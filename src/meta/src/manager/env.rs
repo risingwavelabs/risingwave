@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
-use super::{SystemParamManagerRef, SystemParamsManager};
+use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -51,7 +51,7 @@ where
     idle_manager: IdleManagerRef,
 
     /// system param manager.
-    system_params_manager: SystemParamManagerRef<S>,
+    system_params_manager: SystemParamsManagerRef<S>,
 
     /// options read by all services
     pub opts: Arc<MetaOpts>,
@@ -186,7 +186,7 @@ where
         self.idle_manager.deref()
     }
 
-    pub fn system_params_manager_ref(&self) -> SystemParamManagerRef<S> {
+    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef<S> {
         self.system_params_manager.clone()
     }
 

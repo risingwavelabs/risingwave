@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::system_param::local_manager::LocalSystemParamManagerRef;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompute};
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::SubscribeResponse;
 
 pub struct ComputeObserverNode {
-    system_params_manager: LocalSystemParamManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
 }
 
 impl ObserverState for ComputeObserverNode {
@@ -41,7 +41,7 @@ impl ObserverState for ComputeObserverNode {
 }
 
 impl ComputeObserverNode {
-    pub fn new(system_params_manager: LocalSystemParamManagerRef) -> Self {
+    pub fn new(system_params_manager: LocalSystemParamsManagerRef) -> Self {
         Self {
             system_params_manager,
         }

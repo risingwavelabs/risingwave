@@ -32,7 +32,7 @@ use crate::model::{ValTransaction, VarTransaction};
 use crate::storage::{MetaStore, Transaction};
 use crate::{MetaError, MetaResult};
 
-pub type SystemParamManagerRef<S> = Arc<SystemParamsManager<S>>;
+pub type SystemParamsManagerRef<S> = Arc<SystemParamsManager<S>>;
 
 pub struct SystemParamsManager<S: MetaStore> {
     meta_store: Arc<S>,

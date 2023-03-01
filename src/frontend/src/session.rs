@@ -34,7 +34,7 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
-use risingwave_common::system_param::local_manager::LocalSystemParamManager;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
@@ -233,7 +233,7 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
+        let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,

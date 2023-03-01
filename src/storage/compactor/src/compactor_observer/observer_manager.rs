@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::system_param::local_manager::LocalSystemParamManagerRef;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeCompactor};
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManagerRef,
@@ -26,7 +26,7 @@ use risingwave_pb::meta::SubscribeResponse;
 
 pub struct CompactorObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-    system_params_manager: LocalSystemParamManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
     version: u64,
 }
 
@@ -74,7 +74,7 @@ impl ObserverState for CompactorObserverNode {
 impl CompactorObserverNode {
     pub fn new(
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-        system_params_manager: LocalSystemParamManagerRef,
+        system_params_manager: LocalSystemParamsManagerRef,
     ) -> Self {
         Self {
             filter_key_extractor_manager,

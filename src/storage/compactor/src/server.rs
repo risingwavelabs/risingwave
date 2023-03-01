@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::system_param::local_manager::LocalSystemParamManager;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -109,7 +109,7 @@ pub async fn compactor_serve(
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params_reader));
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
     let compactor_observer_node =
         CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_params_manager);
     let observer_manager =

@@ -26,7 +26,7 @@ use risingwave_common::config::{
     STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::system_param::local_manager::LocalSystemParamManager;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -252,7 +252,7 @@ pub async fn compute_node_serve(
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
     // Initialize observer manager.
-    let system_params_manager = Arc::new(LocalSystemParamManager::new(system_params));
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
     let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
