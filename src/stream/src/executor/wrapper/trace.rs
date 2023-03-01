@@ -105,9 +105,10 @@ fn pretty_identity(identity: &str, actor_id: ActorId, executor_id: u64) -> Strin
     )
 }
 
-/// Streams wrapped by `stack_trace` will print the async stack trace of the executors.
+/// Streams wrapped by `instrument_await_tree` will be able to print the spans of the
+/// executors in the stack trace through `await-tree`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn stack_trace(
+pub async fn instrument_await_tree(
     info: Arc<ExecutorInfo>,
     actor_id: ActorId,
     executor_id: u64,

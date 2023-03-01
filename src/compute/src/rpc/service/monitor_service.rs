@@ -25,17 +25,17 @@ use tonic::{Request, Response, Status};
 #[derive(Clone)]
 pub struct MonitorServiceImpl {
     stream_mgr: Arc<LocalStreamManager>,
-    grpc_stack_trace_mgr: Option<GrpcStackTraceManagerRef>,
+    grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
 }
 
 impl MonitorServiceImpl {
     pub fn new(
         stream_mgr: Arc<LocalStreamManager>,
-        grpc_stack_trace_mgr: Option<GrpcStackTraceManagerRef>,
+        grpc_await_tree_reg: Option<AwaitTreeRegistryRef>,
     ) -> Self {
         Self {
             stream_mgr,
-            grpc_stack_trace_mgr,
+            grpc_await_tree_reg,
         }
     }
 }
@@ -57,7 +57,7 @@ impl MonitorService for MonitorServiceImpl {
             .map(|(k, v)| (k, v.to_string()))
             .collect();
 
-        let rpc_traces = if let Some(m) = &self.grpc_stack_trace_mgr {
+        let rpc_traces = if let Some(m) = &self.grpc_await_tree_reg {
             m.lock()
                 .await
                 .iter()
@@ -119,23 +119,23 @@ pub mod grpc_middleware {
     use tower::util::Either;
     use tower::{Layer, Service};
 
-    /// Manages the stack trace of `gRPC` requests that are currently served by the compute node.
-    pub type GrpcStackTraceManagerRef = Arc<Mutex<await_tree::Registry<u64>>>;
+    /// Manages the await-trees of `gRPC` requests that are currently served by the compute node.
+    pub type AwaitTreeRegistryRef = Arc<Mutex<await_tree::Registry<u64>>>;
 
     #[derive(Clone)]
-    pub struct StackTraceMiddlewareLayer {
-        manager: GrpcStackTraceManagerRef,
+    pub struct AwaitTreeMiddlewareLayer {
+        manager: AwaitTreeRegistryRef,
     }
-    pub type OptionalStackTraceMiddlewareLayer = Either<StackTraceMiddlewareLayer, Identity>;
+    pub type OptionalAwaitTreeMiddlewareLayer = Either<AwaitTreeMiddlewareLayer, Identity>;
 
-    impl StackTraceMiddlewareLayer {
-        pub fn new(manager: GrpcStackTraceManagerRef) -> Self {
+    impl AwaitTreeMiddlewareLayer {
+        pub fn new(manager: AwaitTreeRegistryRef) -> Self {
             Self { manager }
         }
 
         pub fn new_optional(
-            optional: Option<GrpcStackTraceManagerRef>,
-        ) -> OptionalStackTraceMiddlewareLayer {
+            optional: Option<AwaitTreeRegistryRef>,
+        ) -> OptionalAwaitTreeMiddlewareLayer {
             if let Some(manager) = optional {
                 Either::A(Self::new(manager))
             } else {
@@ -144,11 +144,11 @@ pub mod grpc_middleware {
         }
     }
 
-    impl<S> Layer<S> for StackTraceMiddlewareLayer {
-        type Service = StackTraceMiddleware<S>;
+    impl<S> Layer<S> for AwaitTreeMiddlewareLayer {
+        type Service = AwaitTreeMiddleware<S>;
 
         fn layer(&self, service: S) -> Self::Service {
-            StackTraceMiddleware {
+            AwaitTreeMiddleware {
                 inner: service,
                 manager: self.manager.clone(),
                 next_id: Default::default(),
@@ -157,13 +157,13 @@ pub mod grpc_middleware {
     }
 
     #[derive(Clone)]
-    pub struct StackTraceMiddleware<S> {
+    pub struct AwaitTreeMiddleware<S> {
         inner: S,
-        manager: GrpcStackTraceManagerRef,
+        manager: AwaitTreeRegistryRef,
         next_id: Arc<AtomicU64>,
     }
 
-    impl<S> Service<hyper::Request<Body>> for StackTraceMiddleware<S>
+    impl<S> Service<hyper::Request<Body>> for AwaitTreeMiddleware<S>
     where
         S: Service<hyper::Request<Body>> + Clone + Send + 'static,
         S::Future: Send + 'static,

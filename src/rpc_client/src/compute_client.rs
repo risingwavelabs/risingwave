@@ -170,7 +170,7 @@ impl ComputeClient {
         Ok(self
             .monitor_client
             .to_owned()
-            .instrument_await(StackTraceRequest::default())
+            .stack_trace(StackTraceRequest::default())
             .await?
             .into_inner())
     }
