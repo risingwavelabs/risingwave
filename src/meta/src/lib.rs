@@ -128,7 +128,7 @@ pub struct MetaNodeOpts {
 /// Command-line arguments for compute-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 pub struct OverrideConfigOpts {
-    #[clap(long, env = "RW_BACKEND", arg_enum)]
+    #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 

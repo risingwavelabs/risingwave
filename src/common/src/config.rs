@@ -19,7 +19,7 @@
 
 use std::fs;
 
-use clap::ArgEnum;
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -30,10 +30,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
-
-/// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
-/// compilation error.
-pub type Flag = Option<bool>;
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -51,15 +47,6 @@ where
         cli_override.r#override(&mut config);
     }
     config
-}
-
-/// Map command line flag to `Flag`. Should only be used in `#[derive(OverrideConfig)]`.
-pub fn true_if_present(b: bool) -> Flag {
-    if b {
-        Some(true)
-    } else {
-        None
-    }
 }
 
 pub trait OverrideConfig {
@@ -97,7 +84,7 @@ pub struct RwConfig {
     pub backup: BackupConfig,
 }
 
-#[derive(Copy, Clone, Debug, Default, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
     Mem,
@@ -392,7 +379,7 @@ impl Default for FileCacheConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, ArgEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
     Off,
     #[default]
