@@ -86,8 +86,8 @@ impl<S: MetaStore> SystemParamManager<S> {
 // For each field in `persisted` and `init`
 // 1. Some, None: Params not from CLI need not be validated. Use persisted value.
 // 2. Some, Some: Check equality and warn if they differ.
-// 3. None, Some: The persisted param is accidentally deleted or a new version of RW cluster
-// is launched for the first time. Use init value.
+// 3. None, Some: A new version of RW cluster is launched for the first time and newly introduced
+// params are not set. Use init value.
 // 4. None, None: Same as 3, but the init param is not from CLI. Use default value.
 macro_rules! impl_merge_params {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
