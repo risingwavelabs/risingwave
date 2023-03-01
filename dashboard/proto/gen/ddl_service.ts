@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { ColIndexMapping, Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
+import { ColIndexMapping, Connection, Database, Function, Index, Schema, Sink, Source, Table, View } from "./catalog";
 import { Status } from "./common";
 import { StreamFragmentGraph } from "./stream_plan";
 
@@ -241,6 +241,31 @@ export interface DdlProgress {
 
 export interface GetDdlProgressResponse {
   ddlProgress: DdlProgress[];
+}
+
+export interface CreateConnectionRequest {
+  payload?: { $case: "privateLink"; privateLink: CreateConnectionRequest_PrivateLink };
+}
+
+export interface CreateConnectionRequest_PrivateLink {
+  provider: string;
+  serviceName: string;
+  availabilityZones: string[];
+}
+
+export interface CreateConnectionResponse {
+  connectionId: number;
+  /** global catalog version */
+  version: number;
+}
+
+export interface ListConnectionsRequest {
+}
+
+export interface ListConnectionsResponse {
+  connections: Connection[];
+  /** global catalog version */
+  version: number;
 }
 
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
@@ -1495,6 +1520,159 @@ export const GetDdlProgressResponse = {
   fromPartial<I extends Exact<DeepPartial<GetDdlProgressResponse>, I>>(object: I): GetDdlProgressResponse {
     const message = createBaseGetDdlProgressResponse();
     message.ddlProgress = object.ddlProgress?.map((e) => DdlProgress.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCreateConnectionRequest(): CreateConnectionRequest {
+  return { payload: undefined };
+}
+
+export const CreateConnectionRequest = {
+  fromJSON(object: any): CreateConnectionRequest {
+    return {
+      payload: isSet(object.privateLink)
+        ? { $case: "privateLink", privateLink: CreateConnectionRequest_PrivateLink.fromJSON(object.privateLink) }
+        : undefined,
+    };
+  },
+
+  toJSON(message: CreateConnectionRequest): unknown {
+    const obj: any = {};
+    message.payload?.$case === "privateLink" && (obj.privateLink = message.payload?.privateLink
+      ? CreateConnectionRequest_PrivateLink.toJSON(message.payload?.privateLink)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateConnectionRequest>, I>>(object: I): CreateConnectionRequest {
+    const message = createBaseCreateConnectionRequest();
+    if (
+      object.payload?.$case === "privateLink" &&
+      object.payload?.privateLink !== undefined &&
+      object.payload?.privateLink !== null
+    ) {
+      message.payload = {
+        $case: "privateLink",
+        privateLink: CreateConnectionRequest_PrivateLink.fromPartial(object.payload.privateLink),
+      };
+    }
+    return message;
+  },
+};
+
+function createBaseCreateConnectionRequest_PrivateLink(): CreateConnectionRequest_PrivateLink {
+  return { provider: "", serviceName: "", availabilityZones: [] };
+}
+
+export const CreateConnectionRequest_PrivateLink = {
+  fromJSON(object: any): CreateConnectionRequest_PrivateLink {
+    return {
+      provider: isSet(object.provider) ? String(object.provider) : "",
+      serviceName: isSet(object.serviceName) ? String(object.serviceName) : "",
+      availabilityZones: Array.isArray(object?.availabilityZones)
+        ? object.availabilityZones.map((e: any) => String(e))
+        : [],
+    };
+  },
+
+  toJSON(message: CreateConnectionRequest_PrivateLink): unknown {
+    const obj: any = {};
+    message.provider !== undefined && (obj.provider = message.provider);
+    message.serviceName !== undefined && (obj.serviceName = message.serviceName);
+    if (message.availabilityZones) {
+      obj.availabilityZones = message.availabilityZones.map((e) => e);
+    } else {
+      obj.availabilityZones = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateConnectionRequest_PrivateLink>, I>>(
+    object: I,
+  ): CreateConnectionRequest_PrivateLink {
+    const message = createBaseCreateConnectionRequest_PrivateLink();
+    message.provider = object.provider ?? "";
+    message.serviceName = object.serviceName ?? "";
+    message.availabilityZones = object.availabilityZones?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseCreateConnectionResponse(): CreateConnectionResponse {
+  return { connectionId: 0, version: 0 };
+}
+
+export const CreateConnectionResponse = {
+  fromJSON(object: any): CreateConnectionResponse {
+    return {
+      connectionId: isSet(object.connectionId) ? Number(object.connectionId) : 0,
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: CreateConnectionResponse): unknown {
+    const obj: any = {};
+    message.connectionId !== undefined && (obj.connectionId = Math.round(message.connectionId));
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreateConnectionResponse>, I>>(object: I): CreateConnectionResponse {
+    const message = createBaseCreateConnectionResponse();
+    message.connectionId = object.connectionId ?? 0;
+    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseListConnectionsRequest(): ListConnectionsRequest {
+  return {};
+}
+
+export const ListConnectionsRequest = {
+  fromJSON(_: any): ListConnectionsRequest {
+    return {};
+  },
+
+  toJSON(_: ListConnectionsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ListConnectionsRequest>, I>>(_: I): ListConnectionsRequest {
+    const message = createBaseListConnectionsRequest();
+    return message;
+  },
+};
+
+function createBaseListConnectionsResponse(): ListConnectionsResponse {
+  return { connections: [], version: 0 };
+}
+
+export const ListConnectionsResponse = {
+  fromJSON(object: any): ListConnectionsResponse {
+    return {
+      connections: Array.isArray(object?.connections) ? object.connections.map((e: any) => Connection.fromJSON(e)) : [],
+      version: isSet(object.version) ? Number(object.version) : 0,
+    };
+  },
+
+  toJSON(message: ListConnectionsResponse): unknown {
+    const obj: any = {};
+    if (message.connections) {
+      obj.connections = message.connections.map((e) => e ? Connection.toJSON(e) : undefined);
+    } else {
+      obj.connections = [];
+    }
+    message.version !== undefined && (obj.version = Math.round(message.version));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ListConnectionsResponse>, I>>(object: I): ListConnectionsResponse {
+    const message = createBaseListConnectionsResponse();
+    message.connections = object.connections?.map((e) => Connection.fromPartial(e)) || [];
+    message.version = object.version ?? 0;
     return message;
   },
 };
