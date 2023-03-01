@@ -92,11 +92,20 @@ impl GlobalMemoryManager {
     ) {
         use std::time::Duration;
 
+        use risingwave_common::util::epoch::Epoch;
+
         use crate::memory_management::policy::MemoryControlStats;
 
         let mut tick_interval =
             tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
-        let mut memory_control_stats = MemoryControlStats::default();
+        let mut memory_control_stats = MemoryControlStats {
+            batch_memory_usage: 0,
+            streaming_memory_usage: 0,
+            jemalloc_allocated_mib: 0,
+            lru_watermark_step: 0,
+            lru_watermark_time_ms: Epoch::physical_now(),
+            lru_physical_now_ms: Epoch::physical_now(),
+        };
 
         loop {
             // Wait for a while to check if need eviction.

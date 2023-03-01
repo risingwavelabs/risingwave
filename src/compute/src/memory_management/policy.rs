@@ -24,7 +24,6 @@ use risingwave_stream::task::LocalStreamManager;
 
 /// `MemoryControlStats` contains the necessary information for memory control, including both batch
 /// and streaming.
-#[derive(Default)]
 pub struct MemoryControlStats {
     pub batch_memory_usage: usize,
     pub streaming_memory_usage: usize,
