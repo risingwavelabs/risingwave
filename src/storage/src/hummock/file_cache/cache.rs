@@ -338,7 +338,10 @@ mod tests {
         if ci {
             tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
         } else {
-            tempfile::tempdir().unwrap()
+            // tempfile::tempdir().unwrap()
+            tempfile::Builder::new()
+                .tempdir_in("/home/erichgess/tmp")
+                .unwrap()
         }
     }
 
