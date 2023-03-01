@@ -504,20 +504,28 @@ impl<S: MetaStore> HummockManager<S> {
             .current_version
             .apply_version_delta(&new_version_delta);
         // Updates SST split info
-        for (id, divide_ver, _) in sst_split_info {
+        for (id, divide_ver, _, is_trivial_adjust) in sst_split_info {
             match branched_ssts.get_mut(id) {
                 Some(mut entry) => {
-                    let p = entry.get_mut(&parent_group_id).unwrap();
-                    assert_eq!(*p + 1, divide_ver);
-                    *p = divide_ver;
+                    if is_trivial_adjust {
+                        entry.remove(&parent_group_id).unwrap();
+                    } else {
+                        let p = entry.get_mut(&parent_group_id).unwrap();
+                        assert_eq!(*p + 1, divide_ver);
+                        *p = divide_ver;
+                    }
                     entry.insert(new_group_id, divide_ver);
                 }
-                None => branched_ssts.insert(
-                    id,
-                    [(parent_group_id, divide_ver), (new_group_id, divide_ver)]
-                        .into_iter()
-                        .collect(),
-                ),
+                None => {
+                    let to_insert: HashMap<CompactionGroupId, u64> = if is_trivial_adjust {
+                        [(new_group_id, divide_ver)].into_iter().collect()
+                    } else {
+                        [(parent_group_id, divide_ver), (new_group_id, divide_ver)]
+                            .into_iter()
+                            .collect()
+                    };
+                    branched_ssts.insert(id, to_insert);
+                }
             }
         }
         new_version_delta.commit();

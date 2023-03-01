@@ -112,7 +112,7 @@ pub trait HummockVersionUpdateExt {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64, u32)>;
+    ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
@@ -183,10 +183,12 @@ impl HummockVersionExt for HummockVersion {
 
 pub type SstSplitInfo = (
     HummockSstableId,
-    // divide version
+    // Divide version. Counts the number of split of this SST.
     u64,
-    // level idx
+    // Level idx of the SSt.
     u32,
+    // The SST is moved to the new group completely. It should be removed from parent group.
+    bool,
 );
 
 impl HummockVersionUpdateExt for HummockVersion {
@@ -215,8 +217,19 @@ impl HummockVersionUpdateExt for HummockVersion {
                         .iter()
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
-                        sst_info.divide_version += 1;
-                        split_id_vers.push((sst_info.get_id(), sst_info.get_divide_version(), 0));
+                        let is_trivial = sst_info
+                            .get_table_ids()
+                            .iter()
+                            .all(|table_id| member_table_ids.contains(table_id));
+                        if !is_trivial {
+                            sst_info.divide_version += 1;
+                        }
+                        split_id_vers.push((
+                            sst_info.get_id(),
+                            sst_info.get_divide_version(),
+                            0,
+                            is_trivial,
+                        ));
                         let mut branch_table_info = sst_info.clone();
                         branch_table_info.table_ids = sst_info
                             .table_ids
@@ -225,6 +238,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                         insert_table_infos.push(branch_table_info);
                     }
                 }
+                sub_level
+                    .table_infos
+                    .drain_filter(|sst_info| sst_info.table_ids.is_empty());
                 add_new_sub_level(
                     cur_levels.l0.as_mut().unwrap(),
                     sub_level.get_sub_level_id(),
@@ -241,11 +257,18 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .iter()
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
-                    sst_info.divide_version += 1;
+                    let is_trivial = sst_info
+                        .get_table_ids()
+                        .iter()
+                        .all(|table_id| member_table_ids.contains(table_id));
+                    if !is_trivial {
+                        sst_info.divide_version += 1;
+                    }
                     split_id_vers.push((
                         sst_info.get_id(),
                         sst_info.get_divide_version(),
                         level_idx,
+                        is_trivial,
                     ));
                     let mut branch_table_info = sst_info.clone();
                     branch_table_info.table_ids = sst_info
@@ -258,6 +281,9 @@ impl HummockVersionUpdateExt for HummockVersion {
                     cur_levels.levels[z].table_infos.push(branch_table_info);
                 }
             }
+            level
+                .table_infos
+                .drain_filter(|sst_info| sst_info.table_ids.is_empty());
         }
         split_id_vers
     }
