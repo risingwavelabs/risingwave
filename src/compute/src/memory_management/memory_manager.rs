@@ -56,6 +56,11 @@ impl GlobalMemoryManager {
         // especially when it's 0.
         let barrier_interval_ms = std::cmp::max(barrier_interval_ms, 10);
 
+        tracing::debug!(
+            "memory control policy: {}",
+            memory_control_policy.describe(total_compute_memory_bytes)
+        );
+
         Arc::new(Self {
             watermark_epoch: Arc::new(0.into()),
             total_compute_memory_bytes,

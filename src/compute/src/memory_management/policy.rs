@@ -16,6 +16,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use pretty_bytes::converter::convert;
 use risingwave_batch::task::BatchManager;
 use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
@@ -45,6 +46,8 @@ pub trait MemoryControl: Send + Sync {
         stream_manager: Arc<LocalStreamManager>,
         watermark_epoch: Arc<AtomicU64>,
     ) -> MemoryControlStats;
+
+    fn describe(&self, total_compute_memory_bytes: usize) -> String;
 }
 
 /// `FixedProportionPolicy` performs memory control by limiting the memory usage of both batch and
@@ -139,8 +142,19 @@ impl MemoryControl for FixedProportionPolicy {
             lru_physical_now_ms: lru_physical_now,
         }
     }
-}
 
+    fn describe(&self, total_compute_memory_bytes: usize) -> String {
+        let total_stream_memory_bytes =
+            total_compute_memory_bytes as f64 * self.streaming_memory_proportion;
+        let total_batch_memory_bytes =
+            total_compute_memory_bytes as f64 * (1.0 - self.streaming_memory_proportion);
+        format!(
+            "FixedProportionPolicy: total available streaming memory is {}, total available batch memory is {}",
+            convert(total_stream_memory_bytes),
+            convert(total_batch_memory_bytes)
+        )
+    }
+}
 /// `StreamingOnlyPolicy` only performs memory control on streaming tasks. It differs from
 /// `FixedProportionPolicy` in that it calculates the memory usage based on jemalloc statistics,
 /// which actually contains system usage other than computing tasks. This is the default memory
@@ -193,6 +207,13 @@ impl MemoryControl for StreamingOnlyPolicy {
             lru_watermark_time_ms,
             lru_physical_now_ms: lru_physical_now,
         }
+    }
+
+    fn describe(&self, total_compute_memory_bytes: usize) -> String {
+        format!(
+            "StreamingOnlyPolicy: total available streaming memory is {}",
+            convert(total_compute_memory_bytes as f64)
+        )
     }
 }
 
