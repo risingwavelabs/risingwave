@@ -273,7 +273,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .verbose_instrument_await("store_await_sync")
+                .instrument_await("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -310,7 +310,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async move {
             MonitoredStateStore::new(
-                self.inner.new_local(option).await,
+                self.inner
+                    .new_local(option)
+                    .instrument_await("store_new_local")
+                    .await,
                 self.storage_metrics.clone(),
             )
         }
