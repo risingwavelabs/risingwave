@@ -69,6 +69,7 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
 /// It should log the number of queries written to stdout, so external process
 /// can still generate more to make up the shortfall if necessary.
 pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &str) {
+    // FIXME: Gen from seed.
     let mut rng = rand::rngs::SmallRng::from_entropy();
     let (tables, base_tables, mviews, setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
@@ -104,7 +105,7 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             },
-            Ok(skipped) if skipped == 1 => {
+            Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
                 queries.push_str(&format!("{};\n", &sql));
             }
@@ -129,11 +130,10 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
                 tracing::error!("Unrecoverable error encountered.");
                 return;
             },
-            Ok(skipped) if skipped == 1 => {
+            Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
                 queries.push_str(&format!("{};\n", &sql));
-                            queries.push_str(&format!("{};\n", &sql));
-            queries.push_str(&format!("{};\n", format_drop_mview(&table)));
+                queries.push_str(&format!("{};\n", format_drop_mview(&table)));
             }
             _ => {}
         }
@@ -435,7 +435,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
 fn format_fail_reason(setup_sql: &str, query: &str, e: &PgError) -> String {
     format!(
         "
-Query failed:
+[UNEXPECTED ERROR]:
 ---- START
 -- Setup
 {}
