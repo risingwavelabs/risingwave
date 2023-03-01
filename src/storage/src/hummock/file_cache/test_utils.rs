@@ -214,9 +214,6 @@ pub fn tempdir() -> tempfile::TempDir {
     if ci {
         tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
     } else {
-        // tempfile::tempdir().unwrap()
-        tempfile::Builder::new()
-            .tempdir_in("/home/erichgess/tmp")
-            .unwrap()
+        tempfile::tempdir().unwrap()
     }
 }
