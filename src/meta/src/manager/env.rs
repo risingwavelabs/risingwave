@@ -15,7 +15,6 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use risingwave_common::system_param::default_system_params;
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
@@ -222,7 +221,7 @@ impl MetaSrvEnv<MemStore> {
             SystemParamManager::new(
                 meta_store.clone(),
                 notification_manager.clone(),
-                default_system_params(),
+                risingwave_common::system_param::default_system_params(),
             )
             .await
             .unwrap(),

@@ -44,14 +44,7 @@ impl SystemParamsModel for SystemParams {
     where
         S: MetaStore,
     {
-        let kvs = store.list_cf(&Self::cf_name()).await?;
-        if kvs.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(
-                system_params_from_kv(kvs).map_err(MetadataModelError::internal)?,
-            ))
-        }
+        Self::get_at_snapshot::<S>(&store.snapshot().await).await
     }
 
     async fn get_at_snapshot<S>(snapshot: &S::Snapshot) -> MetadataModelResult<Option<SystemParams>>
