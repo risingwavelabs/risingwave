@@ -128,7 +128,8 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
 
 fn append_to_file(outdir: &str, name: &str, sql: &str) {
     let resolved = format!("{}/{}", outdir, name);
-    let mut file = match File::options().append(true).open(resolved) {
+    let path = Path::new(&resolved);
+    let mut file = match File::options().append(true).open(path) {
         Err(e) => panic!("couldn't create {}: {}", resolved, e),
         Ok(file) => file,
     };
