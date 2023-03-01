@@ -31,7 +31,6 @@ use risingwave_meta::hummock::test_utils::{
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::LocalNotification;
 use risingwave_meta::storage::MemStore;
-use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
