@@ -165,12 +165,6 @@ impl ToStream for LogicalShare {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = self.clone_with_input(new_input).into();
-
-                // FIXME: Add an identity project here to avoid parent exchange connecting directly
-                // to the share operator.
-                // let identity = ColIndexMapping::identity(new_share.schema().len());
-                // let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
-
                 ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
                 Ok((new_share, col_change))
             }
