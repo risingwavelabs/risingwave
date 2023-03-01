@@ -43,3 +43,35 @@ pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::OrderedF64;
+
+    use super::exp_f64;
+    use crate::ExprError;
+
+    #[test]
+    fn legal_input() {
+        let res = exp_f64(0.0.into()).unwrap();
+        assert_eq!(res, OrderedF64::from(1.0));
+    }
+
+    #[test]
+    fn underflow() {
+        let res = exp_f64((-1000.0).into()).unwrap_err();
+        match res {
+            ExprError::FloatUnderflow => (),
+            _ => panic!("Expected ExprError::FloatUnderflow"),
+        }
+    }
+
+    #[test]
+    fn overflow() {
+        let res = exp_f64(1000.0.into()).unwrap_err();
+        match res {
+            ExprError::FloatOverflow => (),
+            _ => panic!("Expected ExprError::FloatUnderflow"),
+        }
+    }
+}
