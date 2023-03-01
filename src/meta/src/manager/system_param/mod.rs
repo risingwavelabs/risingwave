@@ -44,9 +44,10 @@ impl<S: MetaStore> SystemParamManager<S> {
         let params = if let Some(persisted) = persisted {
             merge_params(persisted, init_params)
         } else {
-            SystemParams::insert(&init_params, meta_store.as_ref()).await?;
             init_params
         };
+
+        SystemParams::insert(&params, meta_store.as_ref()).await?;
 
         Ok(Self {
             env,
