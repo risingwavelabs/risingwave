@@ -40,8 +40,8 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    reorganize_expr_id, BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize,
+    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
@@ -344,6 +344,7 @@ impl PlanRoot {
             ctx.trace(plan.explain_to_string().unwrap());
         }
 
+        plan = reorganize_expr_id(plan);
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 

@@ -399,6 +399,17 @@ impl GenericPlanRef for PlanRef {
     }
 }
 
+/// In order to let expression display id started from 1 for explaining, hidden column names and
+/// other places. We will reset expression display id to 0 and clone the whole plan to reset the
+/// schema.
+pub fn reorganize_expr_id(plan: PlanRef) -> PlanRef {
+    let old_expr_display_id = plan.ctx().get_expr_display_id();
+    plan.ctx().set_expr_display_id(0);
+    let plan = PlanCloner::clone_whole_plan(plan);
+    plan.ctx().set_expr_display_id(old_expr_display_id);
+    plan
+}
+
 pub trait Explain {
     /// Write explain the whole plan tree.
     fn explain(
@@ -452,15 +463,7 @@ impl Explain for PlanRef {
 
     /// Explain the plan node and return a string.
     fn explain_to_string(&self) -> Result<String> {
-        // In order to let expression display id started from 1 for explaining.
-        // We will reset expression display id to 0 and clone the whole plan to reset the schema.
-        let plan = {
-            let old_expr_display_id = self.ctx().get_expr_display_id();
-            self.ctx().set_expr_display_id(0);
-            let plan = PlanCloner::clone_whole_plan(self.clone());
-            self.ctx().set_expr_display_id(old_expr_display_id);
-            plan
-        };
+        let plan = reorganize_expr_id(self.clone());
 
         let mut output = String::new();
         plan.explain(&mut vec![], 0, &mut output)

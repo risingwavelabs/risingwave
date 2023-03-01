@@ -23,7 +23,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::derive_columns;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{reorganize_expr_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
@@ -158,7 +158,7 @@ impl StreamMaterialize {
         table_type: TableType,
         version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
-        let input = rewritten_input;
+        let input = reorganize_expr_id(rewritten_input);
 
         let value_indices = (0..columns.len()).collect_vec();
         let distribution_key = input.distribution().dist_column_indices().to_vec();
