@@ -2029,30 +2029,37 @@ where
                     }
                 }
 
-                let id_to_config = hummock_manager.get_compaction_group_map().await;
-                let current_version = {
-                    let mut versioning_guard =
-                        write_lock!(hummock_manager.as_ref(), versioning).await;
-                    versioning_guard.deref_mut().current_version.clone()
-                };
+                {
+                    let id_to_config = hummock_manager.get_compaction_group_map().await;
+                    let current_version = {
+                        let mut versioning_guard =
+                            write_lock!(hummock_manager.as_ref(), versioning).await;
+                        versioning_guard.deref_mut().current_version.clone()
+                    };
 
-                let compaction_group_ids_from_version = get_compaction_group_ids(&current_version);
-                let default_config = CompactionConfigBuilder::new().build();
-                for compaction_group_id in &compaction_group_ids_from_version {
-                    let compaction_group_config = id_to_config
-                        .get(compaction_group_id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            CompactionGroup::new(*compaction_group_id, default_config.clone())
-                        });
+                    let compaction_group_ids_from_version =
+                        get_compaction_group_ids(&current_version);
+                    let default_config = CompactionConfigBuilder::new().build();
+                    for compaction_group_id in &compaction_group_ids_from_version {
+                        let compaction_group_config = id_to_config
+                            .get(compaction_group_id)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                CompactionGroup::new(*compaction_group_id, default_config.clone())
+                            });
 
-                    trigger_lsm_stat(
-                        &hummock_manager.metrics,
-                        compaction_group_config.compaction_config(),
-                        current_version
-                            .get_compaction_group_levels(compaction_group_config.group_id()),
-                        compaction_group_config.group_id(),
-                    )
+                        trigger_lsm_stat(
+                            &hummock_manager.metrics,
+                            compaction_group_config.compaction_config(),
+                            current_version
+                                .get_compaction_group_levels(compaction_group_config.group_id()),
+                            compaction_group_config.group_id(),
+                        )
+                    }
+                }
+
+                {
+                    hummock_manager.report_scale_compactor_info().await;
                 }
             }
         });

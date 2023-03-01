@@ -617,5 +617,4 @@ message GetScaleCompactorResponse {
   uint64 running_cores = 2;
   uint64 total_cores = 3;
   uint64 waiting_compaction_bytes = 4;
-  uint64 pending_compaction_bytes = 5;
 }

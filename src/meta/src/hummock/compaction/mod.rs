@@ -225,19 +225,12 @@ impl CompactStatus {
         levels: &Levels,
         compaction_config: Arc<CompactionConfig>,
     ) -> ScaleCompactorInfo {
-        let pending_compaction_bytes = self
-            .level_handlers
-            .iter()
-            .map(|handler| handler.get_pending_file_size())
-            .sum::<u64>();
-
         let dynamic_core = DynamicLevelSelectorCore::new(compaction_config);
         let waiting_compaction_bytes = dynamic_core.compact_pending_bytes_needed(levels);
         ScaleCompactorInfo {
             running_cores: 0,
             total_cores: 0,
             waiting_compaction_bytes,
-            pending_compaction_bytes,
         }
     }
 }
@@ -332,7 +325,6 @@ pub struct ScaleCompactorInfo {
     pub running_cores: u64,
     pub total_cores: u64,
     pub waiting_compaction_bytes: u64,
-    pub pending_compaction_bytes: u64,
 }
 
 impl ScaleCompactorInfo {
@@ -340,7 +332,6 @@ impl ScaleCompactorInfo {
         self.running_cores += other.running_cores;
         self.total_cores += other.total_cores;
         self.waiting_compaction_bytes += other.waiting_compaction_bytes;
-        self.pending_compaction_bytes += other.pending_compaction_bytes;
     }
 
     pub fn scale_out_cores(&self) -> u64 {
@@ -359,7 +350,6 @@ impl From<ScaleCompactorInfo> for GetScaleCompactorResponse {
             running_cores: info.running_cores,
             total_cores: info.total_cores,
             waiting_compaction_bytes: info.waiting_compaction_bytes,
-            pending_compaction_bytes: info.pending_compaction_bytes,
         }
     }
 }

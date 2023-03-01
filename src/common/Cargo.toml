@@ -62,7 +62,7 @@ serde_json = "1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
-sysinfo = "0.26"
+sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
