@@ -8053,10 +8053,6 @@ name = "triomphe"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1ee9bd9239c339d714d657fac840c6d2a4f9c45f4f9ec7b0975113458be78db"
-dependencies = [
- "serde",
- "stable_deref_trait",
-]
 
 [[package]]
 name = "triple_accel"
@@ -8699,7 +8695,6 @@ dependencies = [
  "serde",
  "smallvec",
  "socket2",
- "stable_deref_trait",
  "strum",
  "syn",
  "time 0.3.17",
@@ -8714,7 +8709,6 @@ dependencies = [
  "tracing-core",
  "tracing-futures",
  "tracing-subscriber",
- "triomphe",
  "url",
  "uuid",
  "zstd",
