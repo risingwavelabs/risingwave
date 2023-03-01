@@ -26,3 +26,5 @@ pub mod gcs;
 pub use gcs::*;
 pub mod oss;
 pub use oss::*;
+pub mod azblob;
+pub use azblob::*;

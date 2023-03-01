@@ -852,7 +852,7 @@ pub async fn parse_remote_object_store(
             let webhdfs = webhdfs.strip_prefix("webhdfs://").unwrap();
             let (endpoint, root) = webhdfs.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
-                OpendalObjectStore::new_webhdfs_engine(endpoint.to_string(), root.to_string())
+                OpendalObjectStore::new_azblob_engine(endpoint.to_string(), root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )
