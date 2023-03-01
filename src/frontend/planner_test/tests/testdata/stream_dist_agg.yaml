@@ -147,17 +147,17 @@
             StreamExchange Single from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [$expr4], aggs: [max(t.v), count] }
+      StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count] }
           result table: 3, state tables: [2]
-        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr4] }
+        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [max(t_v), $expr4], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [max(t_v), $expr1], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [max(max(t_v)), count], primary key: [], value indices: [0, 1], distribution key: [] }
-     Table 2 { columns: [$expr4, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [$expr4, max(t_v), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
+     Table 2 { columns: [$expr1, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr1, max(t_v), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1], primary key: [], value indices: [0], distribution key: [] }
 - id: extreme_on_AO
   before:
@@ -406,17 +406,17 @@
             StreamExchange Single from 1
 
     Fragment 1
-      StreamHashAgg { group_key: [$expr4], aggs: [max(t.v), count(t.v), count] }
+      StreamHashAgg { group_key: [$expr1], aggs: [max(t.v), count(t.v), count] }
           result table: 3, state tables: [2]
-        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr4] }
+        StreamProject { exprs: [t.v, t._row_id, Vnode(t._row_id) as $expr1] }
           Chain { table: t, columns: [t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
             Upstream
             BatchPlanNode
 
-     Table 0 { columns: [max(t_v), $expr4], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
+     Table 0 { columns: [max(t_v), $expr1], primary key: [$0 DESC, $1 ASC], value indices: [0, 1], distribution key: [] }
      Table 1 { columns: [max(max(t_v)), sum0(count(t_v)), count], primary key: [], value indices: [0, 1, 2], distribution key: [] }
-     Table 2 { columns: [$expr4, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [$expr4, max(t_v), count(t_v), count], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [], vnode column idx: 0 }
+     Table 2 { columns: [$expr1, t_v, t__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
+     Table 3 { columns: [$expr1, max(t_v), count(t_v), count], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [], vnode column idx: 0 }
      Table 4294967294 { columns: [a1, a2], primary key: [], value indices: [0, 1], distribution key: [] }
 - id: extreme_count_on_AO
   before:

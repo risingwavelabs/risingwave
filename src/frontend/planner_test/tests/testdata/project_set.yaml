@@ -157,13 +157,13 @@
     └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id, Unnest($0)] }
       ├─StreamExchange { dist: HashShard(Unnest($0)) }
       | └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-      |   └─StreamShare { id = 490 }
+      |   └─StreamShare { id = 518 }
       |     └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
       |       └─StreamProjectSet { select_list: [Unnest($0), $1] }
       |         └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(Unnest($0)) }
         └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-          └─StreamShare { id = 490 }
+          └─StreamShare { id = 518 }
             └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
               └─StreamProjectSet { select_list: [Unnest($0), $1] }
                 └─StreamTableScan { table: t, columns: [t.x, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
