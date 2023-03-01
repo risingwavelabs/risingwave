@@ -540,7 +540,7 @@ fn validate_compatibility(
                 connector
             )))
         })?;
-    if connector == KAFKA_CONNECTOR
+    if connector != KAFKA_CONNECTOR
         && matches!(
             &source_schema,
             SourceSchema::Protobuf(ProtobufSchema {

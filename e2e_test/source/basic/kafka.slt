@@ -249,7 +249,7 @@ row schema location 'file:///risingwave/avro-complex-schema.avsc'
 statement error
 create table s19 
 with (
-  connector = 'kafka',
+  connector = 'kinesis',
   topic = 'topic',
   properties.bootstrap.server = '127.0.0.1:29092'
 )
