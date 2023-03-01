@@ -34,7 +34,7 @@ pub struct StreamGlobalSimpleAgg {
 
 impl StreamGlobalSimpleAgg {
     pub fn new(logical: LogicalAgg, row_count_idx: usize) -> Self {
-        debug_assert_eq!(
+        assert_eq!(
             logical.agg_calls()[row_count_idx],
             PlanAggCall::count_star()
         );

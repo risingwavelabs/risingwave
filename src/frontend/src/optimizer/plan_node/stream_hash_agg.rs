@@ -39,7 +39,7 @@ pub struct StreamHashAgg {
 
 impl StreamHashAgg {
     pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>, row_count_idx: usize) -> Self {
-        debug_assert_eq!(
+        assert_eq!(
             logical.agg_calls()[row_count_idx],
             PlanAggCall::count_star()
         );
