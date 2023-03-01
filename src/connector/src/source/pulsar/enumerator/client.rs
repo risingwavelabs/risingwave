@@ -15,7 +15,7 @@
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use itertools::Itertools;
-use pulsar::{Authentication, Pulsar, TokioExecutor};
+use pulsar::{Pulsar, TokioExecutor};
 use serde::{Deserialize, Serialize};
 
 use crate::source::pulsar::split::PulsarSplit;
@@ -43,6 +43,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     type Split = PulsarSplit;
 
     async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+        let pulsar = properties.build_pulsar_client().await?;
         let topic = properties.topic;
         let parsed_topic = parse_topic(&topic)?;
 
@@ -65,16 +66,6 @@ impl SplitEnumerator for PulsarSplitEnumerator {
             let time_offset = s.parse::<i64>().map_err(|e| anyhow!(e))?;
             scan_start_offset = PulsarEnumeratorOffset::Timestamp(time_offset)
         }
-
-        let mut pulsar_builder = Pulsar::builder(properties.service_url, TokioExecutor);
-        if let Some(auth_token) = properties.auth_token {
-            pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
-                data: Vec::from(auth_token),
-            });
-        }
-
-        let pulsar = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
 
         Ok(PulsarSplitEnumerator {
             client: pulsar,

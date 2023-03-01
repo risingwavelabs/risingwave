@@ -36,7 +36,7 @@ pub struct PulsarOauth {
     pub credentials_url: String,
 
     #[serde(rename = "oauth.audience")]
-    pub audience: Option<String>,
+    pub audience: String,
 
     #[serde(rename = "oauth.scope")]
     pub scope: Option<String>,
@@ -66,22 +66,23 @@ pub struct PulsarProperties {
 }
 
 impl PulsarProperties {
-    pub async fn build_pulsar_client(&mut self) -> Result<Pulsar<TokioExecutor>> {
+    pub async fn build_pulsar_client(&self) -> Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
-        if let Some(oauth) = self.oauth.take() {
+        if let Some(oauth) = &self.oauth {
             let url = Url::parse(&oauth.credentials_url)?;
             if url.scheme() == "s3" {
                 todo!("s3 oauth credentials not supported yet");
             }
 
             let auth_params = OAuth2Params {
-                issuer_url: oauth.issuer_url,
-                credentials_url: oauth.credentials_url,
-                audience: oauth.audience,
-                scope: oauth.scope,
+                issuer_url: oauth.issuer_url.clone(),
+                credentials_url: oauth.credentials_url.clone(),
+                audience: Some(oauth.audience.clone()),
+                scope: oauth.scope.clone(),
             };
-            let oauth2 = OAuth2Authentication::client_credentials(auth_params);
-            pulsar_builder = pulsar_builder.with_auth_provider(oauth2);
+
+            pulsar_builder = pulsar_builder
+                .with_auth_provider(OAuth2Authentication::client_credentials(auth_params));
         } else if let Some(auth_token) = &self.auth_token {
             pulsar_builder = pulsar_builder.with_auth(Authentication {
                 name: "token".to_string(),

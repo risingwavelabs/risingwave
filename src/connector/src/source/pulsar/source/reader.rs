@@ -21,9 +21,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{
-    Authentication, Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor,
-};
+use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
@@ -102,21 +100,10 @@ impl SplitReader for PulsarSplitReader {
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-
-        let service_url = &props.service_url;
+        let pulsar = props.build_pulsar_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
-
-        let mut pulsar_builder = Pulsar::builder(service_url, TokioExecutor);
-        if let Some(auth_token) = props.auth_token {
-            pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
-                data: Vec::from(auth_token),
-            });
-        }
-
-        let pulsar = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
 
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
@@ -200,28 +187,4 @@ impl PulsarSplitReader {
             yield res;
         }
     }
-}
-
-#[tokio::test]
-async fn test() {
-    let service_url = "pulsar+ssl://pulsar-gcp-useast1.streaming.datastax.com:6651";
-    let topic = "non-persistent://meetup/default/demo2";
-    let auth_token = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NzgwOTUyMTIsImlhdCI6MTY3NzQ5MDQxMiwiaXNzIjoiZGF0YXN0YXgiLCJzdWIiOiJjbGllbnQ7Yjg5Nzg2YTctMGI3Mi00ZWIwLWIxZWItNzA4MTlhODQ2YWQzO2JXVmxkSFZ3OzJkZWI3ODc2MjAiLCJ0b2tlbmlkIjoiMmRlYjc4NzYyMCJ9.i4kokLAcowtNZAjlVCVu2ACwTNzZDkWEfnwvulCtrIFRKHMdZHo-M9xUS7wiD_tugZ5MxVdV1xDrAb3OX2Z0_9e-Qd_HdktNuBv0lCLIXvFNGe9JgtzL0fgXtsE_NlRB3q77ltIfnQsI16OUK6JMPmM7udvoqkq8XNVq5DmFsOO470ans4TRJEu9WhOko7sihWz2P1y9QpPIIaM__iVJ7N03_-SuX-Du-UPfOPc7nfBTxnldNwXmNXTdD8gXmuvZ5RvnK2bx_7Zf03LQjj5crcw5R4e70oA4y-BTAdH6rxCl0urkLJAZh0DW9Ewe3EQp1vVJDS2OtCkNnEyOpnqY7w";
-
-    let mut pulsar_builder = Pulsar::builder(service_url, TokioExecutor);
-    pulsar_builder = pulsar_builder.with_auth(Authentication {
-        name: "token".to_string(),
-        data: Vec::from(auth_token),
-    });
-
-    let pulsar = pulsar_builder
-        .build()
-        .await
-        .map_err(|e| anyhow!(e))
-        .unwrap();
-
-    println!(
-        "{:?}",
-        pulsar.lookup_partitioned_topic_number(topic).await.unwrap()
-    );
 }
