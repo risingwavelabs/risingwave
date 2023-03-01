@@ -8,16 +8,16 @@
     LogicalProject { exprs: [$expr1, $expr2, $expr3] }
     └─LogicalFilter { predicate: ($expr1 = $expr2) }
       └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalShare { id = 15 }
+        ├─LogicalShare { id = 3 }
         | └─LogicalProject { exprs: [(t1.x + t1.y) as $expr1] }
         |   └─LogicalFilter { predicate: (t1.y > 0:Int32) }
         |     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-        └─LogicalShare { id = 19 }
+        └─LogicalShare { id = 7 }
           └─LogicalProject { exprs: [(t1.x * $expr1) as $expr2, (t1.y * $expr1) as $expr3] }
             └─LogicalFilter { predicate: ($expr1 = t1.x) }
               └─LogicalJoin { type: Inner, on: true, output: all }
                 ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-                └─LogicalShare { id = 15 }
+                └─LogicalShare { id = 3 }
                   └─LogicalProject { exprs: [(t1.x + t1.y) as $expr1] }
                     └─LogicalFilter { predicate: (t1.y > 0:Int32) }
                       └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
@@ -26,7 +26,7 @@
     └─StreamHashJoin { type: Inner, predicate: $expr1 = $expr2, output: [$expr1, $expr2, $expr3, t1._row_id, t1._row_id, t1._row_id, t1.x, $expr1] }
       ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [$expr1, t1._row_id] }
-      |   └─StreamShare { id = 414 }
+      |   └─StreamShare { id = 5 }
       |     └─StreamProject { exprs: [(t1.x + t1.y) as $expr1, t1._row_id] }
       |       └─StreamFilter { predicate: (t1.y > 0:Int32) }
       |         └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -37,7 +37,7 @@
             | └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
             └─StreamExchange { dist: HashShard($expr1) }
               └─StreamProject { exprs: [$expr1, t1._row_id] }
-                └─StreamShare { id = 414 }
+                └─StreamShare { id = 5 }
                   └─StreamProject { exprs: [(t1.x + t1.y) as $expr1, t1._row_id] }
                     └─StreamFilter { predicate: (t1.y > 0:Int32) }
                       └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
