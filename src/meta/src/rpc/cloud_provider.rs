@@ -10,10 +10,11 @@ use crate::MetaResult;
 pub struct AwsEc2Client {
     client: aws_sdk_ec2::Client,
     vpc_id: String,
+    security_group_id: String,
 }
 
 impl AwsEc2Client {
-    pub async fn new(vpc_id: &str) -> Self {
+    pub async fn new(vpc_id: &str, security_group_id: &str) -> Self {
         let sdk_config = aws_config::from_env()
             .retry_config(RetryConfig::standard().with_max_attempts(4))
             .load()
@@ -23,6 +24,7 @@ impl AwsEc2Client {
         Self {
             client,
             vpc_id: vpc_id.to_string(),
+            security_group_id: security_group_id.to_string(),
         }
     }
 
@@ -38,7 +40,12 @@ impl AwsEc2Client {
             .await?;
 
         let (endpoint_id, dns_names) = self
-            .create_vpc_endpoint(&self.vpc_id, service_name, &subnet_ids)
+            .create_vpc_endpoint(
+                &self.vpc_id,
+                service_name,
+                &self.security_group_id,
+                &subnet_ids,
+            )
             .await?;
 
         let mut az_to_dns_map = HashMap::new();
@@ -87,6 +94,7 @@ impl AwsEc2Client {
         &self,
         vpc_id: &str,
         service_name: &str,
+        security_group_id: &str,
         subnet_ids: &Vec<String>,
     ) -> MetaResult<(String, Vec<String>)> {
         let output = self
@@ -94,6 +102,7 @@ impl AwsEc2Client {
             .create_vpc_endpoint()
             .vpc_endpoint_type(VpcEndpointType::Interface)
             .vpc_id(vpc_id)
+            .security_group_ids(security_group_id)
             .service_name(service_name)
             .set_subnet_ids(Some(subnet_ids.clone()))
             .send()

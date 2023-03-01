@@ -78,11 +78,3 @@ workspace-hack = { path = "../workspace-hack" }
 rand = "0.8"
 tempfile = "3"
 wiremock = "0.5"
-
-[[bin]]
-name = "kafka-consumer"
-path = "src/private_links/simple_consumer.rs"
-
-[[bin]]
-name = "kafka-metadata"
-path = "src/private_links/metadata.rs"

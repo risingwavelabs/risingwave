@@ -90,6 +90,9 @@ pub struct MetaOpts {
     /// The VPC id of the cluster.
     pub vpc_id: Option<String>,
 
+    /// A usable security group id to assign to a vpc endpoint
+    pub security_group_id: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
@@ -136,6 +139,7 @@ impl MetaOpts {
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
             vpc_id: None,
+            security_group_id: None,
             connector_rpc_endpoint: None,
             backup_storage_url: "memory".to_string(),
             backup_storage_directory: "backup".to_string(),

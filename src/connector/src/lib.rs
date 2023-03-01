@@ -41,7 +41,6 @@ pub mod sink;
 pub mod source;
 
 pub mod common;
-pub mod private_links;
 
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
