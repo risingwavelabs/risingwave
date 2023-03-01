@@ -291,11 +291,10 @@
     StreamMaterialize { columns: [window_start, window_end, supplier_id, price, cnt], pk_columns: [window_start, window_end, supplier_id], pk_conflict: "no check" }
     └─StreamGroupTopN { order: "[sum(bid.price) DESC]", limit: 3, offset: 0, group_key: [0, 1] }
       └─StreamExchange { dist: HashShard($expr1, $expr2) }
-        └─StreamProject { exprs: [$expr1, $expr2, bid.supplier_id, sum(bid.price), count] }
-          └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [count, sum(bid.price), count] }
-            └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
-              └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
-                └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
+        └─StreamHashAgg { group_key: [$expr1, $expr2, bid.supplier_id], aggs: [sum(bid.price), count] }
+          └─StreamExchange { dist: HashShard($expr1, $expr2, bid.supplier_id) }
+            └─StreamProject { exprs: [TumbleStart(bid.bidtime, '00:10:00':Interval) as $expr1, (TumbleStart(bid.bidtime, '00:10:00':Interval) + '00:10:00':Interval) as $expr2, bid.supplier_id, bid.price, bid._row_id] }
+              └─StreamTableScan { table: bid, columns: [bid.bidtime, bid.price, bid.item, bid.supplier_id, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
 - before:
   - create_bid
   sql: |

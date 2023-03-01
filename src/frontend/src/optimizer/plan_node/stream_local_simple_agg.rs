@@ -97,6 +97,7 @@ impl StreamNode for StreamLocalSimpleAgg {
                 .iter()
                 .map(PlanAggCall::to_protobuf)
                 .collect(),
+            row_count_index: u32::MAX, // this is not used
             distribution_key: self
                 .distribution()
                 .dist_column_indices()
