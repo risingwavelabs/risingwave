@@ -2,7 +2,7 @@ FROM ubuntu:22.04 as base
 
 ENV LANG en_US.utf8
 
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install make build-essential cmake protobuf-compiler curl pkg-config bash lld maven unzip
 
 FROM base as builder
 
@@ -22,6 +22,9 @@ ENV IN_CONTAINER=1
 
 ARG GIT_SHA
 ENV GIT_SHA=$GIT_SHA
+
+RUN curl -LO https://github.com/risingwavelabs/risingwave/archive/refs/heads/dashboard-artifact.zip
+RUN unzip dashboard-artifact.zip && mv risingwave-dashboard-artifact /risingwave/ui && rm dashboard-artifact.zip
 
 # We need to add the `rustfmt` dependency, otherwise `risingwave_pb` will not compile
 RUN rustup self update \
@@ -50,7 +53,10 @@ LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwa
 RUN mkdir -p /risingwave/bin/connector-node
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
+COPY --from=builder /risingwave/ui /risingwave/ui
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
+# Set default dashboard UI to local path instead of github proxy
+ENV RW_DASHBOARD_UI_PATH /risingwave/ui
 ENTRYPOINT [ "/risingwave/bin/risingwave" ]
 CMD [ "playground" ]
