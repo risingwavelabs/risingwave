@@ -14,14 +14,11 @@
 
 use std::io::BufRead;
 
-use anyhow::anyhow;
 use bytes::BytesMut;
-use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::{for_await, try_stream};
-use risingwave_common::error::RwError;
 
 use crate::parser::ByteStreamSourceParser;
-use crate::source::{BoxSourceStream, SourceMessage, StreamChunkWithState};
+use crate::source::{BoxSourceStream, SourceMessage};
 #[derive(Debug)]
 
 /// A newline-delimited bytes stream wrapper that can any converts arbitrary file(bytes) streams
@@ -122,6 +119,8 @@ impl<T: ByteStreamSourceParser> ByteStreamSourceParser for NdByteStreamWrapper<T
 mod tests {
     use std::sync::Arc;
 
+    use futures::{StreamExt, TryStreamExt};
+
     use super::*;
 
     #[tokio::test]
@@ -130,7 +129,7 @@ mod tests {
         const N2: usize = 500;
         const N3: usize = 50;
         let lines = (0..N1)
-            .map(|x| (0..x % N2).map(|y| 'A').collect::<String>())
+            .map(|x| (0..x % N2).map(|_| 'A').collect::<String>())
             .collect::<Vec<_>>();
         let total_chars = lines.iter().map(|e| e.len()).sum::<usize>();
         let text = lines.join("\n").into_bytes();
