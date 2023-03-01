@@ -104,6 +104,7 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Timestamptz,
         T::Time,
         T::Interval,
+        T::Jsonb,
     ];
     let num_types = [
         T::Int16,

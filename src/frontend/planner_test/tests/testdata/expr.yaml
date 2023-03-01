@@ -488,7 +488,7 @@
     StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check" }
     └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [max(t.v1), t.v2] }
       ├─StreamProject { exprs: [max(t.v1), t.v2] }
-      | └─StreamHashAgg { group_key: [t.v2], aggs: [count, max(t.v1)] }
+      | └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
       |   └─StreamExchange { dist: HashShard(t.v2) }
       |     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
