@@ -14,7 +14,6 @@
 
 pub mod event_handler;
 pub mod immutable_memtable;
-pub mod immutable_memtable_impl;
 pub mod memtable;
 pub mod state_store;
 pub mod version;

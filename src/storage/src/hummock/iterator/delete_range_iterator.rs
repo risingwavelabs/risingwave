@@ -19,7 +19,6 @@ use risingwave_hummock_sdk::key::UserKey;
 use risingwave_hummock_sdk::HummockEpoch;
 
 use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferDeleteRangeIterator;
-use crate::hummock::store::immutable_memtable::MergedImmDeleteRangeIterator;
 use crate::hummock::SstableDeleteRangeIterator;
 
 /// `DeleteRangeIterator` defines the interface of all delete-range iterators, which is used to
@@ -104,7 +103,6 @@ pub trait DeleteRangeIterator {
 pub enum RangeIteratorTyped {
     Sst(SstableDeleteRangeIterator),
     Batch(SharedBufferDeleteRangeIterator),
-    MergedImm(MergedImmDeleteRangeIterator),
 }
 
 impl DeleteRangeIterator for RangeIteratorTyped {
@@ -112,7 +110,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.start_user_key(),
             RangeIteratorTyped::Batch(batch) => batch.start_user_key(),
-            RangeIteratorTyped::MergedImm(m) => m.start_user_key(),
         }
     }
 
@@ -120,7 +117,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.end_user_key(),
             RangeIteratorTyped::Batch(batch) => batch.end_user_key(),
-            RangeIteratorTyped::MergedImm(m) => m.end_user_key(),
         }
     }
 
@@ -128,7 +124,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.current_epoch(),
             RangeIteratorTyped::Batch(batch) => batch.current_epoch(),
-            RangeIteratorTyped::MergedImm(m) => m.current_epoch(),
         }
     }
 
@@ -140,7 +135,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
             RangeIteratorTyped::Batch(batch) => {
                 batch.next();
             }
-            RangeIteratorTyped::MergedImm(m) => m.next(),
         }
     }
 
@@ -152,7 +146,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
             RangeIteratorTyped::Batch(batch) => {
                 batch.rewind();
             }
-            RangeIteratorTyped::MergedImm(m) => m.rewind(),
         }
     }
 
@@ -160,7 +153,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.seek(target_user_key),
             RangeIteratorTyped::Batch(batch) => batch.seek(target_user_key),
-            RangeIteratorTyped::MergedImm(m) => m.seek(target_user_key),
         }
     }
 
@@ -168,7 +160,6 @@ impl DeleteRangeIterator for RangeIteratorTyped {
         match self {
             RangeIteratorTyped::Sst(sst) => sst.is_valid(),
             RangeIteratorTyped::Batch(batch) => batch.is_valid(),
-            RangeIteratorTyped::MergedImm(m) => m.is_valid(),
         }
     }
 }
@@ -203,8 +194,8 @@ pub struct ForwardMergeRangeIterator {
 }
 
 impl ForwardMergeRangeIterator {
-    pub fn add_imm_iter(&mut self, iter: RangeIteratorTyped) {
-        self.unused_iters.push(iter);
+    pub fn add_batch_iter(&mut self, iter: SharedBufferDeleteRangeIterator) {
+        self.unused_iters.push(RangeIteratorTyped::Batch(iter));
     }
 
     pub fn add_sst_iter(&mut self, iter: SstableDeleteRangeIterator) {

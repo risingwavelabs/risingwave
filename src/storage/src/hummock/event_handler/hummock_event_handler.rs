@@ -205,10 +205,6 @@ impl HummockEventHandler {
     ) {
         info_in_release!("epoch has been synced: {}.", epoch);
         if !newly_uploaded_sstables.is_empty() {
-            info!(
-                "=== newly_uploaded_sstables.len() {}",
-                newly_uploaded_sstables.len()
-            );
             newly_uploaded_sstables
                 .into_iter()
                 // Take rev because newer data come first in `newly_uploaded_sstables` but we apply

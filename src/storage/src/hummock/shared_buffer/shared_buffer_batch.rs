@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::binary_heap::PeekMut;
-use std::collections::BinaryHeap;
+use std::collections::binary_heap::{BinaryHeap, PeekMut};
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, RangeBounds};
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use itertools::Itertools;
@@ -32,7 +32,6 @@ use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
     HummockIteratorDirection,
 };
-use crate::hummock::shared_buffer::SHARED_BUFFER_BATCH_ID_GENERATOR;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::utils::{range_overlap, MemoryTracker};
 use crate::hummock::value::HummockValue;
@@ -43,11 +42,16 @@ use crate::storage_value::StorageValue;
 pub(crate) type SharedBufferItem = (Bytes, HummockValue<Bytes>);
 pub type SharedBufferBatchId = u64;
 // key is table_key, value is different versions of the key
+// TODO: replace SharedBufferItem with SharedBufferEntry
+// batch and merged imm will share the same layout of SharedBufferEntry
 pub type SharedBufferEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
-    payload: Vec<SharedBufferItem>,
+    payload: Vec<SharedBufferEntry>,
+    epoch: HummockEpoch,
+    imm_ids: Vec<ImmId>,
+    epochs: Vec<HummockEpoch>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
@@ -58,15 +62,93 @@ pub(crate) struct SharedBufferBatchInner {
 
 impl SharedBufferBatchInner {
     pub(crate) fn new(
-        _epoch: HummockEpoch,
+        epoch: HummockEpoch,
         items: Vec<SharedBufferItem>,
-        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
+        range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         _tracker: Option<MemoryTracker>,
     ) -> Self {
+        let (mut smallest_table_key, mut largest_table_key, range_tombstones) =
+            Self::get_table_key_ends(range_tombstone_list);
+        if let Some(item) = items.last() {
+            if item.0.gt(&largest_table_key) {
+                largest_table_key.clear();
+                largest_table_key.extend_from_slice(item.0.as_ref());
+            }
+        }
+        if let Some(item) = items.first() {
+            if smallest_table_key.is_empty() || item.0.lt(&smallest_table_key) {
+                smallest_table_key.clear();
+                smallest_table_key.extend_from_slice(item.0.as_ref());
+            }
+        }
+
+        let items = items
+            .into_iter()
+            .map(|(k, v)| (k, vec![(epoch, v)]))
+            .collect_vec();
+
+        SharedBufferBatchInner {
+            payload: items,
+            epoch,
+            imm_ids: vec![],
+            epochs: vec![],
+            range_tombstone_list: range_tombstones,
+            size,
+            largest_table_key,
+            smallest_table_key,
+            _tracker,
+            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+        }
+    }
+
+    // todo: largest_table_key, smallest_table_key的处理需要参考一下SSTableMeta
+    pub(crate) fn new_with_multi_epoch_items(
+        min_epoch: HummockEpoch,
+        epochs: Vec<HummockEpoch>,
+        items: Vec<SharedBufferEntry>,
+        imm_ids: Vec<ImmId>,
+        range_tombstone_list: Vec<DeleteRangeTombstone>,
+        size: usize,
+        _tracker: Option<MemoryTracker>,
+    ) -> Self {
+        let (mut smallest_table_key, mut largest_table_key, range_tombstones) =
+            Self::get_table_key_ends(range_tombstone_list);
+
+        if let Some(item) = items.last() {
+            if item.0.gt(&largest_table_key) {
+                largest_table_key.clear();
+                largest_table_key.extend_from_slice(item.0.as_ref());
+            }
+        }
+        if let Some(item) = items.first() {
+            if smallest_table_key.is_empty() || item.0.lt(&smallest_table_key) {
+                smallest_table_key.clear();
+                smallest_table_key.extend_from_slice(item.0.as_ref());
+            }
+        }
+
+        Self {
+            payload: items,
+            epoch: min_epoch,
+            epochs,
+            imm_ids,
+            range_tombstone_list: range_tombstones,
+            largest_table_key,
+            smallest_table_key,
+            size,
+            _tracker,
+            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+        }
+    }
+
+    fn get_table_key_ends(
+        mut range_tombstone_list: Vec<DeleteRangeTombstone>,
+    ) -> (Vec<u8>, Vec<u8>, Vec<DeleteRangeTombstone>) {
         let mut largest_table_key = vec![];
         let mut smallest_table_key = vec![];
         let mut smallest_empty = true;
+
         if !range_tombstone_list.is_empty() {
             range_tombstone_list.sort();
             let mut range_tombstones: Vec<DeleteRangeTombstone> = vec![];
@@ -95,37 +177,85 @@ impl SharedBufferBatchInner {
             }
             range_tombstone_list = range_tombstones;
         }
+        (smallest_table_key, largest_table_key, range_tombstone_list)
+    }
 
-        if let Some(item) = items.last() {
-            if item.0.gt(&largest_table_key) {
-                largest_table_key.clear();
-                largest_table_key.extend_from_slice(item.0.as_ref());
+    // If the key is deleted by a epoch greater than the read epoch, return None
+    fn get_value(
+        &self,
+        table_id: TableId,
+        table_key: TableKey<&[u8]>,
+        read_epoch: HummockEpoch,
+    ) -> Option<HummockValue<Bytes>> {
+        let full_key = FullKey::new(table_id, table_key, read_epoch);
+        let delete_epoch = self.get_delete_range_epoch(&full_key);
+
+        // Perform binary search on table key to find the corresponding entry
+        match self.payload.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
+            Ok(i) => {
+                let item = &self.payload[i];
+                assert_eq!(item.0.as_ref(), *table_key);
+                // Scan to find the first version <= epoch
+                for (e, v) in &item.1 {
+                    if read_epoch < *e {
+                        continue;
+                    }
+                    return match delete_epoch {
+                        Some(del_epoch) => {
+                            if *e > del_epoch {
+                                Some(v.clone())
+                            } else {
+                                None
+                            }
+                        }
+                        None => Some(v.clone()),
+                    };
+                }
+                None
             }
+            Err(_) => None,
         }
-        if let Some(item) = payload.first() {
-            if smallest_empty || item.0.lt(&smallest_table_key) {
-                smallest_table_key.clear();
-                smallest_table_key.extend_from_slice(item.0.as_ref());
+    }
+
+    /// Get the latest epoch that deleted the given key
+    fn get_delete_range_epoch(&self, full_key: &FullKey<&[u8]>) -> Option<HummockEpoch> {
+        if self.range_tombstone_list.is_empty() {
+            return None;
+        }
+        let watermark = full_key.epoch;
+        let mut idx = self
+            .range_tombstone_list
+            .partition_point(|tombstone| tombstone.end_user_key.as_ref().le(&full_key.user_key));
+        if idx >= self.range_tombstone_list.len() {
+            return None;
+        }
+        let mut epoch = None;
+        while idx < self.range_tombstone_list.len()
+            && self.range_tombstone_list[idx]
+                .start_user_key
+                .as_ref()
+                .le(&full_key.user_key)
+        {
+            let sequence = self.range_tombstone_list[idx].sequence;
+            if sequence > watermark {
+                idx += 1;
+                continue;
             }
+            if epoch
+                .as_ref()
+                .map(|epoch| *epoch < sequence)
+                .unwrap_or(true)
+            {
+                epoch = Some(sequence);
+            }
+            idx += 1;
         }
-        SharedBufferBatchInner {
-            // payload: items
-            //     .into_iter()
-            //     .map(|(k, v)| (k, vec![(epoch, v)]))
-            //     .collect_vec(),
-            payload: items,
-            range_tombstone_list,
-            size,
-            largest_table_key,
-            smallest_table_key,
-            _tracker,
-            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
-        }
+        epoch
     }
 }
 
 impl Deref for SharedBufferBatchInner {
-    type Target = [SharedBufferItem];
+    type Target = [SharedBufferEntry];
 
     fn deref(&self) -> &Self::Target {
         self.payload.as_slice()
@@ -138,15 +268,15 @@ impl PartialEq for SharedBufferBatchInner {
     }
 }
 
+pub static SHARED_BUFFER_BATCH_ID_GENERATOR: LazyLock<AtomicU64> =
+    LazyLock::new(|| AtomicU64::new(0));
+
 /// A write batch stored in the shared buffer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SharedBufferBatch {
     pub(crate) inner: Arc<SharedBufferBatchInner>,
-    pub(crate) epoch: HummockEpoch,
     pub table_id: TableId,
     pub shard_id: LocalInstanceId,
-    // imms that have merged into this batch
-    // pub imm_ids: Vec<SharedBufferBatchId>,
 }
 
 impl SharedBufferBatch {
@@ -165,10 +295,8 @@ impl SharedBufferBatch {
                 size,
                 None,
             )),
-            epoch,
             table_id,
             shard_id: LocalInstanceId::default(),
-            // imm_ids: Vec::default(),
         }
     }
 
@@ -204,17 +332,28 @@ impl SharedBufferBatch {
         self.table_id
     }
 
+    pub fn is_merged_imm(&self) -> bool {
+        !self.inner.imm_ids.is_empty()
+    }
+
+    pub fn epoch(&self) -> HummockEpoch {
+        self.inner.epoch
+    }
+
+    pub fn get_imm_ids(&self) -> &Vec<ImmId> {
+        &self.inner.imm_ids
+    }
+
     pub fn count(&self) -> usize {
         self.inner.len()
     }
 
-    pub fn get(&self, table_key: TableKey<&[u8]>) -> Option<HummockValue<Bytes>> {
-        // Perform binary search on table key because the items in SharedBufferBatch is ordered by
-        // table key.
-        match self.inner.binary_search_by(|m| (m.0[..]).cmp(*table_key)) {
-            Ok(i) => Some(self.inner[i].1.clone()),
-            Err(_) => None,
-        }
+    pub fn get(
+        &self,
+        table_key: TableKey<&[u8]>,
+        read_epoch: HummockEpoch,
+    ) -> Option<HummockValue<Bytes>> {
+        self.inner.get_value(self.table_id, table_key, read_epoch)
     }
 
     pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
@@ -231,6 +370,10 @@ impl SharedBufferBatch {
                 .table_key
                 .as_ref()
                 .le(table_key.as_ref())
+    }
+
+    pub fn get_delete_range_epoch(&self, full_key: &FullKey<&[u8]>) -> Option<HummockEpoch> {
+        self.inner.get_delete_range_epoch(full_key)
     }
 
     pub fn range_exists(&self, table_key_range: &TableKeyRange) -> bool {
@@ -260,23 +403,26 @@ impl SharedBufferBatch {
             .is_ok()
     }
 
-    pub fn into_directed_iter<D: HummockIteratorDirection>(self) -> SharedBufferBatchIterator<D> {
-        SharedBufferBatchIterator::<D>::new(self.inner, self.table_id, self.epoch)
+    pub fn into_directed_iter<D: HummockIteratorDirection>(
+        self,
+        read_epoch: HummockEpoch,
+    ) -> SharedBufferBatchIterator<D> {
+        SharedBufferBatchIterator::<D>::new(self.inner, self.table_id, read_epoch)
     }
 
-    pub fn into_forward_iter(self) -> SharedBufferBatchIterator<Forward> {
-        self.into_directed_iter()
+    pub fn into_forward_iter(self, epoch: HummockEpoch) -> SharedBufferBatchIterator<Forward> {
+        self.into_directed_iter(epoch)
     }
 
-    pub fn into_backward_iter(self) -> SharedBufferBatchIterator<Backward> {
-        self.into_directed_iter()
+    pub fn into_backward_iter(self, epoch: HummockEpoch) -> SharedBufferBatchIterator<Backward> {
+        self.into_directed_iter(epoch)
     }
 
     pub fn delete_range_iter(&self) -> SharedBufferDeleteRangeIterator {
         SharedBufferDeleteRangeIterator::new(self.inner.clone())
     }
 
-    pub fn get_payload(&self) -> &[SharedBufferItem] {
+    pub fn get_payload(&self) -> &[SharedBufferEntry] {
         &self.inner
     }
 
@@ -307,16 +453,16 @@ impl SharedBufferBatch {
         UserKey::new(self.table_id, self.end_table_key())
     }
 
-    pub fn epoch(&self) -> u64 {
-        self.epoch
-    }
-
     pub fn size(&self) -> usize {
         self.inner.size
     }
 
     pub fn batch_id(&self) -> SharedBufferBatchId {
         self.inner.batch_id
+    }
+
+    pub fn epochs(&self) -> &Vec<HummockEpoch> {
+        &self.inner.epochs
     }
 
     pub fn build_shared_buffer_item_batches(
@@ -363,13 +509,12 @@ impl SharedBufferBatch {
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
-            epoch,
             shard_id: instance_id.unwrap_or(LocalInstanceId::default()),
-            // imm_ids: vec![],
         }
     }
 
-    fn build_merged_imm_private(
+    /// Merge multiple batch to one batch.
+    pub fn build_merged_imm(
         table_id: TableId,
         shard_id: ImmId,
         imms: Vec<ImmutableMemtable>,
@@ -391,14 +536,15 @@ impl SharedBufferBatch {
                 imm.table_id(),
                 "should only merge data belonging to the same table"
             );
+            let epoch = imm.epoch();
             merged_imm_ids.push(imm.batch_id());
-            epochs.push(imm.epoch());
+            epochs.push(epoch);
             num_keys += imm.count();
             size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
             heap.push(Node {
-                iter: imm.into_forward_iter(),
+                iter: imm.into_forward_iter(epoch),
             });
         }
 
@@ -407,7 +553,12 @@ impl SharedBufferBatch {
         let mut items = Vec::with_capacity(num_keys);
         while !heap.is_empty() {
             let mut node = heap.peek_mut().expect("heap is not empty");
-            items.push((node.iter.current_item().clone(), node.iter.epoch()));
+            // (key, value)
+            let item = (
+                node.iter.current_item().0.clone(),
+                node.iter.value().to_bytes(),
+            );
+            items.push((item, node.iter.epoch()));
             node.iter.blocking_next();
             if !node.iter.is_valid() {
                 // remove the invalid iter from heap
@@ -420,20 +571,17 @@ impl SharedBufferBatch {
 
         size += items.len() * EPOCH_LEN;
         // different versions of a key will be put to a vector
-        let mut merged_payload = Vec::new();
-        let mut pivot = items
-            .first()
-            .map(|((k, _), _)| TableKey(k.to_vec()))
-            .unwrap();
-        let mut versions = Vec::new();
-        for ((k, v), epoch) in items {
-            let key = TableKey(k.to_vec());
+        let mut merged_payload: Vec<SharedBufferEntry> = Vec::new();
+        let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
+        let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
+
+        for ((key, value), epoch) in items {
             if key == pivot {
-                versions.push((epoch, v));
+                versions.push((epoch, value));
             } else {
                 merged_payload.push((pivot, versions));
                 pivot = key;
-                versions = vec![(epoch, v)];
+                versions = vec![(epoch, value)];
             }
         }
         // process the last key
@@ -442,17 +590,17 @@ impl SharedBufferBatch {
         }
 
         SharedBufferBatch {
-            inner: Arc::new(SharedBufferBatchInner::new(
+            inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_items(
                 min_epoch,
-                vec![],
+                epochs,
+                merged_payload,
+                merged_imm_ids,
                 range_tombstone_list,
                 size,
                 None,
             )),
-            epoch: min_epoch,
             table_id,
             shard_id,
-            // imm_ids: vec![],
         }
     }
 
@@ -527,7 +675,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
         }
     }
 
-    pub(crate) fn current_item(&self) -> &SharedBufferItem {
+    pub(crate) fn current_item(&self) -> &SharedBufferEntry {
         assert!(self.is_valid());
         let idx = match D::direction() {
             DirectionEnum::Forward => self.current_idx,
@@ -565,7 +713,15 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
-        self.current_item().1.as_slice()
+        let item = self.current_item();
+
+        // Use linear scan here to exploit cpu cache prefetch
+        for (e, v) in &item.1 {
+            if *e <= self.epoch {
+                return v.as_slice();
+            }
+        }
+        unreachable!("should have found a value for epoch {}", self.epoch)
     }
 
     fn is_valid(&self) -> bool {
@@ -724,21 +880,21 @@ mod tests {
         // Point lookup
         for (k, v) in &shared_buffer_items {
             assert_eq!(
-                shared_buffer_batch.get(TableKey(k.as_slice())),
+                shared_buffer_batch.get(TableKey(k.as_slice()), epoch),
                 Some(v.clone())
             );
         }
         assert_eq!(
-            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(3).as_slice())),
+            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(3).as_slice()), epoch),
             None
         );
         assert_eq!(
-            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(4).as_slice())),
+            shared_buffer_batch.get(TableKey(iterator_test_table_key_of(4).as_slice()), epoch),
             None
         );
 
         // Forward iterator
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.rewind().await.unwrap();
         let mut output = vec![];
         while iter.is_valid() {
@@ -751,7 +907,7 @@ mod tests {
         assert_eq!(output, shared_buffer_items);
 
         // Backward iterator
-        let mut backward_iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut backward_iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         backward_iter.rewind().await.unwrap();
         let mut output = vec![];
         while backward_iter.is_valid() {
@@ -773,6 +929,7 @@ mod tests {
                 (Bytes::from("b"), Bytes::from("d")),
             ],
             TableId::new(0),
+            None,
             None,
         );
         assert_eq!(batch.start_table_key().as_ref(), "a".as_bytes());
@@ -803,7 +960,7 @@ mod tests {
         );
 
         // FORWARD: Seek to a key < 1st key, expect all three items to return
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(0, epoch).to_ref())
             .await
             .unwrap();
@@ -816,14 +973,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to a key > the last key, expect no items to return
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(4, epoch).to_ref())
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with current epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch).to_ref())
             .await
             .unwrap();
@@ -836,7 +993,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with future epoch, expect last two items to return
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch + 1).to_ref())
             .await
             .unwrap();
@@ -849,7 +1006,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // FORWARD: Seek to 2nd key with old epoch, expect last item to return
-        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let mut iter = shared_buffer_batch.clone().into_forward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch - 1).to_ref())
             .await
             .unwrap();
@@ -861,14 +1018,14 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key < 1st key, expect no items to return
-        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(0, epoch).to_ref())
             .await
             .unwrap();
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to a key > the last key, expect all items to return
-        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(4, epoch).to_ref())
             .await
             .unwrap();
@@ -881,7 +1038,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with current epoch, expect first two items to return
-        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch).to_ref())
             .await
             .unwrap();
@@ -894,7 +1051,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with future epoch, expect first item to return
-        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch + 1).to_ref())
             .await
             .unwrap();
@@ -906,7 +1063,7 @@ mod tests {
         assert!(!iter.is_valid());
 
         // BACKWARD: Seek to 2nd key with old epoch, expect first two item to return
-        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let mut iter = shared_buffer_batch.clone().into_backward_iter(epoch);
         iter.seek(iterator_test_key_of_epoch(2, epoch - 1).to_ref())
             .await
             .unwrap();
@@ -948,7 +1105,7 @@ mod tests {
         let epoch = 1;
         let shared_buffer_batch = SharedBufferBatch::for_test(vec![], epoch, Default::default());
         // Seeking to non-current epoch should panic
-        let mut iter = shared_buffer_batch.into_forward_iter();
+        let mut iter = shared_buffer_batch.into_forward_iter(epoch);
         iter.seek(FullKey::for_test(TableId::new(1), vec![], epoch).to_ref())
             .await
             .unwrap();
@@ -996,5 +1153,265 @@ mod tests {
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
         let range = (Included(Vec::from("b__x")), Excluded(Vec::from("c__x")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
+    }
+
+    #[tokio::test]
+    async fn test_merge_imms_basic() {
+        let table_id = TableId { table_id: 1004 };
+        let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value1")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value2")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value3")),
+            ),
+        ];
+        let epoch = 1;
+        let imm1 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items1.clone()),
+            epoch,
+            table_id,
+        );
+        let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value12")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value22")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value32")),
+            ),
+        ];
+        let epoch = 2;
+        let imm2 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items2.clone()),
+            epoch,
+            table_id,
+        );
+
+        let shared_buffer_items3: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                iterator_test_table_key_of(1),
+                HummockValue::put(Bytes::from("value13")),
+            ),
+            (
+                iterator_test_table_key_of(2),
+                HummockValue::put(Bytes::from("value23")),
+            ),
+            (
+                iterator_test_table_key_of(3),
+                HummockValue::put(Bytes::from("value33")),
+            ),
+        ];
+        let epoch = 3;
+        let imm3 = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items3.clone()),
+            epoch,
+            table_id,
+        );
+
+        let batch_items = vec![
+            shared_buffer_items1,
+            shared_buffer_items2,
+            shared_buffer_items3,
+        ];
+        // newer data comes first
+        let imms = vec![imm3, imm2, imm1];
+        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms.clone(), None);
+
+        // Point lookup
+        for (i, items) in batch_items.iter().enumerate() {
+            for (key, value) in items {
+                assert_eq!(
+                    merged_imm.get(TableKey(key.as_slice()), i as u64 + 1),
+                    Some(value.clone()),
+                    "epoch: {}, key: {:?}",
+                    i + 1,
+                    String::from_utf8(key.clone())
+                );
+            }
+        }
+        assert_eq!(
+            merged_imm.get(TableKey(iterator_test_table_key_of(4).as_slice()), 1),
+            None
+        );
+        assert_eq!(
+            merged_imm.get(TableKey(iterator_test_table_key_of(5).as_slice()), 1),
+            None
+        );
+
+        // Forward iterator
+        for epoch in 1..=3 {
+            let mut iter = merged_imm.clone().into_forward_iter(epoch);
+            iter.rewind().await.unwrap();
+            let mut output = vec![];
+            while iter.is_valid() {
+                output.push((
+                    iter.key().user_key.table_key.to_vec(),
+                    iter.value().to_bytes(),
+                ));
+                iter.next().await.unwrap();
+            }
+            assert_eq!(output, batch_items[epoch as usize - 1]);
+
+            // Backward iterator
+            let mut backward_iter = merged_imm.clone().into_backward_iter(epoch);
+            backward_iter.rewind().await.unwrap();
+            let mut output = vec![];
+            while backward_iter.is_valid() {
+                output.push((
+                    backward_iter.key().user_key.table_key.to_vec(),
+                    backward_iter.value().to_bytes(),
+                ));
+                backward_iter.next().await.unwrap();
+            }
+            output.reverse();
+            assert_eq!(output, batch_items[epoch as usize - 1]);
+        }
+    }
+
+    fn test_table_key_of(idx: usize) -> Vec<u8> {
+        format!("{:03}", idx).as_bytes().to_vec()
+    }
+
+    #[tokio::test]
+    async fn test_merge_imms_delete_range() {
+        let table_id = TableId { table_id: 1004 };
+        let epoch = 1;
+        let delete_ranges = vec![
+            (Bytes::from(b"111".to_vec()), Bytes::from(b"222".to_vec())),
+            (Bytes::from(b"555".to_vec()), Bytes::from(b"777".to_vec())),
+        ];
+        let shared_buffer_items1: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                test_table_key_of(111),
+                HummockValue::put(Bytes::from("value1")),
+            ),
+            (
+                test_table_key_of(222),
+                HummockValue::put(Bytes::from("value2")),
+            ),
+            (
+                test_table_key_of(333),
+                HummockValue::put(Bytes::from("value3")),
+            ),
+            (
+                test_table_key_of(555),
+                HummockValue::put(Bytes::from("value5")),
+            ),
+            (
+                test_table_key_of(666),
+                HummockValue::put(Bytes::from("value6")),
+            ),
+            (
+                test_table_key_of(888),
+                HummockValue::put(Bytes::from("value8")),
+            ),
+        ];
+        let sorted_items1 = transform_shared_buffer(shared_buffer_items1);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items1);
+        let imm1 = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            sorted_items1,
+            size,
+            delete_ranges,
+            table_id,
+            None,
+            None,
+        );
+
+        let epoch = 2;
+        let delete_ranges = vec![
+            (Bytes::from(b"444".to_vec()), Bytes::from(b"555".to_vec())),
+            (Bytes::from(b"888".to_vec()), Bytes::from(b"999".to_vec())),
+        ];
+        let shared_buffer_items2: Vec<(Vec<u8>, HummockValue<Bytes>)> = vec![
+            (
+                test_table_key_of(111),
+                HummockValue::put(Bytes::from("value12")),
+            ),
+            (
+                test_table_key_of(222),
+                HummockValue::put(Bytes::from("value22")),
+            ),
+            (
+                test_table_key_of(333),
+                HummockValue::put(Bytes::from("value32")),
+            ),
+            (
+                test_table_key_of(444),
+                HummockValue::put(Bytes::from("value42")),
+            ),
+            (
+                test_table_key_of(555),
+                HummockValue::put(Bytes::from("value52")),
+            ),
+        ];
+        let sorted_items2 = transform_shared_buffer(shared_buffer_items2);
+        let size = SharedBufferBatch::measure_batch_size(&sorted_items2);
+        let imm2 = SharedBufferBatch::build_shared_buffer_batch(
+            epoch,
+            sorted_items2,
+            size,
+            delete_ranges,
+            table_id,
+            None,
+            None,
+        );
+
+        let imms = vec![imm2, imm1];
+        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms, None);
+
+        assert_eq!(
+            Some(1),
+            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"111"), 2))
+        );
+        assert_eq!(
+            Some(1),
+            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"555"), 2))
+        );
+        assert_eq!(
+            Some(2),
+            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"888"), 2))
+        );
+
+        assert_eq!(
+            None,
+            merged_imm.get_delete_range_epoch(&FullKey::new(table_id, TableKey(b"888"), 1))
+        );
+
+        assert_eq!(
+            Some(HummockValue::put(Bytes::from("value12"))),
+            merged_imm.get(TableKey(b"111"), 2)
+        );
+
+        // 555 is deleted in epoch=1
+        assert_eq!(None, merged_imm.get(TableKey(b"555"), 1));
+
+        // 555 is inserted again in epoch=2
+        assert_eq!(
+            Some(HummockValue::put(Bytes::from("value52"))),
+            merged_imm.get(TableKey(b"555"), 2)
+        );
+
+        // "666" is deleted in epoch=1 and isn't inserted in later epochs
+        assert_eq!(None, merged_imm.get(TableKey(b"666"), 2));
+        assert_eq!(None, merged_imm.get(TableKey(b"888"), 2));
+
+        // 888 exists in the snapshot of epoch=1
+        assert_eq!(
+            Some(HummockValue::put(Bytes::from("value8"))),
+            merged_imm.get(TableKey(b"888"), 1)
+        );
     }
 }

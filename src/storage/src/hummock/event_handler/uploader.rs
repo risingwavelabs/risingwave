@@ -34,9 +34,9 @@ use tracing::error;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
+// use crate::hummock::store::immutable_memtable::MergedImmutableMemtable;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, IMM_MERGE_THRESHOLD};
+use crate::hummock::store::version::{StagingSstableInfo, IMM_MERGE_THRESHOLD};
 use crate::hummock::{HummockError, HummockResult};
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
@@ -80,16 +80,14 @@ struct UploadingTask {
 pub struct MergeImmTaskOutput {
     pub table_id: TableId,
     pub shard_id: LocalInstanceId,
-    pub merged_imm: MergedImmutableMemtable,
+    pub merged_imm: ImmutableMemtable,
 }
 
 // A future that merges multiple immutable memtables to a single immutable memtable.
 struct MergingImmTask {
     table_id: TableId,
     shard_id: LocalInstanceId,
-    // input_imms: Vec<ImmutableMemtable>,
-    // join_handle: JoinHandle<HummockResult<MergingTaskOutput>>,
-    join_handle: JoinHandle<HummockResult<MergedImmutableMemtable>>,
+    join_handle: JoinHandle<HummockResult<ImmutableMemtable>>,
 }
 
 impl MergingImmTask {
@@ -100,10 +98,9 @@ impl MergingImmTask {
         _context: &UploaderContext,
     ) -> Self {
         // let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
-        // let input_imms = imms.clone();
         let join_handle = tokio::spawn(async move {
-            Ok(MergedImmutableMemtable::build_merged_imm(
-                table_id, imms, None,
+            Ok(ImmutableMemtable::build_merged_imm(
+                table_id, shard_id, imms, None,
             ))
         });
 
@@ -115,10 +112,7 @@ impl MergingImmTask {
     }
 
     /// Poll the result of the merge task
-    fn poll_result(
-        &mut self,
-        cx: &mut Context<'_>,
-    ) -> Poll<HummockResult<MergedImmutableMemtable>> {
+    fn poll_result(&mut self, cx: &mut Context<'_>) -> Poll<HummockResult<ImmutableMemtable>> {
         Poll::Ready(match ready!(self.join_handle.poll_unpin(cx)) {
             Ok(task_result) => task_result,
             Err(err) => Err(HummockError::other(format!(
@@ -136,7 +130,7 @@ impl Drop for MergingImmTask {
 }
 
 impl Future for MergingImmTask {
-    type Output = HummockResult<MergedImmutableMemtable>;
+    type Output = HummockResult<ImmutableMemtable>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.poll_result(cx)
@@ -313,8 +307,8 @@ struct SealedData {
     // newer epoch at the front and newer data at the front in the `VecDeque`
     imms: VecDeque<(HummockEpoch, VecDeque<ImmutableMemtable>)>,
 
-    // TODO: store the output of merge task and will be used for flush
-    // merged_imms: VecDeque<MergedImmutableMemtable>,
+    // TODO: store the output of merge task that will be used for the flush procedure
+    merged_imms: VecDeque<ImmutableMemtable>,
 
     // Sealed imms grouped by table shard.
     imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
@@ -392,15 +386,15 @@ impl SealedData {
             .map(|((table_id, shard_id), imms)| {
                 let imms = imms.drain(..).collect_vec();
                 // ensure imms <= sealed_epoch
-                assert!(imms.iter().all(|imm| imm.epoch <= sealed_epoch));
+                assert!(imms.iter().all(|imm| imm.epoch() <= sealed_epoch));
                 MergingImmTask::new(*table_id, *shard_id, imms, context)
             })
             .for_each(|task| self.merging_tasks.push_front(task));
     }
 
-    fn clear_merged_imms(&mut self, merged_imm: &MergedImmutableMemtable) {
-        let have_merged =
-            HashSet::<ImmId>::from_iter(merged_imm.get_merged_imm_ids().iter().cloned());
+    fn clear_merged_imms(&mut self, merged_imm: &ImmutableMemtable) {
+        debug_assert!(merged_imm.is_merged_imm());
+        let have_merged = HashSet::<ImmId>::from_iter(merged_imm.get_imm_ids().iter().cloned());
 
         // clear imms that have been merged
         self.imms.iter_mut().for_each(|(_, imms)| {
@@ -408,7 +402,7 @@ impl SealedData {
         });
 
         // add merged_imm to merged_imms
-        // self.merged_imms.push_front(merged_imm.clone());
+        self.merged_imms.push_front(merged_imm.clone());
     }
 
     // Flush can be triggered by either a sync_epoch or a spill(`may_flush`) request.
@@ -418,18 +412,21 @@ impl SealedData {
         // drop unfinished merging tasks in the task queue
         self.merging_tasks.clear();
 
-        // BUG(siyuan): When ImmMerged, we have removed those imms that have been merged from the
+        // FIXME(siyuan): When ImmMerged, we have removed those imms that have been merged from the
         // `imms` queue, thus when a SyncEpoch request comes, we also need to feed merged_imms
         // into the `flush` procedure.
         let imms = self.imms.drain(..);
 
-        // todo: drain merged_imms and feed to the uploading task
+        // TODO(siyuan): drain merged_imms and feed to the uploading task
+        // imms should be newer than merged_imms, because imms that have been merged have been
+        // remove from the `imms` queue
         // let merged_imms = self.merged_imms.drain(..);
 
         let payload = imms
             .into_iter()
             // in `imms`, newer data comes first
             .flat_map(|(_epoch, imms)| imms)
+            // .chain(merged_imms.into_iter())
             .collect_vec();
 
         if !payload.is_empty() {
@@ -659,7 +656,7 @@ impl HummockUploader {
             .gen_merging_tasks(sealed_epoch, &self.context);
     }
 
-    pub(crate) fn update_sealed_data(&mut self, merged_imm: &MergedImmutableMemtable) {
+    pub(crate) fn update_sealed_data(&mut self, merged_imm: &ImmutableMemtable) {
         self.sealed_data.clear_merged_imms(merged_imm);
     }
 
@@ -1279,7 +1276,7 @@ mod tests {
                     UploaderEvent::ImmMerged(output) => {
                         uploader.update_sealed_data(&output.merged_imm);
                         let have_merged = HashSet::<ImmId>::from_iter(
-                            output.merged_imm.get_merged_imm_ids().iter().cloned(),
+                            output.merged_imm.get_imm_ids().iter().cloned(),
                         );
                         // check whether merged imms have been clear from sealed imms
                         uploader.sealed_data.imms.iter().for_each(|(_, imms)| {
