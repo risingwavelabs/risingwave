@@ -216,6 +216,11 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 /// Currently the score >= 0, but we use signed type because the score delta might be < 0.
 type Score = i64;
 
+/// `CompactorState` describe the state of `Compactor` and `CompactorPolicy`
+/// Set the `Compactor` state to Busy when the `Compactor` workload exceeds the limit
+/// `CompactorPolicy` will check the state of all `Compactors` and calculate a new state based on
+/// the state and duration, see the `refresh_state` function.
+/// `CompactorState` will determine the `ScalePolicy`, refer to the `suggest_scale_policy` function.
 #[derive(PartialEq, Eq, Debug, Clone)]
 pub enum CompactorState {
     Burst(Instant),
@@ -427,6 +432,10 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             .sum()
     }
 
+    /// `refresh_state` check the state of all `Compactors` and calculate a new state based on the
+    /// state and duration
+    /// The state of `CompactorPolicy` must maintain `MIN_LAST_STATE_TIME` before it will change, to
+    /// ensure that the state changes do not jitter frequently.
     fn refresh_state(&mut self) {
         let idle_count = self
             .score_to_compactor
