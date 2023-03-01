@@ -615,10 +615,10 @@ where
 
     async fn list_connections(
         &self,
-        _request: Request<ListConnectionRequest>,
-    ) -> Result<Response<ListConnectionResponse>, Status> {
+        _request: Request<ListConnectionsRequest>,
+    ) -> Result<Response<ListConnectionsResponse>, Status> {
         let conns = self.catalog_manager.list_connections().await;
-        Ok(Response::new(ListConnectionResponse {
+        Ok(Response::new(ListConnectionsResponse {
             connections: conns,
             version: 0,
         }))
@@ -666,7 +666,7 @@ where
 
         // store the rewrite rules in properties
         if is_kafka_source(properties) && !dns_entries.is_empty() {
-            let broker_key = kafka_props_broker_key(&properties);
+            let broker_key = kafka_props_broker_key(properties);
             let servers = properties
                 .get(broker_key)
                 .cloned()

@@ -90,7 +90,6 @@ message Sink {
   string definition = 13;
 }
 
-
 message Connection {
   message PrivateLinkService {
     string endpoint_id = 1;
@@ -102,7 +101,6 @@ message Connection {
   oneof info {
     PrivateLinkService private_link_service = 3;
   }
-
 }
 
 message Index {

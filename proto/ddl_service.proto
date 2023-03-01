@@ -237,7 +237,6 @@ message GetDdlProgressResponse {
   repeated DdlProgress ddl_progress = 1;
 }
 
-
 message CreateConnectionRequest {
   message PrivateLink {
     string provider = 1;
@@ -256,10 +255,9 @@ message CreateConnectionResponse {
   uint64 version = 2;
 }
 
-message  ListConnectionRequest {
-}
+message ListConnectionsRequest {}
 
-message  ListConnectionResponse {
+message ListConnectionsResponse {
   repeated catalog.Connection connections = 1;
   // global catalog version
   uint64 version = 2;
@@ -289,5 +287,5 @@ service DdlService {
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
-  rpc ListConnections(ListConnectionRequest) returns (ListConnectionResponse);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
 }

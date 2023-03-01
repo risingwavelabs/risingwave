@@ -128,7 +128,7 @@ impl MetaClient {
     }
 
     pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
-        let request = ListConnectionRequest {};
+        let request = ListConnectionsRequest {};
         let resp = self.inner.list_connections(request).await?;
         Ok(resp.connections)
     }
@@ -1378,7 +1378,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
-            ,{ ddl_client, list_connections, ListConnectionRequest, ListConnectionResponse }
+            ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
