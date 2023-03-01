@@ -47,12 +47,7 @@ pub(crate) struct Opts {
     #[clap(name = "PG_USERNAME", short = 'u', long = "user", default_value="postgres", value_hint=ValueHint::Username)]
     pg_user_name: String,
     /// Postgresql server address to test against.
-    #[clap(
-        name = "PG_SERVER_ADDRESS",
-        short = 'h',
-        long = "host",
-        default_value = "localhost"
-    )]
+    #[clap(name = "PG_SERVER_ADDRESS", long = "host", default_value = "localhost")]
     pg_server_host: String,
     /// Postgresql server port to test against.
     #[clap(name = "PG_SERVER_PORT", short = 'p', long = "port")]
