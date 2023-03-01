@@ -15,7 +15,7 @@
 use std::io::BufRead;
 
 use bytes::BytesMut;
-use futures_async_stream::{for_await, try_stream};
+use futures_async_stream::try_stream;
 
 use crate::parser::ByteStreamSourceParser;
 use crate::source::{BoxSourceStream, SourceMessage};
