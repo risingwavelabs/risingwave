@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
+use std::marker::PhantomData;
 
 use itertools::Itertools;
 use risingwave_common::array::column::Column;
@@ -30,19 +31,168 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
+/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
+const ROW_COUNT_COLUMN: usize = 0;
+
+mod changes_builder {
+    use super::*;
+
+    pub(super) fn insert_new_outputs(
+        curr_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize {
+        new_ops.push(Op::Insert);
+
+        for (builder, new_value) in builders.iter_mut().zip_eq_fast(curr_outputs.iter()) {
+            trace!("insert datum: {:?}", new_value);
+            builder.append_datum(new_value);
+        }
+
+        1
+    }
+
+    pub(super) fn delete_old_outputs(
+        prev_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize {
+        new_ops.push(Op::Delete);
+
+        for (builder, old_value) in builders.iter_mut().zip_eq_fast(prev_outputs.iter()) {
+            trace!("delete datum: {:?}", old_value);
+            builder.append_datum(old_value);
+        }
+
+        1
+    }
+
+    pub(super) fn update_outputs(
+        prev_outputs: &OwnedRow,
+        curr_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize {
+        if prev_outputs == curr_outputs {
+            // Fast path for no change.
+            return 0;
+        }
+
+        new_ops.push(Op::UpdateDelete);
+        new_ops.push(Op::UpdateInsert);
+
+        for (builder, old_value, new_value) in itertools::multizip((
+            builders.iter_mut(),
+            prev_outputs.iter(),
+            curr_outputs.iter(),
+        )) {
+            trace!(
+                "update datum: prev = {:?}, curr = {:?}",
+                old_value,
+                new_value
+            );
+            builder.append_datum(old_value);
+            builder.append_datum(new_value);
+        }
+
+        2
+    }
+}
+
+pub trait Strategy {
+    fn build_changes(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize;
+}
+
+/// The strategy that always outputs the aggregation result no matter there're input rows or not.
+pub struct AlwaysOutput;
+/// The strategy that only outputs the aggregation result when there're input rows. If row count
+/// drops to 0, the output row will be deleted.
+pub struct OnlyOutputIfHasInput;
+
+impl Strategy for AlwaysOutput {
+    fn build_changes(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize {
+        match prev_outputs {
+            None => {
+                // First time to build changes, assert to ensure correctness.
+                // Note that it's not true vice versa, i.e. `prev_row_count == 0` doesn't imply
+                // `prev_outputs == None`.
+                assert_eq!(prev_row_count, 0);
+
+                // Generate output no matter whether current row count is 0 or not.
+                changes_builder::insert_new_outputs(curr_outputs, builders, new_ops)
+            }
+            Some(prev_outputs) => {
+                if prev_row_count == 0 && curr_row_count == 0 {
+                    // No rows exist.
+                    return 0;
+                }
+                changes_builder::update_outputs(prev_outputs, curr_outputs, builders, new_ops)
+            }
+        }
+    }
+}
+
+impl Strategy for OnlyOutputIfHasInput {
+    fn build_changes(
+        prev_row_count: usize,
+        curr_row_count: usize,
+        prev_outputs: Option<&OwnedRow>,
+        curr_outputs: &OwnedRow,
+        builders: &mut [ArrayBuilderImpl],
+        new_ops: &mut Vec<Op>,
+    ) -> usize {
+        match (prev_row_count, curr_row_count) {
+            (0, 0) => {
+                // No rows of current group exist.
+                0
+            }
+            (0, _) => {
+                // Insert new output row for this newly emerged group.
+                changes_builder::insert_new_outputs(curr_outputs, builders, new_ops)
+            }
+            (_, 0) => {
+                // Delete old output row for this newly disappeared group.
+                let prev_outputs = prev_outputs.expect("must exist previous outputs");
+                changes_builder::delete_old_outputs(prev_outputs, builders, new_ops)
+            }
+            (_, _) => {
+                // Update output row.
+                let prev_outputs = prev_outputs.expect("must exist previous outputs");
+                changes_builder::update_outputs(prev_outputs, curr_outputs, builders, new_ops)
+            }
+        }
+    }
+}
+
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
-pub struct AggGroup<S: StateStore> {
+pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Group key.
-    group_key: Option<OwnedRow>,
+    group_key: Option<OwnedRow>, // TODO(rc): we can remove this
 
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
+
+    _phantom: PhantomData<Strtg>,
 }
 
-impl<S: StateStore> Debug for AggGroup<S> {
+impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
             .field("group_key", &self.group_key)
@@ -50,9 +200,6 @@ impl<S: StateStore> Debug for AggGroup<S> {
             .finish()
     }
 }
-
-/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-const ROW_COUNT_COLUMN: usize = 0;
 
 /// Information about the changes built by `AggState::build_changes`.
 pub struct AggChangesInfo {
@@ -64,7 +211,7 @@ pub struct AggChangesInfo {
     pub prev_outputs: Option<OwnedRow>,
 }
 
-impl<S: StateStore> AggGroup<S> {
+impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
     pub async fn create(
@@ -75,7 +222,7 @@ impl<S: StateStore> AggGroup<S> {
         pk_indices: &PkIndices,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<AggGroup<S>> {
+    ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
         let prev_outputs: Option<OwnedRow> = result_table.get_row(&group_key).await?;
         if let Some(prev_outputs) = &prev_outputs {
             assert_eq!(prev_outputs.len(), agg_calls.len());
@@ -99,6 +246,7 @@ impl<S: StateStore> AggGroup<S> {
             group_key,
             states,
             prev_outputs,
+            _phantom: PhantomData,
         })
     }
 
@@ -184,6 +332,8 @@ impl<S: StateStore> AggGroup<S> {
             // Reset all states (in fact only value states will be reset).
             // This is important because for some agg calls (e.g. `sum`), if no row is applied,
             // they should output NULL, for some other calls (e.g. `sum0`), they should output 0.
+            // FIXME(rc): Deciding whether to reset states according to `row_count` is not precisely
+            // correct, see https://github.com/risingwavelabs/risingwave/issues/7412 for bug description.
             self.reset();
         }
         futures::future::try_join_all(
@@ -205,88 +355,26 @@ impl<S: StateStore> AggGroup<S> {
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
     ) -> AggChangesInfo {
-        let row_count = curr_outputs[ROW_COUNT_COLUMN]
-            .as_ref()
-            .map(|x| *x.as_int64())
-            .expect("row count should not be None");
         let prev_row_count = self.prev_row_count();
+        let curr_row_count = curr_outputs[ROW_COUNT_COLUMN]
+            .as_ref()
+            .map(|x| *x.as_int64() as usize)
+            .expect("row count should not be None");
 
         trace!(
-            "prev_row_count = {}, row_count = {}",
+            "prev_row_count = {}, curr_row_count = {}",
             prev_row_count,
-            row_count
+            curr_row_count
         );
 
-        let n_appended_ops = match (
+        let n_appended_ops = Strtg::build_changes(
             prev_row_count,
-            row_count,
-            self.group_key().is_some(),
-            self.prev_outputs.is_some(),
-        ) {
-            (0, 0, true, _) => {
-                // We never output any rows for row_count = 0 when group_key is_some
-
-                0
-            }
-
-            (0, _, true, _) | (0, _, _, false) => {
-                // Previous state is empty, current state is not empty, insert one `Insert` op.
-                new_ops.push(Op::Insert);
-
-                for (builder, new_value) in builders.iter_mut().zip_eq_fast(curr_outputs.iter()) {
-                    trace!("append_datum (0 -> N): {:?}", new_value);
-                    builder.append_datum(new_value);
-                }
-
-                1
-            }
-
-            (_, 0, true, _) => {
-                // Previous state is not empty, current state is empty, insert one `Delete` op.
-                new_ops.push(Op::Delete);
-
-                for (builder, old_value) in builders
-                    .iter_mut()
-                    .zip_eq_fast(self.prev_outputs.as_ref().unwrap().iter())
-                {
-                    trace!("append_datum (N -> 0): {:?}", old_value);
-                    builder.append_datum(old_value);
-                }
-
-                1
-            }
-
-            _ => {
-                // 1. Previous state is not empty and current state is not empty.
-                //
-                // 2. Previous state is not empty and current state is empty and there is no group
-                // by keys.
-                //
-                // 3. Previous state is empty and current state is not empty and there is no group
-                // by keys and prev_outputs is not none.
-                //
-                // Insert two `Update` op.
-                new_ops.push(Op::UpdateDelete);
-                new_ops.push(Op::UpdateInsert);
-
-                for (builder, old_value, new_value) in itertools::multizip((
-                    builders.iter_mut(),
-                    self.prev_outputs.as_ref().unwrap().iter(),
-                    curr_outputs.iter(),
-                )) {
-                    trace!(
-                        "append_datum (N -> N): prev = {:?}, cur = {:?}",
-                        old_value,
-                        new_value
-                    );
-
-                    builder.append_datum(old_value);
-                    builder.append_datum(new_value);
-                }
-
-                2
-            }
-        };
+            curr_row_count,
+            self.prev_outputs.as_ref(),
+            &curr_outputs,
+            builders,
+            new_ops,
+        );
 
         let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
 
