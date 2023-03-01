@@ -416,14 +416,15 @@ impl<S: MetaStore> HummockManager<S> {
     }
 
     /// Splits a compaction group into two. The new one will contain `table_ids`.
+    /// Returns the newly created compaction group id.
     #[named]
     pub async fn split_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
-    ) -> Result<()> {
+    ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
-            return Ok(());
+            return Ok(parent_group_id);
         }
         let table_ids = table_ids.iter().cloned().unique().collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -532,7 +533,7 @@ impl<S: MetaStore> HummockManager<S> {
         branched_ssts.commit_memory();
         self.notify_last_version_delta(versioning);
 
-        Ok(())
+        Ok(new_group_id)
     }
 }
 

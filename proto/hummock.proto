@@ -548,7 +548,9 @@ message SplitCompactionGroupRequest {
   repeated uint32 table_ids = 2;
 }
 
-message SplitCompactionGroupResponse {}
+message SplitCompactionGroupResponse {
+  uint64 new_group_id = 1;
+}
 
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);

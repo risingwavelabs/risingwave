@@ -242,6 +242,8 @@ impl HummockVersionUpdateExt for HummockVersion {
                         insert_table_infos.push(branch_table_info);
                     }
                 }
+                // Remove SST from sub level may result in empty sub level. It will be purged
+                // whenever another compaction task is finished.
                 let removed = sub_level
                     .table_infos
                     .drain_filter(|sst_info| sst_info.table_ids.is_empty())

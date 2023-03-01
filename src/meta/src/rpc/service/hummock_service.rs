@@ -504,9 +504,10 @@ where
         request: Request<SplitCompactionGroupRequest>,
     ) -> Result<Response<SplitCompactionGroupResponse>, Status> {
         let req = request.into_inner();
-        self.hummock_manager
+        let new_group_id = self
+            .hummock_manager
             .split_compaction_group(req.group_id, &req.table_ids)
             .await?;
-        Ok(Response::new(SplitCompactionGroupResponse {}))
+        Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }
 }

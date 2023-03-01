@@ -774,6 +774,7 @@ export interface SplitCompactionGroupRequest {
 }
 
 export interface SplitCompactionGroupResponse {
+  newGroupId: number;
 }
 
 export interface CompactionConfig {
@@ -4273,21 +4274,23 @@ export const SplitCompactionGroupRequest = {
 };
 
 function createBaseSplitCompactionGroupResponse(): SplitCompactionGroupResponse {
-  return {};
+  return { newGroupId: 0 };
 }
 
 export const SplitCompactionGroupResponse = {
-  fromJSON(_: any): SplitCompactionGroupResponse {
-    return {};
+  fromJSON(object: any): SplitCompactionGroupResponse {
+    return { newGroupId: isSet(object.newGroupId) ? Number(object.newGroupId) : 0 };
   },
 
-  toJSON(_: SplitCompactionGroupResponse): unknown {
+  toJSON(message: SplitCompactionGroupResponse): unknown {
     const obj: any = {};
+    message.newGroupId !== undefined && (obj.newGroupId = Math.round(message.newGroupId));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupResponse>, I>>(_: I): SplitCompactionGroupResponse {
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupResponse>, I>>(object: I): SplitCompactionGroupResponse {
     const message = createBaseSplitCompactionGroupResponse();
+    message.newGroupId = object.newGroupId ?? 0;
     return message;
   },
 };
