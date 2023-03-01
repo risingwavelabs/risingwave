@@ -16,8 +16,6 @@ use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use bytes::Bytes;
-
 use super::{HummockResult, HummockValue};
 
 mod forward_concat;
@@ -36,15 +34,9 @@ pub mod forward_user;
 mod merge_inner;
 pub use forward_user::*;
 pub use merge_inner::{OrderedMergeIteratorInner, UnorderedMergeIteratorInner};
-use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
+use risingwave_hummock_sdk::key::FullKey;
 
 use crate::hummock::iterator::HummockIteratorUnion::{First, Fourth, Second, Third};
-use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatchIterator;
-use crate::hummock::shared_buffer::SharedBufferIteratorType;
-use crate::hummock::{
-    BackwardSstableIterator, DeleteRangeAggregator, SstableIterator, SstableIteratorType,
-};
 
 mod delete_range_iterator;
 #[cfg(any(test, feature = "test"))]
@@ -59,7 +51,7 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync + 'static {
+pub trait HummockIterator: Send + 'static {
     type Direction: HummockIteratorDirection;
     type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
     where
@@ -341,102 +333,5 @@ impl HummockIteratorDirection for Backward {
     #[inline(always)]
     fn direction() -> DirectionEnum {
         DirectionEnum::Backward
-    }
-}
-
-pub type MultiSstIterator =
-    UnorderedMergeIteratorInner<HummockIteratorUnion<Forward, ConcatIterator, SstableIterator>>;
-
-#[allow(type_alias_bounds)]
-pub type UserIteratorPayloadType<
-    D: HummockIteratorDirection,
-    I: SstableIteratorType<Direction = D>,
-> = HummockIteratorUnion<
-    D,
-    SharedBufferBatchIterator<D>,
-    SharedBufferIteratorType<D, I>,
-    ConcatIteratorInner<I>,
-    I,
->;
-
-pub type ForwardUserIteratorType =
-    UnorderedMergeIteratorInner<UserIteratorPayloadType<Forward, SstableIterator>>;
-pub type BackwardUserIteratorType =
-    UnorderedMergeIteratorInner<UserIteratorPayloadType<Backward, BackwardSstableIterator>>;
-
-pub enum DirectedUserIterator {
-    Forward(UserIterator<ForwardUserIteratorType>),
-    Backward(BackwardUserIterator<BackwardUserIteratorType>),
-}
-
-pub trait DirectedUserIteratorBuilder: 'static {
-    type Direction: HummockIteratorDirection;
-    type SstableIteratorType: SstableIteratorType<Direction = Self::Direction>;
-    /// Initialize an `DirectedUserIterator`.
-    /// The `key_range` should be from smaller key to larger key.
-    fn create(
-        iterator_iter: Vec<UserIteratorPayloadType<Self::Direction, Self::SstableIteratorType>>,
-        key_range: UserKeyRange,
-        read_epoch: u64,
-        min_epoch: u64,
-        version: Option<PinnedVersion>,
-        delete_range_agg: DeleteRangeAggregator<ForwardMergeRangeIterator>,
-    ) -> DirectedUserIterator;
-}
-
-impl DirectedUserIterator {
-    #[inline(always)]
-    pub async fn next(&mut self) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.next().await,
-            Self::Backward(ref mut iter) => iter.next().await,
-        }
-    }
-
-    #[inline(always)]
-    pub fn key(&self) -> &FullKey<Bytes> {
-        match self {
-            Self::Forward(iter) => iter.key(),
-            Self::Backward(iter) => iter.key(),
-        }
-    }
-
-    #[inline(always)]
-    pub fn value(&self) -> &Bytes {
-        match self {
-            Self::Forward(iter) => iter.value(),
-            Self::Backward(iter) => iter.value(),
-        }
-    }
-
-    #[inline(always)]
-    pub async fn rewind(&mut self) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.rewind().await,
-            Self::Backward(ref mut iter) => iter.rewind().await,
-        }
-    }
-
-    #[inline(always)]
-    pub async fn seek(&mut self, user_key: UserKey<&[u8]>) -> HummockResult<()> {
-        match self {
-            Self::Forward(ref mut iter) => iter.seek(user_key).await,
-            Self::Backward(ref mut iter) => iter.seek(user_key).await,
-        }
-    }
-
-    #[inline(always)]
-    pub fn is_valid(&self) -> bool {
-        match self {
-            Self::Forward(iter) => iter.is_valid(),
-            Self::Backward(iter) => iter.is_valid(),
-        }
-    }
-
-    pub fn collect_local_statistic(&self, stats: &mut StoreLocalStatistic) {
-        match self {
-            DirectedUserIterator::Forward(iter) => iter.collect_local_statistic(stats),
-            DirectedUserIterator::Backward(iter) => iter.collect_local_statistic(stats),
-        }
     }
 }

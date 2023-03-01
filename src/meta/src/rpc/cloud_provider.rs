@@ -9,6 +9,7 @@ use crate::MetaResult;
 #[derive(Clone)]
 pub struct AwsEc2Client {
     client: aws_sdk_ec2::Client,
+    /// `vpc_id`: The VPC of the running RisingWave instance
     vpc_id: String,
     security_group_id: String,
 }
@@ -28,15 +29,14 @@ impl AwsEc2Client {
         }
     }
 
-    /// vpc_id: The VPC of the running RisingWave instance
-    /// service_name: The name of the endpoint service we want to access
+    /// `service_name`: The name of the endpoint service we want to access
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
         availability_zones: &Vec<String>,
     ) -> MetaResult<PrivateLinkService> {
         let subnet_ids = self
-            .describe_subnets(&self.vpc_id, &availability_zones)
+            .describe_subnets(&self.vpc_id, availability_zones)
             .await?;
 
         let (endpoint_id, dns_names) = self
@@ -49,7 +49,7 @@ impl AwsEc2Client {
             .await?;
 
         let mut az_to_dns_map = HashMap::new();
-        for dns_name in dns_names.iter() {
+        for dns_name in &dns_names {
             for az in availability_zones {
                 if dns_name.contains(az) {
                     az_to_dns_map.insert(az.clone(), dns_name.clone());
@@ -95,7 +95,7 @@ impl AwsEc2Client {
         vpc_id: &str,
         service_name: &str,
         security_group_id: &str,
-        subnet_ids: &Vec<String>,
+        subnet_ids: &[String],
     ) -> MetaResult<(String, Vec<String>)> {
         let output = self
             .client
@@ -104,7 +104,7 @@ impl AwsEc2Client {
             .vpc_id(vpc_id)
             .security_group_ids(security_group_id)
             .service_name(service_name)
-            .set_subnet_ids(Some(subnet_ids.clone()))
+            .set_subnet_ids(Some(subnet_ids.to_owned()))
             .send()
             .await?;
 

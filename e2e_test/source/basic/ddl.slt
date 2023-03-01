@@ -24,6 +24,15 @@ create source s with (
 ) row format json;
 
 statement ok
+create materialized view mv_1 as select * from s
+
+statement error other relation\(s\) depend on it
+drop source s
+
+statement ok
+drop materialized view mv_1
+
+statement ok
 drop source s
 
 query T

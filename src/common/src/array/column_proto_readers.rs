@@ -55,6 +55,8 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }
 
@@ -68,7 +70,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
     let arr = BoolArray::new(data, bitmap);
-    assert_eq!(arr.len(), cardinality);
+    ensure_eq!(arr.len(), cardinality);
 
     Ok(arr.into())
 }
@@ -133,6 +135,8 @@ macro_rules! read_one_value_array {
                     }
                 }
                 let arr = builder.finish();
+                ensure_eq!(arr.len(), cardinality);
+
                 Ok(arr.into())
             }
             )*
@@ -195,5 +199,7 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }

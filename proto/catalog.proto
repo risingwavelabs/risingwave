@@ -16,6 +16,15 @@ message ColumnIndex {
   uint64 index = 1;
 }
 
+// A mapping of column indices.
+message ColIndexMapping {
+  // The size of the target space.
+  uint64 target_size = 1;
+  // Each subscript is mapped to the corresponding element.
+  // For those not mapped, the value will be negative.
+  repeated int64 map = 2;
+}
+
 message WatermarkDesc {
   // The column idx the watermark is on
   uint32 watermark_idx = 1;
@@ -30,7 +39,7 @@ message StreamSourceInfo {
   string proto_message_name = 4;
   int32 csv_delimiter = 5;
   bool csv_has_header = 6;
-  map<string, string> kafka_rewrite_map = 7;
+  string upsert_avro_primary_key = 7;
 }
 
 message Source {
@@ -115,11 +124,12 @@ message Function {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  uint32 owner = 9;
   repeated data.DataType arg_types = 5;
   data.DataType return_type = 6;
   string language = 7;
-  string path = 8;
-  uint32 owner = 9;
+  string link = 8;
+  string identifier = 10;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
@@ -131,6 +141,7 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
   }
+
   message TableVersion {
     // The version number, which will be 0 by default and be increased by 1 for
     // each schema change in the frontend.
@@ -169,12 +180,18 @@ message Table {
   // `[0..columns.len()]`.
   repeated int32 value_indices = 20;
   string definition = 21;
-  bool handle_pk_conflict = 22;
+  HandleConflictBehavior handle_pk_conflict_behavior = 22;
   uint32 read_prefix_len_hint = 23;
   repeated int32 watermark_indices = 24;
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message View {

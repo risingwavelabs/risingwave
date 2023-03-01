@@ -22,11 +22,11 @@
                     └─LogicalFilter { predicate: (t1.y > 0:Int32) }
                       └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [z, a, b, t1._row_id(hidden), t1._row_id#1(hidden), t1._row_id#2(hidden), t1.x(hidden), $expr86(hidden)], pk_columns: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, $expr86, z, a] }
+    StreamMaterialize { columns: [z, a, b, t1._row_id(hidden), t1._row_id#1(hidden), t1._row_id#2(hidden), t1.x(hidden), $expr89(hidden)], pk_columns: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, $expr89, z, a], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: $expr1 = $expr2, output: [$expr1, $expr2, $expr3, t1._row_id, t1._row_id, t1._row_id, t1.x, $expr1] }
       ├─StreamExchange { dist: HashShard($expr1) }
       | └─StreamProject { exprs: [$expr1, t1._row_id] }
-      |   └─StreamShare { id = 240 }
+      |   └─StreamShare { id = 355 }
       |     └─StreamProject { exprs: [(t1.x + t1.y) as $expr1, t1._row_id] }
       |       └─StreamFilter { predicate: (t1.y > 0:Int32) }
       |         └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
@@ -37,7 +37,7 @@
             | └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
             └─StreamExchange { dist: HashShard($expr1) }
               └─StreamProject { exprs: [$expr1, t1._row_id] }
-                └─StreamShare { id = 240 }
+                └─StreamShare { id = 355 }
                   └─StreamProject { exprs: [(t1.x + t1.y) as $expr1, t1._row_id] }
                     └─StreamFilter { predicate: (t1.y > 0:Int32) }
                       └─StreamTableScan { table: t1, columns: [t1.x, t1.y, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }

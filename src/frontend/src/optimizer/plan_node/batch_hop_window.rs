@@ -24,10 +24,11 @@ use super::{
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,

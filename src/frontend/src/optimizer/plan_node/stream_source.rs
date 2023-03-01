@@ -25,7 +25,7 @@ use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
     logical: LogicalSource,
@@ -106,7 +106,7 @@ impl StreamNode for StreamSource {
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
-            properties: source_catalog.properties.clone(),
+            properties: source_catalog.properties.clone().into_iter().collect(),
         });
         ProstStreamNode::Source(SourceNode { source_inner })
     }

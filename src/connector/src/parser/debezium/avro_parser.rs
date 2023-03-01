@@ -35,7 +35,7 @@ use crate::parser::schema_registry::{extract_schema_id, Client};
 use crate::parser::schema_resolver::ConfluentSchemaResolver;
 use crate::parser::util::get_kafka_topic;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
-use crate::source::SourceColumnDesc;
+use crate::source::{SourceColumnDesc, SourceContextRef};
 
 const BEFORE: &str = "before";
 const AFTER: &str = "after";
@@ -51,6 +51,7 @@ pub struct DebeziumAvroParser {
     inner_schema: Arc<Schema>,
     schema_resolver: Arc<ConfluentSchemaResolver>,
     rw_columns: Vec<SourceColumnDesc>,
+    source_ctx: SourceContextRef,
 }
 
 #[derive(Debug, Clone)]
@@ -75,12 +76,14 @@ impl DebeziumAvroParserConfig {
         let key_schema = Schema::parse_str(&raw_schema.content)
             .map_err(|e| RwError::from(ProtocolError(format!("Avro schema parse error {}", e))))?;
 
-        let (outer_schema, resolver) =
-            ConfluentSchemaResolver::new(format!("{}-value", kafka_topic).as_str(), client).await?;
+        let resolver = ConfluentSchemaResolver::new(client);
+        let outer_schema = resolver
+            .get_by_subject_name(&format!("{}-value", kafka_topic))
+            .await?;
         let inner_schema = Self::extract_inner_schema(&outer_schema)?;
         Ok(Self {
             key_schema: Arc::new(key_schema),
-            outer_schema: Arc::new(outer_schema),
+            outer_schema,
             inner_schema: Arc::new(inner_schema),
             schema_resolver: Arc::new(resolver),
         })
@@ -167,6 +170,7 @@ impl DebeziumAvroParser {
     pub fn new(
         rw_columns: Vec<SourceColumnDesc>,
         config: DebeziumAvroParserConfig,
+        source_ctx: SourceContextRef,
     ) -> Result<Self> {
         let DebeziumAvroParserConfig {
             outer_schema,
@@ -179,6 +183,7 @@ impl DebeziumAvroParser {
             inner_schema,
             schema_resolver,
             rw_columns,
+            source_ctx,
         })
     }
 
@@ -435,7 +440,8 @@ mod tests {
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
 
-        let parser = DebeziumAvroParser::new(columns.clone(), config)?;
+        let parser =
+            DebeziumAvroParser::new(columns.clone(), config, Arc::new(Default::default()))?;
         let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA)
             .await
             .try_into()

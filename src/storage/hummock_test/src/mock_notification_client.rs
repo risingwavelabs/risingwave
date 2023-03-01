@@ -66,7 +66,7 @@ impl<S: MetaStore> NotificationClient for MockNotificationClient<S> {
         };
 
         self.notification_manager
-            .notify_snapshot(worker_key, meta_snapshot);
+            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
 
         Ok(TestChannel(rx))
     }

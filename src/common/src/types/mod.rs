@@ -423,7 +423,9 @@ pub trait Scalar:
     /// Get a reference to current scalar.
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 
-    fn to_scalar_value(self) -> ScalarImpl;
+    fn to_scalar_value(self) -> ScalarImpl {
+        self.into()
+    }
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
@@ -977,6 +979,18 @@ impl ScalarImpl {
         }
 
         Ok(deserializer.position() - base_position)
+    }
+
+    pub fn as_integral(&self) -> i64 {
+        match self {
+            Self::Int16(v) => *v as i64,
+            Self::Int32(v) => *v as i64,
+            Self::Int64(v) => *v,
+            _ => panic!(
+                "Can't convert ScalarImpl::{} to a integral",
+                self.get_ident()
+            ),
+        }
     }
 }
 

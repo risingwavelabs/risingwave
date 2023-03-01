@@ -47,7 +47,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///        |
 ///   LogicalSource
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
     pub base: PlanBase,
     core: generic::Share<PlanRef>,

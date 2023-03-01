@@ -22,6 +22,7 @@ use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
+use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
@@ -122,9 +123,9 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     /// Returns `None` if the no virtual node is set in the bitmap.
     pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
         bitmap
-            .iter_ones()
+            .iter_vnodes()
             .next() // only need to check the first one
-            .map(|i| self.get(VirtualNode::from_index(i)))
+            .map(|v| self.get(v))
     }
 
     /// Iterate over all items in this mapping, in the order of vnodes.

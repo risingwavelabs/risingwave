@@ -22,10 +22,10 @@ pub async fn create_connection(
     context: &CtlContext,
     provider: String,
     service_name: String,
-    availablity_zone: String,
+    availability_zone: String,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
-    let availability_zones: Vec<String> = availablity_zone
+    let availability_zones: Vec<String> = availability_zone
         .split(',')
         .map(|str| str.to_string())
         .collect();

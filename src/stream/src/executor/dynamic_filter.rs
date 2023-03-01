@@ -21,7 +21,7 @@ use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
@@ -386,11 +386,9 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         let range = (Self::to_row_bound(range.0), Self::to_row_bound(range.1));
 
                         // TODO: prefetching for append-only case.
-                        for vnode in self.left_table.vnodes().iter_ones() {
-                            let row_stream = self
-                                .left_table
-                                .iter_with_pk_range(&range, VirtualNode::from_index(vnode))
-                                .await?;
+                        for vnode in self.left_table.vnodes().iter_vnodes() {
+                            let row_stream =
+                                self.left_table.iter_with_pk_range(&range, vnode).await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {
                                 let row = res?;

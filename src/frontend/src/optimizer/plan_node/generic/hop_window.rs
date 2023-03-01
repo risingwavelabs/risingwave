@@ -24,7 +24,7 @@ use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 
 /// [`HopWindow`] implements Hop Table Function.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow<PlanRef> {
     pub input: PlanRef,
     pub time_col: InputRef,

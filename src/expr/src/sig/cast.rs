@@ -101,6 +101,20 @@ pub static CAST_MAP: LazyLock<CastMap> = LazyLock::new(|| {
     m.insert((T::Timestamptz, T::Time), CastContext::Assign);
     m.insert((T::Boolean, T::Int32), CastContext::Explicit);
     m.insert((T::Int32, T::Boolean), CastContext::Explicit);
+
+    // Casting from jsonb to bool / number.
+    for t in [
+        T::Boolean,
+        T::Int16,
+        T::Int32,
+        T::Int64,
+        T::Decimal,
+        T::Float32,
+        T::Float64,
+    ] {
+        m.insert((T::Jsonb, t), CastContext::Explicit);
+    }
+
     m
 });
 

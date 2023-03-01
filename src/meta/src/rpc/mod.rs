@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod cloud_provider;
+pub mod ddl_controller;
 mod election_client;
 mod intercept;
 pub mod metrics;

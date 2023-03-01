@@ -20,5 +20,9 @@ pub mod hdfs;
 #[cfg(feature = "hdfs-backend")]
 pub use hdfs::*;
 
+pub mod webhdfs;
+pub use webhdfs::*;
+pub mod gcs;
+pub use gcs::*;
 pub mod oss;
 pub use oss::*;

@@ -62,7 +62,7 @@ drop view not_exists.not_exists.not_exists;
 
 # 4.1. table
 statement ok
-create table t (v int);
+create table t (v int primary key);
 
 statement error Use `DROP TABLE`
 drop materialized view t;

@@ -56,6 +56,12 @@ pub struct KafkaProperties {
     #[serde(rename = "properties.group.id", alias = "kafka.consumer.group")]
     pub consumer_group: Option<String>,
 
+    /// This parameter is used to tell KafkaSplitReader to produce `UpsertMessage`s, which
+    /// combine both key and value fields of the Kafka message.
+    /// TODO: Currently, `Option<bool>` can not be parsed here.
+    #[serde(rename = "upsert")]
+    pub upsert: Option<String>,
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 }

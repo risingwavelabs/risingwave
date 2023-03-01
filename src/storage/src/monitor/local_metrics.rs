@@ -28,14 +28,6 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
-macro_rules! inc_local_metrics {
-    ($self:ident, $metrics: ident, $($x:ident),*) => {{
-        $(
-            $metrics.$x.inc_by($self.$x);
-        )*
-    }}
-}
-
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -68,23 +60,14 @@ pub struct StoreLocalStatistic {
 
 impl StoreLocalStatistic {
     pub fn add(&mut self, other: &StoreLocalStatistic) {
-        self.cache_meta_block_miss += other.cache_meta_block_miss;
-        self.cache_meta_block_total += other.cache_meta_block_total;
-
-        self.cache_data_block_miss += other.cache_data_block_miss;
-        self.cache_data_block_total += other.cache_data_block_total;
-
-        self.skip_multi_version_key_count += other.skip_multi_version_key_count;
-        self.skip_delete_key_count += other.skip_delete_key_count;
-        self.processed_key_count += other.processed_key_count;
+        self.add_count(other);
+        self.add_histogram(other);
         self.bloom_filter_true_negative_counts += other.bloom_filter_true_negative_counts;
         self.remote_io_time.fetch_add(
             other.remote_io_time.load(Ordering::Relaxed),
             Ordering::Relaxed,
         );
         self.bloom_filter_check_counts += other.bloom_filter_check_counts;
-        self.total_key_count += other.total_key_count;
-        self.get_shared_buffer_hit_counts += other.get_shared_buffer_hit_counts;
 
         #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
         if other.added.fetch_or(true, Ordering::Relaxed) || other.reported.load(Ordering::Relaxed) {
@@ -98,38 +81,12 @@ impl StoreLocalStatistic {
     }
 
     fn report(&self, metrics: &mut LocalStoreMetrics) {
-        inc_local_metrics!(
-            self,
-            metrics,
-            cache_data_block_total,
-            cache_data_block_miss,
-            cache_meta_block_total,
-            cache_meta_block_miss,
-            skip_multi_version_key_count,
-            skip_delete_key_count,
-            get_shared_buffer_hit_counts,
-            total_key_count,
-            processed_key_count
-        );
+        metrics.add_count(self);
+        metrics.add_histogram(self);
         let t = self.remote_io_time.load(Ordering::Relaxed) as f64;
         if t > 0.0 {
             metrics.remote_io_time.observe(t / 1000.0);
         }
-        metrics
-            .staging_imm_iter_count
-            .observe(self.staging_imm_iter_count as f64);
-        metrics
-            .staging_sst_iter_count
-            .observe(self.staging_sst_iter_count as f64);
-        metrics
-            .overlapping_iter_count
-            .observe(self.overlapping_iter_count as f64);
-        metrics
-            .non_overlapping_iter_count
-            .observe(self.non_overlapping_iter_count as f64);
-        metrics
-            .may_exist_check_sstable_count
-            .observe(self.may_exist_check_sstable_count as f64);
 
         metrics.collect_count += 1;
         if metrics.collect_count > FLUSH_LOCAL_METRICS_TIMES {
@@ -186,8 +143,9 @@ impl StoreLocalStatistic {
             return;
         }
         // checks SST bloom filters
-        inc_local_metrics!(self, metrics, bloom_filter_true_negative_counts);
-
+        metrics
+            .bloom_filter_true_negative_counts
+            .inc_by(self.bloom_filter_true_negative_counts);
         metrics.read_req_check_bloom_filter_counts.inc();
 
         if self.bloom_filter_check_counts > self.bloom_filter_true_negative_counts {
@@ -262,6 +220,7 @@ struct LocalStoreMetrics {
     overlapping_iter_count: LocalHistogram,
     non_overlapping_iter_count: LocalHistogram,
     may_exist_check_sstable_count: LocalHistogram,
+    sub_iter_count: LocalHistogram,
     iter_filter_metrics: BloomFilterLocalMetrics,
     get_filter_metrics: BloomFilterLocalMetrics,
     may_exist_filter_metrics: BloomFilterLocalMetrics,
@@ -342,6 +301,10 @@ impl LocalStoreMetrics {
             .iter_merge_sstable_counts
             .with_label_values(&[table_id_label, "may-exist-check-sstable"])
             .local();
+        let sub_iter_count = metrics
+            .iter_merge_sstable_counts
+            .with_label_values(&[table_id_label, "sub-iter"])
+            .local();
         let get_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "get");
         let iter_filter_metrics = BloomFilterLocalMetrics::new(metrics, table_id_label, "iter");
         let may_exist_filter_metrics =
@@ -360,6 +323,7 @@ impl LocalStoreMetrics {
             staging_imm_iter_count,
             staging_sst_iter_count,
             overlapping_iter_count,
+            sub_iter_count,
             non_overlapping_iter_count,
             may_exist_check_sstable_count,
             get_filter_metrics,
@@ -370,20 +334,86 @@ impl LocalStoreMetrics {
     }
 
     pub fn flush(&mut self) {
-        self.cache_data_block_total.flush();
-        self.cache_data_block_miss.flush();
-        self.cache_meta_block_total.flush();
-        self.cache_meta_block_miss.flush();
         self.remote_io_time.flush();
-        self.skip_multi_version_key_count.flush();
-        self.skip_delete_key_count.flush();
-        self.get_shared_buffer_hit_counts.flush();
-        self.total_key_count.flush();
-        self.processed_key_count.flush();
         self.iter_filter_metrics.flush();
         self.get_filter_metrics.flush();
+        self.flush_histogram();
+        self.flush_count();
     }
 }
+
+macro_rules! add_local_metrics_histogram {
+    ($($x:ident),*) => (
+        impl LocalStoreMetrics {
+            fn add_histogram(&self, stats: &StoreLocalStatistic) {
+                $(
+                    self.$x.observe(stats.$x as f64);
+                )*
+            }
+
+            fn flush_histogram(&mut self) {
+                $(
+                    self.$x.flush();
+                )*
+            }
+        }
+
+        impl StoreLocalStatistic {
+            fn add_histogram(&mut self, other: &StoreLocalStatistic) {
+                $(
+                    self.$x += other.$x;
+                )*
+            }
+        }
+    )
+}
+
+add_local_metrics_histogram!(
+    staging_imm_iter_count,
+    staging_sst_iter_count,
+    overlapping_iter_count,
+    non_overlapping_iter_count,
+    sub_iter_count,
+    may_exist_check_sstable_count
+);
+
+macro_rules! add_local_metrics_count {
+    ($($x:ident),*) => (
+        impl LocalStoreMetrics {
+            fn add_count(&self, stats: &StoreLocalStatistic) {
+                $(
+                    self.$x.inc_by(stats.$x);
+                )*
+            }
+
+            fn flush_count(&mut self) {
+                $(
+                    self.$x.flush();
+                )*
+            }
+        }
+
+        impl StoreLocalStatistic {
+            fn add_count(&mut self, other: &StoreLocalStatistic) {
+                $(
+                    self.$x += other.$x;
+                )*
+            }
+        }
+    )
+}
+
+add_local_metrics_count!(
+    cache_data_block_total,
+    cache_data_block_miss,
+    cache_meta_block_total,
+    cache_meta_block_miss,
+    skip_multi_version_key_count,
+    skip_delete_key_count,
+    get_shared_buffer_hit_counts,
+    total_key_count,
+    processed_key_count
+);
 
 macro_rules! define_bloom_filter_metrics {
     ($($x:ident),*) => (

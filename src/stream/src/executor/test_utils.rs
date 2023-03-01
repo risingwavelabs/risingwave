@@ -207,6 +207,9 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod agg_executor {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -374,6 +377,7 @@ pub mod agg_executor {
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
 
             extra: None,
         })

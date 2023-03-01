@@ -25,8 +25,9 @@ use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
-use risingwave_common::system_param::system_params_to_kv;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
@@ -57,7 +58,7 @@ use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
-use risingwave_pb::meta::{SystemParams as ProstSystemParams, *};
+use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::user_service_client::UserServiceClient;
@@ -70,7 +71,6 @@ use tokio::time;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
 use tonic::{Code, Streaming};
-use tracing::warn;
 
 use crate::error::{Result, RpcError};
 use crate::hummock_meta_client::{CompactTaskItem, HummockMetaClient};
@@ -343,10 +343,12 @@ impl MetaClient {
         &self,
         table: ProstTable,
         graph: StreamFragmentGraph,
+        table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
         let request = ReplaceTablePlanRequest {
             table: Some(table),
             fragment_graph: Some(graph),
+            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
         };
         let resp = self.inner.replace_table_plan(request).await?;
         // TODO: handle error in `resp.status` here
@@ -962,69 +964,6 @@ impl HummockMetaClient for MetaClient {
             })
             .await?;
         Ok(())
-    }
-}
-
-/// A wrapper for [`risingwave_pb::meta::SystemParams`] for 2 purposes:
-/// - Avoid misuse of deprecated fields by hiding their getters.
-/// - Abstract fallback logic for fields that might not be provided by meta service due to backward
-///   compatibility.
-pub struct SystemParamsReader {
-    prost: ProstSystemParams,
-}
-
-impl From<ProstSystemParams> for SystemParamsReader {
-    fn from(prost: ProstSystemParams) -> Self {
-        Self { prost }
-    }
-}
-
-impl SystemParamsReader {
-    pub fn barrier_interval_ms(&self) -> u32 {
-        self.prost.barrier_interval_ms.unwrap()
-    }
-
-    pub fn checkpoint_frequency(&self) -> u64 {
-        self.prost.checkpoint_frequency.unwrap()
-    }
-
-    pub fn sstable_size_mb(&self) -> u32 {
-        self.prost.sstable_size_mb.unwrap()
-    }
-
-    pub fn block_size_kb(&self) -> u32 {
-        self.prost.block_size_kb.unwrap()
-    }
-
-    pub fn bloom_false_positive(&self) -> f64 {
-        self.prost.bloom_false_positive.unwrap()
-    }
-
-    // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store(&self, from_local: String) -> String {
-        let from_prost = self.prost.state_store.as_ref().unwrap();
-        if from_prost.is_empty() {
-            warn!("--state-store is not specified on meta node, reading from CLI instead");
-            from_local
-        } else {
-            from_prost.clone()
-        }
-    }
-
-    pub fn data_directory(&self) -> &str {
-        self.prost.data_directory.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_url(&self) -> &str {
-        self.prost.backup_storage_url.as_ref().unwrap()
-    }
-
-    pub fn backup_storage_directory(&self) -> &str {
-        self.prost.backup_storage_directory.as_ref().unwrap()
-    }
-
-    pub fn to_kv(&self) -> Vec<(String, String)> {
-        system_params_to_kv(&self.prost).unwrap()
     }
 }
 

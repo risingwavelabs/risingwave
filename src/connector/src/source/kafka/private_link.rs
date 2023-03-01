@@ -18,13 +18,14 @@ use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::ClientContext;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 pub struct PrivateLinkConsumerContext {
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(brokers: &String, private_links: &Option<String>) -> Self {
+    pub fn new(brokers: &str, private_links: &Option<String>) -> Self {
         let mut rewrite_map = BTreeMap::new();
         if let Some(private_links) = private_links {
             let dns_names = private_links.split(',').collect_vec();
@@ -32,7 +33,7 @@ impl PrivateLinkConsumerContext {
 
             broker_adds
                 .into_iter()
-                .zip_eq(dns_names.into_iter())
+                .zip_eq_fast(dns_names.into_iter())
                 .for_each(|(broker_addr, dns_name)| {
                     let broker_addr = broker_addr.split(':').collect_vec();
                     let dns_name = dns_name.split(':').collect_vec();
@@ -57,7 +58,7 @@ impl ClientContext for PrivateLinkConsumerContext {
         match self.rewrite_map.get(&addr) {
             None => addr,
             Some(new_addr) => {
-                tracing::debug!("broker addr {:?} rewrited to {:?}", addr, new_addr);
+                tracing::debug!("broker addr {:?} rewrote to {:?}", addr, new_addr);
                 new_addr.clone()
             }
         }

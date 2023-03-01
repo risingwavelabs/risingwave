@@ -6,10 +6,10 @@ values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('
 ----
 1
 NULL
-[1,true]
+[1, true]
 null
 true
-{"a":[2,true,"",{}]}
+{"a": [2, true, "", {}]}
 
 statement ok
 create table t (v1 jsonb);
@@ -33,5 +33,117 @@ null
 true
 NULL
 
+query T
+select 'true'::jsonb::bool;
+----
+t
+
+query I
+select '1'::jsonb::smallint;
+----
+1
+
+query I
+select '1'::jsonb::int;
+----
+1
+
+query I
+select '1'::jsonb::bigint;
+----
+1
+
+query R
+select '2.5'::jsonb::decimal;
+----
+2.5
+
+query R
+select '2.5'::jsonb::real;
+----
+2.5
+
+query R
+select '2.5'::jsonb::double precision;
+----
+2.5
+
+# This would fail after #5576 fixed
+# Because PG rounds differently for `decimal -> int` and `float8 -> int`
+query II
+select '2.5'::jsonb::smallint, '3.5'::jsonb::smallint;
+----
+2 3
+
+statement error cannot cast jsonb null to type boolean
+select 'null'::jsonb::bool;
+
+query T
+select null::jsonb::bool;
+----
+NULL
+
+# Example of accessing the boolean nested inside object and array
+query T
+select ('{"k2":[2,true,4]}'::jsonb -> 'k2' -> -2)::bool;
+----
+t
+
+# But for text, avoid cast and use `->>` as the last access operator.
+# Note the difference between access text directly vs access jsonb then cast to text.
+query TTT
+with t(v1) as (values (null::jsonb), ('null'), ('true'), ('1'), ('"a"'), ('[]'), ('{}')),
+     j(v1) as (select ('{"k":' || v1::varchar || '}')::jsonb from t)
+select
+    v1 ->> 'k',
+    (v1 -> 'k')::varchar,
+    jsonb_typeof(v1 -> 'k')
+from j order by 2;
+----
+a "a" string
+1 1 number
+[] [] array
+NULL null null
+true true boolean
+{} {} object
+NULL NULL NULL
+
+query T
+select 'true'::jsonb ->> 2;
+----
+NULL
+
+query I
+select jsonb_array_length('[7, 2]');
+----
+2
+
+statement error cannot get array length
+select jsonb_array_length('null');
+
 statement ok
 drop table t;
+
+# Tests moved from regress tests due to not matching exactly.
+
+# PostgreSQL sorts shorter key "two" before longer key "three"
+# https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING:~:text=shorter%20keys%20are%20stored%20before%20longer%20keys
+query T
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"three":
+		true}'::jsonb; -- OK
+----
+{"one": 1, "three": true, "two": "two"}
+
+# We do not support jsonb IS NULL yet.
+query TTTT
+SELECT
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'ff',
+  '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'qq',
+  -- ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'Y') IS NULL AS f,
+  ('{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb ->> 'Y') IS NULL AS t,
+   '{"ff":{"a":12,"b":16},"qq":123,"x":[1,2],"Y":null}'::jsonb -> 'x';
+----
+{"a": 12, "b": 16} 123 t [1, 2]

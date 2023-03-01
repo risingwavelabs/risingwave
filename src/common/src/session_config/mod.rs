@@ -533,8 +533,8 @@ impl ConfigMap {
                 description: String::from("Enable two phase aggregation.")
             },
             VariableInfo{
-                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
-                setting : self.enable_two_phase_agg.to_string(),
+                name : ForceTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.force_two_phase_agg.to_string(),
                 description: String::from("Force two phase aggregation.")
             },
             VariableInfo{

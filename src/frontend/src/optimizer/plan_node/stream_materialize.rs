@@ -13,31 +13,26 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::HashSet;
 use std::fmt;
-use std::io::{Error, ErrorKind};
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, TableId, USER_COLUMN_ID_OFFSET};
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
+use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::sink::catalog::SinkType;
-use risingwave_connector::sink::{
-    SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode, StreamSink};
+use super::derive::derive_columns;
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
-use crate::optimizer::plan_node::{PlanBase, PlanNode};
-use crate::optimizer::property::{Direction, Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::plan_node::derive::derive_pk;
+use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
+use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::WithOptions;
 
 /// Materializes a stream.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamMaterialize {
     pub base: PlanBase,
     /// Child of Materialize plan
@@ -52,7 +47,7 @@ impl StreamMaterialize {
         Self { base, input, table }
     }
 
-    /// Create a materialize node, for `MATERIALIZED VIEW`, `INDEX`, and `SINK`.
+    /// Create a materialize node, for `MATERIALIZED VIEW` and `INDEX`.
     ///
     /// When creating index, `TableType` should be `Index`. Then, materialize will distribute keys
     /// using `user_distributed_by`.
@@ -68,48 +63,7 @@ impl StreamMaterialize {
         table_type: TableType,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
-        let schema = input.schema();
-
-        // Used to validate and deduplicate column names.
-        let mut col_names = HashSet::new();
-        for name in &out_names {
-            if !col_names.insert(name.clone()) {
-                Err(ErrorCode::InvalidInputSyntax(format!(
-                    "column \"{}\" specified more than once",
-                    name
-                )))?;
-            }
-        }
-        let mut out_name_iter = out_names.into_iter();
-
-        let columns = schema
-            .fields()
-            .iter()
-            .enumerate()
-            .map(|(i, field)| {
-                let mut c = ColumnCatalog {
-                    column_desc: ColumnDesc::from_field_with_column_id(
-                        field,
-                        i as i32 + USER_COLUMN_ID_OFFSET,
-                    ),
-                    is_hidden: !user_cols.contains(i),
-                };
-                c.column_desc.name = if !c.is_hidden {
-                    out_name_iter.next().unwrap()
-                } else {
-                    let mut name = field.name.clone();
-                    let mut count = 0;
-
-                    while !col_names.insert(name.clone()) {
-                        count += 1;
-                        name = format!("{}#{}", field.name, count);
-                    }
-
-                    name
-                };
-                c
-            })
-            .collect_vec();
+        let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let table = Self::derive_table_catalog(
             input.clone(),
@@ -117,7 +71,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            false,
+            ConflictBehavior::NoCheck,
             None,
             table_type,
             None,
@@ -139,7 +93,7 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
     ) -> Result<Self> {
@@ -151,7 +105,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            handle_pk_conflict,
+            conflict_behavior,
             row_id_index,
             TableType::Table,
             version,
@@ -199,67 +153,37 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
     ) -> Result<TableCatalog> {
         let input = rewritten_input;
 
-        let watermark_columns = input.watermark_columns().clone();
-        // Note(congyi): avoid pk duplication
-        let pk_indices = input.logical_pk().iter().copied().unique().collect_vec();
-        let schema = input.schema();
-        let distribution = input.distribution();
-
-        // Assert the uniqueness of column names and IDs, including hidden columns.
-        if let Some(name) = columns.iter().map(|c| c.name()).duplicates().next() {
-            panic!("duplicated column name \"{name}\"");
-        }
-        if let Some(id) = columns.iter().map(|c| c.column_id()).duplicates().next() {
-            panic!("duplicated column ID {id}");
-        }
-        // Assert that the schema of given `columns` is correct.
-        assert_eq!(
-            columns.iter().map(|c| c.data_type().clone()).collect_vec(),
-            input.schema().data_types()
-        );
-
         let value_indices = (0..columns.len()).collect_vec();
-        let mut in_order = FixedBitSet::with_capacity(schema.len());
-        let mut pk_list = vec![];
-
-        for field in &user_order_by.field_order {
-            let idx = field.index;
-            pk_list.push(field.clone());
-            in_order.insert(idx);
-        }
-
-        for &idx in &pk_indices {
-            if in_order.contains(idx) {
-                continue;
-            }
-            pk_list.push(FieldOrder {
-                index: idx,
-                direct: Direction::Asc,
-            });
-            in_order.insert(idx);
-        }
-
-        let distribution_key = distribution.dist_column_indices().to_vec();
+        let distribution_key = input.distribution().dist_column_indices().to_vec();
         let properties = input.ctx().with_options().internal_table_subset(); // TODO: remove this
-        let read_prefix_len_hint = pk_indices.len();
+        let append_only = input.append_only();
+        let watermark_columns = input.watermark_columns().clone();
 
+        let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
+        let read_prefix_len_hint = stream_key.len();
+
+        let conflict_behavior_type = match conflict_behavior {
+            ConflictBehavior::NoCheck => 0,
+            ConflictBehavior::OverWrite => 1,
+            ConflictBehavior::IgnoreConflict => 2,
+        };
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
             name,
             columns,
-            pk: pk_list,
-            stream_key: pk_indices,
+            pk,
+            stream_key,
             distribution_key,
             table_type,
-            append_only: input.append_only(),
+            append_only,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             properties,
             // TODO(zehua): replace it with FragmentId::placeholder()
@@ -268,7 +192,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
-            handle_pk_conflict,
+            conflict_behavior_type,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -283,44 +207,6 @@ impl StreamMaterialize {
 
     pub fn name(&self) -> &str {
         self.table.name()
-    }
-
-    /// Rewrite this plan node into [`StreamSink`] with the given `properties`.
-    pub fn rewrite_into_sink(self, properties: WithOptions) -> Result<StreamSink> {
-        let frontend_derived_append_only = self.table.append_only;
-        let user_defined_append_only =
-            properties.value_eq_ignore_case(SINK_FORMAT_OPTION, SINK_FORMAT_APPEND_ONLY);
-        let user_force_append_only =
-            properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true");
-
-        let sink_type = match (
-            frontend_derived_append_only,
-            user_defined_append_only,
-            user_force_append_only,
-        ) {
-            (true, true, _) => SinkType::AppendOnly,
-            (false, true, true) => SinkType::ForceAppendOnly,
-            (_, false, false) => SinkType::Upsert,
-            (false, true, false) => {
-                return Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                        "The sink cannot be append-only. Please add \"force_append_only='true'\" in WITH options to force the sink to be append-only. Notice that this will cause the sink executor to drop any UPDATE or DELETE message.",
-                )))
-                .into());
-            }
-            (_, false, true) => {
-                return Err(ErrorCode::SinkError(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options",
-                )))
-                .into());
-            }
-        };
-
-        Ok(StreamSink::new(
-            self.input,
-            self.table.to_sink_desc(properties, sink_type),
-        ))
     }
 }
 
@@ -354,6 +240,17 @@ impl fmt::Display for StreamMaterialize {
         if pk_column_names != order_descs {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
+
+        let pk_conflict_behavior;
+        if self.table.conflict_behavior_type() == 0 {
+            pk_conflict_behavior = "no check";
+        } else if self.table.conflict_behavior_type() == 1 {
+            pk_conflict_behavior = "overwrite";
+        } else {
+            pk_conflict_behavior = "ignore conflict";
+        }
+        builder.field("pk_conflict", &pk_conflict_behavior);
+
         builder.finish()
     }
 }
@@ -386,6 +283,7 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
+        let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
         ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -397,7 +295,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict: self.table.handle_pk_conflict(),
+            handle_pk_conflict_behavior,
         })
     }
 }

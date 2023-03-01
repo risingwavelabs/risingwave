@@ -524,6 +524,15 @@ def section_cluster_node(panels):
                 )
             ],
         ),
+        panels.timeseries_count(
+            "Meta Cluster",
+            "",
+            [
+                panels.target(f"sum({metric('meta_num')}) by (worker_addr,role)",
+                              "{{worker_addr}} @ {{role}}")
+            ],
+            ["last"],
+        ),
     ]
 
 
@@ -794,6 +803,28 @@ def section_compaction(outer_panels):
                         ),
                     ],
                 ),
+
+                panels.timeseries_bytes(
+                    "Lsm Compact Pending Bytes",
+                    "bytes of Lsm tree needed to reach balance",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_pending_bytes')}) by (instance, group)",
+                            "compact pending bytes - {{group}} @ {{instance}} ",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_percentage(
+                    "Lsm Level Compression Ratio",
+                    "compression ratio of each level of the lsm tree",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compact_level_compression_ratio')}) by (instance, group, level, algorithm)",
+                            "lsm compression ratio - cg{{group}} @ L{{level}} - {{algorithm}} {{instance}} ",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
@@ -836,8 +867,8 @@ def section_object_storage(outer_panels):
                             [50, 90, 99, "max"],
                         ),
                         panels.target(
-                            f"sum by(le, type)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
-                            "{{type}} avg",
+                            f"sum by(le, type, job, instance)(rate({metric('object_store_operation_latency_sum')}[$__rate_interval])) / sum by(le, type, job, instance) (rate({metric('object_store_operation_latency_count')}[$__rate_interval]))",
+                            "{{type}} avg - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1320,7 +1351,11 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert{{actor_id}} {{side}}",
+                            "cache miss when insert {{actor_id}} {{side}}",
+                        ),
+                        panels.target(
+                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
+                            "may_exist true when insert {{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1461,15 +1496,25 @@ def section_streaming_errors(outer_panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Errors",
+            "User Streaming Errors",
             [
                 panels.timeseries_count(
-                    "User Errors by Type",
+                    "Compute Errors by Type",
                     "",
                     [
                         panels.target(
-                            f"sum({metric('user_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
+                            f"sum({metric('user_compute_error_count')}) by (error_type, error_msg, fragment_id, executor_name)",
                             "{{error_type}}: {{error_msg}} ({{executor_name}}: fragment_id={{fragment_id}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "Source Errors by Type",
+                    "",
+                    [
+                        panels.target(
+                            f"sum({metric('user_source_error_count')}) by (error_type, error_msg, fragment_id, table_id, executor_name)",
+                            "{{error_type}}: {{error_msg}} ({{executor_name}}: table_id={{table_id}}, fragment_id={{fragment_id}})",
                         ),
                     ],
                 ),
@@ -2499,15 +2544,11 @@ def section_memory_manager(outer_panels):
                     ],
                 ),
                 panels.timeseries_ms(
-                    "LRU manager watermark_time and physical_now",
-                    "",
+                    "LRU manager diff between watermark_time and now (ms)",
+                    "watermark_time is the current lower watermark of cached data. physical_now is the current time of the machine. The diff (physical_now - watermark_time) shows how much data is cached.",
                     [
                         panels.target(
-                            f"{metric('lru_current_watermark_time_ms')}",
-                            "",
-                        ),
-                        panels.target(
-                            f"{metric('lru_physical_now_ms')}",
+                            f"{metric('lru_physical_now_ms')} - {metric('lru_current_watermark_time_ms')}",
                             "",
                         ),
                     ],
@@ -2528,6 +2569,16 @@ def section_memory_manager(outer_panels):
                     [
                         panels.target(
                             f"{metric('stream_total_mem_usage')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by batch",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem_usage')}",
                             "",
                         ),
                     ],

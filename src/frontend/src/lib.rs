@@ -28,6 +28,9 @@
 #![feature(once_cell)]
 #![feature(result_option_inspect)]
 #![feature(macro_metavar_expr)]
+#![feature(slice_internals)]
+#![feature(min_specialization)]
+#![feature(is_some_and)]
 #![recursion_limit = "256"]
 
 #[macro_use]
