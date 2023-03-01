@@ -144,12 +144,16 @@ impl StreamService for StreamServiceImpl {
         // avoid collection hang. We need some refine in meta side to remove this workaround since
         // it will cause another round of unnecessary recovery.
         let actor_ids = self.mgr.all_actor_ids().await;
-        if req
+        let missing_actor_ids = req
             .actor_ids_to_collect
             .iter()
-            .any(|id| !actor_ids.contains(id))
-        {
-            tracing::warn!("to collect actors not found, they should be cleaned when recovery.");
+            .filter(|id| !actor_ids.contains(id))
+            .collect_vec();
+        if !missing_actor_ids.is_empty() {
+            tracing::warn!(
+                "to collect actors not found, they should be cleaned when recovering: {:?}",
+                missing_actor_ids
+            );
             return Err(Status::new(
                 Code::InvalidArgument,
                 "to collect actors not found",
