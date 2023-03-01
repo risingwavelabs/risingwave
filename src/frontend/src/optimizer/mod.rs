@@ -22,7 +22,7 @@ mod heuristic_optimizer;
 mod plan_rewriter;
 pub use plan_rewriter::PlanRewriter;
 mod plan_visitor;
-pub use plan_visitor::PlanVisitor;
+pub use plan_visitor::{ExecutionModeDecider, PlanVisitor};
 mod logical_optimization;
 mod optimizer_context;
 mod plan_expr_rewriter;
@@ -157,7 +157,7 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
-    fn gen_batch_plan(&mut self) -> Result<PlanRef> {
+    pub fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan_for_batch()?;
 
@@ -222,9 +222,9 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a batch query plan for distributed execution.
-    pub fn gen_batch_distributed_plan(&mut self) -> Result<PlanRef> {
+    pub fn gen_batch_distributed_plan(&mut self, batch_plan: PlanRef) -> Result<PlanRef> {
         self.set_required_dist(RequiredDist::single());
-        let mut plan = self.gen_batch_plan()?;
+        let mut plan = batch_plan;
 
         // Convert to distributed plan
         plan = plan.to_distributed_with_required(&self.required_order, &self.required_dist)?;
@@ -253,8 +253,8 @@ impl PlanRoot {
     }
 
     /// Optimize and generate a batch query plan for local execution.
-    pub fn gen_batch_local_plan(&mut self) -> Result<PlanRef> {
-        let mut plan = self.gen_batch_plan()?;
+    pub fn gen_batch_local_plan(&mut self, batch_plan: PlanRef) -> Result<PlanRef> {
+        let mut plan = batch_plan;
 
         // Convert to local plan node
         plan = plan.to_local_with_order_required(&self.required_order)?;
