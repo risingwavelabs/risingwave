@@ -2,6 +2,9 @@
 #
 # Note: this file is embedded in the binary and cannot be changed without recompiling.
 
+[server]
+metrics_level = 1
+
 [streaming]
 barrier_interval_ms = 250
 checkpoint_frequency = 4

@@ -4950,6 +4950,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "prometheus-parse"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef7a8ed15bcffc55fe0328931ef20d393bb89ad704756a37bd20cffb4804f306"
+dependencies = [
+ "chrono",
+ "itertools",
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "prost"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6293,7 +6305,9 @@ dependencies = [
  "madsim-tokio",
  "paste",
  "pretty_assertions",
+ "prometheus-parse",
  "rand 0.8.5",
+ "risingwave_batch",
  "risingwave_common",
  "risingwave_compactor",
  "risingwave_compute",
