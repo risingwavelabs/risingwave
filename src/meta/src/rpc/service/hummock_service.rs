@@ -30,7 +30,6 @@ use crate::hummock::{
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
-use crate::MetaError;
 
 pub struct HummockServiceImpl<S>
 where
@@ -273,7 +272,6 @@ where
         self.compactor_manager
             .update_compactor_state(req.context_id, req.workload.unwrap());
 
-        // todo update compactor status
         Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
@@ -388,8 +386,7 @@ where
             .start_full_gc(Duration::from_secs(
                 request.into_inner().sst_retention_time_sec,
             ))
-            .await
-            .map_err(MetaError::from)?;
+            .await?;
         Ok(Response::new(TriggerFullGcResponse { status: None }))
     }
 

@@ -849,7 +849,6 @@ export interface GetScaleCompactorResponse {
   runningCores: number;
   totalCores: number;
   waitingCompactionBytes: number;
-  pendingCompactionBytes: number;
 }
 
 function createBaseSstableInfo(): SstableInfo {
@@ -4489,7 +4488,7 @@ export const GetScaleCompactorRequest = {
 };
 
 function createBaseGetScaleCompactorResponse(): GetScaleCompactorResponse {
-  return { suggestCores: 0, runningCores: 0, totalCores: 0, waitingCompactionBytes: 0, pendingCompactionBytes: 0 };
+  return { suggestCores: 0, runningCores: 0, totalCores: 0, waitingCompactionBytes: 0 };
 }
 
 export const GetScaleCompactorResponse = {
@@ -4499,7 +4498,6 @@ export const GetScaleCompactorResponse = {
       runningCores: isSet(object.runningCores) ? Number(object.runningCores) : 0,
       totalCores: isSet(object.totalCores) ? Number(object.totalCores) : 0,
       waitingCompactionBytes: isSet(object.waitingCompactionBytes) ? Number(object.waitingCompactionBytes) : 0,
-      pendingCompactionBytes: isSet(object.pendingCompactionBytes) ? Number(object.pendingCompactionBytes) : 0,
     };
   },
 
@@ -4510,8 +4508,6 @@ export const GetScaleCompactorResponse = {
     message.totalCores !== undefined && (obj.totalCores = Math.round(message.totalCores));
     message.waitingCompactionBytes !== undefined &&
       (obj.waitingCompactionBytes = Math.round(message.waitingCompactionBytes));
-    message.pendingCompactionBytes !== undefined &&
-      (obj.pendingCompactionBytes = Math.round(message.pendingCompactionBytes));
     return obj;
   },
 
@@ -4521,7 +4517,6 @@ export const GetScaleCompactorResponse = {
     message.runningCores = object.runningCores ?? 0;
     message.totalCores = object.totalCores ?? 0;
     message.waitingCompactionBytes = object.waitingCompactionBytes ?? 0;
-    message.pendingCompactionBytes = object.pendingCompactionBytes ?? 0;
     return message;
   },
 };
