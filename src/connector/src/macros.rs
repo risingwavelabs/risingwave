@@ -236,6 +236,7 @@ macro_rules! impl_common_split_reader_logic {
         impl $reader {
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
             pub(crate) async fn into_chunk_stream(self) {
+                use crate::parser::ByteStreamSourceParser;
                 let parser_config = self.parser_config.clone();
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();
