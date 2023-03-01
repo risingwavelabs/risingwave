@@ -19,11 +19,11 @@ use super::{EngineType, OpendalObjectStore};
 use crate::object::ObjectResult;
 impl OpendalObjectStore {
     /// create opendal azblob engine.
-    pub fn new_azblob_engine(containe_name: String, root: String) -> ObjectResult<Self> {
+    pub fn new_azblob_engine(container_name: String, root: String) -> ObjectResult<Self> {
         // Create azblob backend builder.
         let mut builder = Azblob::default();
         builder.root(&root);
-        builder.container(&containe_name);
+        builder.container(&container_name);
 
         let endpoint = std::env::var("AZBLOB_ENDPOINT")
             .unwrap_or_else(|_| panic!("AZBLOB_ENDPOINT not found from environment variables"));
