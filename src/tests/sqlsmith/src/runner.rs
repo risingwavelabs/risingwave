@@ -86,6 +86,8 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
     .await;
     tracing::info!("Passed sqlsmith tests");
 
+    write_to_file(outdir, "ddl.sql", &setup_sql);
+
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
@@ -97,7 +99,6 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
-                write_to_file(outdir, "ddl.sql", &setup_sql);
                 write_to_file(outdir, "queries.sql", &queries);
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
@@ -123,7 +124,6 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
                 queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
-                write_to_file(outdir, "ddl.sql", &setup_sql);
                 write_to_file(outdir, "queries.sql", &queries);
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
@@ -142,7 +142,6 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
     tracing::info!("Generated {} stream queries", generated_queries);
 
     drop_tables(&mviews, testdata, client).await;
-    write_to_file(outdir, "ddl.sql", &setup_sql);
     write_to_file(outdir, "queries.sql", &queries);
 }
 
