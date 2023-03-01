@@ -2,6 +2,7 @@
 
 set -euxo pipefail
 
+# export SNAPSHOT_REPO=""
 export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
@@ -32,9 +33,22 @@ generate_sqlsmith() {
     --generate "$OUTDIR/$1"
 }
 
-# Check which queries failed
+# Check if any query generation step failed
 check_failing_queries() {
   ls .risingwave/log | grep fuzz | sed -E 's/fuzzing\-([0-9]*).log/\1/'
+}
+
+# Upload step
+upload_queries() {
+  cp "$OUTDIR/*" "$SNAPSHOT_REPO"
+  cd "$SNAPSHOT_REPO"
+  git push origin main
+  cd -
+}
+
+# Cleanup step
+cleanup() {
+  rm -r "$OUTDIR"
 }
 
 main() {
@@ -42,6 +56,7 @@ main() {
   build_madsim
   generate_deterministic
   check_failing_queries
+  cleanup
   cd -
 }
 
