@@ -32,11 +32,11 @@ impl PlanVisitor<bool> for ExecutionModeDecider {
     }
 
     fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
-        !batch_seq_scan.scan_ranges().is_empty() &&
-        batch_seq_scan
-            .scan_ranges()
-            .iter()
-            .all(|x| x.has_eq_conds() || x.two_side_bound())
+        !batch_seq_scan.scan_ranges().is_empty()
+            && batch_seq_scan
+                .scan_ranges()
+                .iter()
+                .all(|x| x.has_eq_conds() || x.two_side_bound())
     }
 
     fn visit_batch_values(&mut self, _batch_values: &BatchValues) -> bool {

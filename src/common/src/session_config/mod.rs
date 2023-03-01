@@ -288,7 +288,8 @@ pub struct ConfigMap {
     create_compaction_group_for_mv: CreateCompactionGroupForMv,
 
     /// A temporary config variable to force query running in either local or distributed mode.
-    /// The default value is auto which means let the system decide to run batch queries in local or distributed mode automatically.
+    /// The default value is auto which means let the system decide to run batch queries in local
+    /// or distributed mode automatically.
     query_mode: QueryMode,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>

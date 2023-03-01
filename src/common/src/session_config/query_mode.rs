@@ -53,6 +53,8 @@ impl TryFrom<&[&str]> for QueryMode {
             Ok(Self::Local)
         } else if s.eq_ignore_ascii_case("distributed") {
             Ok(Self::Distributed)
+        } else if s.eq_ignore_ascii_case("auto") {
+            Ok(Self::Auto)
         } else {
             Err(InvalidConfigValue {
                 config_entry: Self::entry_name().to_string(),
