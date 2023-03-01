@@ -19,7 +19,7 @@ use crate::{ExprError, Result};
 
 pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
     // The cases where the exponent value is Inf or NaN can be handled explicitly and without
-    // executing the `exp` operator.
+    // evaluating the `exp` operation.
     if input.is_nan() {
         Ok(input)
     } else if input.is_infinite() {
