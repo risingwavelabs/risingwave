@@ -208,6 +208,10 @@ impl HummockVersionUpdateExt for HummockVersion {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
+        let remove_sst_stat_from_level = |level: &mut Level, sst: &SstableInfo| {
+            level.total_file_size -= sst.file_size;
+            level.uncompressed_file_size -= sst.uncompressed_file_size;
+        };
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let mut insert_table_infos = vec![];
@@ -238,9 +242,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                         insert_table_infos.push(branch_table_info);
                     }
                 }
-                sub_level
+                let removed = sub_level
                     .table_infos
-                    .drain_filter(|sst_info| sst_info.table_ids.is_empty());
+                    .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                    .collect_vec();
+                for removed_sst in removed {
+                    remove_sst_stat_from_level(sub_level, &removed_sst);
+                }
                 add_new_sub_level(
                     cur_levels.l0.as_mut().unwrap(),
                     sub_level.get_sub_level_id(),
@@ -281,9 +289,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                     cur_levels.levels[z].table_infos.push(branch_table_info);
                 }
             }
-            level
+            let removed = level
                 .table_infos
-                .drain_filter(|sst_info| sst_info.table_ids.is_empty());
+                .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                .collect_vec();
+            for removed_sst in removed {
+                remove_sst_stat_from_level(level, &removed_sst);
+            }
         }
         split_id_vers
     }
