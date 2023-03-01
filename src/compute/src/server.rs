@@ -59,6 +59,7 @@ use tokio::task::JoinHandle;
 use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
+use crate::memory_management::policy::StreamingOnlyPolicy;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -239,6 +240,7 @@ pub async fn compute_node_serve(
         compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
+        Box::new(StreamingOnlyPolicy {}),
     );
     // Run a background memory monitor
     tokio::spawn(mgr.clone().run(batch_mgr_clone, stream_mgr_clone));

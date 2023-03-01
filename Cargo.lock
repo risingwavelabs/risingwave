@@ -5812,6 +5812,7 @@ dependencies = [
 name = "risingwave_compute"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "async_stack_trace",
  "clap 3.2.23",
