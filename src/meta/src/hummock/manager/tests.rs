@@ -910,7 +910,7 @@ async fn test_hummock_compaction_task_heartbeat() {
     let sst_num = 2;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-    let _tx = compactor_manager.add_compactor(context_id, 100);
+    let _tx = compactor_manager.add_compactor(context_id, 100, 100);
     let (join_handle, shutdown_tx) =
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
@@ -1037,7 +1037,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
     let sst_num = 2;
 
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-    let _tx = compactor_manager.add_compactor(context_id, 100);
+    let _tx = compactor_manager.add_compactor(context_id, 100, 100);
     let (join_handle, shutdown_tx) =
         HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await;
 
@@ -1593,7 +1593,7 @@ async fn get_manual_compact_task<S: MetaStore>(
 ) -> CompactTask {
     hummock_manager
         .compactor_manager
-        .add_compactor(context_id, 1);
+        .add_compactor(context_id, 1, 1);
     let compaction_task = hummock_manager
         .manual_get_compact_task(
             2,

@@ -579,6 +579,7 @@ export interface CompactorHeartbeatResponse {
 export interface SubscribeCompactTasksRequest {
   contextId: number;
   maxConcurrentTaskNumber: number;
+  cpuCoreNum: number;
 }
 
 export interface ValidationTask {
@@ -2895,7 +2896,7 @@ export const CompactorHeartbeatResponse = {
 };
 
 function createBaseSubscribeCompactTasksRequest(): SubscribeCompactTasksRequest {
-  return { contextId: 0, maxConcurrentTaskNumber: 0 };
+  return { contextId: 0, maxConcurrentTaskNumber: 0, cpuCoreNum: 0 };
 }
 
 export const SubscribeCompactTasksRequest = {
@@ -2903,6 +2904,7 @@ export const SubscribeCompactTasksRequest = {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       maxConcurrentTaskNumber: isSet(object.maxConcurrentTaskNumber) ? Number(object.maxConcurrentTaskNumber) : 0,
+      cpuCoreNum: isSet(object.cpuCoreNum) ? Number(object.cpuCoreNum) : 0,
     };
   },
 
@@ -2911,6 +2913,7 @@ export const SubscribeCompactTasksRequest = {
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     message.maxConcurrentTaskNumber !== undefined &&
       (obj.maxConcurrentTaskNumber = Math.round(message.maxConcurrentTaskNumber));
+    message.cpuCoreNum !== undefined && (obj.cpuCoreNum = Math.round(message.cpuCoreNum));
     return obj;
   },
 
@@ -2918,6 +2921,7 @@ export const SubscribeCompactTasksRequest = {
     const message = createBaseSubscribeCompactTasksRequest();
     message.contextId = object.contextId ?? 0;
     message.maxConcurrentTaskNumber = object.maxConcurrentTaskNumber ?? 0;
+    message.cpuCoreNum = object.cpuCoreNum ?? 0;
     return message;
   },
 };
