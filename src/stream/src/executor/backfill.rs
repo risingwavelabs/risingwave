@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::ops::Bound;
+use std::time::Instant;
 
 use await_tree::InstrumentAwait;
 use either::Either;
@@ -30,6 +31,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
+use tokio::time::{sleep, Duration};
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
@@ -71,9 +73,14 @@ pub struct BackfillExecutor<S: StateStore> {
     actor_id: ActorId,
 
     info: ExecutorInfo,
+
+    expected_barrier_latency_ms: u32,
 }
 
 const CHUNK_SIZE: usize = 1024;
+
+/// A constant to multiply when calculating the maximum time to wait for a barrier.
+const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
 
 impl<S> BackfillExecutor<S>
 where
@@ -86,6 +93,7 @@ where
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
+        expected_barrier_latency_ms: u32,
     ) -> Self {
         Self {
             info: ExecutorInfo {
@@ -98,6 +106,7 @@ where
             upstream_indices,
             actor_id: progress.actor_id(),
             progress,
+            expected_barrier_latency_ms,
         }
     }
 
@@ -114,13 +123,17 @@ where
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
 
+        let flow_control_time_ms =
+            self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
+
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
         // directly.
         let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
-            let snapshot = Self::snapshot_read(&self.table, init_epoch, None, false);
+            let snapshot =
+                Self::snapshot_read(&self.table, init_epoch, None, false, flow_control_time_ms);
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
@@ -185,8 +198,14 @@ where
             let left_upstream = upstream.by_ref().map(Either::Left);
 
             let right_snapshot = Box::pin(
-                Self::snapshot_read(&self.table, snapshot_read_epoch, current_pos.clone(), true)
-                    .map(Either::Right),
+                Self::snapshot_read(
+                    &self.table,
+                    snapshot_read_epoch,
+                    current_pos.clone(),
+                    true,
+                    flow_control_time_ms,
+                )
+                .map(Either::Right),
             );
 
             // Prefer to select upstream, so we can stop snapshot stream as soon as the barrier
@@ -307,6 +326,7 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
+        flow_control_time_ms: u128,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
@@ -335,6 +355,7 @@ where
             )
             .await?;
 
+        let start = Instant::now();
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
@@ -342,6 +363,10 @@ where
             .instrument_await("backfill_snapshot_read")
             .await?
         {
+            if start.elapsed().as_millis() > flow_control_time_ms {
+                tracing::trace!("Backfill flow control.");
+                sleep(Duration::from_millis(1000)).await;
+            }
             if data_chunk.cardinality() != 0 {
                 let ops = vec![Op::Insert; data_chunk.capacity()];
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);

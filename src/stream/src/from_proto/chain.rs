@@ -152,6 +152,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     progress,
                     schema,
                     params.pk_indices,
+                    params.env.config().barrier_interval_ms,
                 )
                 .boxed()
             }
