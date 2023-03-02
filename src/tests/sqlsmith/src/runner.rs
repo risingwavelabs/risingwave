@@ -58,9 +58,8 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
 /// Query Generator
 /// If we encounter an expected error, just skip.
 /// If we encounter an unexpected error,
-/// sqlsmith should stop execution, but writeout ddl and queries so far.
-/// It should log the number of queries written to stdout, so external process
-/// can still generate more to make up the shortfall if necessary.
+/// Sqlsmith should stop execution, but writeout ddl and queries so far.
+/// NOTE(noel): It will still fail if DDL creation fails.
 pub async fn generate(
     client: &Client,
     testdata: &str,
