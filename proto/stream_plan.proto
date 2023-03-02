@@ -225,6 +225,7 @@ message SimpleAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message HashAggNode {
@@ -236,6 +237,7 @@ message HashAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message TopNNode {

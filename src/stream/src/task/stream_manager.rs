@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use core::time::Duration;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::io::Write;
 use std::sync::atomic::AtomicU64;
@@ -21,7 +21,6 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
 use async_recursion::async_recursion;
-use async_stack_trace::{StackTraceManager, StackTraceReport, TraceConfig};
 use futures::FutureExt;
 use hytra::TrAdder;
 use itertools::Itertools;
@@ -82,8 +81,8 @@ pub struct LocalStreamManagerCore {
     /// Config of streaming engine
     pub(crate) config: StreamingConfig,
 
-    /// Manages the stack traces of all actors.
-    stack_trace_manager: Option<StackTraceManager<ActorId>>,
+    /// Manages the await-trees of all actors.
+    await_tree_reg: Option<await_tree::Registry<ActorId>>,
 
     /// Watermark epoch number.
     watermark_epoch: AtomicU64Ref,
@@ -167,14 +166,14 @@ impl LocalStreamManager {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> Self {
         Self::with_core(LocalStreamManagerCore::new(
             addr,
             state_store,
             streaming_metrics,
             config,
-            async_stack_trace_config,
+            await_tree_config,
         ))
     }
 
@@ -192,24 +191,29 @@ impl LocalStreamManager {
                 let mut o = std::io::stdout().lock();
 
                 for (k, trace) in core
-                    .stack_trace_manager
+                    .await_tree_reg
                     .as_mut()
                     .expect("async stack trace not enabled")
-                    .get_all()
+                    .iter()
                 {
-                    writeln!(o, ">> Actor {}\n\n{}", k, &*trace).ok();
+                    writeln!(o, ">> Actor {}\n\n{}", k, trace).ok();
                 }
             }
         })
     }
 
-    /// Get stack trace reports for all actors.
-    pub async fn get_actor_traces(&self) -> HashMap<ActorId, StackTraceReport> {
+    /// Get await-tree contexts for all actors.
+    pub async fn get_actor_traces(&self) -> HashMap<ActorId, await_tree::TreeContext> {
         let mut core = self.core.lock().await;
-        match &mut core.stack_trace_manager {
-            Some(mgr) => mgr.get_all().map(|(k, v)| (*k, v.clone())).collect(),
+        match &mut core.await_tree_reg {
+            Some(mgr) => mgr.iter().map(|(k, v)| (*k, v)).collect(),
             None => Default::default(),
         }
+    }
+
+    /// Get all existing actor ids.
+    pub async fn all_actor_ids(&self) -> HashSet<ActorId> {
+        self.core.lock().await.handles.keys().cloned().collect()
     }
 
     /// Broadcast a barrier to all senders. Save a receiver in barrier manager
@@ -376,7 +380,7 @@ impl LocalStreamManagerCore {
         state_store: StateStoreImpl,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> Self {
         let context = SharedContext::new(addr, state_store.clone(), &config);
         Self::new_inner(
@@ -384,7 +388,7 @@ impl LocalStreamManagerCore {
             context,
             streaming_metrics,
             config,
-            async_stack_trace_config,
+            await_tree_config,
         )
     }
 
@@ -393,7 +397,7 @@ impl LocalStreamManagerCore {
         context: SharedContext,
         streaming_metrics: Arc<StreamingMetrics>,
         config: StreamingConfig,
-        async_stack_trace_config: Option<TraceConfig>,
+        await_tree_config: Option<await_tree::Config>,
     ) -> Self {
         let mut builder = tokio::runtime::Builder::new_multi_thread();
         if let Some(worker_threads_num) = config.actor_runtime_worker_threads_num {
@@ -417,7 +421,7 @@ impl LocalStreamManagerCore {
             state_store,
             streaming_metrics,
             config,
-            stack_trace_manager: async_stack_trace_config.map(StackTraceManager::new),
+            await_tree_reg: await_tree_config.map(await_tree::Registry::new),
             watermark_epoch: Arc::new(AtomicU64::new(0)),
             total_mem_val: Arc::new(TrAdder::new()),
         }
@@ -649,10 +653,13 @@ impl LocalStreamManagerCore {
                         context.lock_barrier_manager().notify_failure(actor_id, err);
                     }
                 };
-                let traced = match &mut self.stack_trace_manager {
+                let traced = match &mut self.await_tree_reg {
                     Some(m) => m
-                        .register(actor_id)
-                        .trace(actor, format!("Actor {actor_id}: `{}`", mview_definition))
+                        .register(
+                            actor_id,
+                            format!("Actor {actor_id}: `{}`", mview_definition),
+                        )
+                        .instrument(actor)
                         .left_future(),
                     None => actor.right_future(),
                 };
@@ -793,8 +800,8 @@ impl LocalStreamManagerCore {
         }
         self.actors.clear();
         self.context.clear_channels();
-        if let Some(m) = self.stack_trace_manager.as_mut() {
-            m.reset()
+        if let Some(m) = self.await_tree_reg.as_mut() {
+            m.clear();
         }
         self.actor_monitor_tasks.clear();
         self.context.actor_infos.write().clear();

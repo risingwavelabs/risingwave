@@ -15,6 +15,7 @@
 use std::time::Duration;
 
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_pb::common::WorkerType;
 use sync_point::sync_point;
 use tokio::task::JoinHandle;
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
@@ -103,7 +104,9 @@ where
             .map(jitter);
         match notification {
             LocalNotification::WorkerNodeIsDeleted(worker_node) => {
-                self.compactor_manager.remove_compactor(worker_node.id);
+                if worker_node.get_type().unwrap() == WorkerType::Compactor {
+                    self.compactor_manager.remove_compactor(worker_node.id);
+                }
                 tokio_retry::RetryIf::spawn(
                     retry_strategy.clone(),
                     || async {

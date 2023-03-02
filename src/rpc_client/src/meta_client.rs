@@ -29,6 +29,7 @@ use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
@@ -795,6 +796,19 @@ impl MetaClient {
         let resp = self.inner.get_ddl_progress(req).await?;
         Ok(resp.ddl_progress)
     }
+
+    pub async fn split_compaction_group(
+        &self,
+        group_id: CompactionGroupId,
+        table_ids_to_new_group: &[StateTableId],
+    ) -> Result<CompactionGroupId> {
+        let req = SplitCompactionGroupRequest {
+            group_id,
+            table_ids: table_ids_to_new_group.to_vec(),
+        };
+        let resp = self.inner.split_compaction_group(req).await?;
+        Ok(resp.new_group_id)
+    }
 }
 
 #[async_trait]
@@ -1391,6 +1405,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
+            ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

@@ -28,7 +28,7 @@ aws-types = { version = "0.51", default-features = false, features = ["hardcoded
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
@@ -88,7 +88,6 @@ scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
-stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
@@ -101,7 +100,6 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
-triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zstd = { version = "0.11" }
@@ -121,7 +119,7 @@ base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
@@ -182,7 +180,6 @@ scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
-stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
@@ -197,7 +194,6 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
-triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zstd = { version = "0.11" }

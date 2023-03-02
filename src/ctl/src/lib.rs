@@ -140,6 +140,13 @@ enum HummockCommands {
         #[clap(long)]
         max_sub_compaction: Option<u32>,
     },
+    /// Split given compaction group into two. Moves the given tables to the new group.
+    SplitCompactionGroup {
+        #[clap(long)]
+        compaction_group_id: u64,
+        #[clap(long)]
+        table_ids: Vec<u32>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -276,6 +283,13 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 ),
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::SplitCompactionGroup {
+            compaction_group_id,
+            table_ids,
+        }) => {
+            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
+                .await?;
         }
         Commands::Table(TableCommands::Scan { mv_name }) => {
             cmd_impl::table::scan(context, mv_name).await?

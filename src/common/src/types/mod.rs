@@ -235,20 +235,6 @@ impl From<&ProstDataType> for DataType {
 }
 
 impl DataType {
-    pub const BOOLEAN: DataType = DataType::Boolean;
-    pub const DATE: DataType = DataType::Date;
-    pub const DECIMAL: DataType = DataType::Decimal;
-    pub const FLOAT32: DataType = DataType::Float32;
-    pub const FLOAT64: DataType = DataType::Float64;
-    pub const INT16: DataType = DataType::Int16;
-    pub const INT32: DataType = DataType::Int32;
-    pub const INT64: DataType = DataType::Int64;
-    pub const INTERVAL: DataType = DataType::Interval;
-    pub const TIME: DataType = DataType::Time;
-    pub const TIMESTAMP: DataType = DataType::Timestamp;
-    pub const TIMESTAMPTZ: DataType = DataType::Timestamptz;
-    pub const VARCHAR: DataType = DataType::Varchar;
-
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
         match self {
