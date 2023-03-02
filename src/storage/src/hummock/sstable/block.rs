@@ -17,13 +17,14 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use prost::Message;
 use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils::xxhash64_checksum;
-use crate::hummock::{HummockError, HummockResult};
+use crate::hummock::{FullKey, HummockError, HummockResult};
 
 pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
@@ -271,20 +272,22 @@ impl BlockBuilder {
     /// # Panics
     ///
     /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, key: &[u8], value: &[u8]) {
+    pub fn add(&mut self, full_key: &FullKey<&[u8]>, value: &[u8]) {
+        let mut key: BytesMut = Default::default();
+        full_key.encode_into(&mut key);
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], key.as_ref()),
                 Ordering::Less
             );
         }
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            key
+            key.as_ref()
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, key)
+            bytes_diff_below_max_key_length(&self.last_key, key.as_ref())
         };
 
         let prefix = KeyPrefix {
@@ -295,11 +298,11 @@ impl BlockBuilder {
         };
 
         prefix.encode(&mut self.buf);
-        self.buf.put_slice(diff_key);
+        self.buf.put_slice(diff_key.as_ref());
         self.buf.put_slice(value);
 
         self.last_key.clear();
-        self.last_key.extend_from_slice(key);
+        self.last_key.extend_from_slice(key.as_ref());
         self.entry_count += 1;
     }
 
