@@ -23,13 +23,14 @@ use nix::sys::stat::fstat;
 use nix::unistd::ftruncate;
 use tracing::Instrument;
 
-use super::error::Result;
+use super::error::{Error, Result};
 use super::store::FsType;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct CacheFileOptions {
-    /// The file system on which the cache file will be created.  This cannot be TmpFS because that does not support Direct IO.
+    /// The file system on which the cache file will be created.  This cannot be TmpFS because that
+    /// does not support Direct IO.
     pub fs_type: FsType,
     /// NOTE: `block_size` must be a multiple of `fs_block_size`.
     pub block_size: usize,
@@ -84,9 +85,11 @@ impl CacheFile {
     /// punching.
     pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {
         options.assert();
-        assert!(options.fs_type != FsType::Tmpfs, 
-            "Cannot create cache file ({}) on a tmpfs file system: tmpfs does not support Direct IO which is required by the File Cache.", 
-            path.as_ref().display());
+
+        if options.fs_type == FsType::Tmpfs {
+            // The Tmpfs file system does not support Direct IO.
+            return Err(Error::UnsupportedFilesystem(libc::TMPFS_MAGIC));
+        }
 
         let path = path.as_ref().to_owned();
 
