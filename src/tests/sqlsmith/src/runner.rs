@@ -39,6 +39,9 @@ type Result<A> = anyhow::Result<A>;
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
+    let ddl = queries_path.lines().filter(|s| s.starts_with("CREATE")).collect::<String>();
+    let dml = queries_path.lines().filter(|s| s.starts_with("INSERT")).collect::<String>();
+    let setup_sql = format!("{}\n{}", ddl, dml);
     let queries = std::fs::read_to_string(queries_path).unwrap();
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
@@ -85,8 +88,6 @@ pub async fn generate(
     .await;
     tracing::info!("Passed sqlsmith tests");
 
-    write_to_file(outdir, "ddl.sql", &setup_sql);
-
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
@@ -98,7 +99,6 @@ pub async fn generate(
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
-                write_to_file(outdir, "queries.sql", &queries);
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
@@ -123,7 +123,6 @@ pub async fn generate(
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
                 queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
-                write_to_file(outdir, "queries.sql", &queries);
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
@@ -140,7 +139,6 @@ pub async fn generate(
     tracing::info!("Generated {} stream queries", generated_queries);
 
     drop_tables(&mviews, testdata, client).await;
-    write_to_file(outdir, "queries.sql", &queries);
 }
 
 fn write_to_file(outdir: &str, name: &str, sql: &str) {
@@ -343,7 +341,7 @@ async fn test_stream_queries<R: Rng>(
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
         skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response)?;
-        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(table));
+        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
     Ok(skipped as f64 / sample_size as f64)
