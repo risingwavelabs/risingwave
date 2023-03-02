@@ -15,12 +15,30 @@ build_madsim() {
   cargo make sslt-build-all --profile ci-sim
 }
 
+# $LOGFILE
+check_if_crashed() {
+  CRASHED=$(grep "note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error" "$1")
+  echo "$CRASHED"
+}
+
+# Extract queries from $1, write to $2
+extract_queries() {
+  QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
+  CRASHED=$(check_if_crashed "$1")
+  if [[ -n "$CRASHED" ]]; then
+    echo "Cluster crashed while generating queries. see $1 for more information."
+    QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+  fi
+  echo -e "$QUERIES" > "$2"
+}
+
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
+  . $(which env_parallel.bash)
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
-  seq "$TEST_NUM" | parallel "
+  seq "$TEST_NUM" | env_parallel "
     mkdir -p $OUTDIR/{}; \
     MADSIM_TEST_SEED={} ./$MADSIM_BIN \
       --sqlsmith 100 \
@@ -30,23 +48,6 @@ generate_deterministic() {
     extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
     "
   set -e
-}
-
-# $LOGFILE
-check_if_crashed() {
-  CRASHED=$(grep "note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error" $1)
-  echo $CRASHED
-}
-
-# Extract queries from $1, write to $2
-extract_queries() {
-  QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
-  CRASHED=$(check_if_crashed "$1")
-  if [[ -n "$CRASHED" ]]; then
-    echo "Cluster crashed while generating queries."
-    QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
-  fi
-  echo -e "$QUERIES"
 }
 
 generate_sqlsmith() {
@@ -60,24 +61,24 @@ generate_sqlsmith() {
 # Check that queries are different
 check_different_queries() {
   if [[ $(diff "$OUTDIR/1/queries.sql" "$OUTDIR/2/queries.sql") ]]; then
-    echo "Queries should be different"
+    echo "Queries are different."
   else
-    echo "no difference!" && exit 1
+    echo "Queries are the same! Something went wrong in the generation process." && exit 1
   fi
 }
 
-# Check if any query generation step failed
+# Check if any query generation step failed, and any query file not generated.
 check_failing_queries() {
   echo "query files generated:"
-  ls "$OUTDIR/*" | grep -c queries.sql
+  ls "$OUTDIR"/* | grep -c queries.sql
 }
 
 # Upload step
 upload_queries() {
   pushd "$OUTDIR"
-  git add .
-  git commit --amend -m 'update queries'
-  git push -f origin main
+#  git add .
+#  git commit --amend -m 'update queries'
+#  git push -f origin main
   popd
 }
 
@@ -96,3 +97,5 @@ main() {
   upload_queries
   popd
 }
+
+main
