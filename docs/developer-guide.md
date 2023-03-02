@@ -297,6 +297,11 @@ If you want to see the coverage report, run this command:
 ./risedev test-cov
 ```
 
+Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
+error message: `UnsupportedFilesystem(16914836)`. If this happens you can override the use of `/tmp` by setting the 
+environment variable `RISINGWAVE_TEST_DIR` to a directory that is on a non-TmpFS filesystem, the unit tests will then 
+place temporary files under your specified path.
+
 ### Planner tests
 
 RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
