@@ -273,9 +273,9 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
+          environment:
+            - GITHUB_TOKEN
       - ./ci/plugins/upload-failure-logs
-    env:
-      - GITHUB_TOKEN
     timeout_in_minutes: 15
     retry: *auto-retry
 
