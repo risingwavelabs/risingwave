@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// #![cfg(madsim)]
+#![cfg(madsim)]
 #![feature(trait_alias)]
 #![feature(lint_reasons)]
 #![feature(once_cell)]
