@@ -38,6 +38,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Planner tests](#planner-tests)
   * [End-to-end tests](#end-to-end-tests)
   * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [Fuzzing tests](#fuzzing-tests)
   * [DocSlt tests](#docslt-tests)
   * [Deterministic simulation tests](#deterministic-simulation-tests)
 - [Miscellaneous checks](#miscellaneous-checks)
@@ -358,6 +359,12 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### Fuzzing tests
+
+#### SqlSmith
+
+Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](../src/tests/sqlsmith/README.md) for more details on running it locally.
 
 ### DocSlt tests
 

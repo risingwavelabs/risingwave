@@ -217,6 +217,7 @@ steps:
     command: "ci/scripts/pr-fuzz-test.sh -p ci-dev"
     depends_on:
       - "build"
+      - "build-simulation"
     plugins:
       - ./ci/plugins/swapfile
       - gencer/cache#v2.4.10: *cargo-cache
