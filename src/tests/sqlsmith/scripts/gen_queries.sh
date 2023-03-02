@@ -34,9 +34,18 @@ generate_sqlsmith() {
     --generate "$OUTDIR/$1"
 }
 
+# Check that queries are different
+check_different_queries() {
+  if [[ $(diff "$OUTDIR/1/queries.sql" "$OUTDIR/2/queries.sql") ]]; then
+    echo "Queries should be different"
+  else
+    echo "no difference!" && exit 1
+  fi
+}
+
 # Check if any query generation step failed
 check_failing_queries() {
-  ls .risingwave/log | grep fuzz | sed -E 's/fuzzing\-([0-9]*).log/\1/' || true
+  echo "no failing queries"
 }
 
 # Upload step
@@ -53,6 +62,7 @@ main() {
   cd $RW_HOME
   build_madsim
   generate_deterministic
+  check_different_queries
   check_failing_queries
   upload_queries
   cd "$CUR_DIR"

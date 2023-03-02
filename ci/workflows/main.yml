@@ -242,6 +242,8 @@ steps:
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 timeout 25m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
