@@ -84,6 +84,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
     /// State storages for each aggregation calls.
     /// `None` means the agg call need not to maintain a state table by itself.
     storages: Vec<AggStateStorage<S>>,
@@ -197,6 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: extra_args.group_key_indices,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -258,6 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.storages,
                                 &this.result_table,
                                 &this.input_pk_indices,
+                                this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -645,6 +650,7 @@ mod tests {
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
@@ -683,6 +689,7 @@ mod tests {
             extreme_cache_size,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),
@@ -747,7 +754,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -779,6 +786,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![],
             1 << 10,
@@ -851,7 +859,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -884,6 +892,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             key_indices,
             vec![],
             1 << 10,
@@ -957,7 +966,7 @@ mod tests {
         let keys = vec![0];
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -980,6 +989,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,
@@ -1058,7 +1068,7 @@ mod tests {
         let append_only = true;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -1081,6 +1091,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,

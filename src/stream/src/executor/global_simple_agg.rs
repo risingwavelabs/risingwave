@@ -64,6 +64,9 @@ struct ExecutorInner<S: StateStore> {
     /// An operator will support multiple aggregation calls.
     agg_calls: Vec<AggCall>,
 
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
     /// State storage for each agg calls.
     storages: Vec<AggStateStorage<S>>,
 
@@ -140,6 +143,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 input_pk_indices: input_info.pk_indices,
                 input_schema: input_info.schema,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -311,6 +315,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
                 &this.storages,
                 &this.result_table,
                 &this.input_pk_indices,
+                this.row_count_index,
                 this.extreme_cache_size,
                 &this.input_schema,
             )
@@ -401,7 +406,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -443,6 +448,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             vec![2],
             1,
         )

@@ -222,10 +222,8 @@ impl<S: MetaStore> HummockManager<S> {
                     // The config for inexistent group may have been created in
                     // compaction test.
                     let config = self
-                        .compaction_group_manager
-                        .read()
-                        .await
                         .get_compaction_group_config(group_id)
+                        .await
                         .compaction_config
                         .as_ref()
                         .clone();
@@ -416,6 +414,127 @@ impl<S: MetaStore> HummockManager<S> {
         }
         compaction_groups
     }
+
+    /// Splits a compaction group into two. The new one will contain `table_ids`.
+    /// Returns the newly created compaction group id.
+    #[named]
+    pub async fn split_compaction_group(
+        &self,
+        parent_group_id: CompactionGroupId,
+        table_ids: &[StateTableId],
+    ) -> Result<CompactionGroupId> {
+        if table_ids.is_empty() {
+            return Ok(parent_group_id);
+        }
+        let table_ids = table_ids.iter().cloned().unique().collect_vec();
+        let mut versioning_guard = write_lock!(self, versioning).await;
+        let versioning = versioning_guard.deref_mut();
+        let current_version = &versioning.current_version;
+        // Validate parameters.
+        let parent_group = current_version
+            .levels
+            .get(&parent_group_id)
+            .ok_or_else(|| Error::CompactionGroup(format!("invalid group {}", parent_group_id)))?;
+        for table_id in &table_ids {
+            if !parent_group.member_table_ids.contains(table_id) {
+                return Err(Error::CompactionGroup(format!(
+                    "table {} doesn't in group {}",
+                    table_id, parent_group_id
+                )));
+            }
+        }
+        if table_ids.len() == parent_group.member_table_ids.len() {
+            return Err(Error::CompactionGroup(format!(
+                "invalid split attempt for group {}: all member tables are moved",
+                parent_group_id
+            )));
+        }
+
+        let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
+            &mut versioning.hummock_version_deltas,
+            current_version.id + 1,
+            build_version_delta_after_version(current_version),
+        );
+
+        // Remove tables from parent group.
+        for table_id in &table_ids {
+            let group_deltas = &mut new_version_delta
+                .group_deltas
+                .entry(parent_group_id)
+                .or_default()
+                .group_deltas;
+            group_deltas.push(GroupDelta {
+                delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                    table_ids_remove: vec![*table_id],
+                    ..Default::default()
+                })),
+            });
+        }
+
+        // Add tables to new group.
+        let new_group_id = self
+            .env
+            .id_gen_manager()
+            .generate::<{ IdCategory::CompactionGroup }>()
+            .await?;
+        let group_deltas = &mut new_version_delta
+            .group_deltas
+            .entry(new_group_id)
+            .or_default()
+            .group_deltas;
+        let config = self
+            .get_compaction_group_config(new_group_id)
+            .await
+            .compaction_config
+            .as_ref()
+            .clone();
+        group_deltas.push(GroupDelta {
+            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                group_config: Some(config),
+                group_id: new_group_id,
+                parent_group_id,
+                table_ids,
+            })),
+        });
+
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut trx = Transaction::default();
+        new_version_delta.apply_to_txn(&mut trx)?;
+        self.env.meta_store().txn(trx).await?;
+        let sst_split_info = versioning
+            .current_version
+            .apply_version_delta(&new_version_delta);
+        // Updates SST split info
+        for (id, divide_ver, _, is_trivial_adjust) in sst_split_info {
+            match branched_ssts.get_mut(id) {
+                Some(mut entry) => {
+                    if is_trivial_adjust {
+                        entry.remove(&parent_group_id).unwrap();
+                    } else {
+                        let p = entry.get_mut(&parent_group_id).unwrap();
+                        assert_eq!(*p + 1, divide_ver);
+                        *p = divide_ver;
+                    }
+                    entry.insert(new_group_id, divide_ver);
+                }
+                None => {
+                    let to_insert: HashMap<CompactionGroupId, u64> = if is_trivial_adjust {
+                        [(new_group_id, divide_ver)].into_iter().collect()
+                    } else {
+                        [(parent_group_id, divide_ver), (new_group_id, divide_ver)]
+                            .into_iter()
+                            .collect()
+                    };
+                    branched_ssts.insert(id, to_insert);
+                }
+            }
+        }
+        new_version_delta.commit();
+        branched_ssts.commit_memory();
+        self.notify_last_version_delta(versioning);
+
+        Ok(new_group_id)
+    }
 }
 
 #[derive(Default)]
@@ -457,7 +576,7 @@ impl CompactionGroupManager {
         meta_store: &S,
     ) -> Result<()> {
         let mut compaction_groups = BTreeMapTransaction::new(&mut self.compaction_groups);
-        for compaction_group_id in compaction_group_ids {
+        for compaction_group_id in compaction_group_ids.iter().unique() {
             if !compaction_groups.contains_key(compaction_group_id) {
                 compaction_groups.insert(
                     *compaction_group_id,

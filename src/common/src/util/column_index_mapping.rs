@@ -268,6 +268,17 @@ impl ColIndexMapping {
     pub fn is_empty(&self) -> bool {
         self.target_size() == 0
     }
+
+    pub fn is_injective(&self) -> bool {
+        let mut tar_exists = vec![false; self.target_size()];
+        for i in self.map.iter().flatten() {
+            if tar_exists[*i] {
+                return false;
+            }
+            tar_exists[*i] = true;
+        }
+        true
+    }
 }
 
 impl ColIndexMapping {

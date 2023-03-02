@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
-use clap::StructOpt;
+use clap::Parser;
 use risingwave_cmd_all::playground;
 use risingwave_common::enable_task_local_jemalloc_on_linux;
 use tracing::Level;

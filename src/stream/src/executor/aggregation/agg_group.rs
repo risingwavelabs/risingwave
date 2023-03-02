@@ -31,9 +31,6 @@ use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::PkIndices;
 
-/// We assume the first state of aggregation is always `StreamingRowCountAgg`.
-const ROW_COUNT_COLUMN: usize = 0;
-
 mod changes_builder {
     use super::*;
 
@@ -189,6 +186,9 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
     /// Previous outputs of managed states. Initializing with `None`.
     prev_outputs: Option<OwnedRow>,
 
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
     _phantom: PhantomData<Strtg>,
 }
 
@@ -214,12 +214,14 @@ pub struct AggChangesInfo {
 impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Create [`AggGroup`] for the given [`AggCall`]s and `group_key`.
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create(
         group_key: Option<OwnedRow>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
         pk_indices: &PkIndices,
+        row_count_index: usize,
         extreme_cache_size: usize,
         input_schema: &Schema,
     ) -> StreamExecutorResult<AggGroup<S, Strtg>> {
@@ -246,6 +248,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             group_key,
             states,
             prev_outputs,
+            row_count_index,
             _phantom: PhantomData,
         })
     }
@@ -256,7 +259,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     fn prev_row_count(&self) -> usize {
         match &self.prev_outputs {
-            Some(states) => states[ROW_COUNT_COLUMN]
+            Some(states) => states[self.row_count_index]
                 .as_ref()
                 .map(|x| *x.as_int64() as usize)
                 .unwrap_or(0),
@@ -322,8 +325,8 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
         // Row count doesn't need I/O, so the following statement is supposed to be fast.
-        let row_count = self.states[ROW_COUNT_COLUMN]
-            .get_output(&storages[ROW_COUNT_COLUMN], self.group_key.as_ref())
+        let row_count = self.states[self.row_count_index]
+            .get_output(&storages[self.row_count_index], self.group_key.as_ref())
             .await?
             .as_ref()
             .map(|x| *x.as_int64() as usize)
@@ -356,7 +359,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         new_ops: &mut Vec<Op>,
     ) -> AggChangesInfo {
         let prev_row_count = self.prev_row_count();
-        let curr_row_count = curr_outputs[ROW_COUNT_COLUMN]
+        let curr_row_count = curr_outputs[self.row_count_index]
             .as_ref()
             .map(|x| *x.as_int64() as usize)
             .expect("row count should not be None");
