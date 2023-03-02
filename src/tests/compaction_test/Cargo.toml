@@ -18,7 +18,7 @@ normal = ["workspace-hack"]
 anyhow = "1"
 async-trait = "0.1"
 bytes = "1"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = "0.10"
 rand = "0.8"

@@ -28,7 +28,7 @@ aws-types = { version = "0.51", default-features = false, features = ["hardcoded
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
@@ -121,7 +121,7 @@ base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
