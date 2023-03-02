@@ -45,7 +45,7 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let mut setup_sql = String::with_capacity(1000);
     for ddl_statement in parse_sql(&ddl) {
         let sql = ddl_statement.to_string();
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING DDL]: {}", sql);
         let response = client.execute(&sql, &[]).await;
         if let Err(e) = response {
             panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
@@ -54,7 +54,7 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
     }
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING QUERY]: {}", sql);
         let response = client.simple_query(&sql).await;
         if let Err(e) = response {
             panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
@@ -76,6 +76,11 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
 
     let rows_per_table = 10;
     let max_rows_inserted = rows_per_table * base_tables.len();
+
+    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    tracing::info!("Populated base tables");
+
     test_sqlsmith(
         client,
         &mut rng,
@@ -221,7 +226,7 @@ async fn populate_tables<R: Rng>(
 ) -> String {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
-        tracing::info!("[EXECUTING POPULATION]: {}", insert);
+        tracing::info!("[EXECUTING INSERT]: {}", insert);
         client.simple_query(insert).await.unwrap();
     }
     inserts.into_iter().map(|i| format!("{};\n", i)).collect()
@@ -233,14 +238,14 @@ async fn test_sqlsmith<R: Rng>(
     rng: &mut R,
     tables: Vec<Table>,
     setup_sql: &str,
-    _base_tables: Vec<Table>,
-    _row_count: usize,
+    base_tables: Vec<Table>,
+    row_count: usize,
 ) {
     // Test inserted rows should be at least 50% population count,
     // otherwise we don't have sufficient data in our system.
     // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
-    // test_population_count(client, base_tables, row_count).await;
-    // tracing::info!("passed population count test");
+    test_population_count(client, base_tables, row_count).await;
+    tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.40; // permit at most 40% of queries to be skipped.
