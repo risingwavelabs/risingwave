@@ -464,7 +464,7 @@
           └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─LogicalProject { exprs: [a.k1, a.k2] }
               └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [max(count)] }
     └─LogicalAgg { group_key: [a.k1], aggs: [max(count)] }
       └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
@@ -531,7 +531,7 @@
           └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
             └─LogicalProject { exprs: [a.k1, a.k2] }
               └─LogicalScan { table: a, columns: [a.k1, a.k2, a.k3, a.v, a._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [max(count)] }
     └─LogicalAgg { group_key: [a.k2], aggs: [max(count)] }
       └─LogicalAgg { group_key: [a.k1, a.k2], aggs: [count] }
@@ -817,7 +817,7 @@
     └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
         └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at, t1._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
     └─LogicalScan { table: t1, columns: [t1.row_id, t1.uid, t1.v, t1.created_at], predicate: IsNotNull(t1.created_at) }
   batch_plan: |

@@ -21,15 +21,35 @@ use madsim::time::sleep;
 use risingwave_simulation::cluster::Configuration;
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::nexmark::{NexmarkCluster, THROUGHPUT};
-use risingwave_simulation::utils::AssertResult;
 
-/// Check that everything works well after scaling of source-related executor.
 #[madsim::test]
 async fn nexmark_source() -> Result<()> {
-    let events = 20 * THROUGHPUT;
+    nexmark_source_inner(false).await
+}
 
-    let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(events), false).await?;
+#[madsim::test]
+async fn nexmark_source_with_watermark() -> Result<()> {
+    nexmark_source_inner(true).await
+}
+
+/// Check that everything works well after scaling of source-related executor.
+async fn nexmark_source_inner(watermark: bool) -> Result<()> {
+    let expected_events = 20 * THROUGHPUT;
+    let expected_events_range = if watermark {
+        // If there's watermark, we'll possibly get fewer events.
+        (0.99 * expected_events as f64) as usize..=expected_events
+    } else {
+        // If there's no watermark, we'll get exactly the expected number of events.
+        expected_events..=expected_events
+    };
+
+    let mut cluster = NexmarkCluster::new(
+        Configuration::for_scale(),
+        6,
+        Some(expected_events),
+        watermark,
+    )
+    .await?;
 
     // Materialize all sources so that we can also check whether the row id generator is working
     // correctly after scaling.
@@ -63,7 +83,7 @@ async fn nexmark_source() -> Result<()> {
     sleep(Duration::from_secs(30)).await;
 
     // Check the total number of events.
-    cluster
+    let result = cluster
         .run(
             r#"
 with count_p as (select count(*) count_p from materialized_person),
@@ -71,8 +91,15 @@ with count_p as (select count(*) count_p from materialized_person),
      count_b as (select count(*) count_b from materialized_bid)
 select count_p + count_a + count_b from count_p, count_a, count_b;"#,
         )
-        .await?
-        .assert_result_eq(events.to_string());
+        .await?;
+
+    let actual_events: usize = result.trim().parse()?;
+    assert!(
+        expected_events_range.contains(&actual_events),
+        "expected event num in {:?}, got {}",
+        expected_events_range,
+        actual_events
+    );
 
     Ok(())
 }

@@ -980,6 +980,18 @@ impl ScalarImpl {
 
         Ok(deserializer.position() - base_position)
     }
+
+    pub fn as_integral(&self) -> i64 {
+        match self {
+            Self::Int16(v) => *v as i64,
+            Self::Int32(v) => *v as i64,
+            Self::Int64(v) => *v,
+            _ => panic!(
+                "Can't convert ScalarImpl::{} to a integral",
+                self.get_ident()
+            ),
+        }
+    }
 }
 
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {

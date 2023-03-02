@@ -56,13 +56,13 @@
       | └─StreamHashAgg { group_key: [t.id], aggs: [count, max(t.v)] }
       |   └─StreamExchange { dist: HashShard(t.id) }
       |     └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-      |       └─StreamShare { id = 333 }
+      |       └─StreamShare { id = 325 }
       |         └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamProject { exprs: [min(t.v), t.id] }
         └─StreamHashAgg { group_key: [t.id], aggs: [count, min(t.v)] }
           └─StreamExchange { dist: HashShard(t.id) }
             └─StreamProject { exprs: [t.id, t.v, t._row_id] }
-              └─StreamShare { id = 333 }
+              └─StreamShare { id = 325 }
                 └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
@@ -74,7 +74,7 @@
         v1,
         v2,
         v3;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |
@@ -100,7 +100,7 @@
         mv
     where
         v3 = 'world' or v3 = 'hello';
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalScan { table: mv, output_columns: [mv.v1], required_columns: [mv.v1, mv.v3], predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
   stream_plan: |
     StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], pk_columns: [v1, mv.v2, mv.v3], pk_conflict: "no check" }

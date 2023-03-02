@@ -493,7 +493,7 @@ mod tests {
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -667,7 +667,7 @@ mod tests {
             column_ids,
             2,
             Arc::new(AtomicU64::new(0)),
-            false,
+            ConflictBehavior::NoCheck,
         )
         .await
         .boxed()

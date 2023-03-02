@@ -24,7 +24,7 @@ use risingwave_pb::catalog::table::{
 };
 use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
 
-use super::{ColumnId, DatabaseId, FragmentId, RelationCatalog, SchemaId};
+use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
 use crate::user::UserId;
 use crate::WithOptions;
@@ -115,7 +115,7 @@ pub struct TableCatalog {
     /// The full `CREATE TABLE` or `CREATE MATERIALIZED VIEW` definition of the table.
     pub definition: String,
 
-    pub handle_pk_conflict: bool,
+    pub conflict_behavior_type: ConflictBehaviorType,
 
     pub read_prefix_len_hint: usize,
 
@@ -211,8 +211,8 @@ impl TableCatalog {
         self
     }
 
-    pub fn handle_pk_conflict(&self) -> bool {
-        self.handle_pk_conflict
+    pub fn conflict_behavior_type(&self) -> ConflictBehaviorType {
+        self.conflict_behavior_type
     }
 
     pub fn table_type(&self) -> TableType {
@@ -364,10 +364,10 @@ impl TableCatalog {
                 .map(|i| ProstColumnIndex { index: i as _ }),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
-            handle_pk_conflict: self.handle_pk_conflict,
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
+            handle_pk_conflict_behavior: self.conflict_behavior_type,
         }
     }
 }
@@ -399,6 +399,8 @@ impl From<ProstTable> for TableCatalog {
             watermark_columns.insert(idx as _);
         }
 
+        let conflict_behavior_type = tb.handle_pk_conflict_behavior;
+
         Self {
             id: id.into(),
             associated_source_id: associated_source_id.map(Into::into),
@@ -420,7 +422,7 @@ impl From<ProstTable> for TableCatalog {
             row_id_index: tb.row_id_index.map(|x| x.index as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
-            handle_pk_conflict: tb.handle_pk_conflict,
+            conflict_behavior_type,
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
@@ -513,7 +515,6 @@ mod tests {
             fragment_id: 0,
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
@@ -522,6 +523,7 @@ mod tests {
                 next_column_id: 2,
             }),
             watermark_indices: vec![],
+            handle_pk_conflict_behavior: 0,
         }
         .into();
 
@@ -580,7 +582,7 @@ mod tests {
                 row_id_index: None,
                 value_indices: vec![0],
                 definition: "".into(),
-                handle_pk_conflict: false,
+                conflict_behavior_type: 0,
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),

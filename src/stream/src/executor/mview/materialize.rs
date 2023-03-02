@@ -22,7 +22,7 @@ use futures_async_stream::try_stream;
 use itertools::{izip, Itertools};
 use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Schema, TableId};
 use risingwave_common::row::{CompactedRow, RowDeserializer};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -56,7 +56,7 @@ pub struct MaterializeExecutor<S: StateStore> {
     info: ExecutorInfo,
 
     materialize_cache: MaterializeCache,
-    handle_pk_conflict: bool,
+    conflict_behavior: ConflictBehavior,
 }
 
 impl<S: StateStore> MaterializeExecutor<S> {
@@ -73,7 +73,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         vnodes: Option<Arc<Bitmap>>,
         table_catalog: &Table,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
     ) -> Self {
         let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
 
@@ -92,7 +92,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
+            conflict_behavior,
         }
     }
 
@@ -106,7 +106,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
     ) -> Self {
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
@@ -137,12 +137,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                 identity: format!("MaterializeExecutor {:X}", executor_id),
             },
             materialize_cache: MaterializeCache::new(watermark_epoch),
-            handle_pk_conflict,
+            conflict_behavior,
         }
-    }
-
-    pub fn handle_conflict(&mut self) {
-        self.handle_pk_conflict = true;
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -162,8 +158,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
             yield match msg {
                 Message::Watermark(w) => Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    match self.handle_pk_conflict {
-                        true => {
+                    match self.conflict_behavior {
+                        ConflictBehavior::OverWrite | ConflictBehavior::IgnoreConflict => {
                             // create MaterializeBuffer from chunk
                             let buffer = MaterializeBuffer::fill_buffer_from_chunk(
                                 chunk,
@@ -179,7 +175,11 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .apply_changes(buffer, &self.state_table)
+                                .handlle_conflict(
+                                    buffer,
+                                    &self.state_table,
+                                    &self.conflict_behavior,
+                                )
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -196,7 +196,8 @@ impl<S: StateStore> MaterializeExecutor<S> {
                                 None => continue,
                             }
                         }
-                        false => {
+
+                        ConflictBehavior::NoCheck => {
                             self.state_table.write_chunk(chunk.clone());
                             Message::Chunk(chunk)
                         }
@@ -415,47 +416,99 @@ impl MaterializeCache {
         Self { data: cache }
     }
 
-    pub async fn apply_changes<'a, S: StateStore>(
+    pub async fn handlle_conflict<'a, S: StateStore>(
         &mut self,
-        changes: MaterializeBuffer,
+        buffer: MaterializeBuffer,
         table: &StateTable<S>,
+        conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
-        self.fetch_keys(changes.keys().map(|v| v.as_ref()), table)
+        self.fetch_keys(buffer.keys().map(|v| v.as_ref()), table)
             .await?;
 
         let mut fixed_changes = vec![];
-        // handle pk conflict
-        for (key, row_op) in changes.into_parts() {
+        for (key, row_op) in buffer.into_parts() {
+            let mut update_cache = false;
             match row_op {
                 KeyOp::Insert(new_row) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            };
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key) {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
                     };
-                    self.put(key, Some(CompactedRow { row: new_row }));
+
+                    if update_cache {
+                        self.put(key, Some(CompactedRow { row: new_row }));
+                    }
                 }
                 KeyOp::Delete(_) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => {
-                            fixed_changes.push((key.clone(), KeyOp::Delete(old_row.row.clone())));
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Delete(old_row.row.clone())));
+                                }
+                                None => (), // delete a nonexistent value
+                            };
+                            update_cache = true;
                         }
-                        None => (), // delete a nonexistent value
+                        ConflictBehavior::IgnoreConflict => (),
+                        _ => unreachable!(),
                     };
-                    self.put(key, None);
+
+                    if update_cache {
+                        self.put(key, None);
+                    }
                 }
                 KeyOp::Update((_, new_row)) => {
-                    match self.force_get(&key) {
-                        Some(old_row) => fixed_changes.push((
-                            key.clone(),
-                            KeyOp::Update((old_row.row.clone(), new_row.clone())),
-                        )),
-                        None => fixed_changes.push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                    match conflict_behavior {
+                        ConflictBehavior::OverWrite => {
+                            match self.force_get(&key) {
+                                Some(old_row) => fixed_changes.push((
+                                    key.clone(),
+                                    KeyOp::Update((old_row.row.clone(), new_row.clone())),
+                                )),
+                                None => fixed_changes
+                                    .push((key.clone(), KeyOp::Insert(new_row.clone()))),
+                            }
+                            update_cache = true;
+                        }
+                        ConflictBehavior::IgnoreConflict => {
+                            match self.force_get(&key) {
+                                Some(_) => (),
+                                None => {
+                                    fixed_changes
+                                        .push((key.clone(), KeyOp::Insert(new_row.clone())));
+                                    update_cache = true;
+                                }
+                            };
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    if update_cache {
+                        self.put(key, Some(CompactedRow { row: new_row }));
                     }
-                    self.put(key, Some(CompactedRow { row: new_row }));
                 }
             }
         }
@@ -505,6 +558,7 @@ impl MaterializeCache {
         self.data.evict()
     }
 }
+
 #[cfg(test)]
 mod tests {
 
@@ -512,7 +566,7 @@ mod tests {
 
     use futures::stream::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{OrderPair, OrderType};
@@ -585,7 +639,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                false,
+                ConflictBehavior::NoCheck,
             )
             .await,
         )
@@ -702,7 +756,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::OverWrite,
             )
             .await,
         )
@@ -835,7 +889,7 @@ mod tests {
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
-                true,
+                ConflictBehavior::OverWrite,
             )
             .await,
         )
@@ -928,6 +982,326 @@ mod tests {
                 assert_eq!(
                     row,
                     Some(OwnedRow::new(vec![Some(2_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check update wrong pk, should become insert
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(9_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(9_i32.into()), Some(1_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ignore_insert_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // test double insert one pk, the latter needs to override the former.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 3
+            + 1 4
+            + 2 5
+            + 3 6",
+        );
+
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            + 2 6",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 6",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk3),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+            ],
+        );
+
+        let order_types = vec![OrderType::Ascending];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![OrderPair::new(0, OrderType::Ascending)],
+                column_ids,
+                1,
+                Arc::new(AtomicU64::new(0)),
+                ConflictBehavior::IgnoreConflict,
+            )
+            .await,
+        )
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                );
+
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(4_i32.into())]))
+                );
+
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ignore_delete_and_update_conflict() {
+        // Prepare storage and memtable.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        // Two columns of int32 type, the first column is PK.
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        // test double insert one pk, the latter needs to override the former.
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4
+            + 2 5
+            + 3 6
+            U- 8 1
+            U+ 8 2
+            + 8 3",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 7 8
+            - 3 4
+            - 5 0",
+        );
+
+        // test delete wrong value, delete inexistent pk
+        let chunk3 = StreamChunk::from_pretty(
+            " i i
+            + 1 5
+            U- 2 4
+            U+ 2 8
+            U- 9 0
+            U+ 9 1",
+        );
+
+        // Prepare stream executors.
+        let source = MockSource::with_messages(
+            schema.clone(),
+            PkIndices::new(),
+            vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Chunk(chunk1),
+                Message::Barrier(Barrier::new_test_barrier(2)),
+                Message::Chunk(chunk2),
+                Message::Barrier(Barrier::new_test_barrier(3)),
+                Message::Chunk(chunk3),
+                Message::Barrier(Barrier::new_test_barrier(4)),
+            ],
+        );
+
+        let order_types = vec![OrderType::Ascending];
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+            ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ];
+
+        let table = StorageTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            order_types,
+            vec![0],
+            vec![0, 1],
+        );
+
+        let mut materialize_executor = Box::new(
+            MaterializeExecutor::for_test(
+                Box::new(source),
+                memory_state_store,
+                table_id,
+                vec![OrderPair::new(0, OrderType::Ascending)],
+                column_ids,
+                1,
+                Arc::new(AtomicU64::new(0)),
+                ConflictBehavior::IgnoreConflict,
+            )
+            .await,
+        )
+        .execute();
+        materialize_executor.next().await.transpose().unwrap();
+
+        materialize_executor.next().await.transpose().unwrap();
+
+        // First stream chunk. We check the existence of (3) -> (3,6)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                // can read (8, 2), check insert after update
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(8_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(8_i32.into()), Some(3_i32.into())]))
+                );
+            }
+            _ => unreachable!(),
+        }
+        materialize_executor.next().await.transpose().unwrap();
+
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(7_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(7_i32.into()), Some(8_i32.into())]))
+                );
+
+                // check delete wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(3_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(3_i32.into()), Some(6_i32.into())]))
+                );
+
+                // check delete wrong pk
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(5_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(row, None);
+            }
+            _ => unreachable!(),
+        }
+
+        materialize_executor.next().await.transpose().unwrap();
+        // materialize_executor.next().await.transpose().unwrap();
+        // Second stream chunk. We check the existence of (7) -> (7,8)
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Barrier(_)) => {
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(1_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(1_i32.into()), Some(4_i32.into())]))
+                );
+
+                // check update wrong value
+                let row = table
+                    .get_row(
+                        &OwnedRow::new(vec![Some(2_i32.into())]),
+                        HummockReadEpoch::NoWait(u64::MAX),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    row,
+                    Some(OwnedRow::new(vec![Some(2_i32.into()), Some(5_i32.into())]))
                 );
 
                 // check update wrong pk, should become insert

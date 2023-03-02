@@ -208,7 +208,6 @@ where
                                 // Consume upstream buffer chunk
                                 for chunk in upstream_chunk_buffer.drain(..) {
                                     if let Some(current_pos) = &current_pos {
-                                        processed_rows += chunk.cardinality() as u64;
                                         yield Message::Chunk(Self::mapping_chunk(
                                             Self::mark_chunk(
                                                 chunk,
@@ -224,13 +223,13 @@ where
                                 // Update snapshot read epoch.
                                 snapshot_read_epoch = barrier.epoch.prev;
 
-                                yield Message::Barrier(barrier);
-
                                 self.progress.update(
-                                    snapshot_read_epoch,
+                                    barrier.epoch.curr,
                                     snapshot_read_epoch,
                                     processed_rows,
                                 );
+
+                                yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
                                 break;
                             }

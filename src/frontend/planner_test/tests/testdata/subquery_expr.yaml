@@ -7,7 +7,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
     └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
@@ -31,7 +31,7 @@
       └─LogicalLimit { limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
@@ -47,7 +47,7 @@
       └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
@@ -104,7 +104,7 @@
     create table t1 (x int, y int);
     create table t2 (x int, y int);
     select t1.x, (select y from (select y from t2 order by y desc limit 1 offset 3) t2 limit 2) from t1;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalScan { table: t1, columns: [t1.x] }
     └─LogicalLimit { limit: 2, offset: 0 }
@@ -122,7 +122,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: true, output: all }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -136,7 +136,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [t.x] }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftAnti, on: true, output: all }
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }

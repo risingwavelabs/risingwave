@@ -123,7 +123,7 @@
   sql: |
     create table t (x int, y int, z int);
     select x, y from t order by x + y, z;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z] }
     └─LogicalScan { table: t, columns: [t.x, t.y, t.z] }
   batch_plan: |
@@ -133,14 +133,14 @@
         └─BatchProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z] }
           └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [x, y, $expr72(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr72, t.z, t._row_id], pk_conflict: "no check" }
+    StreamMaterialize { columns: [x, y, $expr71(hidden), t.z(hidden), t._row_id(hidden)], pk_columns: [t._row_id], order_descs: [$expr71, t.z, t._row_id], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.x, t.y, (t.x + t.y) as $expr1, t.z, t._row_id] }
       └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: order by the number of an output column
   sql: |
     create table t (x int, y int);
     select x, y from t order by 2;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalScan { table: t, columns: [t.x, t.y] }
   batch_plan: |
     BatchExchange { order: [t.y ASC], dist: Single }
