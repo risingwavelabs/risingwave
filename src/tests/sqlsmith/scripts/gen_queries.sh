@@ -18,12 +18,35 @@ build_madsim() {
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
-  seq "$TEST_NUM" | parallel "mkdir -p $OUTDIR/{}; \
-    MADSIM_TEST_SEED={} $MADSIM_BIN \
+  # Even if fails early, it should still generate some queries, do not exit script.
+  set +e
+  seq "$TEST_NUM" | parallel "
+    mkdir -p $OUTDIR/{}; \
+    MADSIM_TEST_SEED={} ./$MADSIM_BIN \
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{} \
       $TESTDATA \
-      2> $LOGDIR/fuzzing-{}.log"
+      2>$LOGDIR/generate-{}.log; \
+    extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
+    "
+  set -e
+}
+
+# $LOGFILE
+check_if_crashed() {
+  CRASHED=$(grep "note: run with \`MADSIM_TEST_SEED=[0-9]*\` environment variable to reproduce this error" $1)
+  echo $CRASHED
+}
+
+# Extract queries from $1, write to $2
+extract_queries() {
+  QUERIES=$(grep "\[EXECUTING .*\]: " < "$1" | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/')
+  CRASHED=$(check_if_crashed "$1")
+  if [[ -n "$CRASHED" ]]; then
+    echo "Cluster crashed while generating queries."
+    QUERIES=$(echo -e "$QUERIES" | sed -E '$ s/(.*)/-- \1/')
+  fi
+  echo -e "$QUERIES"
 }
 
 generate_sqlsmith() {
@@ -53,22 +76,25 @@ check_failing_queries() {
 
 # Upload step
 upload_queries() {
-  cd "$OUTDIR"
+  pushd "$OUTDIR"
   git add .
   git commit --amend -m 'update queries'
-  # git push -f origin main
-  cd -
+  git push -f origin main
+  popd
+}
+
+# Run it to make sure it should have no errors
+run_queries() {
+ seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './$MADSIM_BIN  --run-sqlsmith-queries $OUTDIR/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 }
 
 main() {
-  CUR_DIR="$PWD"
-  cd $RW_HOME
+  pushd $RW_HOME
   build_madsim
   generate_deterministic
   check_different_queries
   check_failing_queries
+  run_queries
   upload_queries
-  cd "$CUR_DIR"
+  popd
 }
-
-main

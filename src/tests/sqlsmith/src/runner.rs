@@ -355,6 +355,7 @@ async fn test_stream_queries<R: Rng>(
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
         skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response)?;
+        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(table));
         drop_mview_table(&table, client).await;
     }
     Ok(skipped as f64 / sample_size as f64)
