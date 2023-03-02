@@ -42,6 +42,7 @@ pub struct CompactorMetrics {
     pub sstable_avg_value_size: Histogram,
     pub iter_scan_key_counts: GenericCounterVec<AtomicU64>,
     pub write_build_l0_bytes: GenericCounter<AtomicU64>,
+    pub sstable_avg_epoch_count: Histogram,
 }
 
 impl CompactorMetrics {
@@ -198,6 +199,14 @@ impl CompactorMetrics {
             registry
         ).unwrap();
 
+        let opts = histogram_opts!(
+            "compactor_sstable_avg_epoch_count",
+            "Total number gotten from sstable_avg_epoch_count, for observing sstable_avg_epoch_count",
+            exponential_buckets(1.0, 2.0, 17).unwrap()
+        );
+
+        let sstable_avg_epoch_count = register_histogram_with_registry!(opts, registry).unwrap();
+
         Self {
             compaction_upload_sst_counts,
             compact_write_bytes,
@@ -219,6 +228,7 @@ impl CompactorMetrics {
             sstable_avg_value_size,
             iter_scan_key_counts,
             write_build_l0_bytes,
+            sstable_avg_epoch_count,
         }
     }
 

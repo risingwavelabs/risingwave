@@ -198,6 +198,12 @@ where
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
                 }
+
+                if builder_output.epoch_count != 0 {
+                    self.compactor_metrics
+                        .sstable_avg_epoch_count
+                        .observe(builder_output.epoch_count as _);
+                }
             }
             self.sst_outputs.push(SplitTableOutput {
                 upload_join_handle: builder_output.writer_output,

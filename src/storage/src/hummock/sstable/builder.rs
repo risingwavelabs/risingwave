@@ -83,6 +83,7 @@ pub struct SstableBuilderOutput<WO> {
     pub writer_output: WO,
     pub avg_key_size: usize,
     pub avg_value_size: usize,
+    pub epoch_count: usize,
 }
 
 pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
@@ -119,8 +120,9 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 
     filter_builder: F,
 
-    min_epoch: u64,
-    max_epoch: u64,
+    // min_epoch: u64,
+    // max_epoch: u64,
+    epoch_set: BTreeSet<u64>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, XorFilterBuilder> {
@@ -168,8 +170,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             total_key_count: 0,
             table_stats: Default::default(),
             last_table_stats: Default::default(),
-            min_epoch: u64::MAX,
-            max_epoch: u64::MIN,
+            epoch_set: BTreeSet::default(),
         }
     }
 
@@ -238,6 +239,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.total_key_count += 1;
         self.last_table_stats.total_key_count += 1;
 
+        self.epoch_set.insert(full_key.epoch);
+
         if is_new_table && !self.block_builder.is_empty() {
             self.build_block().await?;
         }
@@ -262,9 +265,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         self.raw_key.clear();
         self.raw_value.clear();
-
-        self.min_epoch = cmp::min(self.min_epoch, full_key.epoch);
-        self.max_epoch = cmp::max(self.max_epoch, full_key.epoch);
 
         if self.block_builder.approximate_len() >= self.options.block_capacity {
             self.build_block().await?;
@@ -363,33 +363,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             (tombstone_min_epoch, tombstone_max_epoch)
         };
 
-        let sst_info = SstableInfo {
-            id: self.sstable_id,
-            key_range: Some(risingwave_pb::hummock::KeyRange {
-                left: meta.smallest_key.clone(),
-                right: meta.largest_key.clone(),
-                right_exclusive,
-            }),
-            file_size: meta.estimated_size as u64,
-            table_ids: self.table_ids.into_iter().collect(),
-            meta_offset: meta.meta_offset,
-            stale_key_count: self.stale_key_count,
-            total_key_count: self.total_key_count,
-            divide_version: 0,
-            uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
-            min_epoch: cmp::min(self.min_epoch, tombstone_min_epoch),
-            max_epoch: cmp::max(self.max_epoch, tombstone_max_epoch),
-        };
-        tracing::trace!(
-            "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {}",
-            meta.encoded_size(),
-            meta.bloom_filter.len(),
-            self.total_key_count,
-            self.stale_key_count,
-            self.min_epoch,
-            self.max_epoch,
-        );
-        let bloom_filter_size = meta.bloom_filter.len();
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
             (0, 0)
         } else {
@@ -420,6 +393,47 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             (avg_key_size, avg_value_size)
         };
 
+        let (min_epoch, max_epoch) = {
+            if self.epoch_set.is_empty() {
+                (u64::MAX, u64::MIN)
+            } else {
+                (
+                    *self.epoch_set.first().unwrap(),
+                    *self.epoch_set.last().unwrap(),
+                )
+            }
+        };
+
+        let sst_info = SstableInfo {
+            id: self.sstable_id,
+            key_range: Some(risingwave_pb::hummock::KeyRange {
+                left: meta.smallest_key.clone(),
+                right: meta.largest_key.clone(),
+                right_exclusive,
+            }),
+            file_size: meta.estimated_size as u64,
+            table_ids: self.table_ids.into_iter().collect(),
+            meta_offset: meta.meta_offset,
+            stale_key_count: self.stale_key_count,
+            total_key_count: self.total_key_count,
+            divide_version: 0,
+            uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
+            min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
+            max_epoch: cmp::max(max_epoch, tombstone_max_epoch),
+            avg_key_size: avg_key_size as u32,
+        };
+        tracing::trace!(
+            "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
+            meta.encoded_size(),
+            meta.bloom_filter.len(),
+            self.total_key_count,
+            self.stale_key_count,
+            min_epoch,
+            max_epoch,
+            self.epoch_set.len()
+        );
+        let bloom_filter_size = meta.bloom_filter.len();
+
         let writer_output = self.writer.finish(meta).await?;
         Ok(SstableBuilderOutput::<W::Output> {
             sst_info: LocalSstableInfo::with_stats(sst_info, self.table_stats),
@@ -427,6 +441,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             writer_output,
             avg_key_size,
             avg_value_size,
+            epoch_count: self.epoch_set.len(),
         })
     }
 
