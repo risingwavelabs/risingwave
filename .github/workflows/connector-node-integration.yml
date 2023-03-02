@@ -40,7 +40,6 @@ jobs:
           wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
           chmod +x mc
           ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
-          ./mc mb minio/bucket
 
           echo "starting connector-node service"
           cd assembly/target/
@@ -78,6 +77,8 @@ jobs:
           echo "all jdbc tests passed"
           
           echo "running iceberg integration tests"
+          ./mc mb minio/bucket
+          
           # test append-only mode
           cd python-client
           python3 pyspark-util.py create_iceberg
@@ -108,6 +109,8 @@ jobs:
           echo "all iceberg tests passed"
           
           echo "running deltalake integration tests"
+          ./mc mb minio/bucket
+          
           cd python-client
           # test append-only mode
           python3 pyspark-util.py create_deltalake
