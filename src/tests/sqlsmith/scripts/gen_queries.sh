@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 
+# USAGE: Script for generating queries via sqlsmith.
+# These queries can be used for fuzz testing.
+# Requires `$SNAPSHOT_DIR` to be set,
+# that will be where queries are stored after generation.
+
 set -euo pipefail
 
 # -x is too verbose, selectively enable it if needed.
 
-# export SNAPSHOT_DIR=""
 export OUTDIR=$SNAPSHOT_DIR
 export TEST_NUM=100
 export RW_HOME="../../../.."
