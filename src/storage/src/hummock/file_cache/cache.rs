@@ -304,6 +304,7 @@ mod tests {
     use std::path::Path;
 
     use prometheus::Registry;
+    use risingwave_common::util::env_var::is_ci;
 
     use super::super::test_utils::{datasize, key, FlushHolder, ModuloHasherBuilder, TestCacheKey};
     use super::super::utils;
@@ -330,12 +331,7 @@ mod tests {
     }
 
     fn tempdir() -> tempfile::TempDir {
-        let ci: bool = std::env::var("RISINGWAVE_CI")
-            .unwrap_or_else(|_| "false".to_string())
-            .parse()
-            .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
-
-        if ci {
+        if is_ci() {
             tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
         } else {
             tempfile::tempdir().unwrap()
