@@ -216,6 +216,7 @@ impl MemoryControl for StreamingOnlyPolicy {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
     use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
@@ -229,6 +230,11 @@ fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
         tracing::warn!("Jemalloc read allocated failed! {:?}", e);
         prev_jemalloc_allocated_mib
     })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn advance_jemalloc_epoch(_prev_jemalloc_allocated_mib: usize) -> usize {
+    0
 }
 
 fn calculate_lru_watermark(
