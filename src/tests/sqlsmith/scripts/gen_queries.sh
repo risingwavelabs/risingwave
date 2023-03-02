@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
-set -euxo pipefail
+set -euo pipefail
+
+# -x is too verbose, selectively enable it if needed.
 
 # export SNAPSHOT_DIR=""
 export OUTDIR=$SNAPSHOT_DIR
@@ -87,6 +89,13 @@ run_queries() {
  seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './$MADSIM_BIN  --run-sqlsmith-queries $OUTDIR/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 }
 
+check_failed_to_run_queries() {
+  FAILED_LOGS=$(ls "$LOGDIR/fuzzing-*.log")
+  if [[ -n "$FAILED_LOGS" ]]; then
+    echo -e "FAILING_LOGS: $FAILED_LOGS"
+  fi
+}
+
 main() {
   pushd $RW_HOME
   build_madsim
@@ -94,8 +103,10 @@ main() {
   check_different_queries
   check_failing_queries
   run_queries
+  check_failed_to_run_queries
   upload_queries
   popd
+  echo "successfully generated"
 }
 
 main

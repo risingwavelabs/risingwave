@@ -13,9 +13,9 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
+
+
+
 
 use anyhow;
 use itertools::Itertools;
@@ -39,17 +39,20 @@ type Result<A> = anyhow::Result<A>;
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
-    let ddl = queries_path.lines().filter(|s| s.starts_with("CREATE")).collect::<String>();
-    let dml = queries_path.lines().filter(|s| s.starts_with("INSERT")).collect::<String>();
+    let ddl = queries_path
+        .lines()
+        .filter(|s| s.starts_with("CREATE"))
+        .collect::<String>();
+    let dml = queries_path
+        .lines()
+        .filter(|s| s.starts_with("INSERT"))
+        .collect::<String>();
     let setup_sql = format!("{}\n{}", ddl, dml);
     let queries = std::fs::read_to_string(queries_path).unwrap();
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        let response = client.simple_query(&sql).await;
-        if let Err(e) = response {
-            panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
-        }
+        validate_response(&setup_sql, &sql, client.simple_query(&sql).await).unwrap();
     }
 }
 
@@ -63,7 +66,7 @@ pub async fn generate(
     client: &Client,
     testdata: &str,
     count: usize,
-    outdir: &str,
+    _outdir: &str,
     seed: Option<u64>,
 ) {
     let mut rng = generate_rng(seed);
@@ -134,25 +137,12 @@ pub async fn generate(
             }
             _ => {}
         }
+        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
     tracing::info!("Generated {} stream queries", generated_queries);
 
     drop_tables(&mviews, testdata, client).await;
-}
-
-fn write_to_file(outdir: &str, name: &str, sql: &str) {
-    tracing::info!("[WRITE TO FILE]: {}/{}", outdir, name);
-    let resolved = format!("{}/{}", outdir, name);
-    let path = Path::new(&resolved);
-    let mut file = match File::create(path) {
-        Err(e) => panic!("couldn't create {}: {}", path.display(), e),
-        Ok(file) => file,
-    };
-    match file.write_all(sql.as_bytes()) {
-        Err(why) => panic!("couldn't write to {}: {}", path.display(), why),
-        Ok(_) => tracing::info!("successfully wrote to {}", path.display()),
-    }
 }
 
 /// e2e test runner for sqlsmith
