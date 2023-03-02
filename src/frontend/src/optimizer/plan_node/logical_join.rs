@@ -502,6 +502,10 @@ impl LogicalJoin {
         let order_col_ids = table_desc.order_column_ids();
         let order_key = table_desc.order_column_indices();
         let dist_key = table_desc.distribution_key.clone();
+        // Avoid to lookup a table with a singleton distribution.
+        if dist_key.is_empty() {
+            return None;
+        }
         // The at least prefix of order key that contains distribution key.
         let at_least_prefix_len = {
             let mut max_pos = 0;
