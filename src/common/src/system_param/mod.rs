@@ -132,7 +132,7 @@ macro_rules! impl_derive_missing_fields {
 macro_rules! impl_system_params_from_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// Try to deserialize deprecated fields as well.
-        /// Return error if there are unrecognized fields
+        /// Return error if there are unrecognized fields.
         pub fn system_params_from_kv<K, V>(mut kvs: Vec<(K, V)>) -> Result<SystemParams>
         where
             K: AsRef<[u8]> + Debug,
@@ -156,7 +156,7 @@ macro_rules! impl_system_params_from_kv {
             });
             derive_missing_fields(&mut ret);
             if !kvs.is_empty() {
-                 Err(format!("unrecognized system params {:?}", kvs))
+                Err(format!("unrecognized system params {:?}", kvs))
             } else {
                 Ok(ret)
             }
