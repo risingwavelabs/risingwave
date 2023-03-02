@@ -125,11 +125,14 @@ pub async fn rpc_serve(
             .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
-            let election_client = Arc::new(EtcdElectionClient::new(
-                endpoints,
-                Some(options),
-                address_info.advertise_addr.clone(),
-            ));
+            let election_client = Arc::new(
+                EtcdElectionClient::new(
+                    endpoints,
+                    Some(options),
+                    address_info.advertise_addr.clone(),
+                )
+                .await?,
+            );
 
             rpc_serve_with_store(
                 meta_store,
