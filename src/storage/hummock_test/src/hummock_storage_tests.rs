@@ -215,7 +215,7 @@ async fn test_storage_basic() {
         .unwrap();
     assert_eq!(value, None);
 
-    // Write aa bb
+    // scan range (-inf, "ee"] with snapshot epoch1
     let iter = hummock_storage
         .iter(
             (Unbounded, Included(b"ee".to_vec())),
@@ -285,7 +285,7 @@ async fn test_storage_basic() {
         .unwrap()
         .unwrap();
     assert_eq!(value, Bytes::from("111111"));
-    // Update aa, write cc
+    // scan range (-inf, "ee"] with snapshot epoch2
     let iter = hummock_storage
         .iter(
             (Unbounded, Included(b"ee".to_vec())),

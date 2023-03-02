@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{HashSet};
 use std::collections::vec_deque::VecDeque;
+use std::collections::HashSet;
 use std::iter::once;
 use std::sync::Arc;
 
@@ -462,11 +462,7 @@ pub fn read_filter_for_batch(
     table_id: TableId,
     key_range: &TableKeyRange,
     read_version_vec: Vec<Arc<RwLock<HummockReadVersion>>>,
-) -> StorageResult<(
-    Vec<ImmutableMemtable>,
-    Vec<SstableInfo>,
-    CommittedVersion,
-)> {
+) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     assert!(!read_version_vec.is_empty());
     let read_version_guard_vec = read_version_vec
         .iter()
@@ -512,11 +508,7 @@ pub fn read_filter_for_local(
     table_id: TableId,
     table_key_range: &TableKeyRange,
     read_version: Arc<RwLock<HummockReadVersion>>,
-) -> StorageResult<(
-    Vec<ImmutableMemtable>,
-    Vec<SstableInfo>,
-    CommittedVersion,
-)> {
+) -> StorageResult<(Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion)> {
     let read_version_guard = read_version.read();
     let (imm_iter, sst_iter) =
         read_version_guard
@@ -906,11 +898,7 @@ impl HummockVersionReader {
         &self,
         table_key_range: TableKeyRange,
         read_options: ReadOptions,
-        read_version_tuple: (
-            Vec<ImmutableMemtable>,
-            Vec<SstableInfo>,
-            CommittedVersion,
-        ),
+        read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<bool> {
         let table_id = read_options.table_id;
         let mut table_counts = 0;

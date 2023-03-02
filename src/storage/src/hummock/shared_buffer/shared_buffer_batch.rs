@@ -44,12 +44,20 @@ pub type SharedBufferBatchId = u64;
 // key is table_key, value is different versions of the key
 // TODO: replace SharedBufferItem with SharedBufferEntry
 // batch and merged imm will share the same layout of SharedBufferEntry
+
+// NOTES: Since a shared buffer may contain data from multiple epochs,
+// there will be multiple versions for a single key, we put those versions into a vector and
+// sort them in descending order, aka newest to oldest.
 pub type SharedBufferEntry = (Bytes, Vec<(HummockEpoch, HummockValue<Bytes>)>);
 
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferEntry>,
     epoch: HummockEpoch,
+    has_multi_epochs: bool,
+
+    /// The list of imm ids that are merged into this batch
+    /// This field is immutable
     imm_ids: Vec<ImmId>,
     epochs: Vec<HummockEpoch>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
@@ -88,17 +96,19 @@ impl SharedBufferBatchInner {
             .map(|(k, v)| (k, vec![(epoch, v)]))
             .collect_vec();
 
+        let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
         SharedBufferBatchInner {
             payload: items,
             epoch,
-            imm_ids: vec![],
+            has_multi_epochs: false,
+            imm_ids: vec![batch_id],
             epochs: vec![epoch],
             range_tombstone_list: range_tombstones,
             size,
             largest_table_key,
             smallest_table_key,
             _tracker,
-            batch_id: SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed),
+            batch_id,
         }
     }
 
@@ -130,6 +140,7 @@ impl SharedBufferBatchInner {
         Self {
             payload,
             epoch: min_epoch,
+            has_multi_epochs: true,
             epochs,
             imm_ids,
             range_tombstone_list: range_tombstones,
@@ -336,18 +347,20 @@ impl SharedBufferBatch {
     }
 
     pub fn is_merged_imm(&self) -> bool {
-        !self.inner.imm_ids.is_empty()
+        self.inner.has_multi_epochs
     }
 
+    /// For a merged imm, returns the minimum epoch
     pub fn epoch(&self) -> HummockEpoch {
         self.inner.epoch
     }
 
     pub fn get_imm_ids(&self) -> &Vec<ImmId> {
+        debug_assert!(!self.inner.imm_ids.is_empty());
         &self.inner.imm_ids
     }
 
-    pub fn count(&self) -> usize {
+    pub fn key_count(&self) -> usize {
         self.inner.len()
     }
 
@@ -359,6 +372,7 @@ impl SharedBufferBatch {
         self.inner.get_value(self.table_id, table_key, read_epoch)
     }
 
+    // TODO: remove this method
     pub fn check_delete_by_range(&self, table_key: TableKey<&[u8]>) -> bool {
         if self.inner.range_tombstone_list.is_empty() {
             return false;
@@ -533,7 +547,7 @@ impl SharedBufferBatch {
         let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
         for imm in imms {
-            assert!(imm.count() > 0, "imm should not be empty");
+            assert!(imm.key_count() > 0, "imm should not be empty");
             assert_eq!(
                 table_id,
                 imm.table_id(),
@@ -542,7 +556,7 @@ impl SharedBufferBatch {
             let epoch = imm.epoch();
             merged_imm_ids.push(imm.batch_id());
             epochs.push(epoch);
-            num_keys += imm.count();
+            num_keys += imm.key_count();
             size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
@@ -655,11 +669,12 @@ impl PartialEq for Node {
 
 impl Eq for Node where Self: PartialEq {}
 
+/// A snapshot iterator for a given batch(Imm)
 pub struct SharedBufferBatchIterator<D: HummockIteratorDirection> {
     inner: Arc<SharedBufferBatchInner>,
     current_idx: usize,
     table_id: TableId,
-    epoch: HummockEpoch,
+    read_epoch: HummockEpoch,
     _phantom: PhantomData<D>,
 }
 
@@ -667,13 +682,13 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     pub(crate) fn new(
         inner: Arc<SharedBufferBatchInner>,
         table_id: TableId,
-        epoch: HummockEpoch,
+        read_epoch: HummockEpoch,
     ) -> Self {
         Self {
             inner,
             current_idx: 0,
             table_id,
-            epoch,
+            read_epoch,
             _phantom: Default::default(),
         }
     }
@@ -692,7 +707,7 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
     }
 
     pub fn epoch(&self) -> HummockEpoch {
-        self.epoch
+        self.read_epoch
     }
 }
 
@@ -712,7 +727,14 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::new(self.table_id, TableKey(&self.current_item().0), self.epoch)
+        let item = self.current_item();
+        // Use linear scan here to exploit cpu cache prefetch
+        for (e, v) in &item.1 {
+            if *e <= self.read_epoch {
+                return FullKey::new(self.table_id, TableKey(&item.0), *e);
+            }
+        }
+        unreachable!("should have found a key for read epoch {}", self.read_epoch)
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -720,11 +742,14 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
 
         // Use linear scan here to exploit cpu cache prefetch
         for (e, v) in &item.1 {
-            if *e <= self.epoch {
+            if *e <= self.read_epoch {
                 return v.as_slice();
             }
         }
-        unreachable!("should have found a value for epoch {}", self.epoch)
+        unreachable!(
+            "should have found a value for read epoch {}",
+            self.read_epoch
+        )
     }
 
     fn is_valid(&self) -> bool {
@@ -752,7 +777,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                     Ok(i) => {
                         self.current_idx = i;
                         // The user key part must be the same if we reach here.
-                        if self.epoch > seek_key_epoch {
+                        if self.read_epoch > seek_key_epoch {
                             // Move onto the next key for forward iteration if the current key
                             // has a larger epoch
                             self.current_idx += 1;
@@ -765,7 +790,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                         Ok(i) => {
                             self.current_idx = self.inner.len() - i - 1;
                             // The user key part must be the same if we reach here.
-                            if self.epoch < seek_key_epoch {
+                            if self.read_epoch < seek_key_epoch {
                                 // Move onto the prev key for backward iteration if the current key
                                 // has a smaller epoch
                                 self.current_idx += 1;
