@@ -78,7 +78,7 @@ impl TableFunction for Unnest {
 }
 
 pub fn new_unnest(prost: &TableFunctionProst, chunk_size: usize) -> Result<BoxedTableFunction> {
-    let return_type = DataType::from(&prost.get_return_type()[0]);
+    let return_type = DataType::from(&prost.get_return_types()[0]);
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [list]: [_; 1] = args.try_into().unwrap();
 

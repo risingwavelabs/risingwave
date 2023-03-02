@@ -106,7 +106,7 @@ pub fn new_regexp_matches(
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     ensure!(
-        prost.return_type
+        prost.return_types
             == vec![DataType::List {
                 datatype: Box::new(DataType::Varchar),
             }

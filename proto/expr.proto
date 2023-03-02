@@ -160,7 +160,7 @@ message TableFunction {
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
-  repeated data.DataType return_type = 3;
+  repeated data.DataType return_types = 3;
   oneof rex_node {
     UserDefinedTableFunction udtf = 4;
   }
