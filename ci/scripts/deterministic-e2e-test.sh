@@ -19,6 +19,7 @@ cd ../../
 echo "--- Extract data for SqlSmith"
 cd ./src/tests/sqlsmith/tests
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
+cd ../../../../
 
 export RUST_LOG=info
 export LOGDIR=.risingwave/log
