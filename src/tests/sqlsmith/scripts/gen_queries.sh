@@ -71,7 +71,7 @@ check_different_queries() {
 
 # Check if any query generation step failed, and any query file not generated.
 check_failing_queries() {
-  echo "query files generated:"
+  echo "Query files generated:"
   ls "$OUTDIR"/* | grep -c queries.sql
 }
 
@@ -90,7 +90,7 @@ run_queries() {
 }
 
 check_failed_to_run_queries() {
-  FAILED_LOGS=$(ls "$LOGDIR/fuzzing-*.log")
+  FAILED_LOGS=$(ls "$LOGDIR | grep fuzzing")
   if [[ -n "$FAILED_LOGS" ]]; then
     echo -e "FAILING_LOGS: $FAILED_LOGS"
   fi
