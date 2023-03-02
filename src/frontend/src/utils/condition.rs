@@ -382,36 +382,12 @@ impl Condition {
             }
         }
 
-        let order_column_ids = &table_desc.order_column_indices();
-        let num_cols = table_desc.columns.len();
+        let mut groups = Self::classify_conjunctions_by_pk(self.conjunctions, &table_desc);
 
-        let mut col_idx_to_pk_idx = vec![None; num_cols];
-        order_column_ids
-            .iter()
-            .enumerate()
-            .for_each(|(idx, pk_idx)| {
-                col_idx_to_pk_idx[*pk_idx] = Some(idx);
-            });
-
-        // The i-th group only has exprs that reference the i-th PK column.
-        // The last group contains all the other exprs.
-        let mut groups = vec![vec![]; order_column_ids.len() + 1];
-        for (key, group) in &self.conjunctions.into_iter().group_by(|expr| {
-            let input_bits = expr.collect_input_refs(num_cols);
-            if input_bits.count_ones(..) == 1 {
-                let col_idx = input_bits.ones().next().unwrap();
-                col_idx_to_pk_idx[col_idx].unwrap_or(order_column_ids.len())
-            } else {
-                order_column_ids.len()
-            }
-        }) {
-            groups[key].extend(group);
-        }
-
+        // Analyze each group and use result to update scan range.
         let mut scan_range = ScanRange::full_table_scan();
         let mut other_conds = groups.pop().unwrap();
-
-        for i in 0..order_column_ids.len() {
+        for i in 0..table_desc.order_column_indices().len() {
             let group = std::mem::take(&mut groups[i]);
             if group.is_empty() {
                 groups.push(other_conds);
@@ -426,140 +402,13 @@ impl Condition {
                     },
                 ));
             }
-            let mut lower_bound_conjunctions = vec![];
-            let mut upper_bound_conjunctions = vec![];
-            // values in eq_cond are OR'ed
-            let mut eq_conds = vec![];
 
-            // analyze exprs in the group. scan_range is not updated
-            for expr in group.clone() {
-                if let Some((input_ref, const_expr)) = expr.as_eq_const() {
-                    assert_eq!(input_ref.index, order_column_ids[i]);
-                    let new_expr = if let Ok(expr) = const_expr
-                        .clone()
-                        .cast_implicit(input_ref.data_type.clone())
-                    {
-                        expr
-                    } else {
-                        match self::cast_compare::cast_compare_for_eq(
-                            const_expr,
-                            input_ref.data_type,
-                        ) {
-                            Ok(ResultForEq::Success(expr)) => expr,
-                            Ok(ResultForEq::NeverEqual) => {
-                                return Ok(false_cond());
-                            }
-                            Err(_) => {
-                                other_conds.push(expr);
-                                continue;
-                            }
-                        }
-                    };
-
-                    let Some(new_cond) = new_expr.fold_const()? else {
-                        // column = NULL, the result is always NULL.
-                        return Ok(false_cond());
-                    };
-                    if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
-                        return Ok(false_cond());
-                    }
-                    eq_conds = vec![Some(new_cond)];
-                } else if let Some(input_ref) = expr.as_is_null() {
-                    assert_eq!(input_ref.index, order_column_ids[i]);
-                    if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
-                        return Ok(false_cond());
-                    }
-                    eq_conds = vec![None];
-                } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
-                    assert_eq!(input_ref.index, order_column_ids[i]);
-                    let mut scalars = HashSet::new();
-                    for const_expr in in_const_list {
-                        // The cast should succeed, because otherwise the input_ref is casted
-                        // and thus `as_in_const_list` returns None.
-                        let const_expr = const_expr
-                            .cast_implicit(input_ref.data_type.clone())
-                            .unwrap();
-                        let value = const_expr.fold_const()?;
-                        let Some(value) = value else {
-                            continue;
-                        };
-                        scalars.insert(Some(value));
-                    }
-                    if scalars.is_empty() {
-                        // There're only NULLs in the in-list
-                        return Ok(false_cond());
-                    }
-                    if !eq_conds.is_empty() {
-                        scalars = scalars
-                            .intersection(&HashSet::from_iter(eq_conds))
-                            .cloned()
-                            .collect();
-                        if scalars.is_empty() {
-                            return Ok(false_cond());
-                        }
-                    }
-                    // Sort to ensure a deterministic result for planner test.
-                    eq_conds = scalars.into_iter().sorted().collect();
-                } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
-                    assert_eq!(input_ref.index, order_column_ids[i]);
-                    let new_expr = if let Ok(expr) = const_expr
-                        .clone()
-                        .cast_implicit(input_ref.data_type.clone())
-                    {
-                        expr
-                    } else {
-                        match self::cast_compare::cast_compare_for_cmp(
-                            const_expr,
-                            input_ref.data_type,
-                            op,
-                        ) {
-                            Ok(ResultForCmp::Success(expr)) => expr,
-                            Ok(ResultForCmp::OutUpperBound) => {
-                                if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual
-                                {
-                                    return Ok(false_cond());
-                                }
-                                // op == < and <= means result is always true, don't need any extra
-                                // work.
-                                continue;
-                            }
-                            Ok(ResultForCmp::OutLowerBound) => {
-                                if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
-                                    return Ok(false_cond());
-                                }
-                                // op == > and >= means result is always true, don't need any extra
-                                // work.
-                                continue;
-                            }
-                            Err(_) => {
-                                other_conds.push(expr);
-                                continue;
-                            }
-                        }
-                    };
-                    let Some(value) = new_expr.fold_const()? else {
-                        // column compare with NULL, the result is always  NULL.
-                        return Ok(false_cond());
-                    };
-                    match op {
-                        ExprType::LessThan => {
-                            upper_bound_conjunctions.push(Bound::Excluded(value));
-                        }
-                        ExprType::LessThanOrEqual => {
-                            upper_bound_conjunctions.push(Bound::Included(value));
-                        }
-                        ExprType::GreaterThan => {
-                            lower_bound_conjunctions.push(Bound::Excluded(value));
-                        }
-                        ExprType::GreaterThanOrEqual => {
-                            lower_bound_conjunctions.push(Bound::Included(value));
-                        }
-                        _ => unreachable!(),
-                    }
-                } else {
-                    other_conds.push(expr);
-                }
-            }
+            let Some((lower_bound_conjunctions,upper_bound_conjunctions,eq_conds,part_of_other_conds)) = Self::analyze_group(
+                group,
+            )? else {
+                return Ok(false_cond());
+            };
+            other_conds.extend(part_of_other_conds.into_iter());
 
             let lower_bound = Self::merge_lower_bound_conjunctions(lower_bound_conjunctions);
             let upper_bound = Self::merge_upper_bound_conjunctions(upper_bound_conjunctions);
@@ -617,7 +466,10 @@ impl Condition {
         Ok((
             if scan_range.is_full_table_scan() {
                 vec![]
-            } else if table_desc.columns[order_column_ids[0]].data_type.is_int() {
+            } else if table_desc.columns[table_desc.order_column_indices()[0]]
+                .data_type
+                .is_int()
+            {
                 match scan_range.split_small_range(max_split_range_gap) {
                     Some(scan_ranges) => scan_ranges,
                     None => vec![scan_range],
@@ -629,6 +481,191 @@ impl Condition {
                 conjunctions: other_conds,
             },
         ))
+    }
+
+    /// classify conjunctions into groups:
+    /// The i-th group has exprs that only reference the i-th PK column.
+    /// The last group contains all the other exprs.
+    fn classify_conjunctions_by_pk(
+        conjunctions: Vec<ExprImpl>,
+        table_desc: &Rc<TableDesc>,
+    ) -> Vec<Vec<ExprImpl>> {
+        let pk_column_ids = &table_desc.order_column_indices();
+        let pk_cols_num = pk_column_ids.len();
+        let cols_num = table_desc.columns.len();
+
+        let mut col_idx_to_pk_idx = vec![None; cols_num];
+        pk_column_ids.iter().enumerate().for_each(|(idx, pk_idx)| {
+            col_idx_to_pk_idx[*pk_idx] = Some(idx);
+        });
+
+        let mut groups = vec![vec![]; pk_cols_num + 1];
+        for (key, group) in &conjunctions.into_iter().group_by(|expr| {
+            let input_bits = expr.collect_input_refs(cols_num);
+            if input_bits.count_ones(..) == 1 {
+                let col_idx = input_bits.ones().next().unwrap();
+                col_idx_to_pk_idx[col_idx].unwrap_or(pk_cols_num)
+            } else {
+                pk_cols_num
+            }
+        }) {
+            groups[key].extend(group);
+        }
+
+        groups
+    }
+
+    /// Extract the following information in a group of conjunctions:
+    /// 1. lower bound conjunctions
+    /// 2. upper bound conjunctions
+    /// 3. eq conditions
+    /// 4. other conditions
+    ///
+    /// return None indicates that this conjunctions is always false
+    #[allow(clippy::type_complexity)]
+    fn analyze_group(
+        group: Vec<ExprImpl>,
+    ) -> Result<
+        Option<(
+            Vec<Bound<ScalarImpl>>,
+            Vec<Bound<ScalarImpl>>,
+            Vec<Option<ScalarImpl>>,
+            Vec<ExprImpl>,
+        )>,
+    > {
+        let mut lower_bound_conjunctions = vec![];
+        let mut upper_bound_conjunctions = vec![];
+        // values in eq_cond are OR'ed
+        let mut eq_conds = vec![];
+        let mut other_conds = vec![];
+
+        // analyze exprs in the group. scan_range is not updated
+        for expr in group {
+            if let Some((input_ref, const_expr)) = expr.as_eq_const() {
+                let new_expr = if let Ok(expr) = const_expr
+                    .clone()
+                    .cast_implicit(input_ref.data_type.clone())
+                {
+                    expr
+                } else {
+                    match self::cast_compare::cast_compare_for_eq(const_expr, input_ref.data_type) {
+                        Ok(ResultForEq::Success(expr)) => expr,
+                        Ok(ResultForEq::NeverEqual) => {
+                            return Ok(None);
+                        }
+                        Err(_) => {
+                            other_conds.push(expr);
+                            continue;
+                        }
+                    }
+                };
+
+                let Some(new_cond) = new_expr.fold_const()? else {
+                        // column = NULL, the result is always NULL.
+                        return Ok(None);
+                    };
+                if Self::mutual_exclusive_with_eq_conds(&new_cond, &eq_conds) {
+                    return Ok(None);
+                }
+                eq_conds = vec![Some(new_cond)];
+            } else if expr.as_is_null().is_some() {
+                if !eq_conds.is_empty() && eq_conds.into_iter().all(|l| l.is_some()) {
+                    return Ok(None);
+                }
+                eq_conds = vec![None];
+            } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
+                let mut scalars = HashSet::new();
+                for const_expr in in_const_list {
+                    // The cast should succeed, because otherwise the input_ref is casted
+                    // and thus `as_in_const_list` returns None.
+                    let const_expr = const_expr
+                        .cast_implicit(input_ref.data_type.clone())
+                        .unwrap();
+                    let value = const_expr.fold_const()?;
+                    let Some(value) = value else {
+                            continue;
+                        };
+                    scalars.insert(Some(value));
+                }
+                if scalars.is_empty() {
+                    // There're only NULLs in the in-list
+                    return Ok(None);
+                }
+                if !eq_conds.is_empty() {
+                    scalars = scalars
+                        .intersection(&HashSet::from_iter(eq_conds))
+                        .cloned()
+                        .collect();
+                    if scalars.is_empty() {
+                        return Ok(None);
+                    }
+                }
+                // Sort to ensure a deterministic result for planner test.
+                eq_conds = scalars.into_iter().sorted().collect();
+            } else if let Some((input_ref, op, const_expr)) = expr.as_comparison_const() {
+                let new_expr = if let Ok(expr) = const_expr
+                    .clone()
+                    .cast_implicit(input_ref.data_type.clone())
+                {
+                    expr
+                } else {
+                    match self::cast_compare::cast_compare_for_cmp(
+                        const_expr,
+                        input_ref.data_type,
+                        op,
+                    ) {
+                        Ok(ResultForCmp::Success(expr)) => expr,
+                        Ok(ResultForCmp::OutUpperBound) => {
+                            if op == ExprType::GreaterThan || op == ExprType::GreaterThanOrEqual {
+                                return Ok(None);
+                            }
+                            // op == < and <= means result is always true, don't need any extra
+                            // work.
+                            continue;
+                        }
+                        Ok(ResultForCmp::OutLowerBound) => {
+                            if op == ExprType::LessThan || op == ExprType::LessThanOrEqual {
+                                return Ok(None);
+                            }
+                            // op == > and >= means result is always true, don't need any extra
+                            // work.
+                            continue;
+                        }
+                        Err(_) => {
+                            other_conds.push(expr);
+                            continue;
+                        }
+                    }
+                };
+                let Some(value) = new_expr.fold_const()? else {
+                        // column compare with NULL, the result is always  NULL.
+                        return Ok(None);
+                    };
+                match op {
+                    ExprType::LessThan => {
+                        upper_bound_conjunctions.push(Bound::Excluded(value));
+                    }
+                    ExprType::LessThanOrEqual => {
+                        upper_bound_conjunctions.push(Bound::Included(value));
+                    }
+                    ExprType::GreaterThan => {
+                        lower_bound_conjunctions.push(Bound::Excluded(value));
+                    }
+                    ExprType::GreaterThanOrEqual => {
+                        lower_bound_conjunctions.push(Bound::Included(value));
+                    }
+                    _ => unreachable!(),
+                }
+            } else {
+                other_conds.push(expr);
+            }
+        }
+        Ok(Some((
+            lower_bound_conjunctions,
+            upper_bound_conjunctions,
+            eq_conds,
+            other_conds,
+        )))
     }
 
     fn mutual_exclusive_with_eq_conds(
