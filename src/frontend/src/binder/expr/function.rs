@@ -114,7 +114,15 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
-            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
+            use crate::catalog::function_catalog::FunctionType::*;
+            match func.type_ {
+                Scalar => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                Table => {
+                    self.ensure_table_function_allowed()?;
+                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                }
+                Aggregate => todo!("support UDAF"),
+            }
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)

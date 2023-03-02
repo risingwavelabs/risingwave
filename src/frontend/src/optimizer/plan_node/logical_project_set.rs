@@ -92,8 +92,9 @@ impl LogicalProjectSet {
 
                     let TableFunction {
                         args,
-                        return_type,
+                        return_types,
                         function_type,
+                        udtf_catalog,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -103,8 +104,9 @@ impl LogicalProjectSet {
                     self.level -= 1;
                     TableFunction {
                         args,
-                        return_type,
+                        return_types,
                         function_type,
+                        udtf_catalog,
                     }
                     .into()
                 } else {
