@@ -347,6 +347,10 @@ impl SstableStore {
         self.meta_cache.lookup(sst_id, &sst_id)
     }
 
+    pub fn exists_block(&self, sst_id: u64, block_index: u64) -> bool {
+        self.block_cache.exists_block(sst_id, block_index)
+    }
+
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,

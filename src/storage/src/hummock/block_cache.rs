@@ -131,6 +131,11 @@ impl BlockCache {
             .map(BlockHolder::from_cached_block)
     }
 
+    pub fn exists_block(&self, sst_id: HummockSstableId, block_idx: u64) -> bool {
+        self.inner
+            .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+    }
+
     pub fn insert(
         &self,
         sst_id: HummockSstableId,

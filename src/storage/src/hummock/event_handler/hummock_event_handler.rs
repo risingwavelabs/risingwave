@@ -20,7 +20,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use async_stack_trace::StackTrace;
 use futures::future::{select, Either};
-use futures::{FutureExt, StreamExt};
+use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
 use risingwave_hummock_sdk::{info_in_release, HummockEpoch, KeyComparator, LocalSstableInfo};
@@ -378,7 +378,7 @@ impl HummockEventHandler {
     }
 
     async fn fill_cache(&mut self, delta: &HummockVersionDelta) -> HummockResult<()> {
-        let mut stats = StoreLocalStatistic::default();
+        let stats = StoreLocalStatistic::default();
         for (_group_id, group_delta) in &delta.group_deltas {
             for d in &group_delta.group_deltas {
                 let mut flatten_reqs = vec![];
@@ -388,7 +388,7 @@ impl HummockEventHandler {
                         flatten_reqs.push(self.sstable_store.sstable_syncable(sst, &stats));
                     }
 
-                    let mut flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
+                    let flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
                     let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
                     for (sst, _) in flatten_resp {
                         sstables.push(sst);
@@ -439,6 +439,19 @@ impl HummockEventHandler {
             return;
         }
         let mut remove_block_iter = SstableBlockIterator::new(remove_sst);
+        while remove_block_iter.valid() {
+            if self.sstable_store.exists_block(
+                remove_block_iter.sstable.id,
+                remove_block_iter.current_block_id as u64,
+            ) {
+                break;
+            }
+            remove_block_iter.next();
+        }
+        if !remove_block_iter.valid() {
+            return;
+        }
+
         while start_idx < end_idx {
             let mut insert_block_iter =
                 SstableBlockIterator::new(sstables[start_idx].value().as_ref());
@@ -451,23 +464,31 @@ impl HummockEventHandler {
                     insert_block_iter.next();
                     continue;
                 }
-                while remove_block_iter.valid() {
+                let mut exist_in_cache = true;
+                loop {
                     if KeyComparator::encoded_full_key_less_than(
                         insert_block_iter.current_block_smallest(),
                         remove_block_iter.current_block_largest(),
-                    ) {
+                    ) && exist_in_cache
+                    {
                         break;
                     }
                     remove_block_iter.next();
+                    if remove_block_iter.valid() {
+                        exist_in_cache = self.sstable_store.exists_block(
+                            remove_block_iter.sstable.id,
+                            remove_block_iter.current_block_id as u64,
+                        );
+                    } else {
+                        return;
+                    }
                 }
                 // make sure that remove_block_iter.current_block_largest() >
                 // insert_block_iter.current_block_smallest()  and
-                if remove_block_iter.valid()
-                    && KeyComparator::encoded_full_key_less_than(
-                        remove_block_iter.current_block_smallest(),
-                        insert_block_iter.current_block_largest(),
-                    )
-                {
+                if KeyComparator::encoded_full_key_less_than(
+                    remove_block_iter.current_block_smallest(),
+                    insert_block_iter.current_block_largest(),
+                ) {
                     self.sstable_store.prefetch(
                         &insert_block_iter.sstable,
                         insert_block_iter.current_block_id as u64,
