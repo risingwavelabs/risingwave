@@ -116,19 +116,18 @@ pub async fn rpc_serve(
             if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(
-                endpoints.clone(),
-                Some(options.clone()),
-                credentials.is_some(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            let auth_enabled = credentials.is_some();
+            let client =
+                EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
             let election_client = Arc::new(
                 EtcdElectionClient::new(
                     endpoints,
                     Some(options),
+                    auth_enabled,
                     address_info.advertise_addr.clone(),
                 )
                 .await?,
