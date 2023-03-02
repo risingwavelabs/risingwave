@@ -182,9 +182,8 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("Set session variables");
 
     let rows_per_table = 10;
-    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
-    // let populate_sql = populate_tables(client, &mut rng, base_tables.clone(),
-    // rows_per_table).await; let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
     tracing::info!("Populated base tables");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
