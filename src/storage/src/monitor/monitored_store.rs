@@ -15,9 +15,9 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
-use futures::{Future, TryStreamExt};
+use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -27,11 +27,10 @@ use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{HummockStorage, SstableIdManagerRef};
-use crate::storage_value::StorageValue;
 use crate::store::*;
 use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
-    define_state_store_read_associated_type, define_state_store_write_associated_type,
+    define_state_store_read_associated_type,
 };
 
 /// A state store wrapper for monitoring metrics.
@@ -51,20 +50,31 @@ impl<S> MonitoredStateStore<S> {
     }
 }
 
-pub type MonitoredStateStoreIterStream<S: StateStoreRead> = impl StateStoreReadIterStream;
-impl<S: StateStoreRead> MonitoredStateStore<S> {
-    async fn monitored_iter(
-        &self,
+/// A util function to break the type connection between two opaque return types defined by `impl`.
+fn identity(input: impl StateStoreIterItemStream) -> impl StateStoreIterItemStream {
+    input
+}
+
+pub type MonitoredStateStoreIterStream<'s, S: StateStoreIterItemStream + 's> =
+    impl StateStoreIterItemStream + 's;
+
+// Note: it is important to define the `MonitoredStateStoreIterStream` type alias, as it marks that
+// the return type of `monitored_iter` only captures the lifetime `'s` and has nothing to do with
+// `'a`. If we simply use `impl StateStoreIterItemStream + 's`, the rust compiler will also capture
+// the lifetime `'a` in the scope defined in the scope.
+impl<S> MonitoredStateStore<S> {
+    async fn monitored_iter<'a, 's, St: StateStoreIterItemStream + 's>(
+        &'a self,
         table_id: TableId,
-        iter_stream_future: impl Future<Output = StorageResult<S::IterStream>>,
-    ) -> StorageResult<MonitoredStateStoreIterStream<S>> {
+        iter_stream_future: impl Future<Output = StorageResult<St>> + 'a,
+    ) -> StorageResult<MonitoredStateStoreIterStream<'s, St>> {
         // start time takes iterator build time into account
         let start_time = minstant::Instant::now();
         let table_id_label = table_id.to_string();
 
         // wait for iterator creation (e.g. seek)
         let iter_stream = iter_stream_future
-            .verbose_stack_trace("store_create_iter")
+            .verbose_instrument_await("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
@@ -95,10 +105,42 @@ impl<S: StateStoreRead> MonitoredStateStore<S> {
     pub fn inner(&self) -> &S {
         &self.inner
     }
+
+    async fn monitored_get(
+        &self,
+        get_future: impl Future<Output = StorageResult<Option<Bytes>>>,
+        table_id: TableId,
+        key_len: usize,
+    ) -> StorageResult<Option<Bytes>> {
+        let table_id_label = table_id.to_string();
+        let timer = self
+            .storage_metrics
+            .get_duration
+            .with_label_values(&[table_id_label.as_str()])
+            .start_timer();
+        let value = get_future
+            .verbose_instrument_await("store_get")
+            .await
+            .inspect_err(|e| error!("Failed in get: {:?}", e))?;
+        timer.observe_duration();
+
+        self.storage_metrics
+            .get_key_size
+            .with_label_values(&[table_id_label.as_str()])
+            .observe(key_len as _);
+        if let Some(value) = value.as_ref() {
+            self.storage_metrics
+                .get_value_size
+                .with_label_values(&[table_id_label.as_str()])
+                .observe(value.len() as _);
+        }
+
+        Ok(value)
+    }
 }
 
 impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
-    type IterStream = MonitoredStateStoreIterStream<S>;
+    type IterStream = impl StateStoreReadIterStream;
 
     define_state_store_read_associated_type!();
 
@@ -108,34 +150,9 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::GetFuture<'_> {
-        async move {
-            let table_id_label = read_options.table_id.to_string();
-            let timer = self
-                .storage_metrics
-                .get_duration
-                .with_label_values(&[table_id_label.as_str()])
-                .start_timer();
-            let value = self
-                .inner
-                .get(key, epoch, read_options)
-                .verbose_stack_trace("store_get")
-                .await
-                .inspect_err(|e| error!("Failed in get: {:?}", e))?;
-            timer.observe_duration();
-
-            self.storage_metrics
-                .get_key_size
-                .with_label_values(&[table_id_label.as_str()])
-                .observe(key.len() as _);
-            if let Some(value) = value.as_ref() {
-                self.storage_metrics
-                    .get_value_size
-                    .with_label_values(&[table_id_label.as_str()])
-                    .observe(value.len() as _);
-            }
-
-            Ok(value)
-        }
+        let table_id = read_options.table_id;
+        let key_len = key.len();
+        self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
     }
 
     fn iter(
@@ -148,47 +165,17 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
             read_options.table_id,
             self.inner.iter(key_range, epoch, read_options),
         )
-    }
-}
-
-impl<S: StateStoreWrite> StateStoreWrite for MonitoredStateStore<S> {
-    define_state_store_write_associated_type!();
-
-    fn ingest_batch(
-        &self,
-        kv_pairs: Vec<(Bytes, StorageValue)>,
-        delete_ranges: Vec<(Bytes, Bytes)>,
-        write_options: WriteOptions,
-    ) -> Self::IngestBatchFuture<'_> {
-        async move {
-            let table_id_label = write_options.table_id.to_string();
-            self.storage_metrics
-                .write_batch_tuple_counts
-                .with_label_values(&[table_id_label.as_str()])
-                .inc_by(kv_pairs.len() as _);
-            let timer = self
-                .storage_metrics
-                .write_batch_duration
-                .with_label_values(&[table_id_label.as_str()])
-                .start_timer();
-            let batch_size = self
-                .inner
-                .ingest_batch(kv_pairs, delete_ranges, write_options)
-                .verbose_stack_trace("store_ingest_batch")
-                .await
-                .inspect_err(|e| error!("Failed in ingest_batch: {:?}", e))?;
-            timer.observe_duration();
-
-            self.storage_metrics
-                .write_batch_size
-                .with_label_values(&[table_id_label.as_str()])
-                .observe(batch_size as _);
-            Ok(batch_size)
-        }
+        .map_ok(identity)
     }
 }
 
 impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
+    type FlushFuture<'a> = impl Future<Output = StorageResult<usize>> + 'a;
+    type GetFuture<'a> = impl GetFutureTrait<'a>;
+    type IterFuture<'a> = impl Future<Output = StorageResult<Self::IterStream<'a>>> + Send + 'a;
+    type IterStream<'a> = impl StateStoreIterItemStream + 'a;
+
+    // TODO: include the rest future to macro
     define_local_state_store_associated_type!();
 
     fn may_exist(
@@ -208,6 +195,57 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
             res
         }
     }
+
+    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        let table_id = read_options.table_id;
+        let key_len = key.len();
+        // TODO: may collect the metrics as local
+        self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
+    }
+
+    fn iter(
+        &self,
+        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        read_options: ReadOptions,
+    ) -> Self::IterFuture<'_> {
+        let table_id = read_options.table_id;
+        // TODO: may collect the metrics as local
+        self.monitored_iter(table_id, self.inner.iter(key_range, read_options))
+            .map_ok(identity)
+    }
+
+    fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()> {
+        // TODO: collect metrics
+        self.inner.insert(key, new_val, old_val)
+    }
+
+    fn delete(&mut self, key: Bytes, old_val: Bytes) -> StorageResult<()> {
+        // TODO: collect metrics
+        self.inner.delete(key, old_val)
+    }
+
+    fn flush(&mut self, delete_ranges: Vec<(Bytes, Bytes)>) -> Self::FlushFuture<'_> {
+        // TODO: collect metrics
+        self.inner.flush(delete_ranges)
+    }
+
+    fn epoch(&self) -> u64 {
+        self.inner.epoch()
+    }
+
+    fn is_dirty(&self) -> bool {
+        self.inner.is_dirty()
+    }
+
+    fn init(&mut self, epoch: u64) {
+        // TODO: may collect metrics
+        self.inner.init(epoch)
+    }
+
+    fn seal_current_epoch(&mut self, next_epoch: u64) {
+        // TODO: may collect metrics
+        self.inner.seal_current_epoch(next_epoch)
+    }
 }
 
 impl<S: StateStore> StateStore for MonitoredStateStore<S> {
@@ -221,7 +259,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             self.inner
                 .try_wait_epoch(epoch)
-                .verbose_stack_trace("store_wait_epoch")
+                .verbose_instrument_await("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
@@ -235,7 +273,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .verbose_stack_trace("store_await_sync")
+                .instrument_await("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -263,16 +301,19 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             self.inner
                 .clear_shared_buffer()
-                .verbose_stack_trace("store_clear_shared_buffer")
+                .verbose_instrument_await("store_clear_shared_buffer")
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async move {
             MonitoredStateStore::new(
-                self.inner.new_local(table_id).await,
+                self.inner
+                    .new_local(option)
+                    .instrument_await("store_new_local")
+                    .await,
                 self.storage_metrics.clone(),
             )
         }

@@ -25,6 +25,7 @@ pub struct MonitoredStorageMetrics {
     pub get_duration: HistogramVec,
     pub get_key_size: HistogramVec,
     pub get_value_size: HistogramVec,
+
     pub iter_size: HistogramVec,
     pub iter_item: HistogramVec,
     pub iter_duration: HistogramVec,
@@ -32,9 +33,6 @@ pub struct MonitoredStorageMetrics {
     pub may_exist_duration: HistogramVec,
 
     pub iter_in_process_counts: GenericCounterVec<AtomicU64>,
-    pub write_batch_tuple_counts: GenericCounterVec<AtomicU64>,
-    pub write_batch_duration: HistogramVec,
-    pub write_batch_size: HistogramVec,
 
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
@@ -122,31 +120,6 @@ impl MonitoredStorageMetrics {
         let may_exist_duration =
             register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
 
-        // ----- write_batch -----
-        let write_batch_tuple_counts = register_int_counter_vec_with_registry!(
-            "state_store_write_batch_tuple_counts",
-            "Total number of batched write kv pairs requests that have been issued to state store",
-            &["table_id"],
-            registry
-        )
-        .unwrap();
-
-        let opts = histogram_opts!(
-                "state_store_write_batch_duration",
-                "Total time of batched write that have been issued to state store. With shared buffer on, this is the latency writing to the shared buffer",
-                exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-            );
-        let write_batch_duration =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-
-        let opts = histogram_opts!(
-            "state_store_write_batch_size",
-            "Total size of batched write that have been issued to state store",
-            exponential_buckets(10.0, 2.0, 25).unwrap() // max 160MB
-        );
-        let write_batch_size =
-            register_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-
         let opts = histogram_opts!(
             "state_store_sync_duration",
             "Histogram of time spent from compacting shared buffer to remote storage",
@@ -171,9 +144,6 @@ impl MonitoredStorageMetrics {
             iter_scan_duration,
             may_exist_duration,
             iter_in_process_counts,
-            write_batch_tuple_counts,
-            write_batch_duration,
-            write_batch_size,
             sync_duration,
             sync_size,
         }

@@ -37,7 +37,6 @@ members = [
   "src/tests/sqlsmith",
   "src/tracing",
   "src/udf",
-  "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
@@ -100,7 +99,7 @@ incremental = false
 opt-level = 1
 [profile.ci-dev.package."tokio"]
 opt-level = 3
-[profile.ci-dev.package."async_stack_trace"]
+[profile.ci-dev.package."await-tree"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
@@ -123,10 +122,3 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710"
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
-
-# TODO: remove these patches when arrow releases v34
-# we need this commit for handling batch with no columns
-# https://github.com/apache/arrow-rs/commit/ea48b9571f88bfbced60f9790ae2a7102502870e
-arrow-array = { git = "https://github.com/apache/arrow-rs.git", rev = "9a6c516" }
-arrow-schema = { git = "https://github.com/apache/arrow-rs.git", rev = "9a6c516" }
-arrow-flight = { git = "https://github.com/apache/arrow-rs.git", rev = "9a6c516" }

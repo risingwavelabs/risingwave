@@ -145,7 +145,7 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            handle_pk_conflict: false,
+            conflict_behavior_type: 0,
             read_prefix_len_hint: self.read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,

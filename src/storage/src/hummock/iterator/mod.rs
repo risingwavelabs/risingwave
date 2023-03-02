@@ -53,7 +53,7 @@ use crate::monitor::StoreLocalStatistic;
 /// After creating the iterator instance,
 /// - if you want to iterate from the beginning, you need to then call its `rewind` method.
 /// - if you want to iterate from some specific position, you need to then call its `seek` method.
-pub trait HummockIterator: Send + Sync + 'static {
+pub trait HummockIterator: Send + 'static {
     type Direction: HummockIteratorDirection;
     type NextFuture<'a>: Future<Output = HummockResult<()>> + Send + 'a
     where

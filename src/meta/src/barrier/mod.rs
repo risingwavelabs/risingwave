@@ -121,9 +121,6 @@ pub enum CommandChanges {
 /// barrier manager and meta store, some actions like "drop materialized view" or "create mv on mv"
 /// must be done in barrier manager transactional using [`Command`].
 pub struct GlobalBarrierManager<S: MetaStore> {
-    /// The maximal interval for sending a barrier.
-    interval: Duration,
-
     /// Enable recovery or not when failover.
     enable_recovery: bool,
 
@@ -486,19 +483,11 @@ where
         metrics: Arc<MetaMetrics>,
     ) -> Self {
         let enable_recovery = env.opts.enable_recovery;
-        let interval = env.opts.barrier_interval;
         let in_flight_barrier_nums = env.opts.in_flight_barrier_nums;
-        tracing::info!(
-            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
-            interval,
-            enable_recovery,
-            in_flight_barrier_nums,
-        );
 
         let snapshot_manager = SnapshotManager::new(hummock_manager.clone()).into();
         let tracker = CreateMviewProgressTracker::new();
         Self {
-            interval,
             enable_recovery,
             status: Mutex::new(BarrierManagerStatus::Starting),
             scheduled_barriers,
@@ -538,6 +527,20 @@ where
 
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
+        let interval = Duration::from_millis(
+            self.env
+                .system_param_manager()
+                .get_params()
+                .await
+                .barrier_interval_ms() as u64,
+        );
+        tracing::info!(
+            "Starting barrier manager with: interval={:?}, enable_recovery={}, in_flight_barrier_nums={}",
+            interval,
+            self.enable_recovery,
+            self.in_flight_barrier_nums,
+        );
+
         let mut state = BarrierManagerState::create(self.env.meta_store()).await;
         if self.enable_recovery {
             // handle init, here we simply trigger a recovery process to achieve the consistency. We
@@ -560,7 +563,7 @@ where
             );
         }
         self.set_status(BarrierManagerStatus::Running).await;
-        let mut min_interval = tokio::time::interval(self.interval);
+        let mut min_interval = tokio::time::interval(interval);
         min_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut barrier_timer: Option<HistogramTimer> = None;
         let (barrier_complete_tx, mut barrier_complete_rx) = tokio::sync::mpsc::unbounded_channel();

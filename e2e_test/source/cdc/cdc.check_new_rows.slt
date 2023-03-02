@@ -4,17 +4,17 @@ select cnt from products_cnt;
 ----
 11
 
-query II
+query I
 select cnt from orders_cnt;
 ----
 4
 
-query III
+query I
 select cnt from shipments_cnt;
 ----
 4
 
-query IIII
+query III
 select order_id, product_id, shipment_id from enriched_orders order by order_id;
 ----
 10001  102   1001
@@ -22,7 +22,7 @@ select order_id, product_id, shipment_id from enriched_orders order by order_id;
 10003  106   1003
 10004  110   1004
 
-query VI
+query IIT
 select v1, v2, v3 from mytable order by v1;
 ----
 2 2 yes

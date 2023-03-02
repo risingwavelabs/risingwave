@@ -33,12 +33,12 @@ pub enum ApplyOrder {
 /// apply each rule on them.
 pub struct HeuristicOptimizer<'a> {
     apply_order: &'a ApplyOrder,
-    rules: &'a Vec<BoxedRule>,
+    rules: &'a [BoxedRule],
     stats: Stats,
 }
 
 impl<'a> HeuristicOptimizer<'a> {
-    pub fn new(apply_order: &'a ApplyOrder, rules: &'a Vec<BoxedRule>) -> Self {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
         Self {
             apply_order,
             rules,

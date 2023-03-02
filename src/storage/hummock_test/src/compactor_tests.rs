@@ -47,20 +47,15 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::{
-        HummockStorage as GlobalHummockStorage, MemoryLimiter, SstableIdManager,
+        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter, SstableIdManager,
     };
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
     use risingwave_storage::storage_value::StorageValue;
-    use risingwave_storage::store::{
-        ReadOptions, StateStoreReadExt, StateStoreWrite, WriteOptions,
-    };
+    use risingwave_storage::store::*;
 
     use crate::get_notification_client_for_test;
-    use crate::test_utils::{
-        register_tables_with_id_for_test, HummockV2MixedStateStore,
-        HummockV2MixedStateStore as HummockStorage,
-    };
+    use crate::test_utils::{register_tables_with_id_for_test, TestIngestBatch};
 
     pub(crate) async fn get_hummock_storage<S: MetaStore>(
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -95,7 +90,7 @@ pub(crate) mod tests {
         )
         .await;
 
-        HummockV2MixedStateStore::new(hummock, table_id).await
+        hummock
     }
 
     async fn get_global_hummock_storage(
@@ -130,12 +125,14 @@ pub(crate) mod tests {
         value_size: usize,
         epochs: Vec<u64>,
     ) {
+        let mut local = storage.new_local(Default::default()).await;
         // 1. add sstables
         let val = b"0"[..].repeat(value_size);
-        for epoch in epochs {
+        local.init(epochs[0]);
+        for (i, &epoch) in epochs.iter().enumerate() {
             let mut new_val = val.clone();
             new_val.extend_from_slice(&epoch.to_be_bytes());
-            storage
+            local
                 .ingest_batch(
                     vec![(key.clone(), StorageValue::new_put(Bytes::from(new_val)))],
                     vec![],
@@ -146,6 +143,11 @@ pub(crate) mod tests {
                 )
                 .await
                 .unwrap();
+            if i + 1 < epochs.len() {
+                local.seal_current_epoch(epochs[i + 1]);
+            } else {
+                local.seal_current_epoch(u64::MAX);
+            }
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -156,7 +158,7 @@ pub(crate) mod tests {
     }
 
     fn get_compactor_context_with_filter_key_extractor_manager(
-        storage: &HummockV2MixedStateStore,
+        storage: &HummockStorage,
         hummock_meta_client: &Arc<dyn HummockMetaClient>,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
     ) -> CompactorContext {
@@ -476,22 +478,27 @@ pub(crate) mod tests {
         let kv_count: u8 = 128;
         let mut epoch: u64 = 1;
 
+        let mut local = storage
+            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .await;
+
         // 1. add sstables
         let val = Bytes::from(b"0"[..].repeat(1 << 10)); // 1024 Byte value
         for idx in 0..kv_count {
             epoch += 1;
-            let mut local = storage.local.start_write_batch(WriteOptions {
-                epoch,
-                table_id: existing_table_id.into(),
-            });
+
+            if idx == 0 {
+                local.init(epoch);
+            }
 
             for _ in 0..keys_per_epoch {
                 let mut key = vec![idx];
                 let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
                 key.extend_from_slice(&ramdom_key);
-                local.put(key, StorageValue::new_put(val.clone()));
+                local.insert(Bytes::from(key), val.clone(), None).unwrap();
             }
-            local.ingest().await.unwrap();
+            local.flush(Vec::new()).await.unwrap();
+            local.seal_current_epoch(epoch + 1);
 
             flush_and_commit(&hummock_meta_client, storage, epoch).await;
         }
@@ -626,11 +633,12 @@ pub(crate) mod tests {
         .await;
 
         // register the local_storage to global_storage
-        let storage_1 =
-            HummockV2MixedStateStore::new(global_storage.clone(), TableId::from(1)).await;
-
-        let storage_2 =
-            HummockV2MixedStateStore::new(global_storage.clone(), TableId::from(2)).await;
+        let mut storage_1 = global_storage
+            .new_local(NewLocalOptions::for_test(TableId::from(1)))
+            .await;
+        let mut storage_2 = global_storage
+            .new_local(NewLocalOptions::for_test(TableId::from(2)))
+            .await;
 
         let filter_key_extractor_manager = global_storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
@@ -668,22 +676,32 @@ pub(crate) mod tests {
         )
         .await;
         for index in 0..kv_count {
-            let (table_id, storage) = if index % 2 == 0 {
-                (drop_table_id, &storage_1)
-            } else {
-                (existing_table_ids, &storage_2)
-            };
             epoch += 1;
-            let mut local = storage.start_write_batch(WriteOptions {
-                epoch,
-                table_id: TableId::from(table_id),
-            });
+            let next_epoch = epoch + 1;
+            if index == 0 {
+                storage_1.init(epoch);
+                storage_2.init(epoch);
+            }
 
-            let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_put(val.clone()));
-            local.ingest().await.unwrap();
+            let (storage, other) = if index % 2 == 0 {
+                (&mut storage_1, &mut storage_2)
+            } else {
+                (&mut storage_2, &mut storage_1)
+            };
 
-            let ssts = storage
+            let random_key = rand::thread_rng().gen::<[u8; 32]>();
+            storage
+                .insert(
+                    Bytes::copy_from_slice(random_key.as_slice()),
+                    val.clone(),
+                    None,
+                )
+                .unwrap();
+            storage.flush(Vec::new()).await.unwrap();
+            storage.seal_current_epoch(next_epoch);
+            other.seal_current_epoch(next_epoch);
+
+            let ssts = global_storage
                 .seal_and_sync_epoch(epoch)
                 .await
                 .unwrap()
@@ -835,17 +853,28 @@ pub(crate) mod tests {
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let mut epoch_set = BTreeSet::new();
-        for _ in 0..kv_count {
+
+        let mut local = storage
+            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .await;
+        for i in 0..kv_count {
             epoch += millisec_interval_epoch;
+            let next_epoch = epoch + millisec_interval_epoch;
+            if i == 0 {
+                local.init(epoch);
+            }
             epoch_set.insert(epoch);
-            let mut local = storage.start_write_batch(WriteOptions {
-                epoch,
-                table_id: TableId::from(existing_table_id),
-            });
 
             let ramdom_key = rand::thread_rng().gen::<[u8; 32]>();
-            local.put(ramdom_key, StorageValue::new_put(val.clone()));
-            local.ingest().await.unwrap();
+            local
+                .insert(
+                    Bytes::copy_from_slice(ramdom_key.as_slice()),
+                    val.clone(),
+                    None,
+                )
+                .unwrap();
+            local.flush(Vec::new()).await.unwrap();
+            local.seal_current_epoch(next_epoch);
 
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
@@ -1008,17 +1037,24 @@ pub(crate) mod tests {
         let mut epoch: u64 = base_epoch.0;
         let millisec_interval_epoch: u64 = (1 << 16) * 100;
         let mut epoch_set = BTreeSet::new();
-        for _ in 0..kv_count {
+
+        let mut local = storage
+            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .await;
+        for i in 0..kv_count {
             epoch += millisec_interval_epoch;
+            if i == 0 {
+                local.init(epoch);
+            }
+            let next_epoch = epoch + millisec_interval_epoch;
             epoch_set.insert(epoch);
-            let mut local = storage.start_write_batch(WriteOptions {
-                epoch,
-                table_id: TableId::new(existing_table_id),
-            });
 
             let ramdom_key = [key_prefix, &rand::thread_rng().gen::<[u8; 32]>()].concat();
-            local.put(ramdom_key, StorageValue::new_put(val.clone()));
-            local.ingest().await.unwrap();
+            local
+                .insert(Bytes::from(ramdom_key), val.clone(), None)
+                .unwrap();
+            local.flush(Vec::new()).await.unwrap();
+            local.seal_current_epoch(next_epoch);
             let ssts = storage
                 .seal_and_sync_epoch(epoch)
                 .await
@@ -1163,14 +1199,21 @@ pub(crate) mod tests {
             prepare_compactor_and_filter(&storage, &hummock_meta_client, existing_table_id);
 
         prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
-        let mut local = storage.start_write_batch(WriteOptions {
-            epoch: 130,
-            table_id: existing_table_id.into(),
-        });
-
-        local.delete_prefix([1u8]);
-        local.delete_prefix([2u8]);
-        local.ingest().await.unwrap();
+        let mut local = storage
+            .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+            .await;
+        local.init(130);
+        let prefix_key_range = |key: [u8; 1]| {
+            (
+                Bytes::copy_from_slice(key.as_slice()),
+                Bytes::copy_from_slice(next_key(key.as_slice()).as_slice()),
+            )
+        };
+        local
+            .flush(vec![prefix_key_range([1u8]), prefix_key_range([2u8])])
+            .await
+            .unwrap();
+        local.seal_current_epoch(u64::MAX);
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();

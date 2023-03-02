@@ -729,7 +729,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
     fn key(&self) -> FullKey<&[u8]> {
         let item = self.current_item();
         // Use linear scan here to exploit cpu cache prefetch
-        for (e, v) in &item.1 {
+        for (e, _) in &item.1 {
             if *e <= self.read_epoch {
                 return FullKey::new(self.table_id, TableKey(&item.0), *e);
             }
