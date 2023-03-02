@@ -29,7 +29,7 @@ pub mod rpc;
 pub mod server;
 
 use clap::Parser;
-use risingwave_common::config::{true_if_present, AsyncStackTraceOption, Flag};
+use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use risingwave_common_proc_macro::OverrideConfig;
@@ -113,12 +113,12 @@ struct OverrideConfigOpts {
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", parse(from_flag = true_if_present))]
+    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
     #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Flag,
+    pub enable_jaeger_tracing: Option<bool>,
 
     /// Enable async stack tracing for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", arg_enum)]
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }

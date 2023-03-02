@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"

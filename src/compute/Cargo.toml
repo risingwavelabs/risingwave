@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 async-trait = "0.1"
 async_stack_trace = { path = "../utils/async_stack_trace" }
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 either = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"

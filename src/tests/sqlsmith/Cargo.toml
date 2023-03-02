@@ -15,7 +15,7 @@ normal = ["workspace-hack"]
 
 [dependencies]
 chrono = "0.4"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 itertools = "0.10"
 rand = { version = "0.8", features = ["small_rng"] }
 rand_chacha = { version = "0.3.1" }
