@@ -59,6 +59,8 @@ export interface SstableInfo {
   minEpoch: number;
   maxEpoch: number;
   uncompressedFileSize: number;
+  /** Used to estimate the size of the newly generated sst key size */
+  avgKeySize: number;
 }
 
 export interface OverlappingLevel {
@@ -857,6 +859,7 @@ function createBaseSstableInfo(): SstableInfo {
     minEpoch: 0,
     maxEpoch: 0,
     uncompressedFileSize: 0,
+    avgKeySize: 0,
   };
 }
 
@@ -874,6 +877,7 @@ export const SstableInfo = {
       minEpoch: isSet(object.minEpoch) ? Number(object.minEpoch) : 0,
       maxEpoch: isSet(object.maxEpoch) ? Number(object.maxEpoch) : 0,
       uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
+      avgKeySize: isSet(object.avgKeySize) ? Number(object.avgKeySize) : 0,
     };
   },
 
@@ -894,6 +898,7 @@ export const SstableInfo = {
     message.minEpoch !== undefined && (obj.minEpoch = Math.round(message.minEpoch));
     message.maxEpoch !== undefined && (obj.maxEpoch = Math.round(message.maxEpoch));
     message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
+    message.avgKeySize !== undefined && (obj.avgKeySize = Math.round(message.avgKeySize));
     return obj;
   },
 
@@ -912,6 +917,7 @@ export const SstableInfo = {
     message.minEpoch = object.minEpoch ?? 0;
     message.maxEpoch = object.maxEpoch ?? 0;
     message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
+    message.avgKeySize = object.avgKeySize ?? 0;
     return message;
   },
 };
