@@ -120,8 +120,6 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
 
     filter_builder: F,
 
-    // min_epoch: u64,
-    // max_epoch: u64,
     epoch_set: BTreeSet<u64>,
 }
 
@@ -366,31 +364,32 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         let (avg_key_size, avg_value_size) = if self.table_stats.is_empty() {
             (0, 0)
         } else {
-            let avg_key_size = self
+            let total_key_count: usize = self
                 .table_stats
                 .values()
-                .map(|s| {
-                    if s.total_key_count == 0 {
-                        0
-                    } else {
-                        s.total_key_size as usize / s.total_key_count as usize
-                    }
-                })
-                .sum::<usize>()
-                / self.table_stats.len();
-            let avg_value_size = self
-                .table_stats
-                .values()
-                .map(|s| {
-                    if s.total_key_count == 0 {
-                        0
-                    } else {
-                        s.total_value_size as usize / s.total_key_count as usize
-                    }
-                })
-                .sum::<usize>()
-                / self.table_stats.len();
-            (avg_key_size, avg_value_size)
+                .map(|s| s.total_key_count as usize)
+                .sum();
+
+            if total_key_count == 0 {
+                (0, 0)
+            } else {
+                let total_key_size: usize = self
+                    .table_stats
+                    .values()
+                    .map(|s| s.total_key_size as usize)
+                    .sum();
+
+                let total_value_size: usize = self
+                    .table_stats
+                    .values()
+                    .map(|s| s.total_value_size as usize)
+                    .sum();
+
+                (
+                    total_key_size / total_key_count,
+                    total_value_size / total_key_count,
+                )
+            }
         };
 
         let (min_epoch, max_epoch) = {
