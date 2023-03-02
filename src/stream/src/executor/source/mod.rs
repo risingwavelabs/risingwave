@@ -13,7 +13,7 @@
 // limitations under the License.
 
 pub mod executor_core;
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 pub use executor_core::StreamSourceCore;
 mod fs_source_executor;
 pub use fs_source_executor::*;
@@ -33,7 +33,7 @@ use crate::executor::{Barrier, Message};
 /// Receive barriers from barrier manager with the channel, error on channel close.
 #[try_stream(ok = Message, error = StreamExecutorError)]
 pub async fn barrier_to_message_stream(mut rx: UnboundedReceiver<Barrier>) {
-    while let Some(barrier) = rx.recv().stack_trace("receive_barrier").await {
+    while let Some(barrier) = rx.recv().instrument_await("receive_barrier").await {
         yield Message::Barrier(barrier);
     }
     bail!("barrier reader closed unexpectedly");

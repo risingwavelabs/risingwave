@@ -16,7 +16,6 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_stack_trace::StackTraceManager;
 use pretty_bytes::converter::convert;
 use risingwave_batch::executor::{BatchManagerMetrics, BatchTaskMetrics};
 use risingwave_batch::rpc::service::task_service::BatchServiceImpl;
@@ -65,7 +64,7 @@ use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{
-    GrpcStackTraceManagerRef, MonitorServiceImpl, StackTraceMiddlewareLayer,
+    AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::ComputeNodeOpts;
@@ -209,13 +208,12 @@ pub async fn compute_node_serve(
         extra_info_sources,
     ));
 
-    let async_stack_trace_config = match &config.streaming.async_stack_trace {
+    let await_tree_config = match &config.streaming.async_stack_trace {
         AsyncStackTraceOption::Off => None,
-        c => Some(async_stack_trace::TraceConfig {
-            report_detached: true,
-            verbose: matches!(c, AsyncStackTraceOption::Verbose),
-            interval: Duration::from_secs(1),
-        }),
+        c => await_tree::ConfigBuilder::default()
+            .verbose(matches!(c, AsyncStackTraceOption::Verbose))
+            .build()
+            .ok(),
     };
 
     // Initialize the managers.
@@ -228,7 +226,7 @@ pub async fn compute_node_serve(
         state_store.clone(),
         streaming_metrics.clone(),
         config.streaming.clone(),
-        async_stack_trace_config,
+        await_tree_config.clone(),
     ));
 
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
@@ -250,8 +248,8 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    let grpc_stack_trace_mgr = async_stack_trace_config
-        .map(|config| GrpcStackTraceManagerRef::new(StackTraceManager::new(config).into()));
+    let grpc_await_tree_reg = await_tree_config
+        .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
 
     // Initialize batch environment.
@@ -296,7 +294,7 @@ pub async fn compute_node_serve(
     let exchange_srv =
         ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_stack_trace_mgr.clone());
+    let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
 
@@ -306,9 +304,7 @@ pub async fn compute_node_serve(
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .tcp_nodelay(true)
-            .layer(StackTraceMiddlewareLayer::new_optional(
-                grpc_stack_trace_mgr,
-            ))
+            .layer(AwaitTreeMiddlewareLayer::new_optional(grpc_await_tree_reg))
             .add_service(TaskServiceServer::new(batch_srv))
             .add_service(ExchangeServiceServer::new(exchange_srv))
             .add_service(StreamServiceServer::new(stream_srv))

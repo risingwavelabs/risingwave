@@ -418,22 +418,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async_stack_trace"
-version = "0.1.0"
-dependencies = [
- "coarsetime",
- "futures",
- "futures-async-stream",
- "indextree",
- "itertools",
- "madsim-tokio",
- "pin-project",
- "tracing",
- "triomphe",
- "workspace-hack",
-]
-
-[[package]]
 name = "atomic"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -506,6 +490,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "aef8da1805e028a172334c3b680f93e71126f2327622faef2ec3d893c0a4ad77"
 dependencies = [
  "cc",
+]
+
+[[package]]
+name = "await-tree"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "325bcfc4b87d4aa36f1319b806bacc40fcefcaf43a12bd85a5a2f44fc14ce9de"
+dependencies = [
+ "coarsetime",
+ "derive_builder",
+ "flexstr",
+ "indextree",
+ "itertools",
+ "parking_lot 0.12.1",
+ "pin-project",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -1965,6 +1966,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "derive_builder"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d67778784b508018359cbc8696edb3db78160bab2c2a28ba7f56ef6932997f8"
+dependencies = [
+ "derive_builder_macro",
+]
+
+[[package]]
+name = "derive_builder_core"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c11bdc11a0c47bc7d37d582b5285da6849c96681023680b906673c5707af7b0f"
+dependencies = [
+ "darling",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "derive_builder_macro"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ebcda35c7a396850a55ffeac740804b40ffec779b98fffbb1738f4033f0ee79e"
+dependencies = [
+ "derive_builder_core",
+ "syn",
+]
+
+[[package]]
 name = "derive_utils"
 version = "0.11.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2283,6 +2315,15 @@ checksum = "a8a2db397cb1c8772f31494cb8917e48cd1e64f0fa7efac59fbd741a0a8ce841"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+]
+
+[[package]]
+name = "flexstr"
+version = "0.9.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d50aef14619d336a54fca5a592d952eb39037b1a1e7e6afd9f91c892ac7ef65"
+dependencies = [
+ "static_assertions",
 ]
 
 [[package]]
@@ -5796,7 +5837,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "clap 4.1.8",
  "either",
  "futures",
@@ -6147,7 +6188,7 @@ name = "risingwave_object_store"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "aws-config",
  "aws-smithy-http",
  "aws-smithy-types",
@@ -6246,7 +6287,7 @@ dependencies = [
 name = "risingwave_rt"
 version = "0.2.0-alpha"
 dependencies = [
- "async_stack_trace",
+ "await-tree",
  "console",
  "console-subscriber",
  "futures",
@@ -6367,8 +6408,8 @@ version = "0.2.0-alpha"
 dependencies = [
  "arc-swap",
  "async-trait",
- "async_stack_trace",
  "auto_enums",
+ "await-tree",
  "bytes",
  "criterion",
  "crossbeam",
@@ -6425,7 +6466,7 @@ dependencies = [
  "async-recursion",
  "async-stream",
  "async-trait",
- "async_stack_trace",
+ "await-tree",
  "bytes",
  "derivative",
  "dyn-clone",
@@ -7986,10 +8027,6 @@ name = "triomphe"
 version = "0.1.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1ee9bd9239c339d714d657fac840c6d2a4f9c45f4f9ec7b0975113458be78db"
-dependencies = [
- "serde",
- "stable_deref_trait",
-]
 
 [[package]]
 name = "triple_accel"
@@ -8607,7 +8644,6 @@ dependencies = [
  "serde",
  "smallvec",
  "socket2",
- "stable_deref_trait",
  "strum",
  "syn",
  "time 0.3.17",
@@ -8622,7 +8658,6 @@ dependencies = [
  "tracing-core",
  "tracing-futures",
  "tracing-subscriber",
- "triomphe",
  "url",
  "uuid",
  "zstd",

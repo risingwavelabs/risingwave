@@ -15,8 +15,8 @@
 use std::fmt::Debug;
 
 use anyhow::anyhow;
-use async_stack_trace::{SpanValue, StackTrace};
 use async_trait::async_trait;
+use await_tree::InstrumentAwait;
 use derivative::Derivative;
 use risingwave_common::util::addr::is_local_address;
 use tokio::sync::mpsc::error::SendError;
@@ -51,7 +51,7 @@ pub struct LocalOutput {
     actor_id: ActorId,
 
     #[derivative(Debug = "ignore")]
-    span: SpanValue,
+    span: await_tree::Span,
 
     #[derivative(Debug = "ignore")]
     ch: Sender,
@@ -72,7 +72,7 @@ impl Output for LocalOutput {
     async fn send(&mut self, message: Message) -> StreamResult<()> {
         self.ch
             .send(message)
-            .verbose_stack_trace(self.span.clone())
+            .verbose_instrument_await(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(
@@ -100,7 +100,7 @@ pub struct RemoteOutput {
     actor_id: ActorId,
 
     #[derivative(Debug = "ignore")]
-    span: SpanValue,
+    span: await_tree::Span,
 
     #[derivative(Debug = "ignore")]
     ch: Sender,
@@ -126,7 +126,7 @@ impl Output for RemoteOutput {
 
         self.ch
             .send(message)
-            .verbose_stack_trace(self.span.clone())
+            .verbose_instrument_await(self.span.clone())
             .await
             .map_err(|SendError(message)| {
                 anyhow!(

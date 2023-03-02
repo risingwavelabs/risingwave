@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
@@ -339,7 +339,7 @@ where
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
-            .stack_trace("backfill_snapshot_read")
+            .instrument_await("backfill_snapshot_read")
             .await?
         {
             if data_chunk.cardinality() != 0 {
