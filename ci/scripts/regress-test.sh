@@ -55,7 +55,7 @@ dpkg-reconfigure --frontend=noninteractive locales
 # All the above is required because otherwise psql would throw some warning
 # that goes into the output file and thus diverges from the expected output file.
 export PGPASSWORD='postgres';
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h db \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host db \
   -p 5432 \
   -u postgres \
   --database postgres \
@@ -67,7 +67,7 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h db \
 echo "--- ci-3cn-1fe, RisingWave regress test"
 rm -rf `pwd`/src/tests/regress/output
 cargo make ci-start ci-3cn-1fe
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 4566 \
   -u root \
   --input `pwd`/src/tests/regress/data \
