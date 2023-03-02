@@ -329,7 +329,7 @@ fn bench_expr(c: &mut Criterion) {
                 overflow |= (c ^ a) & (c ^ b) < 0;
             }
             if overflow {
-                return Err(ExprError::NumericOutOfRange);
+                return Err(ExprError::NumericOverflow);
             }
             c.set_bitmap(a.null_bitmap() & b.null_bitmap());
             Ok(c)
