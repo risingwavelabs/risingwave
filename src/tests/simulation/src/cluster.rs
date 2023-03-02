@@ -118,7 +118,10 @@ impl Cluster {
         let net = madsim::net::NetSim::current();
         net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
         for i in 1..=conf.meta_nodes {
-            net.add_dns_record(&format!("meta-{i}"), format!("192.168.1.{i}").parse().unwrap());
+            net.add_dns_record(
+                &format!("meta-{i}"),
+                format!("192.168.1.{i}").parse().unwrap(),
+            );
         }
 
         net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
