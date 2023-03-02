@@ -122,12 +122,6 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 _ => SqlCmd::Others,
             };
 
-            // Since we've configured the session to always enable implicit flush, we don't need to
-            // execute `FLUSH` statements.
-            if cmd == SqlCmd::Flush {
-                continue;
-            }
-
             if cmd.ignore_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);

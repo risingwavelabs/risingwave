@@ -20,12 +20,23 @@ pub struct RisingWave {
     task: tokio::task::JoinHandle<()>,
     host: String,
     dbname: String,
+    /// The `SET` statements that have been executed on this client.
+    /// We need to replay them when reconnecting.
+    set_stmts: Vec<String>,
 }
 
 impl RisingWave {
     pub async fn connect(
         host: String,
         dbname: String,
+    ) -> Result<Self, tokio_postgres::error::Error> {
+        Self::reconnect(host, dbname, vec![]).await
+    }
+
+    pub async fn reconnect(
+        host: String,
+        dbname: String,
+        set_stmts: Vec<String>,
     ) -> Result<Self, tokio_postgres::error::Error> {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -40,23 +51,16 @@ impl RisingWave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
-        // for recovery
-        client
-            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
-            .await?;
-        client
-            .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
-            .await?;
-        // FIXME #7188: Temporarily enforce VISIBILITY_MODE=checkpoint to work around the known
-        // issue in failure propagation for local mode #7367, which would fail VISIBILITY_MODE=all.
-        client
-            .simple_query("SET VISIBILITY_MODE TO checkpoint;")
-            .await?;
+        // replay all SET statements
+        for stmt in &set_stmts {
+            client.simple_query(stmt).await?;
+        }
         Ok(RisingWave {
             client,
             task,
             host,
             dbname,
+            set_stmts,
         })
     }
 
@@ -81,7 +85,16 @@ impl sqllogictest::AsyncDB for RisingWave {
 
         if self.client.is_closed() {
             // connection error, reset the client
-            *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
+            *self = Self::reconnect(
+                self.host.clone(),
+                self.dbname.clone(),
+                self.set_stmts.clone(),
+            )
+            .await?;
+        }
+
+        if sql.trim_start().to_lowercase().starts_with("set") {
+            self.set_stmts.push(sql.to_string());
         }
 
         let mut output = vec![];
