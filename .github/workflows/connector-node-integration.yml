@@ -105,7 +105,7 @@ jobs:
           cd ..
           ./mc rm -r -force minio/bucket
           ./mc rb minio/bucket
-          echo "all iceberg tests passed
+          echo "all iceberg tests passed"
           
           echo "running deltalake integration tests"
           cd python-client
