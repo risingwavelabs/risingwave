@@ -426,8 +426,8 @@ impl Condition {
                     },
                 ));
             }
-            let mut lb = vec![];
-            let mut ub = vec![];
+            let mut lower_bound_conjunctions = vec![];
+            let mut upper_bound_conjunctions = vec![];
             // values in eq_cond are OR'ed
             let mut eq_conds = vec![];
 
@@ -543,16 +543,16 @@ impl Condition {
                     };
                     match op {
                         ExprType::LessThan => {
-                            ub.push((Bound::Excluded(value), expr));
+                            upper_bound_conjunctions.push(Bound::Excluded(value));
                         }
                         ExprType::LessThanOrEqual => {
-                            ub.push((Bound::Included(value), expr));
+                            upper_bound_conjunctions.push(Bound::Included(value));
                         }
                         ExprType::GreaterThan => {
-                            lb.push((Bound::Excluded(value), expr));
+                            lower_bound_conjunctions.push(Bound::Excluded(value));
                         }
                         ExprType::GreaterThanOrEqual => {
-                            lb.push((Bound::Included(value), expr));
+                            lower_bound_conjunctions.push(Bound::Included(value));
                         }
                         _ => unreachable!(),
                     }
@@ -561,29 +561,25 @@ impl Condition {
                 }
             }
 
+            let lower_bound = Self::merge_lower_bound_conjunctions(lower_bound_conjunctions);
+            let upper_bound = Self::merge_upper_bound_conjunctions(upper_bound_conjunctions);
+
+            if Self::is_invalid_range(&lower_bound, &upper_bound) {
+                return Ok(false_cond());
+            }
+
             // update scan_range
             match eq_conds.len() {
                 1 => {
+                    let eq_conds =
+                        Self::extract_eq_conds_within_range(eq_conds, &upper_bound, &lower_bound);
+                    if eq_conds.is_empty() {
+                        return Ok(false_cond());
+                    }
                     scan_range.eq_conds.extend(eq_conds.into_iter());
-                    // TODO: simplify bounds: it's either true or false according to whether lit is
-                    // included
-                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
                 }
                 0 => {
-                    if lb.len() > 1 || ub.len() > 1 {
-                        // TODO: simplify bounds: it can be merged into a single lb & ub.
-                        other_conds
-                            .extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
-                    } else if !lb.is_empty() || !ub.is_empty() {
-                        scan_range.range = (
-                            lb.first()
-                                .map(|(bound, _)| (bound.clone()))
-                                .unwrap_or(Bound::Unbounded),
-                            ub.first()
-                                .map(|(bound, _)| (bound.clone()))
-                                .unwrap_or(Bound::Unbounded),
-                        )
-                    }
+                    scan_range.range = (lower_bound, upper_bound);
                     other_conds.extend(groups[i + 1..].iter().flatten().cloned());
                     break;
                 }
@@ -594,7 +590,11 @@ impl Condition {
                     // a in (1,2) AND b = 1
                     // a in (1,2) AND b in (1,2)
                     // a in (1,2) AND b > 1
-                    other_conds.extend(lb.into_iter().chain(ub.into_iter()).map(|(_, expr)| expr));
+                    let eq_conds =
+                        Self::extract_eq_conds_within_range(eq_conds, &upper_bound, &lower_bound);
+                    if eq_conds.is_empty() {
+                        return Ok(false_cond());
+                    }
                     other_conds.extend(groups[i + 1..].iter().flatten().cloned());
                     let scan_ranges = eq_conds
                         .into_iter()
@@ -643,6 +643,119 @@ impl Condition {
                     true
                 }
             });
+    }
+
+    fn merge_lower_bound_conjunctions(lb: Vec<Bound<ScalarImpl>>) -> Bound<ScalarImpl> {
+        lb.into_iter()
+            .max_by(|a, b| {
+                // For lower bound, Unbounded means -inf
+                match (a, b) {
+                    (Bound::Included(_), Bound::Unbounded) => std::cmp::Ordering::Greater,
+                    (Bound::Excluded(_), Bound::Unbounded) => std::cmp::Ordering::Greater,
+                    (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Less,
+                    (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Less,
+                    (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
+                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    // excluded bound is strict than included bound so we assume it more greater.
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                        std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
+                        other => other,
+                    },
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                        std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
+                        other => other,
+                    },
+                }
+            })
+            .unwrap_or(Bound::Unbounded)
+    }
+
+    fn merge_upper_bound_conjunctions(ub: Vec<Bound<ScalarImpl>>) -> Bound<ScalarImpl> {
+        ub.into_iter()
+            .min_by(|a, b| {
+                // For upper bound, Unbounded means +inf
+                match (a, b) {
+                    (Bound::Included(_), Bound::Unbounded) => std::cmp::Ordering::Less,
+                    (Bound::Excluded(_), Bound::Unbounded) => std::cmp::Ordering::Less,
+                    (Bound::Unbounded, Bound::Included(_)) => std::cmp::Ordering::Greater,
+                    (Bound::Unbounded, Bound::Excluded(_)) => std::cmp::Ordering::Greater,
+                    (Bound::Unbounded, Bound::Unbounded) => std::cmp::Ordering::Equal,
+                    (Bound::Included(a), Bound::Included(b)) => a.cmp(b),
+                    (Bound::Excluded(a), Bound::Excluded(b)) => a.cmp(b),
+                    // excluded bound is strict than included bound so we assume it more greater.
+                    (Bound::Included(a), Bound::Excluded(b)) => match a.cmp(b) {
+                        std::cmp::Ordering::Equal => std::cmp::Ordering::Greater,
+                        other => other,
+                    },
+                    (Bound::Excluded(a), Bound::Included(b)) => match a.cmp(b) {
+                        std::cmp::Ordering::Equal => std::cmp::Ordering::Less,
+                        other => other,
+                    },
+                }
+            })
+            .unwrap_or(Bound::Unbounded)
+    }
+
+    fn is_invalid_range(lower_bound: &Bound<ScalarImpl>, upper_bound: &Bound<ScalarImpl>) -> bool {
+        match (lower_bound, upper_bound) {
+            (Bound::Included(l), Bound::Included(u)) => l > u,
+            (Bound::Included(l), Bound::Excluded(u)) => l >= u,
+            (Bound::Excluded(l), Bound::Included(u)) => l >= u,
+            (Bound::Excluded(l), Bound::Excluded(u)) => l >= u,
+            _ => false,
+        }
+    }
+
+    fn extract_eq_conds_within_range(
+        eq_conds: Vec<Option<ScalarImpl>>,
+        upper_bound: &Bound<ScalarImpl>,
+        lower_bound: &Bound<ScalarImpl>,
+    ) -> Vec<Option<ScalarImpl>> {
+        // defensive programming: for now we will guarantee that the range is valid before calling
+        // this function
+        if Self::is_invalid_range(lower_bound, upper_bound) {
+            return vec![];
+        }
+
+        let is_extract_null = upper_bound == &Bound::Unbounded && lower_bound == &Bound::Unbounded;
+
+        eq_conds
+            .into_iter()
+            .filter(|cond| {
+                if let Some(cond) = cond {
+                    match lower_bound {
+                        Bound::Included(val) => {
+                            if cond < val {
+                                return false;
+                            }
+                        }
+                        Bound::Excluded(val) => {
+                            if cond <= val {
+                                return false;
+                            }
+                        }
+                        Bound::Unbounded => {}
+                    }
+                    match upper_bound {
+                        Bound::Included(val) => {
+                            if cond > val {
+                                return false;
+                            }
+                        }
+                        Bound::Excluded(val) => {
+                            if cond >= val {
+                                return false;
+                            }
+                        }
+                        Bound::Unbounded => {}
+                    }
+                    true
+                } else {
+                    is_extract_null
+                }
+            })
+            .collect()
     }
 
     /// Split the condition expressions into `N` groups.
