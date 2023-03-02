@@ -156,6 +156,7 @@ pub async fn generate(
 }
 
 fn write_to_file(outdir: &str, name: &str, sql: &str) {
+    tracing::info!("[WRITE TO FILE]: {}/{}", outdir, name);
     let resolved = format!("{}/{}", outdir, name);
     let path = Path::new(&resolved);
     let mut file = match File::create(path) {
