@@ -41,10 +41,10 @@ pub enum ExprError {
     NumericOutOfRange,
 
     #[error("Numeric out of range: underflow")]
-    FloatUnderflow,
+    NumericUnderflow,
 
     #[error("Numeric out of range: overflow")]
-    FloatOverflow,
+    NumericOverflow,
 
     #[error("Division by zero")]
     DivisionByZero,

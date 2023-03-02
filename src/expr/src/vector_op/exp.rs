@@ -35,9 +35,9 @@ pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
         // means that the operation had an overflow or an underflow, and the appropriate
         // error should be returned.
         if res.is_infinite() {
-            Err(ExprError::FloatOverflow)
+            Err(ExprError::NumericOverflow)
         } else if res.is_zero() {
-            Err(ExprError::FloatUnderflow)
+            Err(ExprError::NumericUnderflow)
         } else {
             Ok(res)
         }
@@ -61,7 +61,7 @@ mod tests {
     fn underflow() {
         let res = exp_f64((-1000.0).into()).unwrap_err();
         match res {
-            ExprError::FloatUnderflow => (),
+            ExprError::NumericUnderflow => (),
             _ => panic!("Expected ExprError::FloatUnderflow"),
         }
     }
@@ -70,7 +70,7 @@ mod tests {
     fn overflow() {
         let res = exp_f64(1000.0.into()).unwrap_err();
         match res {
-            ExprError::FloatOverflow => (),
+            ExprError::NumericOverflow => (),
             _ => panic!("Expected ExprError::FloatUnderflow"),
         }
     }
