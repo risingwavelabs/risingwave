@@ -78,9 +78,9 @@ check_failing_queries() {
 # Upload step
 upload_queries() {
   pushd "$OUTDIR"
-#  git add .
-#  git commit --amend -m 'update queries'
-#  git push -f origin main
+  git add .
+  git commit --amend -m 'update queries'
+  git push -f origin main
   popd
 }
 
