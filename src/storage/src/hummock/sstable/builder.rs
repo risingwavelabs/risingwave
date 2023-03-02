@@ -208,6 +208,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             );
         }
 
+        let table_id = full_key.user_key.table_id.table_id();
         // TODO: refine me
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
@@ -246,6 +247,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.block_builder.is_empty() {
             self.block_metas.push(BlockMeta {
                 offset: self.writer.data_len() as u32,
+                table_id,
                 len: 0,
                 smallest_key: full_key.encode(),
                 uncompressed_size: 0,
