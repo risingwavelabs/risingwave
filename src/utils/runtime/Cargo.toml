@@ -15,7 +15,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-await-tree = "0.1"
+await-tree = "0.1.1"
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

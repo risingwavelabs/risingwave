@@ -10,7 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 async-trait = "0.1"
-await-tree = "0.1"
+await-tree = "0.1.1"
 aws-config = { workspace = true }
 aws-sdk-s3 = { version = "0.2.15", package = "madsim-aws-sdk-s3" }
 aws-smithy-http = { workspace = true }
