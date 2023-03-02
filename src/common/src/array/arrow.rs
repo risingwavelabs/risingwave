@@ -443,6 +443,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 Time64NanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
+            ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
@@ -642,7 +643,7 @@ mod tests {
                 array! { BoolArray, [Some(false), Some(false), Some(true), None]}.into(),
                 array! { I32Array, [Some(42), Some(28), Some(19), None] }.into(),
             ],
-            vec![DataType::Boolean, DataType::INT32],
+            vec![DataType::Boolean, DataType::Int32],
             vec![String::from("a"), String::from("b")],
         );
         assert_eq!(

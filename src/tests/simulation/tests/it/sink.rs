@@ -27,7 +27,7 @@ use rdkafka::{ClientConfig, Message, TopicPartitionList};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::{identity_contains, no_identity_contains};
 
-const ROOT_TABLE_CREATE: &str = "create table t (v1 int);";
+const ROOT_TABLE_CREATE: &str = "create table t (v1 int) append only;";
 const APPEND_ONLY_SINK_CREATE: &str = "create sink s1 from t with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_append_only', format='append_only');";
 const MV_CREATE: &str = "create materialized view m as select count(*) from t;";
 const DEBEZIUM_SINK_CREATE: &str = "create sink s2 from m with (connector='kafka', properties.bootstrap.server='192.168.11.1:29092', topic='t_sink_debezium', format='debezium');";

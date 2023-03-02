@@ -62,7 +62,7 @@ drop view not_exists.not_exists.not_exists;
 
 # 4.1. table
 statement ok
-create table t (v int);
+create table t (v int primary key);
 
 statement error Use `DROP TABLE`
 drop materialized view t;
@@ -360,6 +360,17 @@ create table sink(v int);
 
 statement error view.*exists
 create table v(v int);
+
+# 8. create with unsupport format
+statement error connector datagen does not support row format DebeziumJson
+create table err_t1 (v int) with (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) row format debezium_json;
 
 # cleanup
 

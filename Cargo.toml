@@ -37,7 +37,6 @@ members = [
   "src/tests/sqlsmith",
   "src/tracing",
   "src/udf",
-  "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
@@ -100,7 +99,7 @@ incremental = false
 opt-level = 1
 [profile.ci-dev.package."tokio"]
 opt-level = 3
-[profile.ci-dev.package."async_stack_trace"]
+[profile.ci-dev.package."await-tree"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
@@ -119,6 +118,7 @@ incremental = false
 [patch.crates-io]
 quanta = { git = "https://github.com/madsim-rs/quanta.git", rev = "a819877" }
 getrandom = { git = "https://github.com/madsim-rs/getrandom.git", rev = "cc95ee3" }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710" }
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }

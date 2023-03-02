@@ -21,6 +21,7 @@ use crate::error::{Result, RwError};
 
 pub mod addr;
 pub mod chunk_coalesce;
+pub mod column_index_mapping;
 pub mod compress;
 pub mod encoding_for_comparison;
 pub mod env_var;

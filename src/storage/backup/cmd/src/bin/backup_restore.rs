@@ -18,9 +18,9 @@ use risingwave_backup::error::BackupResult;
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> BackupResult<()> {
-    use clap::StructOpt;
+    use clap::Parser;
     let opts = risingwave_meta::backup_restore::RestoreOpts::parse();
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

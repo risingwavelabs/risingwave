@@ -14,7 +14,9 @@
 
 use async_trait::async_trait;
 use risingwave_pb::meta::system_params_service_server::SystemParamsService;
-use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
+use risingwave_pb::meta::{
+    GetSystemParamsRequest, GetSystemParamsResponse, SetSystemParamRequest, SetSystemParamResponse,
+};
 use tonic::{Request, Response, Status};
 
 use crate::manager::SystemParamManagerRef;
@@ -44,7 +46,18 @@ where
         &self,
         _request: Request<GetSystemParamsRequest>,
     ) -> Result<Response<GetSystemParamsResponse>, Status> {
-        let params = Some(self.system_params_manager.get_params().clone());
+        let params = Some(self.system_params_manager.get_pb_params().await);
         Ok(Response::new(GetSystemParamsResponse { params }))
+    }
+
+    async fn set_system_param(
+        &self,
+        request: Request<SetSystemParamRequest>,
+    ) -> Result<Response<SetSystemParamResponse>, Status> {
+        let req = request.into_inner();
+        self.system_params_manager
+            .set_param(&req.param, req.value)
+            .await?;
+        Ok(Response::new(SetSystemParamResponse {}))
     }
 }

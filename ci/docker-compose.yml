@@ -24,13 +24,17 @@ services:
       - MYSQL_USER=mysqluser
       - MYSQL_PASSWORD=mysqlpw
     healthcheck:
-      test: [ "CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p123456" ]
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -u root -p123456"
+        ]
       interval: 5s
       timeout: 5s
       retries: 5
 
   source-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230302
     depends_on:
       - mysql
       - db
@@ -38,7 +42,7 @@ services:
       - ..:/risingwave
 
   sink-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230302
     depends_on:
       - mysql
       - db
@@ -46,12 +50,12 @@ services:
       - ..:/risingwave
 
   rw-build-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230302
     volumes:
       - ..:/risingwave
 
   regress-test-env:
-    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230208_05
+    image: public.ecr.aws/x5u3w5h6/rw-build-env:v20230302
     depends_on:
       db:
         condition: service_healthy

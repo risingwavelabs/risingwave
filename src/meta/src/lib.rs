@@ -33,6 +33,7 @@
 #![feature(try_blocks)]
 #![cfg_attr(coverage, feature(no_coverage))]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
+#![feature(is_sorted)]
 
 pub mod backup_restore;
 mod barrier;
@@ -52,6 +53,7 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
+use risingwave_pb::meta::SystemParams;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
@@ -127,7 +129,7 @@ pub struct MetaNodeOpts {
 /// Command-line arguments for compute-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 pub struct OverrideConfigOpts {
-    #[clap(long, env = "RW_BACKEND", arg_enum)]
+    #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 
@@ -166,7 +168,7 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 
-use risingwave_common::config::{load_config, MetaBackend};
+use risingwave_common::config::{load_config, MetaBackend, RwConfig};
 use tracing::info;
 
 /// Start meta node
@@ -201,12 +203,12 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             MetaBackend::Mem => MetaStoreBackend::Mem,
         };
 
+        validate_config(&config);
+
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
-        let barrier_interval = Duration::from_millis(config.streaming.barrier_interval_ms as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
-        let checkpoint_frequency = config.streaming.checkpoint_frequency;
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
@@ -216,17 +218,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             dashboard_addr,
             ui_path: opts.dashboard_ui_path,
         };
-        let (join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
+        let (mut join_handle, leader_lost_handle, shutdown_send) = rpc_serve(
             add_info,
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
-                barrier_interval,
                 in_flight_barrier_nums,
                 max_idle_ms,
-                checkpoint_frequency,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
@@ -238,32 +238,47 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
-                backup_storage_url: config.backup.storage_url,
-                backup_storage_directory: config.backup.storage_directory,
-                sstable_size_mb: config.storage.sstable_size_mb,
-                block_size_kb: config.storage.block_size_kb,
-                bloom_false_positive: config.storage.bloom_false_positive,
-                state_store: opts.state_store,
-                data_directory: config.storage.data_directory,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                periodic_ttl_reclaim_compaction_interval_sec: config
+                    .meta
+                    .periodic_ttl_reclaim_compaction_interval_sec,
+            },
+            SystemParams {
+                barrier_interval_ms: Some(config.streaming.barrier_interval_ms),
+                checkpoint_frequency: Some(config.streaming.checkpoint_frequency as u64),
+                sstable_size_mb: Some(config.storage.sstable_size_mb),
+                block_size_kb: Some(config.storage.block_size_kb),
+                bloom_false_positive: Some(config.storage.bloom_false_positive),
+                state_store: Some(opts.state_store.unwrap_or_default()),
+                data_directory: Some(config.storage.data_directory),
+                backup_storage_url: Some(config.backup.storage_url),
+                backup_storage_directory: Some(config.backup.storage_directory),
             },
         )
         .await
         .unwrap();
 
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            tokio::select! {
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("receive ctrl+c");
-                    shutdown_send.send(()).unwrap();
-                    join_handle.await.unwrap();
-                    leader_lost_handle.abort();
-                },
+        let res = tokio::select! {
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("receive ctrl+c");
+                shutdown_send.send(()).unwrap();
+                join_handle.await
             }
-        } else {
-            join_handle.await.unwrap();
+            res = &mut join_handle => res,
+        };
+        res.unwrap();
+        if let Some(leader_lost_handle) = leader_lost_handle {
+            leader_lost_handle.abort();
         }
     })
+}
+
+fn validate_config(config: &RwConfig) {
+    if config.meta.meta_leader_lease_secs <= 1 {
+        let error_msg = "meta leader lease secs should be larger than 1";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
 }

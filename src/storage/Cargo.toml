@@ -16,8 +16,8 @@ normal = ["workspace-hack"]
 [dependencies]
 arc-swap = "1"
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
+await-tree = "0.1.1"
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
@@ -62,6 +62,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tracing = "0.1"
+xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
 

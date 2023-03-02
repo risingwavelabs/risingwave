@@ -14,17 +14,19 @@
 
 use core::convert::Into;
 use core::fmt::Formatter;
-use std::cell::RefCell;
+use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use risingwave_sqlparser::ast::{ExplainOptions, ExplainType};
 
-use crate::expr::{CorrelatedId, ExprImpl, ExprRewriter, SessionTimezone};
+use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::WithOptions;
+
+const RESERVED_ID_NUM: u16 = 10000;
 
 pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
@@ -46,6 +48,8 @@ pub struct OptimizerContext {
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
     session_timezone: RefCell<SessionTimezone>,
+    /// Store expr display id.
+    next_expr_display_id: RefCell<usize>,
 }
 
 pub type OptimizerContextRef = Rc<OptimizerContext>;
@@ -64,7 +68,7 @@ impl OptimizerContext {
         ));
         Self {
             session_ctx: handler_args.session,
-            next_plan_node_id: RefCell::new(0),
+            next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
             explain_options,
@@ -73,6 +77,7 @@ impl OptimizerContext {
             next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
             session_timezone,
+            next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
         }
     }
 
@@ -91,6 +96,7 @@ impl OptimizerContext {
             next_correlated_id: RefCell::new(0),
             with_options: Default::default(),
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
+            next_expr_display_id: RefCell::new(0),
         }
         .into()
     }
@@ -98,6 +104,27 @@ impl OptimizerContext {
     pub fn next_plan_node_id(&self) -> PlanNodeId {
         *self.next_plan_node_id.borrow_mut() += 1;
         PlanNodeId(*self.next_plan_node_id.borrow())
+    }
+
+    pub fn get_plan_node_id(&self) -> i32 {
+        *self.next_plan_node_id.borrow()
+    }
+
+    pub fn set_plan_node_id(&self, next_plan_node_id: i32) {
+        *self.next_plan_node_id.borrow_mut() = next_plan_node_id;
+    }
+
+    pub fn next_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow_mut() += 1;
+        *self.next_expr_display_id.borrow()
+    }
+
+    pub fn get_expr_display_id(&self) -> usize {
+        *self.next_expr_display_id.borrow()
+    }
+
+    pub fn set_expr_display_id(&self, expr_display_id: usize) {
+        *self.next_expr_display_id.borrow_mut() = expr_display_id;
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {
@@ -113,15 +140,19 @@ impl OptimizerContext {
         self.explain_options.trace
     }
 
+    pub fn is_explain_logical(&self) -> bool {
+        self.explain_options.explain_type == ExplainType::Logical
+    }
+
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.explain_options.explain_type == ExplainType::Logical
-            && self.logical_explain.borrow().is_some()
-        {
+        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
             return;
         }
         let mut optimizer_trace = self.optimizer_trace.borrow_mut();
-        optimizer_trace.push(str.into());
+        let string = str.into();
+        tracing::trace!("{}", string);
+        optimizer_trace.push(string);
         optimizer_trace.push("\n".to_string());
     }
 
@@ -155,9 +186,8 @@ impl OptimizerContext {
         &self.normalized_sql
     }
 
-    pub fn expr_with_session_timezone(&self, expr: ExprImpl) -> ExprImpl {
-        let mut session_timezone = self.session_timezone.borrow_mut();
-        session_timezone.rewrite_expr(expr)
+    pub fn session_timezone(&self) -> RefMut<'_, SessionTimezone> {
+        self.session_timezone.borrow_mut()
     }
 
     /// Appends any information that the optimizer needs to alert the user about to the PG NOTICE

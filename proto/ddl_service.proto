@@ -206,6 +206,8 @@ message ReplaceTablePlanRequest {
   catalog.Table table = 1;
   // The new materialization plan, where all schema are updated.
   stream_plan.StreamFragmentGraph fragment_graph = 2;
+  // The mapping from the old columns to the new columns of the table.
+  catalog.ColIndexMapping table_col_index_mapping = 3;
 }
 
 message ReplaceTablePlanResponse {
@@ -221,6 +223,18 @@ message GetTableRequest {
 
 message GetTableResponse {
   catalog.Table table = 1;
+}
+
+message GetDdlProgressRequest {}
+
+message DdlProgress {
+  uint64 id = 1;
+  string statement = 2;
+  string progress = 3;
+}
+
+message GetDdlProgressResponse {
+  repeated DdlProgress ddl_progress = 1;
 }
 
 service DdlService {
@@ -245,4 +259,5 @@ service DdlService {
   rpc DropFunction(DropFunctionRequest) returns (DropFunctionResponse);
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
+  rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
 }

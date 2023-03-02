@@ -30,7 +30,9 @@ use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Direction;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay, IndexRewriter};
+use crate::utils::{
+    ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
+};
 use crate::TableCatalog;
 
 /// [`Agg`] groups input data by their group key and computes aggregation functions.
@@ -39,7 +41,7 @@ use crate::TableCatalog;
 /// functions in the `SELECT` clause.
 ///
 /// The output schema will first include the group key and then the aggregation calls.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Agg<PlanRef> {
     pub agg_calls: Vec<PlanAggCall>,
     pub group_key: Vec<usize>,
@@ -296,9 +298,14 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         AggCallState::ResultValue
                     }
                 }
-                AggKind::Sum | AggKind::Sum0 | AggKind::Count | AggKind::Avg => {
-                    AggCallState::ResultValue
-                }
+                AggKind::Sum
+                | AggKind::Sum0
+                | AggKind::Count
+                | AggKind::Avg
+                | AggKind::StddevPop
+                | AggKind::StddevSamp
+                | AggKind::VarPop
+                | AggKind::VarSamp => AggCallState::ResultValue,
                 AggKind::ApproxCountDistinct => {
                     if !in_append_only {
                         // FIXME: now the approx count distinct on a non-append-only stream does not
@@ -457,7 +464,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 ///
 /// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByField {
     pub input: InputRef,
     pub direction: Direction,
@@ -481,7 +488,7 @@ impl fmt::Debug for PlanAggOrderByField {
     }
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggOrderByFieldDisplay<'a> {
     pub plan_agg_order_by_field: &'a PlanAggOrderByField,
     pub input_schema: &'a Schema,
@@ -522,7 +529,7 @@ impl PlanAggOrderByField {
 
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct PlanAggCall {
     /// Kind of aggregation function
     pub agg_kind: AggKind,
@@ -601,7 +608,7 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self, ctx: OptimizerContextRef) -> ProstAggCall {
+    pub fn to_protobuf(&self) -> ProstAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
@@ -612,24 +619,11 @@ impl PlanAggCall {
                 .iter()
                 .map(PlanAggOrderByField::to_protobuf)
                 .collect(),
-            filter: self
-                .filter
-                .as_expr_unless_true()
-                .map(|x| ctx.expr_with_session_timezone(x).to_expr_proto()),
+            filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
 
-    pub fn partial_to_total_agg_call(
-        &self,
-        partial_output_idx: usize,
-        is_stream_row_count: bool,
-    ) -> PlanAggCall {
-        if self.agg_kind == AggKind::Count && is_stream_row_count {
-            // For stream row count agg, should only count output rows of partial phase,
-            // but not all inputs of partial phase. Here we just generate exact the same
-            // agg call for global phase as partial phase, which should be `count(*)`.
-            return self.clone();
-        }
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,
@@ -639,6 +633,9 @@ impl PlanAggCall {
             }
             AggKind::ArrayAgg => {
                 panic!("2-phase ArrayAgg is not supported yet")
+            }
+            AggKind::StddevPop | AggKind::StddevSamp | AggKind::VarPop | AggKind::VarSamp => {
+                panic!("Stddev/Var aggregation should have been rewritten to Sum, Count and Case")
             }
         };
         PlanAggCall {

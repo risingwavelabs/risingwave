@@ -29,7 +29,7 @@ use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMapping;
 use crate::OptimizerContextRef;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalNow {
     pub base: PlanBase,
 }

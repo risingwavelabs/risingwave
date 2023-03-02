@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -29,14 +28,13 @@ use tokio::time::Instant;
 
 use crate::parser::ParserConfig;
 use crate::source::data_gen_util::spawn_data_generation_stream;
-use crate::source::monitor::SourceMetrics;
 use crate::source::nexmark::source::combined_event::{
     combined_event_to_row, event_to_row, get_event_data_types, new_combined_event,
 };
 use crate::source::nexmark::{NexmarkProperties, NexmarkSplit};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
-    StreamChunkWithState,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader, StreamChunkWithState,
 };
 
 #[derive(Debug)]
@@ -51,12 +49,11 @@ pub struct NexmarkSplitReader {
 
     row_id_index: Option<usize>,
     split_id: SplitId,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for NexmarkSplitReader {
+impl SplitReader for NexmarkSplitReader {
     type Properties = NexmarkProperties;
 
     #[allow(clippy::unused_async)]
@@ -64,8 +61,7 @@ impl SplitReaderV2 for NexmarkSplitReader {
         properties: NexmarkProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         tracing::debug!("Splits for nexmark found! {:?}", splits);
@@ -104,8 +100,7 @@ impl SplitReaderV2 for NexmarkSplitReader {
             use_real_time: properties.use_real_time,
             min_event_gap_in_ns: properties.min_event_gap_in_ns,
             row_id_index,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -199,7 +194,6 @@ mod tests {
             let mut reader = NexmarkSplitReader::new(
                 props.clone(),
                 state,
-                Default::default(),
                 Default::default(),
                 Default::default(),
                 None,

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::mem::swap;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Result};
@@ -28,9 +27,9 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::{SourceMessage, MAX_CHUNK_SIZE};
 use crate::source::kafka::KafkaProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(KafkaSplitReader, KafkaProperties);
@@ -41,23 +40,22 @@ pub struct KafkaSplitReader {
     stop_offset: Option<i64>,
     bytes_per_second: usize,
     max_num_messages: usize,
+    enable_upsert: bool,
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for KafkaSplitReader {
+impl SplitReader for KafkaSplitReader {
     type Properties = KafkaProperties;
 
     async fn new(
         properties: KafkaProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         let mut config = ClientConfig::new();
@@ -137,8 +135,12 @@ impl SplitReaderV2 for KafkaSplitReader {
             max_num_messages,
             split_id,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
+            enable_upsert: properties
+                .upsert
+                .as_ref()
+                .filter(|x| *x == "true")
+                .is_some(),
         })
     }
 
@@ -174,7 +176,12 @@ impl KafkaSplitReader {
                     Some(payload) => payload.len(),
                 };
                 num_messages += 1;
-                res.push(SourceMessage::from(msg));
+                if self.enable_upsert {
+                    res.push(SourceMessage::from_kafka_message_upsert(msg));
+                } else {
+                    res.push(SourceMessage::from(msg));
+                }
+
                 if let Some(stop_offset) = self.stop_offset {
                     if cur_offset == stop_offset - 1 {
                         tracing::debug!(

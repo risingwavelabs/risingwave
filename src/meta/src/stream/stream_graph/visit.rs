@@ -17,9 +17,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragment;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{agg_call_state, StreamNode};
 
-/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
-/// [`StreamFragment`] recursively.
-pub fn visit_fragment<F>(fragment: &mut StreamFragment, mut f: F)
+/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s recursively.
+pub fn visit_stream_node<F>(stream_node: &mut StreamNode, mut f: F)
 where
     F: FnMut(&mut NodeBody),
 {
@@ -33,13 +32,22 @@ where
         }
     }
 
-    visit_inner(fragment.node.as_mut().unwrap(), &mut f)
+    visit_inner(stream_node, &mut f)
+}
+
+/// A utility for visiting and mutating the [`NodeBody`] of the [`StreamNode`]s in a
+/// [`StreamFragment`] recursively.
+pub fn visit_fragment<F>(fragment: &mut StreamFragment, f: F)
+where
+    F: FnMut(&mut NodeBody),
+{
+    visit_stream_node(fragment.node.as_mut().unwrap(), f)
 }
 
 /// Visit the internal tables of a [`StreamFragment`].
 pub(super) fn visit_internal_tables<F>(fragment: &mut StreamFragment, mut f: F)
 where
-    F: FnMut(&mut Table, &'static str),
+    F: FnMut(&mut Table, &str),
 {
     macro_rules! always {
         ($table:expr, $name:expr) => {{
@@ -93,6 +101,9 @@ where
                         always!(s.table, "HashAgg");
                     }
                 }
+                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                    f(dedup_table, &format!("HashAggDedupForCol{}", distinct_col));
+                }
             }
             NodeBody::GlobalSimpleAgg(node) => {
                 assert_eq!(node.agg_call_states.len(), node.agg_calls.len());
@@ -103,6 +114,12 @@ where
                     {
                         always!(s.table, "GlobalSimpleAgg");
                     }
+                }
+                for (distinct_col, dedup_table) in &mut node.distinct_dedup_tables {
+                    f(
+                        dedup_table,
+                        &format!("GlobalSimpleAggDedupForCol{}", distinct_col),
+                    );
                 }
             }
 

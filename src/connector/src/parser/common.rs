@@ -62,6 +62,11 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             BorrowedValue::Static(_) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
+        DataType::Jsonb => {
+            let v: serde_json::Value = v.clone().try_into()?;
+            #[expect(clippy::disallowed_methods)]
+            ScalarImpl::Jsonb(risingwave_common::array::JsonbVal::from_serde(v))
+        }
         DataType::Struct(struct_type_info) => {
             let fields = struct_type_info
                 .field_names

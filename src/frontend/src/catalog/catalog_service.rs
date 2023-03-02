@@ -19,6 +19,7 @@ use parking_lot::{RawRwLock, RwLock};
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
@@ -76,6 +77,13 @@ pub trait CatalogWriter: Send + Sync {
         source: Option<ProstSource>,
         table: ProstTable,
         graph: StreamFragmentGraph,
+    ) -> Result<()>;
+
+    async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
     ) -> Result<()>;
 
     async fn create_index(
@@ -183,6 +191,19 @@ impl CatalogWriter for CatalogWriterImpl {
         graph: StreamFragmentGraph,
     ) -> Result<()> {
         let (_, version) = self.meta_client.create_table(source, table, graph).await?;
+        self.wait_version(version).await
+    }
+
+    async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+        mapping: ColIndexMapping,
+    ) -> Result<()> {
+        let version = self
+            .meta_client
+            .replace_table(table, graph, mapping)
+            .await?;
         self.wait_version(version).await
     }
 

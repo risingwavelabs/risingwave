@@ -41,5 +41,4 @@
     LogicalProject { exprs: [2:Int32] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [2:Int32] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[2:Int32]] }

@@ -27,7 +27,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::{TableCatalog, WithOptions};
 
 /// [`Source`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
@@ -38,6 +38,8 @@ pub struct Source {
     pub row_id_index: Option<usize>,
     /// Whether the "SourceNode" should generate the row id column for append only source
     pub gen_row_id: bool,
+    /// True if it is a source created when creating table with a source.
+    pub for_table: bool,
 }
 
 impl GenericPlanNode for Source {

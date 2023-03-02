@@ -20,21 +20,30 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::generic::PlanAggCall;
 use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::ExprRewriter;
-use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
-    /// an optional column index which is the vnode of each row computed by the input's consistent
-    /// hash distribution
-    vnode_col_idx: Option<usize>,
     logical: LogicalAgg,
+
+    /// An optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution.
+    vnode_col_idx: Option<usize>,
+
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 
 impl StreamHashAgg {
-    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>, row_count_idx: usize) -> Self {
+        assert_eq!(
+            logical.agg_calls()[row_count_idx],
+            PlanAggCall::count_star()
+        );
+
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -67,8 +76,9 @@ impl StreamHashAgg {
         );
         StreamHashAgg {
             base,
-            vnode_col_idx,
             logical,
+            vnode_col_idx,
+            row_count_idx,
         }
     }
 
@@ -78,6 +88,10 @@ impl StreamHashAgg {
 
     pub fn group_key(&self) -> &[usize] {
         self.logical.group_key()
+    }
+
+    pub(crate) fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.logical.i2o_col_mapping()
     }
 }
 
@@ -97,7 +111,11 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
+        Self::new(
+            self.logical.clone_with_input(input),
+            self.vnode_col_idx,
+            self.row_count_idx,
+        )
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -114,7 +132,7 @@ impl StreamNode for StreamHashAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
 
             is_append_only: self.input().append_only(),
@@ -129,8 +147,16 @@ impl StreamNode for StreamHashAgg {
             ),
             distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
-                .map(|(key_idx, table)| (key_idx as u32, table.to_internal_table_prost()))
+                .map(|(key_idx, table)| {
+                    (
+                        key_idx as u32,
+                        table
+                            .with_id(state.gen_table_id_wrapped())
+                            .to_internal_table_prost(),
+                    )
+                })
                 .collect(),
+            row_count_index: self.row_count_idx as u32,
         })
     }
 }
@@ -148,6 +174,7 @@ impl ExprRewritable for StreamHashAgg {
                 .unwrap()
                 .clone(),
             self.vnode_col_idx,
+            self.row_count_idx,
         )
         .into()
     }

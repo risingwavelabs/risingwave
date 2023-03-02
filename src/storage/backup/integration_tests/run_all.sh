@@ -11,3 +11,5 @@ for t in "${tests[@]}"
 do
   bash "${DIR}/${t}"
 done
+
+echo "all tests succeeded"

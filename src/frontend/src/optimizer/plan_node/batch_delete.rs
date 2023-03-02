@@ -26,7 +26,7 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchDelete` implements [`LogicalDelete`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchDelete {
     pub base: PlanBase,
     logical: LogicalDelete,
@@ -75,6 +75,7 @@ impl ToBatchProst for BatchDelete {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Delete(DeleteNode {
             table_id: self.logical.table_id().table_id(),
+            table_version_id: self.logical.table_version_id(),
             returning: self.logical.has_returning(),
         })
     }

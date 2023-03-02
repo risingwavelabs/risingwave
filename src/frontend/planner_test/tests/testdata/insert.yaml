@@ -14,7 +14,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[22.33:Decimal::Float32, 33:Int32], [44:Int32::Float32, 55.0:Decimal::Int32]] }
+      └─BatchValues { rows: [[22.33:Float32, 33:Int32], [44:Float32, 55:Int32]] }
 - name: prohibit inserting different number of nulls per row
   sql: |
     create table t (v1 real, v2 int, v3 varchar);
@@ -27,7 +27,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[1:Int32::Float32, 2:Int32, null:Varchar]] }
+      └─BatchValues { rows: [[1:Float32, 2:Int32, null:Varchar]] }
 - name: insert values with implicit null (multiple rows)
   sql: |
     create table t (v1 real, v2 int, v3 varchar);
@@ -35,7 +35,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [[1:Int32::Float32, 2:Int32, null:Varchar], [3:Int32::Float32, 4:Int32, null:Varchar]] }
+      └─BatchValues { rows: [[1:Float32, 2:Int32, null:Varchar], [3:Float32, 4:Int32, null:Varchar]] }
 - name: implicit null user defined columns 1
   sql: |
     create table t (v1 int, v2 int);
@@ -129,7 +129,7 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
-      └─BatchValues { rows: [['2020-01-01 01:02:03':Timestamp::Time], ['03:04:05':Time]] }
+      └─BatchValues { rows: [['01:02:03':Time], ['03:04:05':Time]] }
 - name: a `VALUES` without insert context may be invalid on its own (compare with above)
   sql: |
     create table t (v1 time);
@@ -149,7 +149,7 @@
   sql: |
     values (1), (null), (2.3);
   batch_plan: |
-    BatchValues { rows: [[1:Int32::Decimal], [null:Decimal], [2.3:Decimal]] }
+    BatchValues { rows: [[1:Decimal], [null:Decimal], [2.3:Decimal]] }
 - name: rows of different number of columns
   sql: |
     values (1), (2, 3);
@@ -171,7 +171,7 @@
     BatchExchange { order: [], dist: Single }
     └─BatchInsert { table: t }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchProject { exprs: ['2020-01-01 01:02:03':Timestamp::Time, 11:Int32, 4.5:Decimal::Float32] }
+        └─BatchProject { exprs: ['01:02:03':Time, 11:Int32, 4.5:Float32] }
           └─BatchScan { table: t, columns: [], distribution: SomeShard }
 - name: insert into select with cast error
   sql: |
@@ -203,12 +203,12 @@
     create table t (a int, b int);
     insert into t values (0,1), (1,2) returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
+    LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1)] }
+    └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
       └─BatchInsert { table: t, returning: true }
         └─BatchValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
 - name: insert with select and returning
@@ -216,14 +216,14 @@
     create table t (a int, b int);
     insert into t select distinct * from t returning *, a, a+b;
   logical_plan: |
-    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
+    LogicalProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
       └─LogicalAgg { group_key: [t.a, t.b], aggs: [] }
         └─LogicalProject { exprs: [t.a, t.b] }
           └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b)] }
+    └─BatchProject { exprs: [t.a, t.b, t.a, (t.a + t.b) as $expr1] }
       └─BatchInsert { table: t, returning: true }
         └─BatchExchange { order: [], dist: Single }
           └─BatchHashAgg { group_key: [t.a, t.b], aggs: [] }

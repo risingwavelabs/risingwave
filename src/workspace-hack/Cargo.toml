@@ -27,8 +27,8 @@ aws-smithy-client = { version = "0.51", default-features = false, features = ["n
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
@@ -78,20 +78,21 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
 prost-types = { version = "0.11" }
 rand = { version = "0.8", features = ["small_rng"] }
+rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
-stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
+subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
@@ -100,7 +101,6 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
-triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zstd = { version = "0.11" }
@@ -119,8 +119,8 @@ aws-types = { version = "0.51", default-features = false, features = ["hardcoded
 base64 = { version = "0.21" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
-chrono = { version = "0.4" }
-clap = { version = "3", features = ["derive", "env"] }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive", "env"] }
 combine = { version = "4" }
 criterion = { version = "0.4", features = ["async_futures", "async_tokio"] }
 crossbeam-channel = { version = "0.5" }
@@ -171,21 +171,22 @@ prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
 prost-types = { version = "0.11" }
 rand = { version = "0.8", features = ["small_rng"] }
+rand_chacha = { version = "0.3" }
 rand_core = { version = "0.6", default-features = false, features = ["std"] }
 regex = { version = "1" }
 regex-syntax = { version = "0.6" }
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
-stable_deref_trait = { version = "1" }
 strum = { version = "0.24", features = ["derive"] }
+subtle = { version = "2" }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-stream = { version = "0.1", features = ["net"] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tonic-build = { version = "0.8" }
@@ -195,7 +196,6 @@ tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "parking_lot"] }
-triomphe = { version = "0.1" }
 url = { version = "2", features = ["serde"] }
 uuid = { version = "1", features = ["fast-rng", "serde", "v4"] }
 zstd = { version = "0.11" }

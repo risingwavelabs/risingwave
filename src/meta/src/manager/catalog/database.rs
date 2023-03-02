@@ -68,7 +68,7 @@ pub struct DatabaseManager {
     pub(super) in_progress_creation_tracker: HashSet<RelationKey>,
     // In-progress creating streaming job tracker: this is a temporary workaround to avoid clean up
     // creating streaming jobs.
-    pub(super) in_progress_creation_streaming_job: HashSet<TableId>,
+    pub(super) in_progress_creation_streaming_job: HashMap<TableId, RelationKey>,
     // In-progress creating tables, including internal tables.
     pub(super) in_progress_creating_tables: HashMap<TableId, Table>,
 }
@@ -93,7 +93,12 @@ impl DatabaseManager {
         );
         let schemas = BTreeMap::from_iter(schemas.into_iter().map(|schema| (schema.id, schema)));
         let sources = BTreeMap::from_iter(sources.into_iter().map(|source| (source.id, source)));
-        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| (sink.id, sink)));
+        let sinks = BTreeMap::from_iter(sinks.into_iter().map(|sink| {
+            for depend_relation_id in &sink.dependent_relations {
+                *relation_ref_count.entry(*depend_relation_id).or_default() += 1;
+            }
+            (sink.id, sink)
+        }));
         let indexes = BTreeMap::from_iter(indexes.into_iter().map(|index| (index.id, index)));
         let tables = BTreeMap::from_iter(tables.into_iter().map(|table| {
             for depend_relation_id in &table.dependent_relations {
@@ -120,7 +125,7 @@ impl DatabaseManager {
             functions,
             relation_ref_count,
             in_progress_creation_tracker: HashSet::default(),
-            in_progress_creation_streaming_job: HashSet::default(),
+            in_progress_creation_streaming_job: HashMap::default(),
             in_progress_creating_tables: HashMap::default(),
         })
     }
@@ -195,15 +200,14 @@ impl DatabaseManager {
         self.tables.values().cloned().collect_vec()
     }
 
-    pub fn get_table_options(&self, table_ids: &[TableId]) -> HashMap<TableId, TableOption> {
+    pub fn get_table(&self, table_id: TableId) -> Option<&Table> {
+        self.tables.get(&table_id)
+    }
+
+    pub fn get_all_table_options(&self) -> HashMap<TableId, TableOption> {
         self.tables
             .iter()
-            .filter_map(|(id, table)| {
-                if table_ids.contains(id) {
-                    return Some((*id, TableOption::build_table_option(&table.properties)));
-                }
-                None
-            })
+            .map(|(id, table)| (*id, TableOption::build_table_option(&table.properties)))
             .collect()
     }
 
@@ -288,8 +292,9 @@ impl DatabaseManager {
         self.in_progress_creation_tracker.insert(relation.clone());
     }
 
-    pub fn mark_creating_streaming_job(&mut self, table_id: TableId) {
-        self.in_progress_creation_streaming_job.insert(table_id);
+    pub fn mark_creating_streaming_job(&mut self, table_id: TableId, key: RelationKey) {
+        self.in_progress_creation_streaming_job
+            .insert(table_id, key);
     }
 
     pub fn unmark_creating(&mut self, relation: &RelationKey) {
@@ -300,8 +305,15 @@ impl DatabaseManager {
         self.in_progress_creation_streaming_job.remove(&table_id);
     }
 
+    pub fn find_creating_streaming_job_id(&self, key: &RelationKey) -> Option<TableId> {
+        self.in_progress_creation_streaming_job
+            .iter()
+            .find(|(_, v)| *v == key)
+            .map(|(k, _)| *k)
+    }
+
     pub fn all_creating_streaming_jobs(&self) -> impl Iterator<Item = TableId> + '_ {
-        self.in_progress_creation_streaming_job.iter().cloned()
+        self.in_progress_creation_streaming_job.keys().cloned()
     }
 
     pub fn mark_creating_tables(&mut self, tables: &[Table]) {

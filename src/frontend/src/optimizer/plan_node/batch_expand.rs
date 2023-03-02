@@ -27,7 +27,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
     pub base: PlanBase,
     logical: LogicalExpand,

@@ -21,11 +21,11 @@ enable_jemalloc_on_linux!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
-    use clap::StructOpt;
+    use clap::Parser;
 
     let opts = risingwave_ctl::CliOpts::parse();
 
-    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+    risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
     // Note: Use a simple current thread runtime for ctl.
     // When there's a heavy workload, multiple thread runtime seems to respond slowly. May need

@@ -32,7 +32,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 18] = [
+const CONFIG_KEYS: [&str; 19] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -51,6 +51,7 @@ const CONFIG_KEYS: [&str; 18] = [
     "RW_STREAMING_ENABLE_DELTA_JOIN",
     "RW_ENABLE_TWO_PHASE_AGG",
     "RW_FORCE_TWO_PHASE_AGG",
+    "RW_ENABLE_SHARE_PLAN",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -73,6 +74,7 @@ const STREAMING_PARALLELISM: usize = 14;
 const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
 const ENABLE_TWO_PHASE_AGG: usize = 16;
 const FORCE_TWO_PHASE_AGG: usize = 17;
+const RW_ENABLE_SHARE_PLAN: usize = 18;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -271,6 +273,7 @@ type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
+type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -338,6 +341,11 @@ pub struct ConfigMap {
     /// optimizations. Defaults to false.
     /// Setting this to true will always set `ENABLE_TWO_PHASE_AGG` to false.
     force_two_phase_agg: ForceTwoPhaseAgg,
+
+    /// Enable sharing of common sub-plans.
+    /// This means that DAG structured query plans can be constructed,
+    /// rather than only tree structured query plans.
+    enable_share_plan: EnableSharePlan,
 }
 
 impl ConfigMap {
@@ -389,6 +397,8 @@ impl ConfigMap {
             if *self.force_two_phase_agg {
                 self.enable_two_phase_agg = ConfigBool(true);
             }
+        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
+            self.enable_share_plan = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -433,6 +443,8 @@ impl ConfigMap {
             Ok(self.enable_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
             Ok(self.force_two_phase_agg.to_string())
+        } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
+            Ok(self.enable_share_plan.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -521,9 +533,14 @@ impl ConfigMap {
                 description: String::from("Enable two phase aggregation.")
             },
             VariableInfo{
-                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
-                setting : self.enable_two_phase_agg.to_string(),
+                name : ForceTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.force_two_phase_agg.to_string(),
                 description: String::from("Force two phase aggregation.")
+            },
+            VariableInfo{
+                name : EnableSharePlan::entry_name().to_lowercase(),
+                setting : self.enable_share_plan.to_string(),
+                description: String::from("Enable sharing of common sub-plans. This means that DAG structured query plans can be constructed, rather than only tree structured query plans.")
             },
         ]
     }
@@ -604,5 +621,9 @@ impl ConfigMap {
 
     pub fn get_force_two_phase_agg(&self) -> bool {
         *self.force_two_phase_agg
+    }
+
+    pub fn get_enable_share_plan(&self) -> bool {
+        *self.enable_share_plan
     }
 }

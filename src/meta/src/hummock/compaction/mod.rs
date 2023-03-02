@@ -15,6 +15,7 @@
 pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
+use risingwave_common::catalog::TableOption;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -32,8 +33,8 @@ use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
 
 pub use crate::hummock::compaction::level_selector::{
-    default_level_selector, DynamicLevelSelector, LevelSelector, ManualCompactionSelector,
-    SpaceReclaimCompactionSelector, TtlCompactionSelector,
+    default_level_selector, DynamicLevelSelector, DynamicLevelSelectorCore, LevelSelector,
+    ManualCompactionSelector, SpaceReclaimCompactionSelector, TtlCompactionSelector,
 };
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
@@ -121,12 +122,19 @@ impl CompactStatus {
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
         selector: &mut Box<dyn LevelSelector>,
+        table_id_to_options: HashMap<u32, TableOption>,
     ) -> Option<CompactTask> {
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
         // layer must be larger.
-        let ret =
-            selector.pick_compaction(task_id, group, levels, &mut self.level_handlers, stats)?;
+        let ret = selector.pick_compaction(
+            task_id,
+            group,
+            levels,
+            &mut self.level_handlers,
+            stats,
+            table_id_to_options,
+        )?;
         let target_level_id = ret.input.target_level;
 
         let compression_algorithm = match ret.compression_algorithm.as_str() {
@@ -305,17 +313,28 @@ pub fn create_compaction_task(
         let step = (input.target_level - base_level) / 2;
         compaction_config.target_file_size_base << step
     };
-    let compression_algorithm = if input.target_level == 0 {
-        compaction_config.compression_algorithm[0].clone()
-    } else {
-        let idx = input.target_level - base_level + 1;
-        compaction_config.compression_algorithm[idx].clone()
-    };
 
     CompactionTask {
+        compression_algorithm: get_compression_algorithm(
+            compaction_config,
+            base_level,
+            input.target_level,
+        ),
         input,
-        compression_algorithm,
         target_file_size,
         compaction_task_type,
+    }
+}
+
+pub fn get_compression_algorithm(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    level: usize,
+) -> String {
+    if level == 0 || level < base_level {
+        compaction_config.compression_algorithm[0].clone()
+    } else {
+        let idx = level - base_level + 1;
+        compaction_config.compression_algorithm[idx].clone()
     }
 }

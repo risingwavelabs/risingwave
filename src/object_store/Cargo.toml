@@ -10,7 +10,7 @@ repository = { workspace = true }
 
 [dependencies]
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
+await-tree = "0.1.1"
 aws-config = { workspace = true }
 aws-sdk-s3 = { version = "0.2.15", package = "madsim-aws-sdk-s3" }
 aws-smithy-http = { workspace = true }
@@ -21,7 +21,7 @@ fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
-opendal = "0.26.2"
+opendal = "0.27.2"
 prometheus = { version = "0.13", features = ["process"] }
 random-string = "1.0"
 risingwave_common = { path = "../common" }

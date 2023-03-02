@@ -49,7 +49,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     pub(crate) fn gen_expr(&mut self, typ: &DataType, context: SqlGeneratorContext) -> Expr {
         if !self.can_recurse() {
             // Stop recursion with a simple scalar or column.
-            return match self.rng.gen_bool(0.5) {
+            // Weight it more towards columns, scalar has much higher chance of being generated,
+            // since it is usually used as fail-safe expression.
+            return match self.rng.gen_bool(0.2) {
                 true => self.gen_simple_scalar(typ),
                 false => self.gen_col(typ, context),
             };
@@ -76,7 +78,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                     let ty = column.data_type;
                     let expr = self.gen_simple_scalar(&ty); // WORKAROUND
                     let in_subquery_expr = Expr::InSubquery {
-                        expr: Box::new(expr),
+                        expr: Box::new(Expr::Nested(Box::new(expr))),
                         subquery: Box::new(query),
                         negated: self.flip_coin(),
                     };
@@ -114,47 +116,55 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_data_type_inner(&mut self, depth: usize) -> DataType {
-        use {DataType as S, DataTypeName as T};
-        let mut candidate_ret_types = vec![
-            T::Boolean,
-            T::Int16,
-            T::Int32,
-            T::Int64,
-            T::Decimal,
-            T::Float32,
-            T::Float64,
-            T::Varchar,
-            T::Date,
-            T::Timestamp,
-            // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
-            // T::Timestamptz,
-            T::Time,
-            T::Interval,
-        ];
-        if depth > 0 {
-            candidate_ret_types.push(T::Struct);
-            candidate_ret_types.push(T::List);
-        }
-
-        let ret_type = candidate_ret_types.choose(&mut self.rng).unwrap();
-
-        match ret_type {
-            T::Boolean => S::Boolean,
-            T::Int16 => S::Int16,
-            T::Int32 => S::Int32,
-            T::Int64 => S::Int64,
-            T::Decimal => S::Decimal,
-            T::Float32 => S::Float32,
-            T::Float64 => S::Float64,
-            T::Varchar => S::Varchar,
-            T::Date => S::Date,
-            T::Timestamp => S::Timestamp,
-            T::Timestamptz => S::Timestamptz,
-            T::Time => S::Time,
-            T::Interval => S::Interval,
-            T::Struct => self.gen_struct_data_type(depth - 1),
-            T::List => self.gen_list_data_type(depth - 1),
-            _ => unreachable!(),
+        match self.rng.gen_bool(0.8) {
+            true if !self.bound_columns.is_empty() => self
+                .bound_columns
+                .choose(&mut self.rng)
+                .unwrap()
+                .data_type
+                .clone(),
+            _ => {
+                use {DataType as S, DataTypeName as T};
+                let mut candidate_ret_types = vec![
+                    T::Boolean,
+                    T::Int16,
+                    T::Int32,
+                    T::Int64,
+                    T::Decimal,
+                    T::Float32,
+                    T::Float64,
+                    T::Varchar,
+                    T::Date,
+                    T::Timestamp,
+                    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
+                    // T::Timestamptz,
+                    T::Time,
+                    T::Interval,
+                ];
+                if depth > 0 {
+                    candidate_ret_types.push(T::Struct);
+                    candidate_ret_types.push(T::List);
+                }
+                let typ_name = candidate_ret_types.choose(&mut self.rng).unwrap();
+                match typ_name {
+                    T::Boolean => S::Boolean,
+                    T::Int16 => S::Int16,
+                    T::Int32 => S::Int32,
+                    T::Int64 => S::Int64,
+                    T::Decimal => S::Decimal,
+                    T::Float32 => S::Float32,
+                    T::Float64 => S::Float64,
+                    T::Varchar => S::Varchar,
+                    T::Date => S::Date,
+                    T::Timestamp => S::Timestamp,
+                    T::Timestamptz => S::Timestamptz,
+                    T::Time => S::Time,
+                    T::Interval => S::Interval,
+                    T::Struct => self.gen_struct_data_type(depth - 1),
+                    T::List => self.gen_list_data_type(depth - 1),
+                    _ => unreachable!(),
+                }
+            }
         }
     }
 
@@ -179,6 +189,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         }))
     }
 
+    /// Generates an arbitrary expression, but biased towards datatypes present in bound columns.
     pub(crate) fn gen_arbitrary_expr(&mut self, context: SqlGeneratorContext) -> (DataType, Expr) {
         let ret_type = self.gen_data_type();
         let expr = self.gen_expr(&ret_type, context);
@@ -209,7 +220,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             self.gen_simple_scalar(typ)
         } else {
             let col_def = matched_cols.choose(&mut self.rng).unwrap();
-            Expr::Identifier(Ident::new(&col_def.name))
+            Expr::Identifier(Ident::new_unchecked(&col_def.name))
         }
     }
 
@@ -382,7 +393,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         while self.flip_coin() {
             let column = self.bound_columns.choose(&mut self.rng).unwrap();
             order_by.push(OrderByExpr {
-                expr: Expr::Identifier(Ident::new(&column.name)),
+                expr: Expr::Identifier(Ident::new_unchecked(&column.name)),
                 asc: Some(self.rng.gen_bool(0.5)),
                 nulls_first: None,
             })
@@ -451,6 +462,26 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             ))),
             A::Avg => Some(Expr::Function(make_agg_func(
                 "avg", exprs, distinct, filter, order_by,
+            ))),
+            A::VarSamp => Some(Expr::Function(make_agg_func(
+                "var_samp", exprs, distinct, filter, order_by,
+            ))),
+            A::VarPop => Some(Expr::Function(make_agg_func(
+                "var_pop", exprs, distinct, filter, order_by,
+            ))),
+            A::StddevSamp => Some(Expr::Function(make_agg_func(
+                "stddev_samp",
+                exprs,
+                distinct,
+                filter,
+                order_by,
+            ))),
+            A::StddevPop => Some(Expr::Function(make_agg_func(
+                "stddev_pop",
+                exprs,
+                distinct,
+                filter,
+                order_by,
             ))),
             A::StringAgg => {
                 // distinct and non_distinct_string_agg are incompatible according to
@@ -586,7 +617,7 @@ fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
         .collect();
 
     Function {
-        name: ObjectName(vec![Ident::new(func_name)]),
+        name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         over: None,
         distinct: false,
@@ -610,7 +641,7 @@ fn make_agg_func(
         .collect();
 
     Function {
-        name: ObjectName(vec![Ident::new(func_name)]),
+        name: ObjectName(vec![Ident::new_unchecked(func_name)]),
         args,
         over: None,
         distinct,

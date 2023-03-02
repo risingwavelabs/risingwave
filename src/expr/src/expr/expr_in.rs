@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
-use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -74,7 +74,7 @@ impl Expression for InExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval_checked(input)?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
-        for (data, vis) in input_array.iter().zip_eq_debug(input.vis().iter()) {
+        for (data, vis) in input_array.iter().zip_eq_fast(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
                 output_array.append(ret);

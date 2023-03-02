@@ -106,4 +106,15 @@ macro_rules! impl_has_variant {
     };
 }
 
-impl_has_variant! { LogicalApply, LogicalOverAgg, BatchExchange, BatchSeqScan, BatchSource, BatchInsert, BatchDelete, BatchUpdate }
+impl_has_variant! {
+    LogicalApply,
+    LogicalOverAgg,
+    LogicalScan,
+    LogicalSource,
+    BatchExchange,
+    BatchSeqScan,
+    BatchSource,
+    BatchInsert,
+    BatchDelete,
+    BatchUpdate
+}

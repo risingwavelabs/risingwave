@@ -19,7 +19,7 @@ use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
-use crate::array::{ListRef, ListValue, StructRef, StructValue};
+use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::row::RowDeserializer as BasicDeserializer;
 use crate::types::struct_type::StructType;
 use crate::types::{
@@ -85,6 +85,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::NaiveTime(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
+        ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
         ScalarRefImpl::Struct(s) => serialize_struct(s, buf),
         ScalarRefImpl::List(v) => serialize_list(v, buf),
     }
@@ -156,6 +157,10 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Timestamp => ScalarImpl::NaiveDateTime(deserialize_naivedatetime(data)?),
         DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
         DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
+        DataType::Jsonb => ScalarImpl::Jsonb(
+            JsonbVal::value_deserialize(&deserialize_bytea(data))
+                .ok_or(ValueEncodingError::InvalidJsonbEncoding)?,
+        ),
         DataType::Struct(struct_def) => deserialize_struct(struct_def, data)?,
         DataType::Bytea => ScalarImpl::Bytea(deserialize_bytea(data).into()),
         DataType::List {

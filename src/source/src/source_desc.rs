@@ -100,6 +100,8 @@ impl SourceDescBuilder {
             ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
             ProstRowFormatType::Native => SourceFormat::Native,
             ProstRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            ProstRowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            ProstRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             _ => unreachable!(),
         };
 
@@ -147,6 +149,7 @@ impl SourceDescBuilder {
     pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let format = match self.source_info.get_row_format()? {
             ProstRowFormatType::Csv => SourceFormat::Csv,
+            ProstRowFormatType::Json => SourceFormat::Json,
             _ => unreachable!(),
         };
 

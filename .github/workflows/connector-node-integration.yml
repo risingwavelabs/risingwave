@@ -1,0 +1,130 @@
+name: Connector Node Integration tests
+
+on:
+  push:
+    branches: [main]
+    path: [connector_node/**, proto/**]
+  pull_request:
+    branches: [main]
+    paths: [connector_node/**, proto/**]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+          cache: 'maven'
+      - name: run integration tests
+        run: |
+          cd connector_node
+          mvn --batch-mode --update-snapshots clean package  -DskipTests=true
+          sudo apt install postgresql postgresql-contrib libpq-dev
+          sudo systemctl start postgresql || sudo pg_ctlcluster 12 main start
+          # disable password encryption
+          sudo -u postgres psql -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
+          sudo -u postgres createdb test
+          sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
+          
+          echo "setting up minio"
+          wget https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
+          chmod +x minio
+          sudo ./minio server /tmp/minio &
+          # wait for minio to start
+          sleep 3
+          wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
+          chmod +x mc
+          ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+
+          echo "starting connector-node service"
+          cd assembly/target/
+          tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
+          sh ./start-service.sh &
+          sleep 3
+          cd ../../
+
+          echo "running jdbc integration tests"
+          bash python-client/build-venv.sh
+          cd python-client && bash gen-stub.sh
+          pip install pyspark
+
+          if python3 integration_tests.py --file_sink; then
+            echo "File sink test passed"
+          else
+            echo "File sink test failed"
+            exit 1
+          fi
+
+          if python3 integration_tests.py --jdbc_sink; then
+            echo "Jdbc sink test passed"
+          else
+            echo "Jdbc sink test failed"
+            exit 1
+          fi
+
+          if python3 integration_tests.py --print_sink; then
+            echo "Print sink test passed"
+          else
+            echo "Print sink test failed"
+            exit 1
+          fi
+          cd ..
+          echo "all jdbc tests passed"
+          
+          echo "running iceberg integration tests"
+          ./mc mb minio/bucket
+          
+          # test append-only mode
+          cd python-client
+          python3 pyspark-util.py create_iceberg
+          if python3 integration_tests.py --iceberg_sink; then
+            python3 pyspark-util.py test_iceberg
+            echo "Iceberg sink test passed"
+          else
+            echo "Iceberg sink test failed"
+            exit 1
+          fi
+          python3 pyspark-util.py drop_iceberg
+
+          # test upsert mode
+          python3 pyspark-util.py create_iceberg
+          if python3 integration_tests.py --upsert_iceberg_sink --input_file="./data/upsert_sink_input.json"; then
+            python3 pyspark-util.py test_upsert_iceberg --input_file="./data/upsert_sink_input.json"
+            echo "Upsert iceberg sink test passed"
+          else
+            echo "Upsert iceberg sink test failed"
+            exit 1
+          fi
+          python3 pyspark-util.py drop_iceberg
+
+          # clean up minio
+          cd ..
+          ./mc rm -r -force minio/bucket
+          ./mc rb minio/bucket
+          echo "all iceberg tests passed"
+          
+          echo "running deltalake integration tests"
+          ./mc mb minio/bucket
+          
+          cd python-client
+          # test append-only mode
+          python3 pyspark-util.py create_deltalake
+          if python3 integration_tests.py --deltalake_sink; then
+            python3 pyspark-util.py test_deltalake
+            echo "Deltalake sink test passed"
+          else
+            echo "Deltalake sink test failed"
+            exit 1
+          fi
+
+          # clean up minio
+          cd ..
+          ./mc rm -r -force minio/bucket
+          ./mc rb minio/bucket
+          echo "all deltalake tests passed"
+          

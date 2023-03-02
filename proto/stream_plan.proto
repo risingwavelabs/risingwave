@@ -44,6 +44,10 @@ message UpdateMutation {
     // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
     uint32 actor_id = 1;
     uint32 upstream_fragment_id = 2;
+    // - For scaling, this is always `None`.
+    // - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+    //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+    optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
     repeated uint32 added_upstream_actor_id = 3;
     // Removed upstream actors.
@@ -177,8 +181,14 @@ message MaterializeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  // Used to handle pk conflict, open it when upstream executor is source executor.
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message AggCallState {
@@ -215,6 +225,7 @@ message SimpleAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message HashAggNode {
@@ -226,6 +237,7 @@ message HashAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message TopNNode {
@@ -407,7 +419,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -471,6 +483,8 @@ message SortNode {
 message DmlNode {
   // Id of the table on which DML performs.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
 }
@@ -547,9 +561,12 @@ enum DispatcherType {
   NO_SHUFFLE = 4;
 }
 
+// The property of an edge in the fragment graph.
+// This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  repeated uint32 output_indices = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -558,15 +575,16 @@ message Dispatcher {
   DispatcherType type = 1;
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  // Indices of the columns to output.
+  // In most cases, this contains all columns in the input. But for some cases like MV on MV or
+  // schema change, we may only output a subset of the columns.
+  repeated uint32 output_indices = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as its downstream fragment id.
-  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
-  //   could belong to more than one downstream in DAG.
-  // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+  // This is exactly the same as its downstream fragment id.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
@@ -647,7 +665,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_table_ids = 3;
+  repeated uint32 dependent_relation_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

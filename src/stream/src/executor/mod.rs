@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
@@ -54,6 +54,7 @@ mod barrier_align;
 pub mod exchange;
 pub mod monitor;
 
+pub mod agg_common;
 pub mod aggregation;
 mod batch_query;
 mod chain;
@@ -84,6 +85,7 @@ mod sink;
 mod sort;
 mod sort_buffer;
 pub mod source;
+mod stream_reader;
 pub mod subtask;
 mod top_n;
 mod union;
@@ -715,7 +717,7 @@ pub async fn expect_first_barrier(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
-        .stack_trace("expect_first_barrier")
+        .instrument_await("expect_first_barrier")
         .await
         .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
@@ -730,7 +732,7 @@ pub async fn expect_first_barrier_from_aligned_stream(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
-        .stack_trace("expect_first_barrier")
+        .instrument_await("expect_first_barrier")
         .await
         .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message

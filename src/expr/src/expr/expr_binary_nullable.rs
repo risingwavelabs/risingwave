@@ -211,6 +211,7 @@ fn build_array_access_expr(
         DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
         DataType::Timestamptz => array_access_expression!(PrimitiveArray::<i64>),
         DataType::Interval => array_access_expression!(IntervalArray),
+        DataType::Jsonb => array_access_expression!(JsonbArray),
         DataType::Struct { .. } => array_access_expression!(StructArray),
         DataType::List { .. } => array_access_expression!(ListArray),
     }

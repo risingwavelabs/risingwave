@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::iter_util::ZipEqDebug;
+use super::iter_util::ZipEqFast;
 
 /// This function compresses sequential repeated data in a vector. The compression result contains
 /// two vectors, one for the last indices of sequential repeated elements, and another for the
@@ -49,7 +49,7 @@ where
             let mut original_data = Vec::with_capacity(*last_idx as usize + 1);
             original_indices
                 .iter()
-                .zip_eq_debug(data)
+                .zip_eq_fast(data)
                 .for_each(|(&idx, &x)| {
                     original_data.resize(idx as usize + 1, x);
                 });

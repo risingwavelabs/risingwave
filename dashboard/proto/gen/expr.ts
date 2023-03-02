@@ -106,6 +106,7 @@ export const ExprNode_Type = {
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
   POW: "POW",
+  EXP: "EXP",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -123,13 +124,20 @@ export const ExprNode_Type = {
   ARRAY: "ARRAY",
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
+  ARRAY_TO_STRING: "ARRAY_TO_STRING",
   /** ARRAY_CAT - Array functions */
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
   FORMAT_TYPE: "FORMAT_TYPE",
+  /** JSONB_ACCESS_INNER - jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb */
+  JSONB_ACCESS_INNER: "JSONB_ACCESS_INNER",
+  /** JSONB_ACCESS_STR - jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text */
+  JSONB_ACCESS_STR: "JSONB_ACCESS_STR",
+  JSONB_TYPEOF: "JSONB_TYPEOF",
+  JSONB_ARRAY_LENGTH: "JSONB_ARRAY_LENGTH",
   /**
-   * VNODE - Non-pure functions below (> 600)
+   * VNODE - Non-pure functions below (> 1000)
    * ------------------------
    * Internal functions
    */
@@ -343,6 +351,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 233:
     case "POW":
       return ExprNode_Type.POW;
+    case 234:
+    case "EXP":
+      return ExprNode_Type.EXP;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -382,6 +393,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 523:
     case "ROW":
       return ExprNode_Type.ROW;
+    case 524:
+    case "ARRAY_TO_STRING":
+      return ExprNode_Type.ARRAY_TO_STRING;
     case 531:
     case "ARRAY_CAT":
       return ExprNode_Type.ARRAY_CAT;
@@ -394,6 +408,18 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 534:
     case "FORMAT_TYPE":
       return ExprNode_Type.FORMAT_TYPE;
+    case 600:
+    case "JSONB_ACCESS_INNER":
+      return ExprNode_Type.JSONB_ACCESS_INNER;
+    case 601:
+    case "JSONB_ACCESS_STR":
+      return ExprNode_Type.JSONB_ACCESS_STR;
+    case 602:
+    case "JSONB_TYPEOF":
+      return ExprNode_Type.JSONB_TYPEOF;
+    case 603:
+    case "JSONB_ARRAY_LENGTH":
+      return ExprNode_Type.JSONB_ARRAY_LENGTH;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -544,6 +570,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "REGEXP_MATCH";
     case ExprNode_Type.POW:
       return "POW";
+    case ExprNode_Type.EXP:
+      return "EXP";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
@@ -570,6 +598,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_ACCESS";
     case ExprNode_Type.ROW:
       return "ROW";
+    case ExprNode_Type.ARRAY_TO_STRING:
+      return "ARRAY_TO_STRING";
     case ExprNode_Type.ARRAY_CAT:
       return "ARRAY_CAT";
     case ExprNode_Type.ARRAY_APPEND:
@@ -578,6 +608,14 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_PREPEND";
     case ExprNode_Type.FORMAT_TYPE:
       return "FORMAT_TYPE";
+    case ExprNode_Type.JSONB_ACCESS_INNER:
+      return "JSONB_ACCESS_INNER";
+    case ExprNode_Type.JSONB_ACCESS_STR:
+      return "JSONB_ACCESS_STR";
+    case ExprNode_Type.JSONB_TYPEOF:
+      return "JSONB_TYPEOF";
+    case ExprNode_Type.JSONB_ARRAY_LENGTH:
+      return "JSONB_ARRAY_LENGTH";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
@@ -711,6 +749,10 @@ export const AggCall_Type = {
   ARRAY_AGG: "ARRAY_AGG",
   FIRST_VALUE: "FIRST_VALUE",
   SUM0: "SUM0",
+  VAR_POP: "VAR_POP",
+  VAR_SAMP: "VAR_SAMP",
+  STDDEV_POP: "STDDEV_POP",
+  STDDEV_SAMP: "STDDEV_SAMP",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -751,6 +793,18 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case 10:
     case "SUM0":
       return AggCall_Type.SUM0;
+    case 11:
+    case "VAR_POP":
+      return AggCall_Type.VAR_POP;
+    case 12:
+    case "VAR_SAMP":
+      return AggCall_Type.VAR_SAMP;
+    case 13:
+    case "STDDEV_POP":
+      return AggCall_Type.STDDEV_POP;
+    case 14:
+    case "STDDEV_SAMP":
+      return AggCall_Type.STDDEV_SAMP;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -782,6 +836,14 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "FIRST_VALUE";
     case AggCall_Type.SUM0:
       return "SUM0";
+    case AggCall_Type.VAR_POP:
+      return "VAR_POP";
+    case AggCall_Type.VAR_SAMP:
+      return "VAR_SAMP";
+    case AggCall_Type.STDDEV_POP:
+      return "STDDEV_POP";
+    case AggCall_Type.STDDEV_SAMP:
+      return "STDDEV_SAMP";
     case AggCall_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -805,7 +867,8 @@ export interface UserDefinedFunction {
   name: string;
   argTypes: DataType[];
   language: string;
-  path: string;
+  link: string;
+  identifier: string;
 }
 
 function createBaseExprNode(): ExprNode {
@@ -1140,7 +1203,7 @@ export const AggCall_OrderByField = {
 };
 
 function createBaseUserDefinedFunction(): UserDefinedFunction {
-  return { children: [], name: "", argTypes: [], language: "", path: "" };
+  return { children: [], name: "", argTypes: [], language: "", link: "", identifier: "" };
 }
 
 export const UserDefinedFunction = {
@@ -1150,7 +1213,8 @@ export const UserDefinedFunction = {
       name: isSet(object.name) ? String(object.name) : "",
       argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -1168,7 +1232,8 @@ export const UserDefinedFunction = {
       obj.argTypes = [];
     }
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -1178,7 +1243,8 @@ export const UserDefinedFunction = {
     message.name = object.name ?? "";
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };

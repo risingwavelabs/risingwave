@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::TrustedLen;
 use std::ops::Index;
 use std::slice::Iter;
 
@@ -131,10 +132,11 @@ impl Iterator for FormatIterator<'_, '_> {
                 .unwrap_or(self.default_format),
         )
     }
-}
 
-impl ExactSizeIterator for FormatIterator<'_, '_> {
-    fn len(&self) -> usize {
-        self.actual_len
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.actual_len, Some(self.actual_len))
     }
 }
+
+impl ExactSizeIterator for FormatIterator<'_, '_> {}
+unsafe impl TrustedLen for FormatIterator<'_, '_> {}

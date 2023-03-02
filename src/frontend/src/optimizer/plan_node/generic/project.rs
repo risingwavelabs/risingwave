@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::fmt::Formatter;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
@@ -42,7 +43,7 @@ fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
 }
 
 /// [`Project`] computes a set of expressions from its input relation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[allow(clippy::manual_non_exhaustive)]
 pub struct Project<PlanRef> {
     pub exprs: Vec<ExprImpl>,
@@ -66,21 +67,29 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
         let o2i = self.o2i_col_mapping();
         let exprs = &self.exprs;
         let input_schema = self.input.schema();
+        let ctx = self.ctx();
         let fields = exprs
             .iter()
             .enumerate()
-            .map(|(id, expr)| {
+            .map(|(i, expr)| {
                 // Get field info from o2i.
-                let (name, sub_fields, type_name) = match o2i.try_map(id) {
+                let (name, sub_fields, type_name) = match o2i.try_map(i) {
                     Some(input_idx) => {
                         let field = input_schema.fields()[input_idx].clone();
                         (field.name, field.sub_fields, field.type_name)
                     }
-                    None => (
-                        format!("{:?}", ExprDisplay { expr, input_schema }),
-                        vec![],
-                        String::new(),
-                    ),
+                    None => match expr {
+                        ExprImpl::InputRef(_) | ExprImpl::Literal(_) => (
+                            format!("{:?}", ExprDisplay { expr, input_schema }),
+                            vec![],
+                            String::new(),
+                        ),
+                        _ => (
+                            format!("$expr{}", ctx.next_expr_display_id()),
+                            vec![],
+                            String::new(),
+                        ),
+                    },
                 };
                 Field::with_struct(expr.return_type(), name, sub_fields, type_name)
             })
@@ -162,16 +171,30 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        schema: &Schema,
+    ) -> fmt::Result {
         let mut builder = f.debug_struct(name);
         builder.field(
             "exprs",
             &self
                 .exprs
                 .iter()
-                .map(|expr| ExprDisplay {
-                    expr,
-                    input_schema: self.input.schema(),
+                .zip_eq_fast(schema.fields().iter())
+                .map(|(expr, field)| AliasedExpr {
+                    expr: ExprDisplay {
+                        expr,
+                        input_schema: self.input.schema(),
+                    },
+                    alias: {
+                        match expr {
+                            ExprImpl::InputRef(_) | ExprImpl::Literal(_) => None,
+                            _ => Some(field.name.clone()),
+                        }
+                    },
                 })
                 .collect_vec(),
         );
@@ -257,5 +280,20 @@ impl ProjectBuilder {
     /// build the `LogicalProject` from `LogicalProjectBuilder`
     pub fn build<PlanRef: GenericPlanRef>(self, input: PlanRef) -> Project<PlanRef> {
         Project::new(self.exprs, input)
+    }
+}
+
+/// Auxiliary struct for displaying `expr AS alias`
+pub struct AliasedExpr<'a> {
+    pub expr: ExprDisplay<'a>,
+    pub alias: Option<String>,
+}
+
+impl fmt::Debug for AliasedExpr<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match &self.alias {
+            Some(alias) => write!(f, "{:?} as {}", self.expr, alias),
+            None => write!(f, "{:?}", self.expr),
+        }
     }
 }

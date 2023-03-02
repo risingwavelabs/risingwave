@@ -1,0 +1,53 @@
+statement ok
+create table t1 (v1 int, v2 int);
+
+statement error No primary key for the upsert sink
+create sink s1 from t1 with (connector = 'console');
+
+statement ok
+create sink s1 as select v1, v2, _row_id from t1 with (connector = 'console');
+
+statement ok
+create table t2 (v1 int, v2 int primary key);
+
+statement ok
+create sink s2 from t2 with (connector = 'console');
+
+statement error No primary key for the upsert sink
+create sink s3 as select avg(v1) from t2 with (connector = 'console');
+
+statement ok
+create sink s3 as select avg(v1) from t2 with (connector = 'console', format = 'append_only', force_append_only = 'true');
+
+statement ok
+create sink s4 as select avg(v1), v2 from t2 group by v2 with (connector = 'console');
+
+statement error The sink cannot be append-only
+create sink s5 from t2 with (connector = 'console', format = 'append_only');
+
+statement ok
+create sink s5 from t2 with (connector = 'console', format = 'append_only', force_append_only = 'true');
+
+statement error Cannot force the sink to be append-only
+create sink s6 from t2 with (connector = 'console', format = 'upsert', force_append_only = 'true');
+
+statement ok
+drop sink s1
+
+statement ok
+drop sink s2
+
+statement ok
+drop sink s3
+
+statement ok
+drop sink s4
+
+statement ok
+drop sink s5
+
+statement ok
+drop table t1
+
+statement ok
+drop table t2

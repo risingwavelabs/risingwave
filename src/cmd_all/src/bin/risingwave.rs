@@ -19,9 +19,10 @@ use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
-use clap::StructOpt;
+use clap::Parser;
 use risingwave_cmd_all::playground;
 use risingwave_common::enable_task_local_jemalloc_on_linux;
+use tracing::Level;
 
 enable_task_local_jemalloc_on_linux!();
 
@@ -40,7 +41,9 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compute::ComputeNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false));
+                risingwave_rt::init_risingwave_logger(
+                    risingwave_rt::LoggerSettings::new().enable_tokio_console(false),
+                );
 
                 risingwave_rt::main_okk(risingwave_compute::start(opts));
 
@@ -58,7 +61,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_meta::MetaNodeOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_meta::start(opts));
 
@@ -76,7 +79,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_frontend::FrontendOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_frontend::start(opts));
 
@@ -85,7 +88,7 @@ fn main() -> Result<()> {
         );
     }
 
-    // frontend node configuration
+    // compactor node configuration
     for fn_name in ["compactor", "compactor-node", "compactor_node"] {
         fns.insert(
             fn_name,
@@ -94,7 +97,7 @@ fn main() -> Result<()> {
 
                 let opts = risingwave_compactor::CompactorOpts::parse_from(args);
 
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_compactor::start(opts));
 
@@ -111,7 +114,7 @@ fn main() -> Result<()> {
                 eprintln!("launching risectl");
 
                 let opts = risingwave_ctl::CliOpts::parse_from(args);
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
                 risingwave_rt::main_okk(risingwave_ctl::start(opts))
             }),
@@ -123,11 +126,10 @@ fn main() -> Result<()> {
         fns.insert(
             fn_name,
             Box::new(move |_: Vec<String>| {
-                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new_default());
-
-                // Enable tokio console for `./risedev p` by replacing the above statement to:
-                // risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new(false,
-                // true));
+                let settings = risingwave_rt::LoggerSettings::new()
+                    .enable_tokio_console(false)
+                    .with_target("risingwave_storage", Level::INFO);
+                risingwave_rt::init_risingwave_logger(settings);
 
                 risingwave_rt::main_okk(playground())
             }),
@@ -160,7 +162,9 @@ fn main() -> Result<()> {
             func(args)?;
         }
         None => {
-            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
+            let mut components = fns.keys().collect::<Vec<_>>();
+            components.sort();
+            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, components);
         }
     }
 

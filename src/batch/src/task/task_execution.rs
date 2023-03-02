@@ -76,8 +76,11 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
-                    // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
-                    BYTES_ALLOCATED.with(|bytes| context.store_mem_usage(bytes.val()));
+                    // NOTE: Report bytes allocated when the actor ends. We simply report 0 here,
+                    // assuming that all memory allocated by this batch task will be freed at some
+                    // time. Maybe we should introduce a better monitoring strategy for batch memory
+                    // usage.
+                    BYTES_ALLOCATED.with(|_| context.store_mem_usage(0));
                     output
                 },
             };
@@ -298,8 +301,8 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// Shutdown signal sender.
-    shutdown_tx: Mutex<Option<Sender<u64>>>,
+    /// Shutdown signal sender, which sends the reason for task failure.
+    shutdown_tx: Mutex<Option<Sender<String>>>,
 
     /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
     /// This is a hack, cuz there is no easy way to get out the receiver.
@@ -373,7 +376,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Init shutdown channel and data receivers.
         let sender = self.sender.clone();
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<String>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
         let failure = self.failure.clone();
         let task_id = self.task_id.clone();
@@ -516,17 +519,19 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         &self,
         root: BoxedExecutor,
         sender: &mut ChanSenderImpl,
-        mut shutdown_rx: Receiver<u64>,
+        mut shutdown_rx: Receiver<String>,
         state_tx: &mut StateReporter,
     ) -> Result<()> {
         let mut data_chunk_stream = root.execute();
         let mut state = TaskStatus::Unspecified;
+        let mut err_str = None;
         loop {
             tokio::select! {
             // We prioritize abort signal over normal data chunks.
             biased;
-            _ = &mut shutdown_rx => {
+            err_res = &mut shutdown_rx => {
                 state = TaskStatus::Aborted;
+                err_str = err_res.ok();
                 break;
             }
             res = data_chunk_stream.next() => {
@@ -568,7 +573,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, None).await {
+        if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e
@@ -578,12 +583,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         Ok(())
     }
 
-    pub fn abort_task(&self) {
+    pub fn abort_task(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
-            if sender.send(0).is_err() {
-                warn!("The task has already died before this request, so the abort did no-op")
+            if sender.send(err_msg).is_err() {
+                debug!("The task has already died before this request.")
             } else {
                 info!("Abort task {:?} done", self.task_id);
             }

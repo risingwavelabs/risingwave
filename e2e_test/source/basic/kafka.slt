@@ -52,11 +52,11 @@ statement ok
 select * from s4;
 
 statement ok
-create table s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
+create table s5 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) append only with (
   connector = 'kafka',
   topic = 'kafka_4_partition_topic_with_100_message',
   properties.bootstrap.server = '127.0.0.1:29092',
-  scan.startup.mode = 'earliest'
+  scan.startup.mode = 'earliest',
 ) row format json
 
 statement ok
@@ -131,7 +131,8 @@ create table s9 with (
   topic = 'avro_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
-) row format avro message 'test_student' row schema location 'file:///risingwave/avro-simple-schema.avsc'
+) row format avro 
+row schema location 'file:///risingwave/avro-simple-schema.avsc'
 
 statement ok
 create table s10 with (
@@ -139,7 +140,8 @@ create table s10 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
-) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
+) row format avro 
+row schema location 'file:///risingwave/avro-complex-schema.avsc'
 
 statement ok
 create table s11 with (
@@ -239,7 +241,20 @@ create source s18 with (
   topic = 'avro_c_bin',
   properties.bootstrap.server = '127.0.0.1:29092',
   scan.startup.mode = 'earliest'
-) row format avro message 'user' row schema location 'file:///risingwave/avro-complex-schema.avsc'
+) row format avro 
+row schema location 'file:///risingwave/avro-complex-schema.avsc'
+
+
+# we cannot use confluent schema registry when connector is not kafka
+statement error
+create table s19 
+with (
+  connector = 'kinesis',
+  topic = 'topic',
+  properties.bootstrap.server = '127.0.0.1:29092'
+)
+row format avro
+row schema location confluent schema registry 'http://127.0.0.1:8081'
 
 statement ok
 flush;

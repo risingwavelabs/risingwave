@@ -14,14 +14,14 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableVersionId};
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
@@ -124,7 +124,8 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),
-            _ => "".to_owned(),
+            Self::Index(_, table) => table.definition.clone(),
+            Self::Sink(sink) => sink.definition.clone(),
         }
     }
 
@@ -135,6 +136,12 @@ impl StreamingJob {
             Self::Table(_, table) => table.properties.clone(),
             Self::Index(_, index_table) => index_table.properties.clone(),
         }
+    }
+
+    /// Returns the [`TableVersionId`] if this job contains a table.
+    pub fn table_version_id(&self) -> Option<TableVersionId> {
+        self.table()
+            .map(|t| t.get_version().expect("table must be versioned").version)
     }
 
     /// Returns the optional [`Source`] if this is a `Table` streaming job.

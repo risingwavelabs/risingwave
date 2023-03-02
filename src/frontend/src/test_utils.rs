@@ -27,6 +27,8 @@ use risingwave_common::catalog::{
     DEFAULT_SUPER_USER_ID, NON_RESERVED_USER_ID, PG_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
+use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{
@@ -34,14 +36,14 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::{CreatingJobInfo, SystemParams};
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use risingwave_rpc_client::error::Result as RpcResult;
-use risingwave_rpc_client::SystemParamsReader;
 use tempfile::{Builder, NamedTempFile};
 
 use crate::catalog::catalog_service::CatalogWriter;
@@ -73,6 +75,10 @@ impl SessionManager<PgResponseStream> for LocalFrontend {
     }
 
     fn cancel_queries_in_session(&self, _session_id: SessionId) {
+        todo!()
+    }
+
+    fn cancel_creating_jobs_in_session(&self, _session_id: SessionId) {
         todo!()
     }
 
@@ -248,6 +254,16 @@ impl CatalogWriter for MockCatalogWriter {
                 Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id));
         }
         self.create_materialized_view(table, graph).await?;
+        Ok(())
+    }
+
+    async fn replace_table(
+        &self,
+        table: ProstTable,
+        _graph: StreamFragmentGraph,
+        _mapping: ColIndexMapping,
+    ) -> Result<()> {
+        self.catalog.write().update_table(&table);
         Ok(())
     }
 
@@ -659,6 +675,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         })
     }
 
+    async fn cancel_creating_jobs(&self, _infos: Vec<CreatingJobInfo>) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn list_table_fragments(
         &self,
         _table_ids: &[u32],
@@ -680,6 +700,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn get_system_params(&self) -> RpcResult<SystemParamsReader> {
         Ok(SystemParams::default().into())
+    }
+
+    async fn set_system_param(&self, _param: String, _value: Option<String>) -> RpcResult<()> {
+        Ok(())
+    }
+
+    async fn list_ddl_progress(&self) -> RpcResult<Vec<DdlProgress>> {
+        Ok(vec![])
     }
 }
 

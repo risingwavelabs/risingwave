@@ -26,7 +26,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::{ManagedTopNState, NO_GROUP_KEY};
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 
 /// If the input contains only append, `AppendOnlyTopNExecutor` does not need
 /// to keep all the data records/rows that have been seen. As long as a record
@@ -186,6 +186,11 @@ where
         self.managed_state
             .init_topn_cache(NO_GROUP_KEY, &mut self.cache)
             .await
+    }
+
+    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
+        // TODO(yuhao): handle watermark
+        None
     }
 }
 

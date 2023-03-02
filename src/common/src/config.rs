@@ -19,7 +19,7 @@
 
 use std::fs;
 
-use clap::ArgEnum;
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
@@ -30,10 +30,6 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
-
-/// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
-/// compilation error.
-pub type Flag = Option<bool>;
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -51,15 +47,6 @@ where
         cli_override.r#override(&mut config);
     }
     config
-}
-
-/// Map command line flag to `Flag`. Should only be used in `#[derive(OverrideConfig)]`.
-pub fn true_if_present(b: bool) -> Flag {
-    if b {
-        Some(true)
-    } else {
-        None
-    }
 }
 
 pub trait OverrideConfig {
@@ -97,7 +84,7 @@ pub struct RwConfig {
     pub backup: BackupConfig,
 }
 
-#[derive(Copy, Clone, Debug, Default, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
     Mem,
@@ -159,6 +146,10 @@ pub struct MetaConfig {
     /// Schedule space_reclaim compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
     pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl Default for MetaConfig {
@@ -206,6 +197,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
 }
 
 impl Default for BatchConfig {
@@ -239,12 +233,16 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::enable_jaegar_tracing")]
     pub enable_jaeger_tracing: bool,
 
-    /// Enable async stack tracing for risectl.
+    /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    /// Max unique user stream errors per actor
+    #[serde(default = "default::streaming::unique_user_stream_errors")]
+    pub unique_user_stream_errors: usize,
 }
 
 impl Default for StreamingConfig {
@@ -342,10 +340,6 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
-
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
 }
 
 impl Default for StorageConfig {
@@ -385,7 +379,7 @@ impl Default for FileCacheConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, ArgEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
     Off,
     #[default]
@@ -504,6 +498,10 @@ mod default {
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
             3600 // 60min
         }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
+        }
     }
 
     pub mod server {
@@ -603,10 +601,6 @@ mod default {
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
         }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
-        }
     }
 
     pub mod streaming {
@@ -632,6 +626,10 @@ mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::On
+        }
+
+        pub fn unique_user_stream_errors() -> usize {
+            10
         }
     }
 

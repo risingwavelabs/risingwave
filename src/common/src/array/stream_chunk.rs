@@ -24,7 +24,7 @@ use crate::buffer::Bitmap;
 use crate::row::{OwnedRow, Row};
 use crate::types::to_text::ToText;
 use crate::types::DataType;
-use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::iter_util::ZipEqFast;
 
 /// `Op` represents three operations in `StreamChunk`.
 ///
@@ -166,7 +166,7 @@ impl StreamChunk {
             })
             .collect();
         let mut new_ops = Vec::with_capacity(cardinality);
-        for (op, visible) in ops.into_iter().zip_eq_debug(visibility.iter()) {
+        for (op, visible) in ops.into_iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 new_ops.push(op);
             }

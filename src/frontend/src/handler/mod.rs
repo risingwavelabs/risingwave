@@ -30,6 +30,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_system;
 mod alter_table;
 pub mod alter_user;
 mod create_database;
@@ -189,13 +190,14 @@ pub async fn handle(
             columns,
             constraints,
             query,
-
             with_options: _, // It is put in OptimizerContext
             // Not supported things
             or_replace,
             temporary,
             if_not_exists,
             source_schema,
+            source_watermarks,
+            append_only,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -218,6 +220,7 @@ pub async fn handle(
                     if_not_exists,
                     query,
                     columns,
+                    append_only,
                 )
                 .await;
             }
@@ -228,6 +231,8 @@ pub async fn handle(
                 constraints,
                 if_not_exists,
                 source_schema,
+                source_watermarks,
+                append_only,
             )
             .await
         }
@@ -375,7 +380,9 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::AddColumn { column_def },
         } => alter_table::handle_add_column(handler_args, name, column_def).await,
-        Statement::AlterSystem { param: _, value: _ } => todo!(),
+        Statement::AlterSystem { param, value } => {
+            alter_system::handle_alter_system(handler_args, param, value).await
+        }
         // Ignore `StartTransaction` and `BEGIN`,`Abort`,`Rollback`,`Commit`temporarily.Its not
         // final implementation.
         // 1. Fully support transaction is too hard and gives few benefits to us.

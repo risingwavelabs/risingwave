@@ -66,8 +66,8 @@ use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::{
-    read_interval_unit, ArrayBuilderImpl, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
-    StructValue,
+    read_interval_unit, ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue,
+    PrimitiveArrayItemType, StructRef, StructValue,
 };
 use crate::error::Result as RwResult;
 
@@ -128,6 +128,9 @@ pub enum DataType {
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
     Bytea,
+    #[display("jsonb")]
+    #[from_str(regex = "(?i)^jsonb$")]
+    Jsonb,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -154,6 +157,7 @@ impl DataTypeName {
             | DataTypeName::Timestamptz
             | DataTypeName::Time
             | DataTypeName::Bytea
+            | DataTypeName::Jsonb
             | DataTypeName::Interval => true,
 
             DataTypeName::Struct | DataTypeName::List => false,
@@ -176,6 +180,7 @@ impl DataTypeName {
             DataTypeName::Timestamptz => DataType::Timestamptz,
             DataTypeName::Time => DataType::Time,
             DataTypeName::Interval => DataType::Interval,
+            DataTypeName::Jsonb => DataType::Jsonb,
             DataTypeName::Struct | DataTypeName::List => {
                 return None;
             }
@@ -214,6 +219,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Decimal => DataType::Decimal,
             TypeName::Interval => DataType::Interval,
             TypeName::Bytea => DataType::Bytea,
+            TypeName::Jsonb => DataType::Jsonb,
             TypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
@@ -229,20 +235,6 @@ impl From<&ProstDataType> for DataType {
 }
 
 impl DataType {
-    pub const BOOLEAN: DataType = DataType::Boolean;
-    pub const DATE: DataType = DataType::Date;
-    pub const DECIMAL: DataType = DataType::Decimal;
-    pub const FLOAT32: DataType = DataType::Float32;
-    pub const FLOAT64: DataType = DataType::Float64;
-    pub const INT16: DataType = DataType::Int16;
-    pub const INT32: DataType = DataType::Int32;
-    pub const INT64: DataType = DataType::Int64;
-    pub const INTERVAL: DataType = DataType::Interval;
-    pub const TIME: DataType = DataType::Time;
-    pub const TIMESTAMP: DataType = DataType::Timestamp;
-    pub const TIMESTAMPTZ: DataType = DataType::Timestamptz;
-    pub const VARCHAR: DataType = DataType::Varchar;
-
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
         match self {
@@ -259,6 +251,7 @@ impl DataType {
             DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
             DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
+            DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
             DataType::Struct(t) => {
                 StructArrayBuilder::with_meta(capacity, t.to_array_meta()).into()
             }
@@ -288,6 +281,7 @@ impl DataType {
             DataType::Timestamptz => TypeName::Timestamptz,
             DataType::Decimal => TypeName::Decimal,
             DataType::Interval => TypeName::Interval,
+            DataType::Jsonb => TypeName::Jsonb,
             DataType::Struct { .. } => TypeName::Struct,
             DataType::List { .. } => TypeName::List,
             DataType::Bytea => TypeName::Bytea,
@@ -373,6 +367,7 @@ impl DataType {
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
             DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
+            DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
                     .fields
@@ -414,7 +409,9 @@ pub trait Scalar:
     /// Get a reference to current scalar.
     fn as_scalar_ref(&self) -> Self::ScalarRefType<'_>;
 
-    fn to_scalar_value(self) -> ScalarImpl;
+    fn to_scalar_value(self) -> ScalarImpl {
+        self.into()
+    }
 }
 
 /// Convert an `Option<Scalar>` to corresponding `Option<ScalarRef>`.
@@ -469,6 +466,7 @@ macro_rules! for_all_scalar_variants {
             { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
             { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
+            { Jsonb, jsonb, JsonbVal, JsonbRef<'scalar> },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
             { Bytea, bytea, Box<[u8]>, &'scalar [u8] }
@@ -854,6 +852,7 @@ impl ScalarRefImpl<'_> {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
+            Self::Jsonb(v) => v.memcmp_serialize(ser)?,
             Self::Struct(v) => v.memcmp_serialize(ser)?,
             Self::List(v) => v.memcmp_serialize(ser)?,
         };
@@ -905,6 +904,7 @@ impl ScalarImpl {
                 NaiveDateWrapper::with_days(days)
                     .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
+            Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
             Ty::List { datatype } => ListValue::memcmp_deserialize(datatype, de)?.to_scalar_value(),
         })
@@ -950,6 +950,7 @@ impl ScalarImpl {
                         .iter()
                         .map(|field| Self::encoding_data_size(field, deserializer))
                         .try_fold(0, |a, b| b.map(|b| a + b))?,
+                    DataType::Jsonb => deserializer.skip_bytes()?,
                     DataType::Varchar => deserializer.skip_bytes()?,
                     DataType::Bytea => deserializer.skip_bytes()?,
                 };
@@ -964,6 +965,18 @@ impl ScalarImpl {
         }
 
         Ok(deserializer.position() - base_position)
+    }
+
+    pub fn as_integral(&self) -> i64 {
+        match self {
+            Self::Int16(v) => *v as i64,
+            Self::Int32(v) => *v as i64,
+            Self::Int64(v) => *v,
+            _ => panic!(
+                "Can't convert ScalarImpl::{} to a integral",
+                self.get_ident()
+            ),
+        }
     }
 }
 
@@ -986,6 +999,7 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
                     | (DataType::Timestamptz, ScalarImpl::Int64(_))
                     | (DataType::Decimal, ScalarImpl::Decimal(_))
                     | (DataType::Interval, ScalarImpl::Interval(_))
+                    | (DataType::Jsonb, ScalarImpl::Jsonb(_))
                     | (DataType::Struct { .. }, ScalarImpl::Struct(_))
                     | (DataType::List { .. }, ScalarImpl::List(_))
             )
@@ -1187,6 +1201,7 @@ mod tests {
                     ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
                     DataType::Interval,
                 ),
+                DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
                 DataTypeName::Struct => (
                     ScalarImpl::Struct(StructValue::new(vec![
                         ScalarImpl::Int64(233).into(),

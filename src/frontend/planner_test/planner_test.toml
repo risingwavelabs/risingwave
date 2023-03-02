@@ -52,8 +52,13 @@ done
 rm *.apply.yaml
 
 echo "$(tput setaf 2)Diff applied!$(tput sgr 0)"
+echo "Tip: use the alias $(tput setaf 4)./risedev dapt$(tput sgr0)."
 '''
 category = "RiseDev - Test"
+
+[tasks.dapt]
+alias = "do-apply-planner-test"
+
 
 [tasks.run-planner-test]
 description = "Run planner test"

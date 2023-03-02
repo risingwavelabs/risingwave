@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use derivative::Derivative;
 use generic::PlanAggCall;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
@@ -34,7 +35,7 @@ use crate::TableCatalog;
 
 macro_rules! impl_node {
 ($base:ident, $($t:ident),*) => {
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
     pub enum Node {
         $($t(Box<$t>),)*
     }
@@ -136,7 +137,7 @@ impl StreamPlanRef for PlanRef {
 
 /// Implements [`generic::Join`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DeltaJoin {
     pub core: generic::Join<PlanRef>,
 
@@ -146,7 +147,7 @@ pub struct DeltaJoin {
 }
 impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(DeltaJoin, core, left, right);
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DynamicFilter {
     pub core: generic::DynamicFilter<PlanRef>,
 }
@@ -156,32 +157,34 @@ impl_plan_tree_node_v2_for_stream_binary_node_with_core_delegating!(
     left,
     right
 );
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Exchange {
     pub dist: Distribution,
     pub input: PlanRef,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Exchange, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Expand {
     pub core: generic::Expand<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Expand, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Filter {
     pub core: generic::Filter<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Filter, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GlobalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GlobalSimpleAgg, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GroupTopN {
     pub core: generic::TopN<PlanRef>,
     /// an optional column index which is the vnode of each row computed by the input's consistent
@@ -190,19 +193,21 @@ pub struct GroupTopN {
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(GroupTopN, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashAgg {
-    /// an optional column index which is the vnode of each row computed by the input's consistent
-    /// hash distribution
-    pub vnode_col_idx: Option<usize>,
     pub core: generic::Agg<PlanRef>,
+    /// An optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution.
+    vnode_col_idx: Option<usize>,
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HashAgg, core, input);
 
 /// Implements [`generic::Join`] with hash table. It builds a hash table
 /// from inner (right-side) relation and probes with data from outer (left-side) relation to
 /// get output rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HashJoin {
     pub core: generic::Join<PlanRef>,
 
@@ -291,7 +296,7 @@ impl HashJoin {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
 }
@@ -301,7 +306,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HopWindow, co
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request. Compared with [`TableScan`], it will reorder columns, and the chain node
 /// doesn't allow rearrange.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IndexScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
@@ -313,13 +318,13 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(IndexScan);
 ///
 /// The output of `LocalSimpleAgg` doesn't have pk columns, so the result can only
 /// be used by `GlobalSimpleAgg` with `ManagedValueState`s.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LocalSimpleAgg {
     pub core: generic::Agg<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(LocalSimpleAgg, core, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Materialize {
     /// Child of Materialize plan
     pub input: PlanRef,
@@ -327,7 +332,7 @@ pub struct Materialize {
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Materialize, input);
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ProjectSet {
     pub core: generic::ProjectSet<PlanRef>,
 }
@@ -335,7 +340,7 @@ impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(ProjectSet, c
 
 /// `Project` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Project {
     pub core: generic::Project<PlanRef>,
     watermark_derivations: Vec<(usize, usize)>,
@@ -343,14 +348,14 @@ pub struct Project {
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(Project, core, input);
 
 /// [`Sink`] represents a table/connector sink at the very end of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Sink {
     pub input: PlanRef,
     pub sink_desc: SinkDesc,
 }
 impl_plan_tree_node_v2_for_stream_unary_node!(Sink, input);
 /// [`Source`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Source {
     pub core: generic::Source,
 }
@@ -359,7 +364,7 @@ impl_plan_tree_node_v2_for_stream_leaf_node!(Source);
 /// `TableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TableScan {
     pub core: generic::Scan,
     pub batch_plan_id: PlanNodeId,
@@ -367,18 +372,25 @@ pub struct TableScan {
 impl_plan_tree_node_v2_for_stream_leaf_node!(TableScan);
 
 /// `TopN` implements [`super::LogicalTopN`] to find the top N elements with a heap
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN {
     pub core: generic::TopN<PlanRef>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(TopN, core, input);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct PlanBase {
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub id: PlanNodeId,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub ctx: OptimizerContextRef,
     pub schema: Schema,
     pub logical_pk: Vec<usize>,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
     pub dist: Distribution,
     pub append_only: bool,
 }
@@ -425,10 +437,11 @@ pub fn to_stream_prost_body(
                     Distribution::Broadcast => DispatcherType::Broadcast,
                     _ => panic!("Do not allow Any or AnyShard in serialization process"),
                 } as i32,
-                column_indices: match &base.dist {
+                dist_key_indices: match &base.dist {
                     Distribution::HashShard(keys) => keys.iter().map(|&num| num as u32).collect(),
                     _ => vec![],
                 },
+                output_indices: (0..base.schema().len() as u32).collect(),
             }),
         }),
         Node::DynamicFilter(me) => {
@@ -437,7 +450,7 @@ pub fn to_stream_prost_body(
             let condition = me
                 .predicate()
                 .as_expr_unless_true()
-                .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto());
+                .map(|x| x.to_expr_proto());
             let left_table = infer_left_internal_table_catalog(base, me.left_index)
                 .with_id(state.gen_table_id_wrapped());
             let right_table = infer_right_internal_table_catalog(&me.right.0)
@@ -483,7 +496,7 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
+                    .map(|x| x.to_expr_proto()),
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
@@ -527,32 +540,29 @@ pub fn to_stream_prost_body(
         Node::Filter(me) => {
             let me = &me.core;
             ProstNode::Filter(FilterNode {
-                search_condition: Some(
-                    base.ctx()
-                        .expr_with_session_timezone(ExprImpl::from(me.predicate.clone()))
-                        .to_expr_proto(),
-                ),
+                search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
         Node::GlobalSimpleAgg(me) => {
-            let me = &me.core;
-            let result_table = me.infer_result_table(base, None);
-            let agg_states = me.infer_stream_agg_state(base, None);
-            let distinct_dedup_tables = me.infer_distinct_dedup_tables(base, None);
+            let result_table = me.core.infer_result_table(base, None);
+            let agg_states = me.core.infer_stream_agg_state(base, None);
+            let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
             ProstNode::GlobalSimpleAgg(SimpleAggNode {
                 agg_calls: me
+                    .core
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .map(PlanAggCall::to_protobuf)
                     .collect(),
+                row_count_index: me.row_count_idx as u32,
                 distribution_key: base
                     .dist
                     .dist_column_indices()
                     .iter()
                     .map(|&idx| idx as u32)
                     .collect(),
-                is_append_only: me.input.0.append_only,
+                is_append_only: me.core.input.0.append_only,
                 agg_call_states: agg_states
                     .into_iter()
                     .map(|s| s.into_prost(state))
@@ -595,9 +605,9 @@ pub fn to_stream_prost_body(
                     .core
                     .agg_calls
                     .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
+                    .map(PlanAggCall::to_protobuf)
                     .collect(),
-
+                row_count_index: me.row_count_idx as u32,
                 is_append_only: me.core.input.0.append_only,
                 agg_call_states: agg_states
                     .into_iter()
@@ -661,7 +671,7 @@ pub fn to_stream_prost_body(
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| base.ctx().expr_with_session_timezone(x).to_expr_proto()),
+                    .map(|x| x.to_expr_proto()),
                 left_table: Some(left_table.to_internal_table_prost()),
                 right_table: Some(right_table.to_internal_table_prost()),
                 left_degree_table: Some(left_degree_table.to_internal_table_prost()),
@@ -684,11 +694,8 @@ pub fn to_stream_prost_body(
         Node::LocalSimpleAgg(me) => {
             let me = &me.core;
             ProstNode::LocalSimpleAgg(SimpleAggNode {
-                agg_calls: me
-                    .agg_calls
-                    .iter()
-                    .map(|x| PlanAggCall::to_protobuf(x, base.ctx()))
-                    .collect(),
+                agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
+                row_count_index: u32::MAX, // this is not used
                 distribution_key: base
                     .dist
                     .dist_column_indices()
@@ -708,7 +715,7 @@ pub fn to_stream_prost_body(
                 table_id: 0,
                 column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
-                handle_pk_conflict: false,
+                handle_pk_conflict_behavior: 0,
             })
         }
         Node::ProjectSet(me) => {
@@ -721,16 +728,7 @@ pub fn to_stream_prost_body(
             ProstNode::ProjectSet(ProjectSetNode { select_list })
         }
         Node::Project(me) => ProstNode::Project(ProjectNode {
-            select_list: me
-                .core
-                .exprs
-                .iter()
-                .map(|x| {
-                    base.ctx()
-                        .expr_with_session_timezone(x.clone())
-                        .to_expr_proto()
-                })
-                .collect(),
+            select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
             watermark_input_key: me
                 .watermark_derivations
                 .iter()
@@ -761,7 +759,7 @@ pub fn to_stream_prost_body(
                     .map(|index| ColumnIndex { index: index as _ }),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
-                properties: me.properties.clone(),
+                properties: me.properties.clone().into_iter().collect(),
             });
             ProstNode::Source(SourceNode { source_inner })
         }

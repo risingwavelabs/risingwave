@@ -19,7 +19,7 @@ use std::str::FromStr;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use itertools::Itertools;
 use num_traits::ToPrimitive;
-use risingwave_common::array::{Array, ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::array::{Array, JsonbRef, ListRef, ListValue, StructRef, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
@@ -316,6 +316,43 @@ pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
 }
 
+#[inline(always)]
+pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
+    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+}
+
+#[inline(always)]
+pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
+    v.as_number()
+        .map_err(|e| ExprError::Parse(e.into()))
+        .map(Into::into)
+}
+
+/// Similar to and an result of [`define_cast_to_primitive`] macro above.
+/// If that was implemented as a trait to cast from `f64`, this could also call them via trait
+/// rather than macro.
+///
+/// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
+/// This is less powerful but still meets RFC 8259 interoperability.
+macro_rules! define_jsonb_to_number {
+    ($ty:ty) => {
+        define_jsonb_to_number! { $ty, $ty }
+    };
+    ($ty:ty, $wrapper_ty:ty) => {
+        paste::paste! {
+            #[inline(always)]
+            pub fn [<jsonb_to_ $ty>](v: JsonbRef<'_>) -> Result<$wrapper_ty> {
+                v.as_number().map_err(|e| ExprError::Parse(e.into())).and_then([<to_ $ty>])
+            }
+        }
+    };
+}
+define_jsonb_to_number! { i16 }
+define_jsonb_to_number! { i32 }
+define_jsonb_to_number! { i64 }
+define_jsonb_to_number! { f32, OrderedF32 }
+define_jsonb_to_number! { f64, OrderedF64 }
+
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[inline(always)]
 pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> NaiveDateWrapper {
@@ -427,6 +464,7 @@ pub fn literal_parsing(
         // evaluation).
         DataType::List { .. } => return Err(None),
         DataType::Struct(_) => return Err(None),
+        DataType::Jsonb => return Err(None),
         DataType::Bytea => str_to_bytea(s)?.into(),
     };
     Ok(scalar)
@@ -455,6 +493,7 @@ macro_rules! for_all_cast_variants {
             { varchar, decimal, str_parse, false },
             { varchar, boolean, str_to_bool, false },
             { varchar, bytea, str_to_bytea, false },
+            { varchar, jsonb, str_parse, false },
             // `str_to_list` requires `target_elem_type` and is handled elsewhere
 
             { boolean, varchar, bool_to_varchar, false },
@@ -468,7 +507,16 @@ macro_rules! for_all_cast_variants {
             { interval, varchar, general_to_text, false },
             { date, varchar, general_to_text, false },
             { timestamp, varchar, general_to_text, false },
+            { jsonb, varchar, |x, w| general_to_text(x, w), false },
             { list, varchar, |x, w| general_to_text(x, w), false },
+
+            { jsonb, boolean, jsonb_to_bool, false },
+            { jsonb, int16, jsonb_to_i16, false },
+            { jsonb, int32, jsonb_to_i32, false },
+            { jsonb, int64, jsonb_to_i64, false },
+            { jsonb, decimal, jsonb_to_dec, false },
+            { jsonb, float32, jsonb_to_f32, false },
+            { jsonb, float64, jsonb_to_f64, false },
 
             { boolean, int32, try_cast, false },
             { int32, boolean, int32_to_bool, false },

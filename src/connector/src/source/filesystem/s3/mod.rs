@@ -33,6 +33,8 @@ pub struct S3Properties {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
+    #[serde(rename = "s3.endpoint_url")]
+    endpoint_url: Option<String>,
 }
 
 impl From<S3Properties> for HashMap<String, String> {
@@ -46,6 +48,10 @@ impl From<S3Properties> for HashMap<String, String> {
         if props.secret.is_some() {
             m.insert("secret_access".to_owned(), props.secret.unwrap());
         }
+        if props.endpoint_url.is_some() {
+            m.insert("endpoint_url".to_owned(), props.endpoint_url.unwrap());
+        }
+
         m
     }
 }

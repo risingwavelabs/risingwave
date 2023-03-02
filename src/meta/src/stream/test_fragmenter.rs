@@ -213,7 +213,8 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         node_body: Some(NodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
-                column_indices: vec![0],
+                dist_key_indices: vec![0],
+                output_indices: vec![0, 1, 2],
             }),
         })),
         fields: vec![
@@ -349,7 +350,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             table_id: 1,
             table: Some(make_materialize_table(888)),
             column_orders: vec![make_column_order(1), make_column_order(2)],
-            handle_pk_conflict: false,
+            handle_pk_conflict_behavior: 0,
         })),
         fields: vec![], // TODO: fill this later
         operator_id: 7,
@@ -374,7 +375,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Simple as i32,
-                column_indices: vec![],
+                dist_key_indices: vec![],
+                output_indices: vec![],
             }),
             link_id: 4,
             upstream_id: 1,
@@ -383,7 +385,8 @@ fn make_fragment_edges() -> Vec<StreamFragmentEdge> {
         StreamFragmentEdge {
             dispatch_strategy: Some(DispatchStrategy {
                 r#type: DispatcherType::Hash as i32,
-                column_indices: vec![0],
+                dist_key_indices: vec![0],
+                output_indices: vec![],
             }),
             link_id: 1,
             upstream_id: 2,
@@ -398,7 +401,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         fragments: HashMap::from_iter(fragments.into_iter().map(|f| (f.fragment_id, f))),
         edges: make_fragment_edges(),
         env: Some(StreamEnvironment::default()),
-        dependent_table_ids: vec![],
+        dependent_relation_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
     }

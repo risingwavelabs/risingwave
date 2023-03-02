@@ -22,6 +22,7 @@ use super::agg_common::{
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
+use crate::executor::agg_common::AggExecutorArgs;
 use crate::executor::aggregation::AggCall;
 use crate::executor::GlobalSimpleAggExecutor;
 
@@ -53,17 +54,23 @@ impl ExecutorBuilder for GlobalSimpleAggExecutorBuilder {
             build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, None)
                 .await;
 
-        Ok(GlobalSimpleAggExecutor::new(
-            params.actor_context,
+        Ok(GlobalSimpleAggExecutor::new(AggExecutorArgs {
             input,
+            actor_ctx: params.actor_context,
+            pk_indices: params.pk_indices,
+            executor_id: params.executor_id,
+
+            extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
+
             agg_calls,
+            row_count_index: node.get_row_count_index() as usize,
             storages,
             result_table,
             distinct_dedup_tables,
-            params.pk_indices,
-            params.executor_id,
-            stream.config.developer.unsafe_stream_extreme_cache_size,
-        )?
+            watermark_epoch: stream.get_watermark_epoch(),
+
+            extra: None,
+        })?
         .boxed())
     }
 }
