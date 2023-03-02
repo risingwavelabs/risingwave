@@ -881,6 +881,43 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
             }
         }
     }
+
+    pub fn prefetch_with_request_dedup<F, E, VC>(
+        self: &Arc<Self>,
+        hash: u64,
+        key: K,
+        fetch_value: F,
+    ) where
+        F: FnOnce() -> VC,
+        E: Error + Send + 'static + From<RecvError>,
+        VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
+    {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.lookup(hash, &key);
+            if !ptr.is_null() {
+                return;
+            }
+            if let Some(que) = shard.write_request.get_mut(&key) {
+                return;
+            }
+            shard.write_request.insert(key.clone(), vec![]);
+            let this = self.clone();
+            let fetch_value = fetch_value();
+            let key2 = key;
+            tokio::spawn(async move {
+                let guard = CleanCacheGuard {
+                    cache: &this,
+                    key: Some(key2),
+                    hash,
+                };
+                let (value, charge) = fetch_value.await?;
+                let key2 = guard.mark_success();
+                this.insert(key2, hash, charge, value);
+                Ok::<(), E>(())
+            });
+        }
+    }
 }
 
 pub struct CacheableEntry<K: LruKey, T: LruValue> {

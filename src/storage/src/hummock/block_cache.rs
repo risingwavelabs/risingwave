@@ -145,6 +145,28 @@ impl BlockCache {
         ))
     }
 
+    pub fn prefetch_block<F, Fut>(
+        &self,
+        sst_id: HummockSstableId,
+        block_idx: u64,
+        mut fetch_block: F,
+    ) where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
+    {
+        let h = Self::hash(sst_id, block_idx);
+        let key = (sst_id, block_idx);
+        self.inner
+            .prefetch_with_request_dedup::<_, HummockError, _>(h, key, || {
+                let f = fetch_block();
+                async move {
+                    let block = f.await?;
+                    let len = block.capacity();
+                    Ok((block, len))
+                }
+            });
+    }
+
     pub async fn get_or_insert_with<F, Fut>(
         &self,
         sst_id: HummockSstableId,

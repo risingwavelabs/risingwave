@@ -20,11 +20,12 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use async_stack_trace::StackTrace;
 use futures::future::{select, Either};
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, HummockEpoch, KeyComparator, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
+use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
@@ -37,11 +38,16 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::hummock::{
+    HummockError, HummockResult, MemoryLimiter, Sstable, SstableBlockIterator, SstableIdManagerRef,
+    TrackerId,
+};
+use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -107,6 +113,7 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
+    sstable_store: SstableStoreRef,
 }
 
 async fn flush_imms(
@@ -143,6 +150,7 @@ impl HummockEventHandler {
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let sstable_store = compactor_context.sstable_store.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -162,6 +170,7 @@ impl HummockEventHandler {
             uploader,
             last_instance_id: 0,
             sstable_id_manager,
+            sstable_store,
         }
     }
 
@@ -368,7 +377,109 @@ impl HummockEventHandler {
         });
     }
 
-    fn handle_version_update(&mut self, version_payload: Payload) {
+    async fn fill_cache(&mut self, delta: &HummockVersionDelta) -> HummockResult<()> {
+        let mut stats = StoreLocalStatistic::default();
+        for (_group_id, group_delta) in &delta.group_deltas {
+            for d in &group_delta.group_deltas {
+                let mut flatten_reqs = vec![];
+                if let Some(group_delta::DeltaType::IntraLevel(level_delta)) = d.delta_type.as_ref()
+                {
+                    for sst in &level_delta.inserted_table_infos {
+                        flatten_reqs.push(self.sstable_store.sstable_syncable(sst, &stats));
+                    }
+
+                    let mut flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
+                    let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
+                    for (sst, _) in flatten_resp {
+                        sstables.push(sst);
+                    }
+                    sstables.sort_by(|a, b| {
+                        KeyComparator::compare_encoded_full_key(
+                            &a.value().meta.smallest_key,
+                            &b.value().meta.smallest_key,
+                        )
+                    });
+                    for idx in 1..sstables.len() {
+                        if KeyComparator::compare_encoded_full_key(
+                            &sstables[idx].value().meta.smallest_key,
+                            &sstables[idx - 1].value().meta.largest_key,
+                        ) != std::cmp::Ordering::Greater
+                        {
+                            return Ok(());
+                        }
+                    }
+                    for remove_sst_id in &level_delta.removed_table_ids {
+                        if let Some(sst) = self.sstable_store.lookup_sstable(*remove_sst_id) {
+                            self.refill_sstable(sst.value(), &sstables);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn refill_sstable(&self, remove_sst: &Sstable, sstables: &[TableHolder]) {
+        let mut start_idx = sstables.partition_point(|sst| {
+            KeyComparator::compare_encoded_full_key(
+                &sst.value().meta.largest_key,
+                &remove_sst.meta.smallest_key,
+            ) == std::cmp::Ordering::Less
+        });
+        if start_idx == sstables.len() {
+            return;
+        }
+        let end_idx = sstables.partition_point(|sst| {
+            KeyComparator::compare_encoded_full_key(
+                &sst.value().meta.smallest_key,
+                &remove_sst.meta.largest_key,
+            ) == std::cmp::Ordering::Less
+        });
+        if start_idx >= end_idx {
+            return;
+        }
+        let mut remove_block_iter = SstableBlockIterator::new(remove_sst);
+        while start_idx < end_idx {
+            let mut insert_block_iter =
+                SstableBlockIterator::new(sstables[start_idx].value().as_ref());
+            while insert_block_iter.valid() {
+                if KeyComparator::compare_encoded_full_key(
+                    insert_block_iter.current_block_largest(),
+                    remove_block_iter.current_block_smallest(),
+                ) == std::cmp::Ordering::Less
+                {
+                    insert_block_iter.next();
+                    continue;
+                }
+                while remove_block_iter.valid() {
+                    if KeyComparator::encoded_full_key_less_than(
+                        insert_block_iter.current_block_smallest(),
+                        remove_block_iter.current_block_largest(),
+                    ) {
+                        break;
+                    }
+                    remove_block_iter.next();
+                }
+                // make sure that remove_block_iter.current_block_largest() >
+                // insert_block_iter.current_block_smallest()  and
+                if remove_block_iter.valid()
+                    && KeyComparator::encoded_full_key_less_than(
+                        remove_block_iter.current_block_smallest(),
+                        insert_block_iter.current_block_largest(),
+                    )
+                {
+                    self.sstable_store.prefetch(
+                        &insert_block_iter.sstable,
+                        insert_block_iter.current_block_id as u64,
+                    );
+                }
+                insert_block_iter.next();
+            }
+            start_idx += 1;
+        }
+    }
+
+    async fn handle_version_update(&mut self, version_payload: Payload) {
         let pinned_version = self.pinned_version.load();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
@@ -377,6 +488,9 @@ impl HummockEventHandler {
                 let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    if version_to_apply.max_committed_epoch < version_delta.max_committed_epoch {
+                        let _ = self.fill_cache(version_delta).await;
+                    }
                     version_to_apply.apply_version_delta(version_delta);
                 }
                 version_to_apply
@@ -460,7 +574,7 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload);
+                            self.handle_version_update(version_payload).await;
                         }
 
                         HummockEvent::ImmToUploader(imm) => {

@@ -379,6 +379,42 @@ impl SstableMeta {
     }
 }
 
+pub struct SstableBlockIterator<'a> {
+    pub sstable: &'a Sstable,
+    pub current_block_id: usize,
+}
+
+impl<'a> SstableBlockIterator<'a> {
+    pub fn new(sstable: &'a Sstable) -> Self {
+        Self {
+            sstable,
+            current_block_id: 0,
+        }
+    }
+
+    #[inline(always)]
+    pub fn next(&mut self) {
+        self.current_block_id += 1;
+    }
+
+    #[inline(always)]
+    pub fn valid(&self) -> bool {
+        self.current_block_id < self.sstable.block_count()
+    }
+
+    pub fn current_block_smallest(&self) -> &[u8] {
+        &self.sstable.meta.block_metas[self.current_block_id].smallest_key
+    }
+
+    pub fn current_block_largest(&self) -> &[u8] {
+        if self.current_block_id + 1 < self.sstable.block_count() {
+            &self.sstable.meta.block_metas[self.current_block_id + 1].smallest_key
+        } else {
+            &self.sstable.meta.largest_key
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub prefetch: bool,

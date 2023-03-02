@@ -208,6 +208,29 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
+    pub fn prefetch(&self, sst: &Sstable, block_index: u64) {
+        let block_meta = sst
+            .meta
+            .block_metas
+            .get(block_index as usize)
+            .ok_or_else(HummockError::invalid_block)
+            .unwrap(); // FIXME: don't unwrap here.
+        let block_loc = BlockLocation {
+            offset: block_meta.offset as usize,
+            size: block_meta.len as usize,
+        };
+        let uncompressed_capacity = block_meta.uncompressed_size as usize;
+        self.block_cache.prefetch_block(sst.id, block_index, || {
+            let data_path = self.get_sst_data_path(sst.id);
+            let store = self.store.clone();
+            async move {
+                let block_data = store.read(&data_path, Some(block_loc)).await?;
+                let block = Block::decode(block_data, uncompressed_capacity)?;
+                Ok(Box::new(block))
+            }
+        });
+    }
+
     pub async fn get(
         &self,
         sst: &Sstable,
@@ -318,6 +341,10 @@ impl SstableStore {
     #[cfg(any(test, feature = "test"))]
     pub fn clear_meta_cache(&self) {
         self.meta_cache.clear();
+    }
+
+    pub fn lookup_sstable(&self, sst_id: u64) -> Option<TableHolder> {
+        self.meta_cache.lookup(sst_id, &sst_id)
     }
 
     pub async fn sstable_syncable(
