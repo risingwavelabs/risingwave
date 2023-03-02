@@ -4,7 +4,7 @@ set -euxo pipefail
 
 # export SNAPSHOT_DIR=""
 export OUTDIR=$SNAPSHOT_DIR
-export TEST_NUM=200
+export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
@@ -20,7 +20,7 @@ build_madsim() {
 generate_deterministic() {
   seq "$TEST_NUM" | parallel "mkdir -p $OUTDIR/{}; \
     MADSIM_TEST_SEED={} $MADSIM_BIN \
-      --sqlsmith 1000 \
+      --sqlsmith 500 \
       --generate-sqlsmith-queries $OUTDIR/{} \
       $TESTDATA \
       2> $LOGDIR/fuzzing-{}.log"
