@@ -647,7 +647,7 @@ mod tests {
     fn test_prepared_statement_with_explicit_param() {
         let raw_statement = "SELECT * FROM test_table WHERE id = $1".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::Int32.to_oid()])
                 .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT" == default_sql);
@@ -657,7 +657,7 @@ mod tests {
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
             raw_statement,
-            vec![DataType::INT32.to_oid(), DataType::VARCHAR.to_oid()],
+            vec![DataType::Int32.to_oid(), DataType::Varchar.to_oid()],
         )
         .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
@@ -670,7 +670,7 @@ mod tests {
         let raw_statement = "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2".to_string();
         let prepared_statement = PreparedStatement::parse_statement(
             raw_statement,
-            vec![DataType::INT32.to_oid(), DataType::VARCHAR.to_oid()],
+            vec![DataType::Int32.to_oid(), DataType::Varchar.to_oid()],
         )
         .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
@@ -684,9 +684,9 @@ mod tests {
         let prepared_statement = PreparedStatement::parse_statement(
             raw_statement,
             vec![
-                DataType::INT32.to_oid(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.to_oid(),
+                DataType::Int32.to_oid(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.to_oid(),
             ],
         )
         .unwrap();
@@ -733,7 +733,7 @@ mod tests {
         let raw_statement =
             "SELECT * FROM test_table WHERE id = $1 AND name = $2::VARCHAR".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::Int32.to_oid()])
                 .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("SELECT * FROM test_table WHERE id = 0::INT AND name = '0'" == default_sql);
@@ -744,7 +744,7 @@ mod tests {
 
         let raw_statement = "INSERT INTO test (index,data) VALUES ($1,$2)".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::Int32.to_oid()])
                 .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("INSERT INTO test (index,data) VALUES (0::INT,'0')" == default_sql);
@@ -756,7 +756,7 @@ mod tests {
         let raw_statement =
             "UPDATE COFFEES SET SALES = $1 WHERE COF_NAME LIKE $2::VARCHAR".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::Int32.to_oid()])
                 .unwrap();
         let default_sql = prepared_statement.instance_default().unwrap();
         assert!("UPDATE COFFEES SET SALES = 0::INT WHERE COF_NAME LIKE '0'" == default_sql);
@@ -774,7 +774,7 @@ mod tests {
 
         let raw_statement = "SELECT $1,$1::INT,$2::VARCHAR,$2;".to_string();
         let prepared_statement =
-            PreparedStatement::parse_statement(raw_statement, vec![DataType::INT32.to_oid()])
+            PreparedStatement::parse_statement(raw_statement, vec![DataType::Int32.to_oid()])
                 .unwrap();
         let sql = prepared_statement
             .instance(&["1".into(), "DATA".into()], &[])
@@ -1028,7 +1028,7 @@ mod tests {
             .map(|b| b.freeze())
             .collect::<Vec<_>>();
         raw_params.push("TEST".into());
-        let type_description = vec![DataType::Float32, DataType::Float64, DataType::VARCHAR];
+        let type_description = vec![DataType::Float32, DataType::Float64, DataType::Varchar];
         let params = PreparedStatement::parse_params(
             &type_description,
             &raw_params,

@@ -460,18 +460,10 @@ where
             StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
-                    let internal_tables: [_; 1] = internal_tables.try_into().unwrap();
                     self.catalog_manager
-                        .finish_create_table_procedure_with_source(
-                            source,
-                            table,
-                            &internal_tables[0],
-                        )
+                        .finish_create_table_procedure_with_source(source, table, internal_tables)
                         .await?
                 } else {
-                    assert!(internal_tables.is_empty());
-                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
-                    // the method.
                     self.catalog_manager
                         .finish_create_table_procedure(internal_tables, table)
                         .await?

@@ -984,7 +984,7 @@ where
         &self,
         source: &Source,
         mview: &Table,
-        internal_table: &Table,
+        internal_tables: Vec<Table>,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
@@ -1016,11 +1016,16 @@ where
 
         sources.insert(source.id, source.clone());
         tables.insert(mview.id, mview.clone());
-        tables.insert(internal_table.id, internal_table.clone());
-
+        for table in &internal_tables {
+            tables.insert(table.id, table.clone());
+        }
         commit_meta!(self, sources, tables)?;
-        self.notify_frontend(Operation::Add, Info::Table(internal_table.to_owned()))
-            .await;
+
+        for internal_table in internal_tables {
+            self.notify_frontend(Operation::Add, Info::Table(internal_table))
+                .await;
+        }
+
         self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
             .await;
 
