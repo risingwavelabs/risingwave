@@ -1972,19 +1972,19 @@ where
 
     #[named]
     pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
-        let total_score_count = self.compactor_manager.max_concurrent_task_number();
-        // TODO: avoid hold compaction lock too long.
-        let compaction = read_lock!(self, compaction).await;
-        let pending_task_count = compaction.compact_task_assignment.len();
+        let total_cpu_core = self.compactor_manager.total_cpu_core_num();
+        let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
         let version = {
             let guard = read_lock!(self, versioning).await;
             guard.current_version.clone()
         };
         let mut global_info = ScaleCompactorInfo {
-            total_cores: total_score_count as u64,
-            running_cores: pending_task_count as u64,
+            total_cores: total_cpu_core as u64,
+            running_cores: total_running_cpu_core as u64,
             ..Default::default()
         };
+
+        let compaction = read_lock!(self, compaction).await;
         for (group_id, status) in &compaction.compaction_statuses {
             if let Some(levels) = version.levels.get(group_id) {
                 let cg = self.get_compaction_group_config(*group_id).await;

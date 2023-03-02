@@ -58,6 +58,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(

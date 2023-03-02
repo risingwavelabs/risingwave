@@ -14,13 +14,13 @@
 
 use std::collections::{BTreeMap, HashMap};
 use std::ops::Deref;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime};
+use std::time::SystemTime;
 
 use fail::fail_point;
 use itertools::Itertools;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -30,9 +30,7 @@ use risingwave_pb::hummock::{
 };
 use tokio::sync::mpsc::{Receiver, Sender};
 
-use super::compaction_schedule_policy::{
-    CompactionSchedulePolicy, CompactorState, RoundRobinPolicy, ScoredPolicy,
-};
+use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
 use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
@@ -49,7 +47,11 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: AtomicU64,
-    state: Mutex<CompactorState>,
+    // state: Mutex<CompactorState>,
+
+    // state
+    pub cpu_ratio: AtomicU32,
+    pub total_cpu_core: u32,
 }
 
 struct TaskHeartbeat {
@@ -64,12 +66,17 @@ impl Compactor {
         context_id: HummockContextId,
         sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Self {
         Self {
             context_id,
             sender,
-            max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
-            state: Mutex::new(CompactorState::Idle(Instant::now())),
+            max_concurrent_task_number: AtomicU64::new(std::cmp::min(
+                max_concurrent_task_number,
+                cpu_core_num as u64,
+            )),
+            cpu_ratio: AtomicU32::new(0),
+            total_cpu_core: cpu_core_num,
         }
     }
 
@@ -110,15 +117,10 @@ impl Compactor {
         self.max_concurrent_task_number
             .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
-}
 
-impl Compactor {
-    pub fn state(&self) -> CompactorState {
-        self.state.try_lock().unwrap().clone()
-    }
-
-    pub fn set_state(&self, new_state: CompactorState) {
-        *self.state.try_lock().unwrap() = new_state;
+    pub fn is_busy(&self) -> bool {
+        const CPU_THRESHOLD: u32 = 80;
+        self.cpu_ratio.load(Ordering::Acquire) > CPU_THRESHOLD
     }
 }
 
@@ -193,7 +195,7 @@ impl CompactorManager {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        let mut policy = self.policy.write();
+        let policy = self.policy.write();
         policy.next_idle_compactor(compactor_assigned_task_num)
     }
 
@@ -213,9 +215,10 @@ impl CompactorManager {
         &self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let mut policy = self.policy.write();
-        let rx = policy.add_compactor(context_id, max_concurrent_task_number);
+        let rx = policy.add_compactor(context_id, max_concurrent_task_number, cpu_core_num);
         tracing::info!("Added compactor session {}", context_id);
         rx
     }
@@ -421,23 +424,20 @@ impl CompactorManager {
         context_id: HummockContextId,
         workload: CompactorWorkload,
     ) {
-        const CPU_THRESHOLD: u32 = 80;
-
         if let Some(compactor) = self.policy.read().get_compactor(context_id) {
-            if workload.cpu > CPU_THRESHOLD {
-                compactor.set_state(CompactorState::Busy(Instant::now()))
-            } else {
-                compactor.set_state(CompactorState::Idle(Instant::now()))
-            }
-
-            tracing::info!(
-                "update_compactor_state cpu {} state {:?}",
-                workload.cpu,
-                compactor.state(),
-            );
+            compactor.cpu_ratio.store(workload.cpu, Ordering::Release);
+            tracing::info!("update_compactor_state cpu {}", workload.cpu,);
         }
 
         self.policy.write().refresh_state();
+    }
+
+    pub fn total_cpu_core_num(&self) -> u32 {
+        self.policy.read().total_cpu_core_num()
+    }
+
+    pub fn total_running_cpu_core_num(&self) -> u32 {
+        self.policy.read().total_running_cpu_core_num()
     }
 }
 
@@ -460,7 +460,7 @@ mod tests {
             let context_id = worker_node.id;
             let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
             let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-            let _receiver = compactor_manager.add_compactor(context_id, 1);
+            let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
                 .get_compact_task(
@@ -528,7 +528,7 @@ mod tests {
         // Test add
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
-        compactor_manager.add_compactor(context_id, 1);
+        compactor_manager.add_compactor(context_id, 1, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
         assert_eq!(
             compactor_manager
@@ -542,7 +542,7 @@ mod tests {
         assert_eq!(compactor_manager.compactor_num(), 0);
         assert!(compactor_manager.get_compactor(context_id).is_none());
         for _ in 0..3 {
-            compactor_manager.add_compactor(context_id, 1);
+            compactor_manager.add_compactor(context_id, 1, 1);
             assert_eq!(compactor_manager.compactor_num(), 1);
             assert_eq!(
                 compactor_manager

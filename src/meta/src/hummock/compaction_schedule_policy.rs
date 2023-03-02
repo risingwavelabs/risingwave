@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -40,7 +41,7 @@ pub enum ScalePolicy {
 pub trait CompactionSchedulePolicy: Send + Sync {
     /// Get next idle compactor to assign task.
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>>;
 
@@ -51,6 +52,7 @@ pub trait CompactionSchedulePolicy: Send + Sync {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>>;
 
     /// Make sure the compactor with `context_id` will not be scheduled until it resubscribes.
@@ -90,6 +92,10 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     fn max_concurrent_task_num(&self) -> usize;
 
+    fn total_cpu_core_num(&self) -> u32;
+
+    fn total_running_cpu_core_num(&self) -> u32;
+
     fn refresh_state(&mut self);
 }
 
@@ -119,7 +125,7 @@ impl RoundRobinPolicy {
 
 impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         if self.compactors.is_empty() {
@@ -155,13 +161,19 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         self.compactors.retain(|c| *c != context_id);
         self.compactors.push(context_id);
         self.compactor_map.insert(
             context_id,
-            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+            Arc::new(Compactor::new(
+                context_id,
+                tx,
+                max_concurrent_task_number,
+                cpu_core_num,
+            )),
         );
         rx
     }
@@ -209,6 +221,20 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     }
 
     fn refresh_state(&mut self) {}
+
+    fn total_cpu_core_num(&self) -> u32 {
+        self.compactor_map
+            .values()
+            .map(|c| c.cpu_ratio.load(Ordering::Acquire))
+            .sum()
+    }
+
+    fn total_running_cpu_core_num(&self) -> u32 {
+        self.compactor_map
+            .values()
+            .map(|c| c.cpu_ratio.load(Ordering::Acquire) * c.total_cpu_core / 100)
+            .sum()
+    }
 }
 
 /// The score must be linear to the input for easy update.
@@ -326,7 +352,7 @@ impl ScoredPolicy {
 
 impl CompactionSchedulePolicy for ScoredPolicy {
     fn next_idle_compactor(
-        &mut self,
+        &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
         if let Some(compactor) = self.fetch_idle_compactor(compactor_assigned_task_num) {
@@ -348,13 +374,19 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         &mut self,
         context_id: HummockContextId,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let (tx, rx) = tokio::sync::mpsc::channel(STREAM_BUFFER_SIZE);
         // If `context_id` already exists, we only need to update the task channel.
         let score = self.context_id_to_score.entry(context_id).or_insert(0);
         self.score_to_compactor.insert(
             (*score, context_id),
-            Arc::new(Compactor::new(context_id, tx, max_concurrent_task_number)),
+            Arc::new(Compactor::new(
+                context_id,
+                tx,
+                max_concurrent_task_number,
+                cpu_core_num,
+            )),
         );
         rx
     }
@@ -415,7 +447,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
                     let decrease_core = self
                         .score_to_compactor
                         .values()
-                        .map(|compactor| compactor.max_concurrent_task_number())
+                        .map(|compactor| compactor.total_cpu_core as u64)
                         .min()
                         .unwrap_or(0);
                     return ScalePolicy::ScaleIn(decrease_core);
@@ -440,7 +472,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         let idle_count = self
             .score_to_compactor
             .values()
-            .filter(|compactor| matches!(compactor.state(), CompactorState::Idle(_)))
+            .filter(|compactor| !compactor.is_busy())
             .count();
 
         if idle_count == 0 {
@@ -482,6 +514,20 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             self.state,
             self.suggest_scale_policy(),
         );
+    }
+
+    fn total_cpu_core_num(&self) -> u32 {
+        self.score_to_compactor
+            .values()
+            .map(|c| c.cpu_ratio.load(Ordering::Acquire))
+            .sum()
+    }
+
+    fn total_running_cpu_core_num(&self) -> u32 {
+        self.score_to_compactor
+            .values()
+            .map(|c| c.cpu_ratio.load(Ordering::Acquire) * c.total_cpu_core / 100)
+            .sum()
     }
 }
 
@@ -576,10 +622,10 @@ mod tests {
         assert_eq!(policy.compactors.len(), 0);
         assert_eq!(policy.max_concurrent_task_num(), 0);
 
-        let mut receiver = policy.add_compactor(1, 1000);
+        let mut receiver = policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.compactors.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
-        let _receiver_2 = policy.add_compactor(2, 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000, 1000);
         assert_eq!(policy.compactors.len(), 2);
         assert_eq!(policy.max_concurrent_task_num(), 2000);
         policy.remove_compactor(2);
@@ -631,7 +677,7 @@ mod tests {
         assert!(compactor_manager.next_compactor().is_none());
 
         // Add a compactor.
-        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX);
+        let mut receiver = compactor_manager.add_compactor(context_id, u64::MAX, 16);
         assert_eq!(compactor_manager.compactors.len(), 1);
         let compactor = compactor_manager.next_compactor().unwrap();
         // No compact task.
@@ -668,7 +714,7 @@ mod tests {
         let mut policy = RoundRobinPolicy::new();
         let mut receivers = vec![];
         for context_id in 0..5 {
-            receivers.push(policy.add_compactor(context_id, u64::MAX));
+            receivers.push(policy.add_compactor(context_id, u64::MAX, 16));
         }
         assert_eq!(policy.compactors.len(), 5);
         let task = dummy_compact_task(0, 1);
@@ -705,7 +751,7 @@ mod tests {
         assert!(policy.next_compactor().is_none());
 
         // Adding existing compactor does not change score.
-        policy.add_compactor(0, u64::MAX);
+        policy.add_compactor(0, u64::MAX, 16);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
         assert_eq!(*policy.context_id_to_score.get(&0).unwrap(), 1);
@@ -718,11 +764,11 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), 0);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        policy.add_compactor(1, 1000);
+        policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
-        let _receiver_2 = policy.add_compactor(2, 1000);
+        let _receiver_2 = policy.add_compactor(2, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 2);
         assert_eq!(policy.score_to_compactor.len(), 2);
         assert_eq!(policy.max_concurrent_task_num(), 2000);
@@ -736,7 +782,7 @@ mod tests {
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 0);
 
-        let mut receiver = policy.add_compactor(1, 1000);
+        let mut receiver = policy.add_compactor(1, 1000, 1000);
         assert_eq!(policy.context_id_to_score.len(), 1);
         assert_eq!(policy.score_to_compactor.len(), 1);
         assert_eq!(policy.max_concurrent_task_num(), 1000);
@@ -788,7 +834,7 @@ mod tests {
 
         // Add 3 compactors.
         for context_id in 0..3 {
-            policy.add_compactor(context_id, u64::MAX);
+            policy.add_compactor(context_id, u64::MAX, 16);
         }
 
         let task1 = dummy_compact_task(0, 5);
@@ -845,7 +891,7 @@ mod tests {
 
         // Add 2 compactors.
         for context_id in 0..2 {
-            policy.add_compactor(context_id, 2);
+            policy.add_compactor(context_id, 2, 16);
         }
 
         let task1 = dummy_compact_task(0, 1);

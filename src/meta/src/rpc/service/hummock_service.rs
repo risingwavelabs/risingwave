@@ -25,7 +25,6 @@ use tonic::{Request, Response, Status};
 use crate::hummock::compaction::ManualCompactionOption;
 use crate::hummock::{
     CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
-    CANCEL_STATUS_SET,
 };
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
@@ -150,20 +149,14 @@ where
                 status: None,
             })),
             Some(mut compact_task) => {
-                let task_status = compact_task.task_status();
-                if CANCEL_STATUS_SET.contains(&task_status) {
-                    self.hummock_manager
-                        .cancel_compact_task(&mut compact_task, task_status)
-                        .await?;
-                } else {
-                    self.hummock_manager
-                        .report_compact_task(
-                            req.context_id,
-                            &mut compact_task,
-                            Some(req.table_stats_change),
-                        )
-                        .await?;
-                }
+                self.hummock_manager
+                    .report_compact_task(
+                        req.context_id,
+                        &mut compact_task,
+                        Some(req.table_stats_change),
+                    )
+                    .await?;
+
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
@@ -247,9 +240,11 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        let rx = self
-            .compactor_manager
-            .add_compactor(context_id, req.max_concurrent_task_number);
+        let rx = self.compactor_manager.add_compactor(
+            context_id,
+            req.max_concurrent_task_number,
+            req.cpu_core_num,
+        );
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
             self.hummock_manager

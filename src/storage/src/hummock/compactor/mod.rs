@@ -37,6 +37,7 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
+use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -339,6 +340,7 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(60);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
+        let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
@@ -359,7 +361,7 @@ impl Compactor {
 
                 let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(config.max_concurrent_task_number)
+                    .subscribe_compact_tasks(config.max_concurrent_task_number, cpu_core_num)
                     .await
                 {
                     Ok(stream) => {

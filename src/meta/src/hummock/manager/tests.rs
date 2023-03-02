@@ -151,7 +151,7 @@ async fn test_hummock_compaction_task() {
         .unwrap();
     // Get the compactor and assign task.
     let compactor_manager = hummock_manager.compactor_manager_ref_for_test();
-    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     hummock_manager
         .assign_compaction_task(&compact_task, compactor.context_id())
@@ -797,7 +797,7 @@ async fn test_trigger_manual_compaction() {
 
     // No compaction task available.
     let compactor_manager_ref = hummock_manager.compactor_manager_ref_for_test();
-    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    let receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX, 16);
     {
         let option = ManualCompactionOption::default();
         // to check no compaction task
@@ -826,7 +826,7 @@ async fn test_trigger_manual_compaction() {
     }
 
     compactor_manager_ref.remove_compactor(context_id);
-    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    let _receiver = compactor_manager_ref.add_compactor(context_id, u64::MAX, 16);
 
     {
         let option = ManualCompactionOption {
@@ -875,7 +875,7 @@ async fn test_trigger_compaction_deterministic() {
         compactor_manager_ref.clone(),
     ));
 
-    let _ = compactor_manager_ref.add_compactor(context_id, u64::MAX);
+    let _ = compactor_manager_ref.add_compactor(context_id, u64::MAX, 16);
     let (_handle, shutdown_tx) = start_compaction_scheduler(compaction_scheduler);
 
     // Generate data for compaction task
@@ -1234,7 +1234,7 @@ async fn test_version_stats() {
     // Report compaction
     hummock_manager
         .compactor_manager_ref_for_test()
-        .add_compactor(worker_node.id, u64::MAX);
+        .add_compactor(worker_node.id, u64::MAX, 16);
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut compact_task = hummock_manager
         .get_compact_task(

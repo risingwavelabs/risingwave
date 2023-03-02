@@ -890,10 +890,12 @@ impl HummockMetaClient for MetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
+            cpu_core_num,
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
