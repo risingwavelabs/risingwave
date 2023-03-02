@@ -20,7 +20,7 @@ use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{ListRef, ListValue, StructRef, StructValue};
-use crate::row::RowDeserializer;
+use crate::row::RowDeserializer as BasicDeserializer;
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,

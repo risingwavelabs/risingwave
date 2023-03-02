@@ -106,30 +106,24 @@ impl RowEncoding {
     }
 }
 
-trait ValueRowSerializer: Clone {
-    fn new(column_ids: &[ColumnId]) -> impl ValueRowSerializer;
+pub trait ValueRowSerializer: Clone {
     fn serialize(&self, row: impl Row) -> Vec<u8>;
 }
 
-trait ValueRowDeserializer: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> impl ValueRowDeserializer;
+pub trait ValueRowDeserializer: Clone {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
 
-pub trait ValueRowSerde: Clone {
+pub trait ValueRowSerdeNew: Clone {
     fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-    fn serialize(&self, row: impl Row) -> Vec<u8>;
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
 }
+
+pub trait ValueRowSerde: ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew {}
 
 #[derive(Clone)]
 pub struct BasicSerializer {}
 
 impl ValueRowSerializer for BasicSerializer {
-    fn new(_column_ids: &[ColumnId]) -> BasicSerializer {
-        BasicSerializer {}
-    }
-
     fn serialize(&self, row: impl Row) -> Vec<u8> {
         let mut buf = vec![];
         for datum in row.iter() {
@@ -139,11 +133,7 @@ impl ValueRowSerializer for BasicSerializer {
     }
 }
 
-impl ValueRowDeserializer for RowDeserializer {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> RowDeserializer {
-        RowDeserializer::new(schema.as_ref().to_owned())
-    }
-
+impl ValueRowDeserializer for BasicDeserializer {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         Ok(self.deserialize(encoded_bytes)?.into_inner())
     }
@@ -151,28 +141,32 @@ impl ValueRowDeserializer for RowDeserializer {
 
 #[derive(Clone)]
 pub struct BasicSerde {
-    deserializer: RowDeserializer,
+    serializer: BasicSerializer,
+    deserializer: BasicDeserializer,
 }
 
-impl ValueRowSerde for BasicSerde {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
+impl ValueRowSerdeNew for BasicSerde {
+    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
         BasicSerde {
-            deserializer: <RowDeserializer as ValueRowDeserializer>::new(column_ids, schema),
+            serializer: BasicSerializer {},
+            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
         }
     }
+}
 
+impl ValueRowSerializer for BasicSerde {
     fn serialize(&self, row: impl Row) -> Vec<u8> {
-        let mut buf = vec![];
-        for datum in row.iter() {
-            serialize_datum_into(datum, &mut buf);
-        }
-        buf
+        self.serializer.serialize(row)
     }
+}
 
+impl ValueRowDeserializer for BasicSerde {
     fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
     }
 }
+
+impl ValueRowSerde for BasicSerde {}
 
 /// Column-Aware `Serializer` holds schema related information, and shall be
 /// created again once the schema changes
@@ -197,15 +191,7 @@ impl Serializer {
         }
     }
 
-    /// Serialize a row under the schema of the Serializer
-    pub fn serialize_row_column_aware(&self, row: impl Row) -> Vec<u8> {
-        assert_eq!(row.len(), self.datum_num as usize);
-        let mut encoding = RowEncoding::new();
-        encoding.encode(row.iter());
-        self.serialize(encoding)
-    }
-
-    fn serialize(&self, encoding: RowEncoding) -> Vec<u8> {
+    fn serialize_inner(&self, encoding: RowEncoding) -> Vec<u8> {
         let mut row_bytes = Vec::with_capacity(
             5 + self.encoded_column_ids.len() + encoding.offsets.len() + encoding.buf.len(), /* 5 comes from u8+u32 */
         );
@@ -216,6 +202,16 @@ impl Serializer {
         row_bytes.extend(&encoding.buf);
 
         row_bytes
+    }
+}
+
+impl ValueRowSerializer for Serializer {
+    /// Serialize a row under the schema of the Serializer
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        assert_eq!(row.len(), self.datum_num as usize);
+        let mut encoding = RowEncoding::new();
+        encoding.encode(row.iter());
+        self.serialize_inner(encoding)
     }
 }
 
@@ -239,8 +235,10 @@ impl Deserializer {
             schema,
         }
     }
+}
 
-    pub fn decode(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+impl ValueRowDeserializer for Deserializer {
+    fn deserialize(&self, mut encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
         let flag = Flag::from_bits(encoded_bytes.get_u8()).expect("should be a valid flag");
         let offset_bytes = match flag - Flag::EMPTY {
             Flag::OFFSET8 => 1,
@@ -305,7 +303,7 @@ pub struct ColumnAwareSerde {
     deserializer: Deserializer,
 }
 
-impl ValueRowSerde for ColumnAwareSerde {
+impl ValueRowSerdeNew for ColumnAwareSerde {
     fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
         let serializer = Serializer::new(column_ids);
         let deserializer = Deserializer::new(column_ids, schema);
@@ -314,15 +312,21 @@ impl ValueRowSerde for ColumnAwareSerde {
             deserializer,
         }
     }
+}
 
+impl ValueRowSerializer for ColumnAwareSerde {
     fn serialize(&self, row: impl Row) -> Vec<u8> {
-        self.serializer.serialize_row_column_aware(row)
-    }
-
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        self.deserializer.decode(encoded_bytes)
+        self.serializer.serialize(row)
     }
 }
+
+impl ValueRowDeserializer for ColumnAwareSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        self.deserializer.deserialize(encoded_bytes)
+    }
+}
+
+impl ValueRowSerde for ColumnAwareSerde {}
 
 #[cfg(test)]
 mod tests {
@@ -343,7 +347,7 @@ mod tests {
         let mut array = vec![];
         let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
         for row in &rows {
-            let row_bytes = serializer.serialize_row_column_aware(row);
+            let row_bytes = serializer.serialize(row);
             array.push(row_bytes);
         }
         let zero_le_bytes = 0_i32.to_le_bytes();
@@ -384,13 +388,13 @@ mod tests {
         let column_ids = vec![ColumnId::new(0), ColumnId::new(1)];
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
         let serializer = column_aware_row_encoding::Serializer::new(&column_ids);
-        let row_bytes = serializer.serialize_row_column_aware(row1);
+        let row_bytes = serializer.serialize(row1);
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let deserializer = column_aware_row_encoding::Deserializer::new(
             &column_ids[..],
             Arc::from(data_types.into_boxed_slice()),
         );
-        let decoded = deserializer.decode(&row_bytes[..]);
+        let decoded = deserializer.deserialize(&row_bytes[..]);
         assert_eq!(
             decoded.unwrap(),
             vec![Some(Int16(5)), Some(Utf8("abc".into()))]
