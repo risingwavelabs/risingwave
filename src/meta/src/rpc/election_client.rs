@@ -17,6 +17,7 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 use etcd_client::{ConnectOptions, Error, GetOptions};
+use risingwave_common::bail;
 use tokio::sync::watch::Receiver;
 use tokio::sync::{oneshot, watch};
 use tokio::time;
@@ -192,7 +193,7 @@ impl ElectionClient for EtcdElectionClient {
                     }
 
                     _ = stop_.changed() => {
-                        tracing::info!("stop signal received");
+                        tracing::info!("stop signal received when keeping alive");
                         break;
                     }
                 }
@@ -209,9 +210,14 @@ impl ElectionClient for EtcdElectionClient {
                 biased;
 
                 _ = stop.changed() => {
-                    tracing::info!("stop signal received");
+                    tracing::info!("stop signal received when campaigning");
                     return Ok(());
                 }
+
+                _ = keep_alive_fail_rx.borrow_mut() => {
+                    tracing::error!("keep alive failed, stopping main loop");
+                    bail!("keep alive failed, stopping main loop");
+                },
 
                 campaign_resp = self.client.campaign(META_ELECTION_KEY, self.id.as_bytes().to_vec(), lease_id) => {
                     campaign_resp?;
@@ -228,7 +234,7 @@ impl ElectionClient for EtcdElectionClient {
             tokio::select! {
                 biased;
                 _ = stop.changed() => {
-                    tracing::info!("stop signal received");
+                    tracing::info!("stop signal received when observing");
                     break;
                 },
                 _ = keep_alive_fail_rx.borrow_mut() => {
