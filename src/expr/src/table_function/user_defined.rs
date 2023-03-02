@@ -29,9 +29,11 @@ pub struct UserDefinedTableFunction {
     return_types: Vec<DataType>,
     client: ArrowFlightUdfClient,
     identifier: String,
+    #[allow(dead_code)]
     chunk_size: usize,
 }
 
+#[cfg(not(madsim))]
 impl TableFunction for UserDefinedTableFunction {
     fn return_type(&self) -> DataType {
         // FIXME: support multiple return types
@@ -61,6 +63,7 @@ impl TableFunction for UserDefinedTableFunction {
     }
 }
 
+#[cfg(not(madsim))]
 pub fn new_user_defined(
     prost: &TableFunctionProst,
     chunk_size: usize,
@@ -89,4 +92,23 @@ pub fn new_user_defined(
         chunk_size,
     }
     .boxed())
+}
+
+#[cfg(madsim)]
+impl TableFunction for UserDefinedTableFunction {
+    fn return_type(&self) -> DataType {
+        panic!("UDF is not supported in simulation yet");
+    }
+
+    fn eval(&self, _input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        panic!("UDF is not supported in simulation yet");
+    }
+}
+
+#[cfg(madsim)]
+pub fn new_user_defined(
+    _prost: &TableFunctionProst,
+    _chunk_size: usize,
+) -> Result<BoxedTableFunction> {
+    panic!("UDF is not supported in simulation yet");
 }
