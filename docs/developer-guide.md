@@ -298,9 +298,9 @@ If you want to see the coverage report, run this command:
 ```
 
 Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
-error message: `UnsupportedFilesystem(16914836)`. If this happens you can override the use of `/tmp` by setting the 
-environment variable `RISINGWAVE_TEST_DIR` to a directory that is on a non-TmpFS filesystem, the unit tests will then 
-place temporary files under your specified path.
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
 
 ### Planner tests
 
