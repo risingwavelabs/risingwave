@@ -68,9 +68,8 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
 /// sqlsmith should stop execution, but writeout ddl and queries so far.
 /// It should log the number of queries written to stdout, so external process
 /// can still generate more to make up the shortfall if necessary.
-pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &str) {
-    // FIXME: Gen from seed.
-    let mut rng = rand::rngs::SmallRng::from_entropy();
+pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &str, seed: Option<u64>) {
+    let mut rng = generate_rng(seed);
     let (tables, base_tables, mviews, setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
 
@@ -165,18 +164,7 @@ fn write_to_file(outdir: &str, name: &str, sql: &str) {
 
 /// e2e test runner for sqlsmith
 pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
-    #[cfg(madsim)]
-    let mut rng = if let Some(seed) = seed {
-        ChaChaRng::seed_from_u64(seed)
-    } else {
-        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
-    };
-    #[cfg(not(madsim))]
-    let mut rng = if let Some(seed) = seed {
-        SmallRng::seed_from_u64(seed)
-    } else {
-        SmallRng::from_entropy()
-    };
+    let mut rng = generate_rng(seed);
     let (tables, base_tables, mviews, mut setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
     tracing::info!("Created tables");
@@ -215,6 +203,21 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("Passed stream queries");
 
     drop_tables(&mviews, testdata, client).await;
+}
+
+fn generate_rng(seed: Option<u64>) -> impl Rng {
+    #[cfg(madsim)]
+    if let Some(seed) = seed {
+        ChaChaRng::seed_from_u64(seed)
+    } else {
+        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+    }
+    #[cfg(not(madsim))]
+    if let Some(seed) = seed {
+        SmallRng::seed_from_u64(seed)
+    } else {
+        SmallRng::from_entropy()
+    }
 }
 
 #[allow(dead_code)]

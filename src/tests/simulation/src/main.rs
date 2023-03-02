@@ -193,6 +193,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        Some(seed),
                     )
                     .await;
                 } else {
