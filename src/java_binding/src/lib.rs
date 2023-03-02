@@ -31,10 +31,10 @@ use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::hash::VirtualNode;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
-use risingwave_common::hash::VirtualNode;
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
