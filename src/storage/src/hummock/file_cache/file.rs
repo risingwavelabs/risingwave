@@ -24,10 +24,13 @@ use nix::unistd::ftruncate;
 use tracing::Instrument;
 
 use super::error::Result;
+use super::store::FsType;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
 #[derive(Clone, Debug)]
 pub struct CacheFileOptions {
+    /// The file system on which the cache file will be created.  This cannot be TmpFS because that does not support Direct IO.
+    pub fs_type: FsType,
     /// NOTE: `block_size` must be a multiple of `fs_block_size`.
     pub block_size: usize,
     pub fallocate_unit: usize,
@@ -81,6 +84,9 @@ impl CacheFile {
     /// punching.
     pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {
         options.assert();
+        assert!(options.fs_type != FsType::Tmpfs, 
+            "Cannot create cache file ({}) on a tmpfs file system: tmpfs does not support Direct IO which is required by the File Cache.", 
+            path.as_ref().display());
 
         let path = path.as_ref().to_owned();
 
@@ -273,6 +279,8 @@ impl CacheFile {
 
 #[cfg(test)]
 mod tests {
+    use nix::sys::statfs::statfs;
+
     use super::*;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
@@ -282,11 +290,33 @@ mod tests {
         is_send_sync_clone::<CacheFile>();
     }
 
+    fn get_fs_type(path: &Path) -> FsType {
+        //! This is temp code and is waiting on another PR to merge where it will switch to using a
+        //! common function
+        let fs_stat = statfs(path).unwrap();
+        let fst = fs_stat.filesystem_type();
+        let fs_type = match fst {
+            // FYI: https://github.com/nix-rust/nix/issues/1742
+            // FYI: Aftere https://github.com/nix-rust/nix/pull/1743 is release,
+            //      we can bump to the new nix version and use nix type instead of libc's.
+            nix::sys::statfs::FsType(libc::XFS_SUPER_MAGIC) => FsType::Xfs,
+            nix::sys::statfs::EXT4_SUPER_MAGIC => FsType::Ext4,
+            nix::sys::statfs::BTRFS_SUPER_MAGIC => FsType::Btrfs,
+            nix::sys::statfs::TMPFS_MAGIC => FsType::Tmpfs,
+            nix_fs_type => panic!("Unknown Unix Filesystem type: {nix_fs_type:?}"),
+        };
+
+        fs_type
+    }
+
     #[tokio::test]
     async fn test_file_cache() {
         let tempdir = tempfile::tempdir().unwrap();
+
+        let fs_type = get_fs_type(tempdir.path());
         let path = tempdir.path().join("test-cache-file");
         let options = CacheFileOptions {
+            fs_type,
             block_size: 4096,
             fallocate_unit: 4 * 4096,
         };
