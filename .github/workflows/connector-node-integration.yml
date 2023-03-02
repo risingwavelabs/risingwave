@@ -2,11 +2,8 @@ name: Connector Node Integration tests
 
 on:
   push:
-    branches:
-      - main
-  pull_request:
-    branches:
-      - main
+    branches: [main]
+    path: [connector_node/**, proto/**]
 
 jobs:
   build:
