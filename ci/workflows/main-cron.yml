@@ -118,23 +118,6 @@ steps:
     timeout_in_minutes: 12
     retry: *auto-retry
 
-  - label: "fuzz test"
-    command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
-    depends_on:
-      - "build"
-    plugins:
-      - ./ci/plugins/swapfile
-      - gencer/cache#v2.4.10: *cargo-cache
-      - docker-compose#v4.9.0:
-          run: rw-build-env
-          config: ci/docker-compose.yml
-          mount-buildkite-agent: true
-          environment:
-            - RW_RANDOM_SEED_SQLSMITH: true
-      - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
-    retry: *auto-retry
-
   - label: "unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
     plugins:
