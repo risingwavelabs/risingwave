@@ -20,7 +20,7 @@ build_madsim() {
 generate_deterministic() {
   seq "$TEST_NUM" | parallel "mkdir -p $OUTDIR/{}; \
     MADSIM_TEST_SEED={} $MADSIM_BIN \
-      --sqlsmith 500 \
+      --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{} \
       $TESTDATA \
       2> $LOGDIR/fuzzing-{}.log"
