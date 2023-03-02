@@ -21,7 +21,7 @@ enable_jemalloc_on_linux!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
-    use clap::StructOpt;
+    use clap::Parser;
 
     let opts = risingwave_ctl::CliOpts::parse();
 

@@ -85,8 +85,9 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Schema check
         let stream = schema_check::schema_check(info.clone(), stream);
@@ -113,8 +114,9 @@ impl WrapperExecutor {
             extra.metrics,
             stream,
         );
-        // Stack trace
-        let stream = trace::stack_trace(info.clone(), extra.actor_id, extra.executor_id, stream);
+        // Await tree
+        let stream =
+            trace::instrument_await_tree(info.clone(), extra.actor_id, extra.executor_id, stream);
 
         // Epoch check
         let stream = epoch_check::epoch_check(info, stream);
