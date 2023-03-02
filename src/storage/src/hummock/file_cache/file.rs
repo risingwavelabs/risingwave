@@ -87,8 +87,7 @@ impl CacheFile {
         options.assert();
 
         if options.fs_type == FsType::Tmpfs {
-            // The Tmpfs file system does not support Direct IO.
-            return Err(Error::UnsupportedFilesystem(libc::TMPFS_MAGIC));
+            panic!("Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.")
         }
 
         let path = path.as_ref().to_owned();
