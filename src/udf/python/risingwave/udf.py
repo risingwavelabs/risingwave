@@ -53,7 +53,8 @@ class TableFunction(UserDefinedFunction):
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
         # only the first row from batch is used
-        columns = zip(*self.eval(*[col[0].as_py() for col in batch]))
+        res = self.eval(*[col[0].as_py() for col in batch])
+        columns = zip(*res) if len(self._result_schema) > 1 else [res]
         arrays = [pa.array(col, type)
                   for col, type in zip(columns, self._result_schema.types)]
         return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
