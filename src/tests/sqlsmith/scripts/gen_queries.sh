@@ -68,10 +68,8 @@ check_different_queries() {
 
 # Check if any query generation step failed
 check_failing_queries() {
-  echo "ddl files generated:"
-  ls ./* | grep -c ddl.sql
   echo "query files generated:"
-  ls ./* | grep -c queries.sql
+  ls "$OUTDIR/*" | grep -c queries.sql
 }
 
 # Upload step

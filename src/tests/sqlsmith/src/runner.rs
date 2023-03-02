@@ -38,23 +38,11 @@ type Result<A> = anyhow::Result<A>;
 
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
-    let ddl_path = format!("{}/ddl.sql", outdir);
     let queries_path = format!("{}/queries.sql", outdir);
-    let ddl = std::fs::read_to_string(ddl_path).unwrap();
     let queries = std::fs::read_to_string(queries_path).unwrap();
-    let mut setup_sql = String::with_capacity(1000);
-    for ddl_statement in parse_sql(&ddl) {
-        let sql = ddl_statement.to_string();
-        tracing::info!("[EXECUTING DDL]: {}", sql);
-        let response = client.execute(&sql, &[]).await;
-        if let Err(e) = response {
-            panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
-        }
-        setup_sql.push_str(&sql);
-    }
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
-        tracing::info!("[EXECUTING QUERY]: {}", sql);
+        tracing::info!("[EXECUTING STATEMENT]: {}", sql);
         let response = client.simple_query(&sql).await;
         if let Err(e) = response {
             panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
