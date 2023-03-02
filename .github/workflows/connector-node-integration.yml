@@ -1,4 +1,4 @@
-name: Integration tests
+name: Connector Node Integration tests
 
 on:
   push:
@@ -30,13 +30,26 @@ jobs:
           sudo -u postgres psql -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
           sudo -u postgres createdb test
           sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
+          
+          echo "setting up minio"
+          wget https://dl.minio.io/server/minio/release/linux-amd64/minio
+          chmod +x minio
+          sudo ./minio server /tmp/minio &
+          # wait for minio to start
+          sleep 3
+          wget https://dl.minio.io/client/mc/release/linux-amd64/mc
+          chmod +x mc
+          ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+          ./mc mb minio/bucket
 
+          echo "starting connector-node service"
           cd assembly/target/
           tar xvf risingwave-connector-1.0.0.tar.gz
           sh ./start-service.sh &
           sleep 3
           cd ../../
 
+          echo "running jdbc integration tests"
           bash python-client/build-venv.sh
           cd python-client && bash gen-stub.sh
 
@@ -60,5 +73,54 @@ jobs:
             echo "Print sink test failed"
             exit 1
           fi
+          cd ..
+          echo "all jdbc tests passed"
+          
+          echo "running iceberg integration tests"
+          # test append-only mode
+          cd python-client
+          python3 pyspark-util.py create_iceberg
+          if python3 integration_tests.py --iceberg_sink; then
+            python3 pyspark-util.py test_iceberg
+            echo "Iceberg sink test passed"
+          else
+            echo "Iceberg sink test failed"
+            exit 1
+          fi
+          python3 pyspark-util.py drop_iceberg
 
-          echo "All tests passed"
+          # test upsert mode
+          python3 pyspark-util.py create_iceberg
+          if python3 integration_tests.py --upsert_iceberg_sink --input_file="./data/upsert_sink_input.json"; then
+            python3 pyspark-util.py test_upsert_iceberg --input_file="./data/upsert_sink_input.json"
+            echo "Upsert iceberg sink test passed"
+          else
+            echo "Upsert iceberg sink test failed"
+            exit 1
+          fi
+          python3 pyspark-util.py drop_iceberg
+
+          # clean up minio
+          cd ..
+          ./mc rm -r -force minio/bucket
+          ./mc rb minio/bucket
+          echo "all iceberg tests passed
+          
+          echo "running deltalake integration tests"
+          cd python-client
+          # test append-only mode
+          python3 pyspark-util.py create_deltalake
+          if python3 integration_tests.py --deltalake_sink; then
+            python3 pyspark-util.py test_deltalake
+            echo "Deltalake sink test passed"
+          else
+            echo "Deltalake sink test failed"
+            exit 1
+          fi
+
+          # clean up minio
+          cd ..
+          ./mc rm -r -force minio/bucket
+          ./mc rb minio/bucket
+          echo "all deltalake tests passed"
+          
