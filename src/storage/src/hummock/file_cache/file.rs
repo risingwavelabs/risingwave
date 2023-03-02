@@ -86,9 +86,8 @@ impl CacheFile {
     pub async fn open(path: impl AsRef<Path>, options: CacheFileOptions) -> Result<Self> {
         options.assert();
 
-        if options.fs_type == FsType::Tmpfs {
-            panic!("Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.")
-        }
+        assert!(options.fs_type == FsType::Tmpfs,
+            "Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.");
 
         let path = path.as_ref().to_owned();
 
