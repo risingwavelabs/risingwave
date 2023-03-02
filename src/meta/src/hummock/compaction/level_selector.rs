@@ -813,6 +813,7 @@ pub mod tests {
             .max_bytes_for_level_base(200)
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
+            .target_file_size_base(5)
             .max_compaction_bytes(10000)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
@@ -859,6 +860,7 @@ pub mod tests {
         let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
             .sub_level_max_compaction_bytes(50)
+            .target_file_size_base(20)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
