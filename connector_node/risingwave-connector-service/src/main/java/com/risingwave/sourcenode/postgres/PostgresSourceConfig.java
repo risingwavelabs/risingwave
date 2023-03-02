@@ -10,7 +10,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Properties;
 
-/** Postgres Srouce Config */
+/** Postgres Source Config */
 public class PostgresSourceConfig implements SourceConfig {
     static final String DB_SERVER_NAME_PREFIX = "RW_CDC_";
     private final Properties props = DebeziumCdcUtils.createCommonConfig();

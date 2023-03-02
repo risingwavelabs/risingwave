@@ -134,7 +134,7 @@ public class SourceRequestHandler {
                             }
                         }
                     }
-                    // check whther PK constraint match source table definition
+                    // check whether PK constraint match source table definition
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("mysql.table_schema"))) {
                         var sourceSchema = validate.getTableSchema();

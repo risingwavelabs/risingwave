@@ -7,7 +7,7 @@ public class DebeziumCdcUtils {
     /** Common config properties for Debeizum CDC connectors */
     public static Properties createCommonConfig() {
         var props = new Properties();
-        // capture deciaml type in doule values, which may result in a loss of precision but is
+        // capture decimal type in doule values, which may result in a loss of precision but is
         // easier to use
         // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-property-decimal-handling-mode
         props.setProperty("decimal.handling.mode", "double");

@@ -62,7 +62,7 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Specific connectors dependencies managed by the assembly plugin, refer to assembly/pom.xml for more detials -->
+        <!-- Specific connectors dependencies managed by the assembly plugin, refer to assembly/pom.xml for more details -->
         <dependency>
             <groupId>com.risingwave.connector</groupId>
             <artifactId>risingwave-source-cdc</artifactId>
