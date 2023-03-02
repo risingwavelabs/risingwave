@@ -21,11 +21,11 @@ use anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
-use tokio_postgres::Client;
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use risingwave_common::error::anyhow_error;
 use tokio_postgres::error::Error as PgError;
+use tokio_postgres::Client;
 
 use crate::validation::is_permissible_error;
 use crate::{
@@ -68,7 +68,13 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
 /// sqlsmith should stop execution, but writeout ddl and queries so far.
 /// It should log the number of queries written to stdout, so external process
 /// can still generate more to make up the shortfall if necessary.
-pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &str, seed: Option<u64>) {
+pub async fn generate(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    outdir: &str,
+    seed: Option<u64>,
+) {
     let mut rng = generate_rng(seed);
     let (tables, base_tables, mviews, setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
@@ -108,7 +114,7 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
                 tracing::info!("Generated {} batch queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
-            },
+            }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
                 queries.push_str(&format!("{};\n", &sql));
@@ -133,7 +139,7 @@ pub async fn generate(client: &Client, testdata: &str, count: usize, outdir: &st
                 tracing::info!("Generated {} stream queries", generated_queries);
                 tracing::error!("Unrecoverable error encountered.");
                 return;
-            },
+            }
             Ok(skipped) if skipped == 0 => {
                 generated_queries += 1;
                 queries.push_str(&format!("{};\n", &sql));
@@ -297,11 +303,7 @@ async fn test_session_variable<R: Rng>(client: &Client, rng: &mut R) -> String {
 
 /// Expects at least 50% of inserted rows included.
 #[allow(dead_code)]
-async fn test_population_count(
-    client: &Client,
-    base_tables: Vec<Table>,
-    expected_count: usize,
-) {
+async fn test_population_count(client: &Client, base_tables: Vec<Table>, expected_count: usize) {
     let mut actual_count = 0;
     for t in base_tables {
         let q = format!("select * from {};", t.name);
@@ -472,7 +474,7 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: PgResult<_Row
             }
             // consolidate error reason for deterministic test
             let error_msg = format_fail_reason(setup_sql, query, &e);
-            tracing::info!(error_msg);
+            tracing::info!("{}", error_msg);
             Err(anyhow_error!(error_msg))
         }
     }
