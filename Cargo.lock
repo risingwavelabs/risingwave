@@ -5535,7 +5535,7 @@ version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
  "chrono",
- "clap 3.2.23",
+ "clap 4.1.6",
  "console",
  "dialoguer",
  "enum-iterator",
@@ -5581,7 +5581,7 @@ dependencies = [
 name = "risingwave_backup_cmd"
 version = "0.2.0-alpha"
 dependencies = [
- "clap 3.2.23",
+ "clap 4.1.6",
  "madsim-tokio",
  "risingwave_backup",
  "risingwave_meta",
@@ -5641,7 +5641,7 @@ dependencies = [
  "bcc",
  "bytes",
  "bytesize",
- "clap 3.2.23",
+ "clap 4.1.6",
  "futures",
  "hdrhistogram",
  "isahc",
@@ -5670,7 +5670,7 @@ name = "risingwave_cmd"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "clap 3.2.23",
+ "clap 4.1.6",
  "madsim-tokio",
  "risingwave_common",
  "risingwave_compactor",
@@ -5690,7 +5690,7 @@ name = "risingwave_cmd_all"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "clap 3.2.23",
+ "clap 4.1.6",
  "console",
  "madsim-tokio",
  "risingwave_common",
@@ -5723,7 +5723,7 @@ dependencies = [
  "bytes",
  "chrono",
  "chrono-tz",
- "clap 3.2.23",
+ "clap 4.1.6",
  "comfy-table",
  "crc32fast",
  "criterion",
@@ -5808,7 +5808,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
- "clap 3.2.23",
+ "clap 4.1.6",
  "futures",
  "itertools",
  "madsim-tokio",
@@ -5833,7 +5833,7 @@ name = "risingwave_compactor"
 version = "0.2.0-alpha"
 dependencies = [
  "async-trait",
- "clap 3.2.23",
+ "clap 4.1.6",
  "madsim-tokio",
  "madsim-tonic",
  "prometheus",
@@ -5853,9 +5853,10 @@ dependencies = [
 name = "risingwave_compute"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "await-tree",
- "clap 3.2.23",
+ "clap 4.1.6",
  "either",
  "futures",
  "futures-async-stream",
@@ -5961,7 +5962,7 @@ dependencies = [
  "anyhow",
  "bytes",
  "chrono",
- "clap 3.2.23",
+ "clap 4.1.6",
  "comfy-table",
  "futures",
  "itertools",
@@ -6024,7 +6025,7 @@ dependencies = [
  "async-trait",
  "bk-tree",
  "bytes",
- "clap 3.2.23",
+ "clap 4.1.6",
  "derivative",
  "downcast-rs",
  "dyn-clone",
@@ -6148,7 +6149,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
- "clap 3.2.23",
+ "clap 4.1.6",
  "crepe",
  "easy-ext",
  "either",
@@ -6267,7 +6268,7 @@ name = "risingwave_regress_test"
 version = "0.2.0-alpha"
 dependencies = [
  "anyhow",
- "clap 3.2.23",
+ "clap 4.1.6",
  "madsim-tokio",
  "path-absolutize",
  "similar",
@@ -6322,7 +6323,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
- "clap 3.2.23",
+ "clap 4.1.6",
  "console",
  "futures",
  "glob",
@@ -6403,7 +6404,7 @@ name = "risingwave_sqlsmith"
 version = "0.2.0-alpha"
 dependencies = [
  "chrono",
- "clap 3.2.23",
+ "clap 4.1.6",
  "itertools",
  "libtest-mimic",
  "madsim-tokio",

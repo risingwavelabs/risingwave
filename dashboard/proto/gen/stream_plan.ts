@@ -511,6 +511,7 @@ export interface SimpleAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface SimpleAggNode_DistinctDedupTablesEntry {
@@ -531,6 +532,7 @@ export interface HashAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface HashAggNode_DistinctDedupTablesEntry {
@@ -2336,6 +2338,7 @@ function createBaseSimpleAggNode(): SimpleAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2355,6 +2358,7 @@ export const SimpleAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2384,6 +2388,7 @@ export const SimpleAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2405,6 +2410,7 @@ export const SimpleAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };
@@ -2446,6 +2452,7 @@ function createBaseHashAggNode(): HashAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2465,6 +2472,7 @@ export const HashAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2494,6 +2502,7 @@ export const HashAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2515,6 +2524,7 @@ export const HashAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };

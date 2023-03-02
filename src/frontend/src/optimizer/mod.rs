@@ -35,6 +35,7 @@ use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::WatermarkDesc;
 
@@ -294,8 +295,35 @@ impl PlanRoot {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
-                let (plan, out_col_change) =
-                    plan.logical_rewrite_for_stream(&mut Default::default())?;
+                let (plan, out_col_change) = {
+                    let (plan, out_col_change) =
+                        plan.logical_rewrite_for_stream(&mut Default::default())?;
+                    if out_col_change.is_injective() {
+                        (plan, out_col_change)
+                    } else {
+                        let mut output_indices = (0..plan.schema().len()).collect_vec();
+                        #[allow(unused_assignments)]
+                        let (mut map, mut target_size) = out_col_change.into_parts();
+
+                        // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
+                        // assert_eq!(target_size, output_indices.len());
+                        target_size = plan.schema().len();
+                        let mut tar_exists = vec![false; target_size];
+                        for i in map.iter_mut().flatten() {
+                            if tar_exists[*i] {
+                                output_indices.push(*i);
+                                *i = target_size;
+                                target_size += 1;
+                            } else {
+                                tar_exists[*i] = true;
+                            }
+                        }
+                        let plan =
+                            LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
+                        let out_col_change = ColIndexMapping::with_target_size(map, target_size);
+                        (plan.into(), out_col_change)
+                    }
+                };
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
@@ -317,6 +345,12 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Add identity project between exchange and share",
+            vec![AvoidExchangeShareRule::create()],
+            ApplyOrder::BottomUp,
+        ));
 
         if ctx.session_ctx().config().get_streaming_enable_delta_join() {
             // TODO: make it a logical optimization.

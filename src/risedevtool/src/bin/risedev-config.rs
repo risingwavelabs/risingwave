@@ -18,7 +18,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
-use clap::{ArgEnum, Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
@@ -42,20 +42,20 @@ enum Commands {
     /// Enable one component
     Enable {
         /// Component to enable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Disable one component
     Disable {
         /// Component to disable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Use default configuration
     Default,
 }
 
-#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
+#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     Minio,

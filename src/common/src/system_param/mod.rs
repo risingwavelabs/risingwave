@@ -27,7 +27,7 @@ pub type SystemParamsError = String;
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
 // Only includes undeprecated params.
-// Macro input is { field identifier, default value }
+// Macro input is { field identifier, type, default value }
 macro_rules! for_all_undeprecated_params {
     ($macro:ident) => {
         $macro! {
@@ -45,7 +45,7 @@ macro_rules! for_all_undeprecated_params {
 }
 
 // Only includes deprecated params. Used to define key constants.
-// Macro input is { field identifier, default value }
+// Macro input is { field identifier, type, default value }
 macro_rules! for_all_deprecated_params {
     ($macro:ident) => {
         $macro! {}
@@ -197,20 +197,28 @@ macro_rules! impl_set_system_param {
     };
 }
 
+macro_rules! impl_default_system_params {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        #[allow(clippy::needless_update)]
+        pub fn default_system_params() -> SystemParams {
+            SystemParams {
+                $(
+                    $field: Some($default),
+                )*
+                ..Default::default()
+            }
+        }
+    };
+}
+
 for_all_undeprecated_params!(impl_system_params_from_kv);
-
 for_all_undeprecated_params!(impl_system_params_to_kv);
-
 for_all_undeprecated_params!(impl_set_system_param);
-
 for_all_undeprecated_params!(impl_default_validation_on_set);
+for_all_undeprecated_params!(impl_default_system_params);
 
 struct OverrideValidateOnSet;
 impl ValidateOnSet for OverrideValidateOnSet {
-    fn barrier_interval_ms(v: &u32) -> Result<()> {
-        Self::expect_range(*v, 1..)
-    }
-
     fn checkpoint_frequency(v: &u64) -> Result<()> {
         Self::expect_range(*v, 1..)
     }
@@ -259,13 +267,17 @@ mod tests {
         // Unrecognized param.
         assert!(set_system_param(&mut p, "?", Some("?".to_string())).is_err());
         // Value out of range.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("-1".to_string())).is_err());
+        assert!(
+            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("-1".to_string())).is_err()
+        );
         // Set immutable.
         assert!(set_system_param(&mut p, STATE_STORE_KEY, Some("?".to_string())).is_err());
         // Parse error.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("?".to_string())).is_err());
+        assert!(set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("?".to_string())).is_err());
         // Normal set.
-        assert!(set_system_param(&mut p, BARRIER_INTERVAL_MS_KEY, Some("500".to_string())).is_ok());
-        assert_eq!(p.barrier_interval_ms, Some(500));
+        assert!(
+            set_system_param(&mut p, CHECKPOINT_FREQUENCY_KEY, Some("500".to_string())).is_ok()
+        );
+        assert_eq!(p.checkpoint_frequency, Some(500));
     }
 }
