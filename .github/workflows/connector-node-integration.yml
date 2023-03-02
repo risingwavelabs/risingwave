@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
     path: [connector_node/**, proto/**]
+  pull_request:
+    branches: [main]
+    paths: [connector_node/**, proto/**]
 
 jobs:
   build:
