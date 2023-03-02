@@ -62,7 +62,7 @@ pub struct ComputeNodeOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
@@ -117,7 +117,7 @@ struct OverrideConfigOpts {
     #[override_opts(path = streaming.enable_jaeger_tracing)]
     pub enable_jaeger_tracing: Option<bool>,
 
-    /// Enable async stack tracing for risectl.
+    /// Enable async stack tracing through `await-tree` for risectl.
     #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,

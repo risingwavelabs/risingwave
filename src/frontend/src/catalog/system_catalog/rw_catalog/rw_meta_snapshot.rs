@@ -24,9 +24,9 @@ pub const RW_META_SNAPSHOT_COLUMNS: &[SystemCatalogColumnsDef<'_>] = &[
     // the smallest epoch this meta snapshot includes
     (DataType::Int64, "safe_epoch"),
     // human-readable timestamp of safe_epoch
-    (DataType::TIMESTAMP, "safe_epoch_ts"),
+    (DataType::Timestamp, "safe_epoch_ts"),
     // the largest epoch this meta snapshot includes
     (DataType::Int64, "max_committed_epoch"),
     // human-readable timestamp of max_committed_epoch
-    (DataType::TIMESTAMP, "max_committed_epoch_ts"),
+    (DataType::Timestamp, "max_committed_epoch_ts"),
 ];

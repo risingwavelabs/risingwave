@@ -790,21 +790,21 @@ impl Session<PgResponseStream> for SessionImpl {
                     vec![
                         PgFieldDescriptor::new(
                             "Name".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Type".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                     ]
                 }
                 _ => {
                     vec![PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     )]
                 }
             },
@@ -812,13 +812,13 @@ impl Session<PgResponseStream> for SessionImpl {
                 vec![
                     PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                     PgFieldDescriptor::new(
                         "Create Sql".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                 ]
             }
@@ -828,25 +828,25 @@ impl Session<PgResponseStream> for SessionImpl {
                     vec![
                         PgFieldDescriptor::new(
                             "Name".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Setting".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Description".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     )]
                 }
             }
@@ -854,21 +854,21 @@ impl Session<PgResponseStream> for SessionImpl {
                 vec![
                     PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                     PgFieldDescriptor::new(
                         "Type".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                 ]
             }
             Statement::Explain { .. } => {
                 vec![PgFieldDescriptor::new(
                     "QUERY PLAN".to_owned(),
-                    DataType::VARCHAR.to_oid(),
-                    DataType::VARCHAR.type_len(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
                 )]
             }
             _ => {

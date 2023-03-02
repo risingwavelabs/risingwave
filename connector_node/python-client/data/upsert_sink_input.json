@@ -1,0 +1,39 @@
+[
+  [
+    {
+      "op_type": 1,
+      "line": {
+        "id": 1,
+        "name": "Alice"
+      }
+    },
+    {
+      "op_type": 1,
+      "line": {
+        "id": 2,
+        "name": "Bob"
+      }
+    },
+    {
+      "op_type": 4,
+      "line": {
+        "id": 1,
+        "name": "Alice"
+      }
+    },
+    {
+      "op_type": 3,
+      "line": {
+        "id": 1,
+        "name": "Clare"
+      }
+    },
+    {
+      "op_type": 2,
+      "line": {
+        "id": 2,
+        "name": "Bob"
+      }
+    }
+  ]
+]
