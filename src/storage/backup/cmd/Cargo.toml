@@ -14,7 +14,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 risingwave_backup = { path = "../../backup" }
 risingwave_meta = { path = "../../../meta" }
 risingwave_rt = { path = "../../../utils/runtime" }

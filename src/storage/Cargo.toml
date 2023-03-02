@@ -16,8 +16,8 @@ normal = ["workspace-hack"]
 [dependencies]
 arc-swap = "1"
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
+await-tree = "0.1.1"
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }

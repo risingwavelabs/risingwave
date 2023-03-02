@@ -19,7 +19,7 @@ arc-swap = "1"
 assert_matches = "1"
 async-trait = "0.1"
 bytes = { version = "1", features = ["serde"] }
-clap = { version = "3", features = ["derive", "env"] }
+clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"
 easy-ext = "1"
 either = "1"

@@ -43,7 +43,7 @@
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
     select * from t1 union select * from t2;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
     └─LogicalUnion { all: true }
       ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
@@ -101,7 +101,7 @@
     create table t1 (a int, b numeric, c bigint, primary key(a));
     create table t2 (a int, b numeric, c bigint, primary key(a));
     select * from t1 union select * from t2;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
     └─LogicalUnion { all: true }
       ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.c] }
@@ -159,7 +159,7 @@
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
     (select * from t1 limit 1) union (select * from t2 limit 1);
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t1.a, t1.b, t1.c], aggs: [] }
     └─LogicalUnion { all: true }
       ├─LogicalLimit { limit: 1, offset: 0 }
@@ -183,7 +183,7 @@
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
     select a from ((select * from t1 limit 1) union (select * from t2 limit 1)) T;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t1.a], aggs: [] }
     └─LogicalUnion { all: true }
       ├─LogicalLimit { limit: 1, offset: 0 }
@@ -205,19 +205,19 @@
                 └─BatchScan { table: t2, columns: [t2.a], distribution: SomeShard }
 - sql: |
     select 1 union all select 1
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalValues { rows: [[1:Int32], [1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchValues { rows: [[1:Int32], [1:Int32]] }
 - sql: |
     select 1 union all select 2 union all select 3 union all select 4 union all select 5
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |
     BatchValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32]] }
 - sql: |
     select 1 union select 2 union select 3 union select 4 union select 5 union select 5
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [1:Int32], aggs: [] }
     └─LogicalValues { rows: [[1:Int32], [2:Int32], [3:Int32], [4:Int32], [5:Int32], [5:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
   batch_plan: |

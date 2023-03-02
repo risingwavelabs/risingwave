@@ -17,7 +17,7 @@ use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 use risingwave_common::bail;
@@ -469,27 +469,18 @@ impl CompleteStreamFragmentGraph {
     /// downstream existing `Chain` fragments.
     pub fn with_downstreams(
         graph: StreamFragmentGraph,
-        downstream_fragments: Vec<Fragment>,
+        original_table_fragment_id: FragmentId,
+        downstream_fragments: Vec<(DispatchStrategy, Fragment)>,
     ) -> MetaResult<Self> {
         let mut extra_downstreams = HashMap::new();
         let mut extra_upstreams = HashMap::new();
 
-        let original_table_fragment_id = GlobalFragmentId::new(
-            downstream_fragments
-                .iter()
-                .flat_map(|f| f.upstream_fragment_ids.iter().copied())
-                .unique()
-                .exactly_one()
-                .map_err(|_| {
-                    anyhow!("downstream fragments must have exactly one upstream fragment")
-                })?,
-        );
-
+        let original_table_fragment_id = GlobalFragmentId::new(original_table_fragment_id);
         let table_fragment_id = GlobalFragmentId::new(graph.table_fragment_id());
 
         // Build the extra edges between the `Materialize` and the downstream `Chain` of the
         // existing materialized views.
-        for fragment in &downstream_fragments {
+        for (dispatch_strategy, fragment) in &downstream_fragments {
             let id = GlobalFragmentId::new(fragment.fragment_id);
 
             let edge = StreamFragmentEdge {
@@ -497,13 +488,7 @@ impl CompleteStreamFragmentGraph {
                     original_upstream_fragment_id: original_table_fragment_id,
                     downstream_fragment_id: id,
                 },
-                // We always use `NoShuffle` for the exchange between the upstream `Materialize`
-                // and the downstream `Chain` of the new materialized view.
-                dispatch_strategy: DispatchStrategy {
-                    r#type: DispatcherType::NoShuffle as _,
-                    dist_key_indices: vec![], // not used
-                    output_indices: vec![],   // FIXME: should erase the changes of the schema
-                },
+                dispatch_strategy: dispatch_strategy.clone(),
             };
 
             extra_downstreams
@@ -520,7 +505,7 @@ impl CompleteStreamFragmentGraph {
 
         let existing_fragments = downstream_fragments
             .into_iter()
-            .map(|f| (GlobalFragmentId::new(f.fragment_id), f))
+            .map(|(_, f)| (GlobalFragmentId::new(f.fragment_id), f))
             .collect();
 
         Ok(Self {

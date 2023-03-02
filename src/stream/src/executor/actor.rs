@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use async_stack_trace::{SpanValue, StackTrace};
+use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use futures::pin_mut;
 use hytra::TrAdder;
@@ -181,9 +181,9 @@ where
         while let Some(barrier) = stream
             .next()
             .in_span(span)
-            .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
-                format!("Epoch {}", e.curr).into()
-            }))
+            .instrument_await(
+                last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
+            )
             .await
             .transpose()?
         {

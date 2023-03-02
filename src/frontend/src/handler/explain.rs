@@ -68,6 +68,8 @@ pub async fn handle_explain(
                 columns,
                 constraints,
                 source_schema,
+                source_watermarks,
+                append_only,
                 ..
             } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
                 Some(s) => {
@@ -77,7 +79,9 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         s,
+                        source_watermarks,
                         ColumnIdGenerator::new_initial(),
+                        append_only,
                     )
                     .await?
                     .0
@@ -89,6 +93,8 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         ColumnIdGenerator::new_initial(),
+                        source_watermarks,
+                        append_only,
                     )?
                     .0
                 }

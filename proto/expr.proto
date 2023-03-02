@@ -244,5 +244,6 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string path = 5;
+  string link = 5;
+  string identifier = 6;
 }

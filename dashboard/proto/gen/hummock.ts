@@ -768,6 +768,15 @@ export interface PinVersionResponse {
   pinnedVersion: HummockVersion | undefined;
 }
 
+export interface SplitCompactionGroupRequest {
+  groupId: number;
+  tableIds: number[];
+}
+
+export interface SplitCompactionGroupResponse {
+  newGroupId: number;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -4229,6 +4238,59 @@ export const PinVersionResponse = {
     message.pinnedVersion = (object.pinnedVersion !== undefined && object.pinnedVersion !== null)
       ? HummockVersion.fromPartial(object.pinnedVersion)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseSplitCompactionGroupRequest(): SplitCompactionGroupRequest {
+  return { groupId: 0, tableIds: [] };
+}
+
+export const SplitCompactionGroupRequest = {
+  fromJSON(object: any): SplitCompactionGroupRequest {
+    return {
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: SplitCompactionGroupRequest): unknown {
+    const obj: any = {};
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupRequest>, I>>(object: I): SplitCompactionGroupRequest {
+    const message = createBaseSplitCompactionGroupRequest();
+    message.groupId = object.groupId ?? 0;
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseSplitCompactionGroupResponse(): SplitCompactionGroupResponse {
+  return { newGroupId: 0 };
+}
+
+export const SplitCompactionGroupResponse = {
+  fromJSON(object: any): SplitCompactionGroupResponse {
+    return { newGroupId: isSet(object.newGroupId) ? Number(object.newGroupId) : 0 };
+  },
+
+  toJSON(message: SplitCompactionGroupResponse): unknown {
+    const obj: any = {};
+    message.newGroupId !== undefined && (obj.newGroupId = Math.round(message.newGroupId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupResponse>, I>>(object: I): SplitCompactionGroupResponse {
+    const message = createBaseSplitCompactionGroupResponse();
+    message.newGroupId = object.newGroupId ?? 0;
     return message;
   },
 };

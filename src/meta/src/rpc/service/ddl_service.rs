@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
@@ -484,15 +485,22 @@ where
 
         let stream_job = StreamingJob::Table(None, req.table.unwrap());
         let fragment_graph = req.fragment_graph.unwrap();
+        let table_col_index_mapping =
+            ColIndexMapping::from_protobuf(&req.table_col_index_mapping.unwrap());
 
-        let _version = self
+        let version = self
             .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::ReplaceTable(
+                stream_job,
+                fragment_graph,
+                table_col_index_mapping,
+            ))
             .await?;
 
-        Err(Status::unimplemented(
-            "replace table plan is not implemented yet",
-        ))
+        Ok(Response::new(ReplaceTablePlanResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn get_table(

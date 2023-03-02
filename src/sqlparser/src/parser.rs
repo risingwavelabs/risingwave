@@ -563,6 +563,7 @@ impl Parser {
             }
             Token::Number(_)
             | Token::SingleQuotedString(_)
+            | Token::DollarQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_)
             | Token::CstyleEscapesString(_) => {
@@ -1847,9 +1848,26 @@ impl Parser {
             } else if self.parse_keyword(Keyword::RETURN) {
                 ensure_not_set(&body.return_, "RETURN")?;
                 body.return_ = Some(self.parse_expr()?);
+            } else if self.parse_keyword(Keyword::USING) {
+                ensure_not_set(&body.using, "USING")?;
+                body.using = Some(self.parse_create_function_using()?);
             } else {
                 return Ok(body);
             }
+        }
+    }
+
+    fn parse_create_function_using(&mut self) -> Result<CreateFunctionUsing, ParserError> {
+        let keyword = self.expect_one_of_keywords(&[Keyword::LINK])?;
+
+        let uri = self.parse_literal_string()?;
+
+        match keyword {
+            Keyword::LINK => Ok(CreateFunctionUsing::Link(uri)),
+            _ => self.expected(
+                "LINK, got {:?}",
+                Token::make_keyword(format!("{keyword:?}").as_str()),
+            ),
         }
     }
 
@@ -1950,8 +1968,15 @@ impl Parser {
     ) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
-        // parse optional column list (schema)
-        let (columns, constraints) = self.parse_columns()?;
+        // parse optional column list (schema) and watermarks on source.
+        let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
+
+        let append_only = if cfg!(debug_assertions) && self.parse_keyword(Keyword::APPEND) {
+            self.expect_keyword(Keyword::ONLY)?;
+            true
+        } else {
+            false
+        };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
@@ -1999,6 +2024,11 @@ impl Parser {
 
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
+            if !source_watermarks.is_empty() {
+                return Err(ParserError::ParserError(
+                    "Watermarks can't be defined on table created by CREATE TABLE AS".to_string(),
+                ));
+            }
             Some(Box::new(self.parse_query()?))
         } else {
             None
@@ -2013,23 +2043,13 @@ impl Parser {
             or_replace,
             if_not_exists,
             source_schema,
+            source_watermarks,
+            append_only,
             query,
         })
     }
 
-    pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
-        let (column_refs, table_constraints, _) = self.parse_columns_inner(true)?;
-        Ok((column_refs, table_constraints))
-    }
-
     pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
-        self.parse_columns_inner(true)
-    }
-
-    fn parse_columns_inner(
-        &mut self,
-        with_watermark: bool,
-    ) -> Result<ColumnsDefTuple, ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
@@ -2040,7 +2060,7 @@ impl Parser {
         loop {
             if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
-            } else if with_watermark && let Some(watermark) = self.parse_optional_watermark()? {
+            } else if let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
                 if watermarks.len() > 1 {
                     // TODO(yuhao): allow multiple watermark on source.
@@ -2472,6 +2492,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
             Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
@@ -2515,20 +2536,16 @@ impl Parser {
     }
 
     pub fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
-        Ok(FunctionDefinition::SingleQuotedDef(
-            self.parse_literal_string()?,
-        ))
-        // TODO: support dollar quoted string
-        // let peek_token = self.peek_token();
-        // match peek_token {
-        //     Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
-        //         self.next_token();
-        //         Ok(FunctionDefinition::DoubleDollarDef(value.value))
-        //     }
-        //     _ => Ok(FunctionDefinition::SingleQuotedDef(
-        //         self.parse_literal_string()?,
-        //     )),
-        // }
+        let peek_token = self.peek_token();
+        match peek_token {
+            Token::DollarQuotedString(value) => {
+                self.next_token();
+                Ok(FunctionDefinition::DoubleDollarDef(value.value))
+            }
+            _ => Ok(FunctionDefinition::SingleQuotedDef(
+                self.parse_literal_string()?,
+            )),
+        }
     }
 
     /// Parse a literal string

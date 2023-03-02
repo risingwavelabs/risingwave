@@ -462,7 +462,7 @@ mod tests {
             row_id_index: Some(ColumnIndex { index: 0 }),
             value_indices: vec![0],
             definition: "".into(),
-            handle_pk_conflict: false,
+            handle_pk_conflict_behavior: 0,
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],

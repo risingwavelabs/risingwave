@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "tokio_postgres::Client::query", reason = "Please use `simple_query` instead, extended `query` uses binary format, which has some outstanding issues." },
+]

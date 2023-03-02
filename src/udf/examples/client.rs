@@ -39,12 +39,12 @@ async fn main() {
     let output_schema = Schema::new(vec![Field::new("x", DataType::Int32, true)]);
 
     // check function
-    let gcd2 = client
+    client
         .check("gcd", &input2_schema, &output_schema)
         .await
         .unwrap();
-    let gcd3 = client
-        .check("gcd", &input3_schema, &output_schema)
+    client
+        .check("gcd3", &input3_schema, &output_schema)
         .await
         .unwrap();
 
@@ -55,7 +55,7 @@ async fn main() {
     .unwrap();
 
     let output = client
-        .call(&gcd2, input2)
+        .call("gcd", input2)
         .await
         .expect("failed to call function");
 
@@ -68,7 +68,7 @@ async fn main() {
     .unwrap();
 
     let output = client
-        .call(&gcd3, input3)
+        .call("gcd3", input3)
         .await
         .expect("failed to call function");
 

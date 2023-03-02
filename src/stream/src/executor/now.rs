@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
@@ -72,7 +72,7 @@ impl<S: StateStore> NowExecutor<S> {
         // Consume the first barrier message and initialize state table.
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("now_executor_recv_first_barrier")
+            .instrument_await("now_executor_recv_first_barrier")
             .await
             .unwrap();
         let mut is_pausing = barrier.is_pause() || barrier.is_update();
