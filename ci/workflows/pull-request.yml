@@ -264,15 +264,18 @@ steps:
   - label: "end-to-end test (deterministic simulation)"
     command: "TEST_NUM=16 timeout 14m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     plugins:
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            GITHUB_TOKEN: github-token
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
       - ./ci/plugins/upload-failure-logs
+    env:
+      - GITHUB_TOKEN
     timeout_in_minutes: 15
     retry: *auto-retry
 
