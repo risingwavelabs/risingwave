@@ -25,8 +25,8 @@ pub type SystemParamsError = String;
 
 type Result<T> = core::result::Result<T, SystemParamsError>;
 
-// Only includes undeprecated params.
-// Macro input is { field identifier, type, default value }
+/// Only includes undeprecated params.
+/// Macro input is { field identifier, type, default value }
 #[macro_export]
 macro_rules! for_all_undeprecated_params {
     ($macro:ident
@@ -47,8 +47,8 @@ macro_rules! for_all_undeprecated_params {
     };
 }
 
-// Includes all params.
-// Macro input is { field identifier, type, default value }
+/// Includes all params.
+/// Macro input is { field identifier, type, default value }
 macro_rules! for_all_params {
     ($macro:ident) => {
         for_all_undeprecated_params!(
@@ -66,7 +66,7 @@ macro_rules! key_of {
     };
 }
 
-// Define key constants for fields in `SystemParams` for use of other modules.
+/// Define key constants for fields in `SystemParams` for use of other modules.
 macro_rules! def_key {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         paste! {
@@ -79,7 +79,7 @@ macro_rules! def_key {
 
 for_all_params!(def_key);
 
-// Define default value functions.
+/// Define default value functions.
 macro_rules! def_default {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         pub mod default {
@@ -94,7 +94,7 @@ macro_rules! def_default {
 
 for_all_undeprecated_params!(def_default);
 
-// Derive serialization to kv pairs.
+/// Derive serialization to kv pairs.
 macro_rules! impl_system_params_to_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// The returned map only contains undeprecated fields.
@@ -128,7 +128,7 @@ macro_rules! impl_derive_missing_fields {
     };
 }
 
-// Derive deserialization from kv pairs.
+/// Derive deserialization from kv pairs.
 macro_rules! impl_system_params_from_kv {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         /// Try to deserialize deprecated fields as well.
@@ -164,9 +164,9 @@ macro_rules! impl_system_params_from_kv {
     };
 }
 
-// Define check rules when a field is changed. By default all fields are immutable.
-// If you want custom rules, please override the default implementation in
-// `OverrideValidateOnSet` below.
+/// Define check rules when a field is changed. By default all fields are immutable.
+/// If you want custom rules, please override the default implementation in
+/// `OverrideValidateOnSet` below.
 macro_rules! impl_default_validation_on_set {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         #[allow(clippy::ptr_arg)]
@@ -196,32 +196,31 @@ macro_rules! impl_default_validation_on_set {
     }
 }
 
-// Define rules to derive a parameter from others. This is useful for parameter type change or
-// semantic change, where a new parameter has to be introduced. When the cluster upgrades to a newer
-// version, we need to ensure the effect of the new parameter is equal to its older versions.
-//
-// For example, if you had `interval_sec` and now you want finer granularity, you can introduce a
-// new param `interval_ms` and try to derive it from `interval_sec` by overriding `FromParams` trait
-// in `OverrideFromParams`:
-//
-// ```
-// impl FromParams for OverrideFromParams {
-//     fn interval_ms(params: &mut SystemParams) -> Option<u64> {
-//         if let Some(sec) = params.interval_sec {
-//             Some(sec * 1000)
-//         } else {
-//             None
-//         }
-//     }
-// }
-// ```
-//
-// Note that newer versions must be prioritized during derivation.
+/// Define rules to derive a parameter from others. This is useful for parameter type change or
+/// semantic change, where a new parameter has to be introduced. When the cluster upgrades to a
+/// newer version, we need to ensure the effect of the new parameter is equal to its older versions.
+/// For example, if you had `interval_sec` and now you want finer granularity, you can introduce a
+/// new param `interval_ms` and try to derive it from `interval_sec` by overriding `FromParams`
+/// trait in `OverrideFromParams`:
+///
+/// ```ignore
+/// impl FromParams for OverrideFromParams {
+///     fn interval_ms(params: &SystemParams) -> Option<u64> {
+///         if let Some(sec) = params.interval_sec {
+///             Some(sec * 1000)
+///         } else {
+///             None
+///         }
+///     }
+/// }
+/// ```
+///
+/// Note that newer versions must be prioritized during derivation.
 macro_rules! impl_default_from_other_params {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         trait FromParams {
             $(
-                fn $field(_params: &mut SystemParams) -> Option<$type> {
+                fn $field(_params: &SystemParams) -> Option<$type> {
                     None
                 }
             )*
