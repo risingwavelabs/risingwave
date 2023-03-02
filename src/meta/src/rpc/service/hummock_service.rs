@@ -504,6 +504,18 @@ where
         }
     }
 
+    async fn split_compaction_group(
+        &self,
+        request: Request<SplitCompactionGroupRequest>,
+    ) -> Result<Response<SplitCompactionGroupResponse>, Status> {
+        let req = request.into_inner();
+        let new_group_id = self
+            .hummock_manager
+            .split_compaction_group(req.group_id, &req.table_ids)
+            .await?;
+        Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
+    }
+
     async fn get_scale_compactor(
         &self,
         _: Request<GetScaleCompactorRequest>,

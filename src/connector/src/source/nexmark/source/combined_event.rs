@@ -165,7 +165,7 @@ pub(crate) fn get_bid_struct_type() -> StructType {
         DataType::Varchar,
         DataType::Varchar,
         DataType::Timestamp,
-        DataType::VARCHAR,
+        DataType::Varchar,
     ];
     let field_names = vec![
         "auction",

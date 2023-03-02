@@ -550,6 +550,15 @@ message PinVersionResponse {
   HummockVersion pinned_version = 1;
 }
 
+message SplitCompactionGroupRequest {
+  uint64 group_id = 1;
+  repeated uint32 table_ids = 2;
+}
+
+message SplitCompactionGroupResponse {
+  uint64 new_group_id = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -579,6 +588,7 @@ service HummockManagerService {
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
   rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
+  rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
 }
 
 message CompactionConfig {

@@ -202,8 +202,8 @@ pub async fn handle_explain(
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
         )],
     ))
 }

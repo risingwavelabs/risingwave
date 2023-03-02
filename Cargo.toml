@@ -37,7 +37,6 @@ members = [
   "src/tests/sqlsmith",
   "src/tracing",
   "src/udf",
-  "src/utils/async_stack_trace",
   "src/utils/local_stats_alloc",
   "src/utils/pgwire",
   "src/utils/runtime",
@@ -100,7 +99,7 @@ incremental = false
 opt-level = 1
 [profile.ci-dev.package."tokio"]
 opt-level = 3
-[profile.ci-dev.package."async_stack_trace"]
+[profile.ci-dev.package."await-tree"]
 opt-level = 3
 [profile.ci-dev.package."indextree"]
 opt-level = 3
