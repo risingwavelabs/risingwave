@@ -199,7 +199,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             }
         }
 
-        cluster.check_no_batch_task_in_all_compute_nodes(cluster.config().compute_nodes);
+        cluster
+            .check_no_batch_task_in_all_compute_nodes(cluster.config().compute_nodes)
+            .await;
     }
 }
 

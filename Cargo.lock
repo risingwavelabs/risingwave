@@ -6307,6 +6307,7 @@ dependencies = [
  "pretty_assertions",
  "prometheus-parse",
  "rand 0.8.5",
+ "reqwest",
  "risingwave_batch",
  "risingwave_common",
  "risingwave_compactor",

@@ -44,3 +44,4 @@ tokio = { version = "0.2.15", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tracing = "0.1"
 tracing-subscriber = "0.3"
+reqwest = "0.11"
