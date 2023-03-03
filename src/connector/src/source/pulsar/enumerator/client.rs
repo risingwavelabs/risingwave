@@ -15,16 +15,16 @@
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
 use itertools::Itertools;
+use pulsar::{Pulsar, TokioExecutor};
 use serde::{Deserialize, Serialize};
 
-use crate::source::pulsar::admin::PulsarAdminClient;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::topic::{parse_topic, Topic};
 use crate::source::pulsar::PulsarProperties;
 use crate::source::SplitEnumerator;
 
 pub struct PulsarSplitEnumerator {
-    admin_client: PulsarAdminClient,
+    client: Pulsar<TokioExecutor>,
     topic: Topic,
     start_offset: PulsarEnumeratorOffset,
 }
@@ -43,8 +43,8 @@ impl SplitEnumerator for PulsarSplitEnumerator {
     type Split = PulsarSplit;
 
     async fn new(properties: PulsarProperties) -> Result<PulsarSplitEnumerator> {
+        let pulsar = properties.build_pulsar_client().await?;
         let topic = properties.topic;
-        let admin_url = properties.admin_url;
         let parsed_topic = parse_topic(&topic)?;
 
         let mut scan_start_offset = match properties
@@ -68,7 +68,7 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         }
 
         Ok(PulsarSplitEnumerator {
-            admin_client: PulsarAdminClient::new(admin_url, properties.auth_token),
+            client: pulsar,
             topic: parsed_topic,
             start_offset: scan_start_offset,
         })
@@ -79,19 +79,15 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         // MessageId is only used when recovering from a State
         assert!(!matches!(offset, PulsarEnumeratorOffset::MessageId(_)));
 
-        let topic_metadata = self.admin_client.get_topic_metadata(&self.topic).await?;
-        // note: may check topic exists by get stats
-        if topic_metadata.partitions < 0 {
-            bail!(
-                "illegal metadata {:?} for pulsar topic {}",
-                topic_metadata.partitions,
-                self.topic.to_string()
-            );
-        }
+        let topic_partitions = self
+            .client
+            .lookup_partitioned_topic_number(&self.topic.to_string())
+            .await
+            .map_err(|e| anyhow!(e))?;
 
-        let splits = if topic_metadata.partitions > 0 {
+        let splits = if topic_partitions > 0 {
             // partitioned topic
-            (0..topic_metadata.partitions as i32)
+            (0..topic_partitions as i32)
                 .map(|p| PulsarSplit {
                     topic: self.topic.sub_topic(p).unwrap(),
                     start_offset: offset.clone(),
@@ -106,119 +102,5 @@ impl SplitEnumerator for PulsarSplitEnumerator {
         };
 
         Ok(splits)
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use wiremock::{Mock, MockServer, ResponseTemplate};
-
-    use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties, PulsarSplitEnumerator};
-    use crate::source::SplitEnumerator;
-
-    async fn empty_mock_server() -> MockServer {
-        MockServer::start().await
-    }
-
-    pub async fn mock_server(web_path: &str, body: &str) -> MockServer {
-        let mock_server = MockServer::start().await;
-        use wiremock::matchers::{method, path};
-
-        let response = ResponseTemplate::new(200)
-            .set_body_string(body)
-            .append_header("content-type", "application/json");
-
-        Mock::given(method("GET"))
-            .and(path(web_path))
-            .respond_with(response)
-            .mount(&mock_server)
-            .await;
-
-        mock_server
-    }
-
-    #[tokio::test]
-    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
-    async fn test_list_splits_on_no_existing_pulsar() {
-        let prop = PulsarProperties {
-            topic: "t".to_string(),
-            admin_url: "http://test_illegal_url:8000".to_string(),
-            service_url: "pulsar://localhost:6650".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
-            time_offset: None,
-            auth_token: None,
-        };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
-        assert!(enumerator.list_splits().await.is_err());
-    }
-
-    #[tokio::test]
-    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
-    async fn test_list_on_no_existing_topic() {
-        let server = empty_mock_server().await;
-
-        let prop = PulsarProperties {
-            topic: "t".to_string(),
-            admin_url: server.uri(),
-            service_url: "pulsar://localhost:6650".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
-            time_offset: None,
-            auth_token: None,
-        };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
-        assert!(enumerator.list_splits().await.is_err());
-    }
-
-    #[tokio::test]
-    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
-    async fn test_list_splits_with_partitioned_topic() {
-        let server = mock_server(
-            "/admin/v2/persistent/public/default/t/partitions",
-            "{\"partitions\":3}",
-        )
-        .await;
-
-        let prop = PulsarProperties {
-            topic: "t".to_string(),
-            admin_url: server.uri(),
-            service_url: "pulsar://localhost:6650".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
-            time_offset: None,
-            auth_token: None,
-        };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
-
-        let splits = enumerator.list_splits().await.unwrap();
-        assert_eq!(splits.len(), 3);
-
-        (0..3).for_each(|i| {
-            assert_eq!(splits[i].start_offset, PulsarEnumeratorOffset::Earliest);
-            assert_eq!(splits[i].topic.partition_index, Some(i as i32));
-        });
-    }
-
-    #[tokio::test]
-    #[cfg_attr(madsim, ignore)] // MockServer is not supported in simulation.
-    async fn test_list_splits_with_non_partitioned_topic() {
-        let server = mock_server(
-            "/admin/v2/persistent/public/default/t/partitions",
-            "{\"partitions\":0}",
-        )
-        .await;
-
-        let prop = PulsarProperties {
-            topic: "t".to_string(),
-            admin_url: server.uri(),
-            service_url: "pulsar://localhost:6650".to_string(),
-            scan_startup_mode: Some("earliest".to_string()),
-            time_offset: None,
-            auth_token: None,
-        };
-        let mut enumerator = PulsarSplitEnumerator::new(prop).await.unwrap();
-
-        let splits = enumerator.list_splits().await.unwrap();
-        assert_eq!(splits.len(), 1);
-        assert_eq!(splits[0].start_offset, PulsarEnumeratorOffset::Earliest);
-        assert_eq!(splits[0].topic.partition_index, None);
     }
 }
