@@ -238,9 +238,9 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
         match self.join_type {
             JoinType::Inner => {
-                // Theoretically add either side is ok, but the distribution key of inner join
-                // derives based on the left side by default, so we choose left side here to ensure
-                // the pk comprise the distribution key.
+                // Theoretically adding either side is ok, but the distribution key of the inner
+                // join derived based on the left side by default, so we choose the left side here
+                // to ensure the pk comprises the distribution key.
                 EitherOrBoth::Left(())
             }
             JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => EitherOrBoth::Left(()),
