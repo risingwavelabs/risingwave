@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use etcd_client::{
-    ConnectOptions, DeleteOptions, DeleteResponse, GetOptions, GetResponse, PutOptions,
-    PutResponse, Txn, TxnResponse,
+    CampaignResponse, ConnectOptions, DeleteOptions, DeleteResponse, GetOptions, GetResponse,
+    LeaderResponse, LeaseGrantOptions, LeaseGrantResponse, LeaseKeepAliveStream, LeaseKeeper,
+    ObserveStream, PutOptions, PutResponse, Txn, TxnResponse,
 };
 use tokio::sync::RwLock;
 
@@ -216,5 +217,100 @@ impl EtcdRefreshClient {
             self.try_refresh_conn(version).await?;
         }
         resp
+    }
+
+    #[inline]
+    pub async fn leader(&self, name: impl Into<Vec<u8>> + Clone) -> Result<LeaderResponse> {
+        let (resp, version) = {
+            let inner = self.inner.read().await;
+            (
+                inner.client.election_client().leader(name).await,
+                inner.version,
+            )
+        };
+        if let Err(err) = &resp && Self::should_refresh(err) {
+            self.try_refresh_conn(version).await?;
+        }
+        resp
+    }
+
+    #[inline]
+    pub async fn grant(
+        &self,
+        ttl: i64,
+        options: Option<LeaseGrantOptions>,
+    ) -> Result<LeaseGrantResponse> {
+        let (resp, version) = {
+            let inner = self.inner.read().await;
+            (
+                inner.client.lease_client().grant(ttl, options).await,
+                inner.version,
+            )
+        };
+        if let Err(err) = &resp && Self::should_refresh(err) {
+            self.try_refresh_conn(version).await?;
+        }
+        resp
+    }
+
+    #[inline]
+    pub async fn keep_alive(&self, id: i64) -> Result<(LeaseKeeper, LeaseKeepAliveStream)> {
+        let (resp, version) = {
+            let inner = self.inner.read().await;
+            (
+                inner.client.lease_client().keep_alive(id).await,
+                inner.version,
+            )
+        };
+
+        match resp {
+            Err(err) if Self::should_refresh(&err) => {
+                self.try_refresh_conn(version).await?;
+                Err(err)
+            }
+            _ => resp,
+        }
+    }
+
+    #[inline]
+    pub async fn campaign(
+        &self,
+        name: impl Into<Vec<u8>>,
+        value: impl Into<Vec<u8>>,
+        lease: i64,
+    ) -> Result<CampaignResponse> {
+        let (resp, version) = {
+            let inner = self.inner.read().await;
+            (
+                inner
+                    .client
+                    .election_client()
+                    .campaign(name, value, lease)
+                    .await,
+                inner.version,
+            )
+        };
+        if let Err(err) = &resp && Self::should_refresh(err) {
+            self.try_refresh_conn(version).await?;
+        }
+        resp
+    }
+
+    #[inline]
+    pub async fn observe(&self, name: impl Into<Vec<u8>>) -> Result<ObserveStream> {
+        let (resp, version) = {
+            let inner = self.inner.read().await;
+            (
+                inner.client.election_client().observe(name).await,
+                inner.version,
+            )
+        };
+        match resp {
+            Err(err) if Self::should_refresh(&err) => {
+                self.try_refresh_conn(version).await?;
+                Err(err)
+            }
+            _ => resp,
+        }
     }
 }

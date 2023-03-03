@@ -17,7 +17,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::Future;
 use risingwave_common::cache::{CacheableEntry, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
@@ -167,7 +167,7 @@ impl BlockCache {
                     Ok((block, len))
                 }
             })
-            .verbose_stack_trace("block_cache_lookup")
+            .verbose_instrument_await("block_cache_lookup")
             .await?;
         Ok(BlockHolder::from_cached_block(block))
     }
