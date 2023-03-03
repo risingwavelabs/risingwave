@@ -156,12 +156,7 @@ impl Sstable {
     }
 
     pub fn calculate_block_info(&self, block_index: usize) -> (BlockLocation, usize) {
-        let block_meta = self
-            .meta
-            .block_metas
-            .get(block_index)
-            .ok_or_else(HummockError::invalid_block)
-            .unwrap(); // FIXME: don't unwrap here.
+        let block_meta = &self.meta.block_metas[block_index];
         let block_loc = BlockLocation {
             offset: block_meta.offset as usize,
             size: block_meta.len as usize,
