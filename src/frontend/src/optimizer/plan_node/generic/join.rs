@@ -98,6 +98,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
                 ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
             for (lk, rk) in eq_predicate.eq_indexes() {
+                // Check before add join keys.
                 if let Some(lk) = l2i.try_map(lk) {
                     if let Some(out_k) = i2o.try_map(lk) {
                         if pk_indices.contains(&out_k) {

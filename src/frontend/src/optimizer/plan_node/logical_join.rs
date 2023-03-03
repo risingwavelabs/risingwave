@@ -1339,12 +1339,14 @@ impl ToStream for LogicalJoin {
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
         for (lk, rk) in eq_predicate.eq_indexes() {
+            // Check before add join keys.
             if l2i.try_map(lk).is_some() {
                 continue;
             }
             if r2i.try_map(rk).is_some() {
                 continue;
             }
+            // Add left one is enough.
             left_to_add.push(lk);
         }
 
