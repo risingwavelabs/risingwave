@@ -51,6 +51,10 @@ impl RisingWave {
                 tracing::error!("postgres connection error: {e}");
             }
         });
+        // for recovery
+        client
+            .simple_query("SET RW_IMPLICIT_FLUSH TO true;")
+            .await?;
         client
             .simple_query("SET CREATE_COMPACTION_GROUP_FOR_MV TO true;")
             .await?;
