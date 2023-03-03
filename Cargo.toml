@@ -85,7 +85,6 @@ rpath = false
 # better catch bugs in CI.
 [profile.ci-release]
 inherits = "release"
-debug = 1 # line tables only
 debug-assertions = true
 overflow-checks = true
 
