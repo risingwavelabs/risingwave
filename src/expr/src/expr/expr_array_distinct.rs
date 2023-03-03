@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use risingwave_common::array::*;
 use risingwave_common::row::OwnedRow;
@@ -43,10 +43,7 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayDistinctExpression {
         ensure!(children.len() == 1);
         let array = build_from_prost(&children[0])?;
         let return_type = array.return_type();
-        Ok(Self {
-            array,
-            return_type
-        })
+        Ok(Self { array, return_type })
     }
 }
 
@@ -57,14 +54,8 @@ impl Expression for ArrayDistinctExpression {
 
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let array = self.array.eval_checked(input)?;
-        let mut builder = self
-            .return_type
-            .create_array_builder(array.len());
-        for (vis,arr) in input
-            .vis()
-            .iter()
-            .zip_eq_fast(array.iter())
-        {
+        let mut builder = self.return_type.create_array_builder(array.len());
+        for (vis, arr) in input.vis().iter().zip_eq_fast(array.iter()) {
             if !vis {
                 builder.append_null();
             } else {
@@ -83,16 +74,18 @@ impl Expression for ArrayDistinctExpression {
 impl ArrayDistinctExpression {
     fn evaluate(&self, array: DatumRef<'_>) -> Datum {
         match array {
-           Some(ScalarRefImpl::List(array)) => Some(
-            ListValue::new(
-                array.values_ref()
-                .into_iter()
-                .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect()
-            ).into()
-           ),
+            Some(ScalarRefImpl::List(array)) => Some(
+                ListValue::new(
+                    array
+                        .values_ref()
+                        .into_iter()
+                        .map(|x| x.map(ScalarRefImpl::into_scalar_impl))
+                        .collect::<HashSet<_>>()
+                        .into_iter()
+                        .collect(),
+                )
+                .into(),
+            ),
             _ => {
                 panic!("the operand must be a list type");
             }

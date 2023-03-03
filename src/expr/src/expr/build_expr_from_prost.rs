@@ -49,8 +49,8 @@ use super::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
+use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,

@@ -532,8 +532,7 @@ fn infer_type_for_special(
                 } => {
                     if let Ok(res) = align_types(inputs.iter_mut()) {
                         Some(res)
-                    }
-                    else {
+                    } else {
                         let common_type = align_array_and_element(0, 1, inputs)
                             .or_else(|_| align_array_and_element(1, 0, inputs));
                         match common_type {
@@ -545,9 +544,7 @@ fn infer_type_for_special(
                 _ => None,
             };
             Ok(Some(return_type.ok_or_else(|| {
-                ErrorCode::BindError(format!(
-                    "Array contains different values types"
-                ))
+                ErrorCode::BindError(format!("Array contains different values types"))
             })?))
         }
         ExprType::Vnode => {
