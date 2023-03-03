@@ -75,11 +75,14 @@ impl TieredCacheValue for Box<Block> {
     }
 
     fn encode(&self, mut buf: &mut [u8]) {
+        buf.put_u32_le(self.table_id());
         buf.put_slice(self.raw_data());
     }
 
     fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(Bytes::from(buf)))
+        let mut a: &[u8] = buf.as_ref();
+        let table_id = a.get_u32_le();
+        Box::new(Block::decode_from_raw(Bytes::from(buf), table_id))
     }
 }
 
@@ -234,7 +237,7 @@ impl SstableStore {
             let sst_id = sst.id;
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
             let uncompressed_capacity = block_meta.uncompressed_size as usize;
-
+            let table_id = block_meta.table_id;
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
                     .get(&(sst_id, block_index))
@@ -246,7 +249,7 @@ impl SstableStore {
                 }
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(block_data, uncompressed_capacity)?;
+                let block = Block::decode(block_data, uncompressed_capacity, table_id)?;
                 Ok(Box::new(block))
             }
         };
@@ -548,6 +551,7 @@ impl SstableWriter for BatchUploadWriter {
             self.block_info.push(Block::decode(
                 Bytes::from(block.to_vec()),
                 meta.uncompressed_size as usize,
+                meta.table_id,
             )?);
         }
         Ok(())
@@ -634,7 +638,7 @@ impl SstableWriter for StreamingUploadWriter {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
-            let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize)?;
+            let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize, meta.table_id)?;
             self.blocks.push(block);
         }
         self.object_uploader
@@ -768,6 +772,8 @@ pub struct BlockStream {
     /// streaming starts at block 2 of a given SST, then the list does not contain information
     /// about block 0 and block 1.
     block_size_vec: Vec<(usize, usize)>,
+
+    table_id: u32,
 }
 
 impl BlockStream {
@@ -797,11 +803,12 @@ impl BlockStream {
             .for_each(|b_meta| {
                 block_len_vec.push((b_meta.len as usize, b_meta.uncompressed_size as usize))
             });
-
+        let table_id = sst_meta.block_metas[block_index].table_id;
         Self {
             byte_stream,
             block_idx: 0,
             block_size_vec: block_len_vec,
+            table_id,
         }
     }
 
@@ -830,8 +837,7 @@ impl BlockStream {
                 ),
             )));
         }
-
-        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size)?);
+        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size, self.table_id)?);
         self.block_idx += 1;
 
         Ok(Some(boxed_block))

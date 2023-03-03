@@ -17,7 +17,6 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use prost::Message;
 use risingwave_hummock_sdk::key::MAX_KEY_LEN;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -38,10 +37,12 @@ pub struct Block {
     data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
+
+    table_id: u32,
 }
 
 impl Block {
-    pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
+    pub fn decode(buf: Bytes, uncompressed_capacity: usize, table_id: u32) -> HummockResult<Self> {
         // Verify checksum.
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
@@ -73,10 +74,10 @@ impl Block {
             }
         };
 
-        Ok(Self::decode_from_raw(buf))
+        Ok(Self::decode_from_raw(buf, table_id))
     }
 
-    pub fn decode_from_raw(buf: Bytes) -> Self {
+    pub fn decode_from_raw(buf: Bytes,table_id: u32) -> Self {
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -90,6 +91,7 @@ impl Block {
             data: buf,
             data_len,
             restart_points,
+            table_id,
         }
     }
 
@@ -104,6 +106,9 @@ impl Block {
         self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>()
     }
 
+    pub fn table_id(&self) -> u32 {
+        self.table_id
+    } 
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
         self.restart_points[index]
@@ -275,6 +280,8 @@ impl BlockBuilder {
     pub fn add(&mut self, full_key: &FullKey<&[u8]>, value: &[u8]) {
         let mut key: BytesMut = Default::default();
         full_key.encode_into(&mut key);
+        let table_key = full_key.user_key.table_key.as_ref();
+        let key = table_key.as_ref();
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(

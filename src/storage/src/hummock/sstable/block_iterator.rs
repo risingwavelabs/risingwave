@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Deref, borrow::Borrow};
 use std::ops::Range;
-
+use bytes::BufMut;
 use bytes::BytesMut;
-use risingwave_hummock_sdk::KeyComparator;
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::{KeyComparator, key::{UserKey, TableKey}};
 
 use super::KeyPrefix;
 use crate::hummock::BlockHolder;
@@ -71,8 +72,14 @@ impl BlockIterator {
 
     pub fn key(&self) -> &[u8] {
         assert!(self.is_valid());
-        &self.key[..]
+        let table_id = self.block.deref().table_id();
+        let key = &self.key[..];
+        let mut buf = vec![];
+        buf.put_u32(table_id);
+        buf.put_slice(key);
+        buf.as_ref()
     }
+
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
