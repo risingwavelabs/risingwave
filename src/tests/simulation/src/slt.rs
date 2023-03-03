@@ -48,6 +48,7 @@ impl SqlCmd {
         matches!(
             self,
             SqlCmd::Dml
+                | SqlCmd::Flush
                 | SqlCmd::Create {
                     is_create_table_as: true
                 }
