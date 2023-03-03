@@ -17,7 +17,6 @@ use std::sync::Arc;
 use arrow_schema::{Field, Schema, SchemaRef};
 use risingwave_common::array::{ArrayImpl, ArrayRef, DataChunk};
 use risingwave_common::bail;
-use risingwave_pb::expr::table_function::RexNode;
 use risingwave_udf::ArrowFlightUdfClient;
 
 use super::*;
@@ -68,7 +67,7 @@ pub fn new_user_defined(
     prost: &TableFunctionProst,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
-    let Some(RexNode::Udtf(udtf)) = &prost.rex_node else {
+    let Some(udtf) = &prost.udtf else {
         bail!("expect UDTF");
     };
 

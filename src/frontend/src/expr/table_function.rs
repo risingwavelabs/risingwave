@@ -18,7 +18,7 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
-use risingwave_pb::expr::table_function::{RexNode, Type};
+use risingwave_pb::expr::table_function::Type;
 use risingwave_pb::expr::{
     TableFunction as TableFunctionProst, UserDefinedTableFunction as UserDefinedTableFunctionProst,
 };
@@ -231,14 +231,15 @@ impl TableFunction {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_types: self.return_types.iter().map(|t| t.to_protobuf()).collect(),
-            rex_node: self.udtf_catalog.as_ref().map(|c| {
-                RexNode::Udtf(UserDefinedTableFunctionProst {
+            udtf: self
+                .udtf_catalog
+                .as_ref()
+                .map(|c| UserDefinedTableFunctionProst {
                     arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
                     language: c.language.clone(),
                     link: c.link.clone(),
                     identifier: c.identifier.clone(),
-                })
-            }),
+                }),
         }
     }
 
