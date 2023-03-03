@@ -78,21 +78,6 @@ where
     config
 }
 
-#[test]
-fn test() {
-    let c: RwConfig = toml::from_str(
-        r#"
-        [batch]
-        aaa = "??"
-
-        [storage.file_cache]
-        bbb = 1
-    "#,
-    )
-    .unwrap();
-    warn_unrecognized_fields(&c);
-}
-
 pub trait OverrideConfig {
     fn r#override(self, config: &mut RwConfig);
 }
