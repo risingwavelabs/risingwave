@@ -309,7 +309,7 @@ mod tests {
     use super::super::utils;
     use super::*;
     use crate::hummock::file_cache::metrics::FileCacheMetrics;
-    use crate::hummock::file_cache::test_utils::TestCacheValue;
+    use crate::hummock::file_cache::test_utils::{tempdir, TestCacheValue};
 
     const SHARDS: usize = 1 << LRU_SHARD_BITS;
     const SHARDSU8: u8 = SHARDS as u8;
@@ -327,19 +327,6 @@ mod tests {
     #[test]
     fn ensure_send_sync_clone() {
         is_send_sync_clone::<FileCache<TestCacheKey, Vec<u8>>>();
-    }
-
-    fn tempdir() -> tempfile::TempDir {
-        let ci: bool = std::env::var("RISINGWAVE_CI")
-            .unwrap_or_else(|_| "false".to_string())
-            .parse()
-            .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
-
-        if ci {
-            tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
-        } else {
-            tempfile::tempdir().unwrap()
-        }
     }
 
     async fn create_file_cache_manager_for_test(
