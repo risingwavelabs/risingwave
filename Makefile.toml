@@ -369,6 +369,8 @@ category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
   "download-connector",
+  "download-maven",
+  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -580,6 +582,29 @@ set -e
 cargo nextest run "$@"
 """
 description = "Run unit tests"
+
+[tasks.build-connector-node]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+description = "Build RisingWave Connector from source"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+artifact="risingwave-connector-1.0.0.tar.gz"
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+tar xf "assembly/target/${artifact}" -C "${PREFIX_BIN}/connector-node"
+'''
+
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
