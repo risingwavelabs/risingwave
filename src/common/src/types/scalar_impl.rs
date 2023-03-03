@@ -16,6 +16,7 @@ use std::hash::Hasher;
 
 use super::*;
 use crate::array::list_array::{ListRef, ListValue};
+use crate::array::serial_array::Serial;
 use crate::array::struct_array::{StructRef, StructValue};
 use crate::{for_all_native_types, for_all_scalar_variants};
 
@@ -156,6 +157,28 @@ impl<'a> ScalarRef<'a> for bool {
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
         self.hash(state)
+    }
+}
+
+/// Implement `Scalar` for `Serial`.
+impl Scalar for Serial {
+    type ScalarRefType<'a> = Serial;
+
+    fn as_scalar_ref(&self) -> Self::ScalarRefType<'_> {
+        Serial(self.0)
+    }
+}
+
+/// Implement `ScalarRef` for `Serial`.
+impl<'a> ScalarRef<'a> for Serial {
+    type ScalarType = Serial;
+
+    fn to_owned_scalar(&self) -> Serial {
+        *self
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state)
     }
 }
 

@@ -70,6 +70,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
         ScalarRefImpl::Int64(v) => buf.put_i64_le(v),
+        ScalarRefImpl::Serial(v) => buf.put_i64_le(v.0),
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
         ScalarRefImpl::Utf8(v) => serialize_str(v.as_bytes(), buf),
