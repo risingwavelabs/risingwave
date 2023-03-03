@@ -2,7 +2,7 @@
 
 SqlSmith is currently used as a testing tool to discover unexpected panics in RisingWave (It's not designed to generally test every SQL database, as it also tests some special SQL syntax used in RisingWave). It always generates the correct SQL based on the feature set supported so far. Therefore, if a test fails, it can only be due to two causes:
 
-1. There's a bug in SQLSmith, as it generates invalid SQL. 
+1. There's a bug in SQLSmith, as it generates invalid SQL.
 2. There's a bug in RisingWave because it's unable to handle a correct query.
 
 ## Frontend

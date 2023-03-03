@@ -6,13 +6,13 @@
 [![Build status](https://badge.buildkite.com/9394d2bca0f87e2e97aa78b25f765c92d4207c0b65e7f6648f.svg)](https://buildkite.com/risingwavelabs/main)
 [![codecov](https://codecov.io/gh/risingwavelabs/risingwave/branch/main/graph/badge.svg?token=EB44K9K38B)](https://codecov.io/gh/risingwavelabs/risingwave)
 
-**RisingWave has achieved production-readiness and has been effectively deployed in dozens of companies across a diverse range of industries, including entertainment, fintech, social media, and manufacturing.**
-
 RisingWave is a distributed SQL database for stream processing. It is designed to reduce the complexity and cost of building real-time applications. RisingWave consumes streaming data, performs incremental computations when new data comes in, and updates results dynamically. As a database system, RisingWave maintains results inside its own storage so that users can access data efficiently.
 
 RisingWave ingests data from sources like Apache Kafka, Apache Pulsar, Amazon Kinesis, Redpanda, and materialized CDC sources.
 
 Data in RisingWave can be output to external targets such as message brokers, data warehouses, and data lakes for storage or additional processing.
+
+*RisingWave has achieved production-readiness and has been effectively deployed in dozens of companies across a diverse range of industries, including entertainment, fintech, social media, and manufacturing.*
 
 Learn more at [Introduction to RisingWave](https://www.risingwave.dev/docs/current/intro/).
 
@@ -26,9 +26,9 @@ There are two ways to install RisingWave: use a pre-built package or compile fro
 
 ```shell
 # Download the pre-built binary
-wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.16/risingwave-v0.1.16-x86_64-unknown-linux.tar.gz
+wget https://github.com/risingwavelabs/risingwave/releases/download/v0.1.17/risingwave-v0.1.17-x86_64-unknown-linux.tar.gz
 # Unzip the binary
-tar xvf risingwave-v0.1.16-x86_64-unknown-linux.tar.gz
+tar xvf risingwave-v0.1.17-x86_64-unknown-linux.tar.gz
 # Start RisingWave in single-binary playground mode
 ./risingwave playground
 ```
@@ -37,7 +37,7 @@ tar xvf risingwave-v0.1.16-x86_64-unknown-linux.tar.gz
 
 ```shell
 # Start RisingWave in single-binary playground mode
-docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.16 playground
+docker run -it --pull=always -p 4566:4566 -p 5691:5691 ghcr.io/risingwavelabs/risingwave:v0.1.17 playground
 ```
 
 **Compile from Source with [RiseDev](docs/developer-guide.md#set-up-the-development-environment) (Linux and macOS)**

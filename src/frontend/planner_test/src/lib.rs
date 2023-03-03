@@ -68,8 +68,11 @@ pub struct TestCase {
     /// The original logical plan
     pub logical_plan: Option<String>,
 
-    /// Logical plan with optimization `.gen_optimized_logical_plan()`
-    pub optimized_logical_plan: Option<String>,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
+    pub optimized_logical_plan_for_batch: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
+    pub optimized_logical_plan_for_stream: Option<String>,
 
     /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
@@ -134,8 +137,11 @@ pub struct TestCaseResult {
     /// The original logical plan
     pub logical_plan: Option<String>,
 
-    /// Logical plan with optimization `.gen_optimized_logical_plan()`
-    pub optimized_logical_plan: Option<String>,
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_batch()`
+    pub optimized_logical_plan_for_batch: Option<String>,
+
+    /// Logical plan with optimization `.gen_optimized_logical_plan_for_stream()`
+    pub optimized_logical_plan_for_stream: Option<String>,
 
     /// Distributed batch plan `.gen_batch_query_plan()`
     pub batch_plan: Option<String>,
@@ -198,7 +204,8 @@ impl TestCaseResult {
             explain_output: self.explain_output,
             before_statements: original_test_case.before_statements.clone(),
             logical_plan: self.logical_plan,
-            optimized_logical_plan: self.optimized_logical_plan,
+            optimized_logical_plan_for_batch: self.optimized_logical_plan_for_batch,
+            optimized_logical_plan_for_stream: self.optimized_logical_plan_for_stream,
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
@@ -363,6 +370,7 @@ impl TestCase {
                     if_not_exists,
                     source_schema,
                     source_watermarks,
+                    append_only,
                     ..
                 } => {
                     create_table::handle_create_table(
@@ -373,6 +381,7 @@ impl TestCase {
                         if_not_exists,
                         source_schema,
                         source_watermarks,
+                        append_only,
                     )
                     .await?;
                 }
@@ -503,18 +512,37 @@ impl TestCase {
             }
         };
 
-        if self.optimized_logical_plan.is_some() || self.optimizer_error.is_some() {
-            let optimized_logical_plan = match logical_plan.gen_optimized_logical_plan() {
-                Ok(optimized_logical_plan) => optimized_logical_plan,
-                Err(err) => {
-                    ret.optimizer_error = Some(err.to_string());
-                    return Ok(ret);
-                }
-            };
+        if self.optimized_logical_plan_for_batch.is_some() || self.optimizer_error.is_some() {
+            let optimized_logical_plan_for_batch =
+                match logical_plan.gen_optimized_logical_plan_for_batch() {
+                    Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
+                    Err(err) => {
+                        ret.optimizer_error = Some(err.to_string());
+                        return Ok(ret);
+                    }
+                };
 
-            // Only generate optimized_logical_plan if it is specified in test case
-            if self.optimized_logical_plan.is_some() {
-                ret.optimized_logical_plan = Some(explain_plan(&optimized_logical_plan));
+            // Only generate optimized_logical_plan_for_batch if it is specified in test case
+            if self.optimized_logical_plan_for_batch.is_some() {
+                ret.optimized_logical_plan_for_batch =
+                    Some(explain_plan(&optimized_logical_plan_for_batch));
+            }
+        }
+
+        if self.optimized_logical_plan_for_stream.is_some() || self.optimizer_error.is_some() {
+            let optimized_logical_plan_for_stream =
+                match logical_plan.gen_optimized_logical_plan_for_stream() {
+                    Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
+                    Err(err) => {
+                        ret.optimizer_error = Some(err.to_string());
+                        return Ok(ret);
+                    }
+                };
+
+            // Only generate optimized_logical_plan_for_stream if it is specified in test case
+            if self.optimized_logical_plan_for_stream.is_some() {
+                ret.optimized_logical_plan_for_stream =
+                    Some(explain_plan(&optimized_logical_plan_for_stream));
             }
         }
 
@@ -624,9 +652,14 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
     )?;
     check_option_plan_eq("logical_plan", &expected.logical_plan, &actual.logical_plan)?;
     check_option_plan_eq(
-        "optimized_logical_plan",
-        &expected.optimized_logical_plan,
-        &actual.optimized_logical_plan,
+        "optimized_logical_plan_for_batch",
+        &expected.optimized_logical_plan_for_batch,
+        &actual.optimized_logical_plan_for_batch,
+    )?;
+    check_option_plan_eq(
+        "optimized_logical_plan_for_stream",
+        &expected.optimized_logical_plan_for_stream,
+        &actual.optimized_logical_plan_for_stream,
     )?;
     check_option_plan_eq("batch_plan", &expected.batch_plan, &actual.batch_plan)?;
     check_option_plan_eq(

@@ -24,7 +24,7 @@ use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
@@ -43,12 +43,42 @@ use crate::scheduler::{
 use crate::session::SessionImpl;
 use crate::PlanRef;
 
+fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
+    fn is_insert_using_select(stmt: &Statement) -> bool {
+        fn has_select_query(set_expr: &SetExpr) -> bool {
+            match set_expr {
+                SetExpr::Select(_) => true,
+                SetExpr::Query(query) => has_select_query(&query.body),
+                SetExpr::SetOperation { left, right, .. } => {
+                    has_select_query(left) || has_select_query(right)
+                }
+                SetExpr::Values(_) => false,
+            }
+        }
+
+        matches!(
+            stmt,
+            Statement::Insert {source, ..} if has_select_query(&source.body)
+        )
+    }
+
+    let stmt_type = to_statement_type(stmt)?;
+
+    Ok(matches!(
+        stmt_type,
+        StatementType::UPDATE
+            | StatementType::DELETE
+            | StatementType::UPDATE_RETURNING
+            | StatementType::DELETE_RETURNING
+    ) | is_insert_using_select(stmt))
+}
+
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<(PlanRef, QueryMode, Schema)> {
-    let stmt_type = to_statement_type(&stmt)?;
+    let must_dist = must_run_in_distributed_mode(&stmt)?;
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -68,7 +98,6 @@ pub fn gen_batch_query_plan(
                 must_local = true;
         }
     }
-    let must_dist = stmt_type.is_dml();
 
     let query_mode = match (must_dist, must_local) {
         (true, true) => {

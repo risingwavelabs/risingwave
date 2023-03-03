@@ -47,6 +47,7 @@ pub struct StreamingMetrics {
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: GenericCounterVec<AtomicU64>,
     pub stream_total_mem_usage: IntGauge,
+    pub batch_total_mem_usage: IntGauge,
 
     // Streaming Join
     pub join_lookup_miss_count: GenericCounterVec<AtomicU64>,
@@ -149,6 +150,13 @@ impl StreamingMetrics {
         let stream_total_mem_usage = register_int_gauge_with_registry!(
             "stream_total_mem_usage",
             "The memory allocated by streaming jobs, get from TaskLocalAlloc",
+            registry
+        )
+        .unwrap();
+
+        let batch_total_mem_usage = register_int_gauge_with_registry!(
+            "batch_total_mem_usage",
+            "The memory allocated by batch jobs, get from TaskLocalAlloc",
             registry
         )
         .unwrap();
@@ -474,6 +482,7 @@ impl StreamingMetrics {
             source_row_per_barrier,
             exchange_frag_recv_size,
             stream_total_mem_usage,
+            batch_total_mem_usage,
             join_lookup_miss_count,
             join_total_lookup_count,
             join_insert_cache_miss_count,

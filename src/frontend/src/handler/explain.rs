@@ -69,6 +69,7 @@ pub async fn handle_explain(
                 constraints,
                 source_schema,
                 source_watermarks,
+                append_only,
                 ..
             } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
                 Some(s) => {
@@ -80,6 +81,7 @@ pub async fn handle_explain(
                         s,
                         source_watermarks,
                         ColumnIdGenerator::new_initial(),
+                        append_only,
                     )
                     .await?
                     .0
@@ -92,6 +94,7 @@ pub async fn handle_explain(
                         constraints,
                         ColumnIdGenerator::new_initial(),
                         source_watermarks,
+                        append_only,
                     )?
                     .0
                 }
@@ -199,8 +202,8 @@ pub async fn handle_explain(
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
         )],
     ))
 }

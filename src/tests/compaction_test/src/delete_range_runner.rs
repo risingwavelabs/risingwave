@@ -122,7 +122,7 @@ async fn compaction_test(
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
-        handle_pk_conflict: false,
+        handle_pk_conflict_behavior: 0,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,

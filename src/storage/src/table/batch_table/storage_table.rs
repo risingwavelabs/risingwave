@@ -17,8 +17,8 @@ use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::ops::{Index, RangeBounds};
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
 use auto_enums::auto_enum;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt};
@@ -672,7 +672,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         futures::pin_mut!(iter);
         while let Some((raw_key, value)) = iter
             .try_next()
-            .verbose_stack_trace("storage_table_iter_next")
+            .verbose_instrument_await("storage_table_iter_next")
             .await?
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
