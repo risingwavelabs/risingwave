@@ -1,5 +1,6 @@
 package com.risingwave.java;
 
+import com.risingwave.java.binding.Binding;
 import com.risingwave.java.binding.Iterator;
 import com.risingwave.java.binding.KeyedRow;
 import com.risingwave.java.binding.rpc.MetaClient;
@@ -9,7 +10,9 @@ import com.risingwave.proto.JavaBinding.KeyRange;
 import com.risingwave.proto.JavaBinding.KeyRange.Bound;
 import com.risingwave.proto.JavaBinding.ReadPlan;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
 
@@ -34,6 +37,14 @@ public class Demo {
                     metaClient.startHeartbeatLoop(Duration.ofMillis(1000));
             HummockVersion version = metaClient.pinVersion();
             Table tableCatalog = metaClient.getTable(dbName, tableName);
+
+            int vnodeCount = Binding.vnodeCount();
+
+            List<Integer> vnodeList = new ArrayList<>();
+            for (int i = 0; i < vnodeCount; i++) {
+                vnodeList.add(i);
+            }
+
             ReadPlan readPlan =
                     ReadPlan.newBuilder()
                             .setDataDir(dataDir)
@@ -43,6 +54,7 @@ public class Demo {
                             .setEpoch(version.getMaxCommittedEpoch())
                             .setVersion(version)
                             .setTableCatalog(tableCatalog)
+                            .addAllVnodeIds(vnodeList)
                             .build();
 
             try (Iterator iter = new Iterator(readPlan)) {

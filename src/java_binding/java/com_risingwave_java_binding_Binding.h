@@ -9,6 +9,14 @@ extern "C" {
 #endif
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    vnodeCount
+ * Signature: ()I
+ */
+JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_vnodeCount
+  (JNIEnv *, jclass);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    iteratorNew
  * Signature: ([B)J
  */

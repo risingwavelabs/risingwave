@@ -17,6 +17,7 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{anyhow, Result};
+use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
@@ -83,10 +84,12 @@ impl MetaNodeService {
                 cmd.arg("--backend")
                     .arg("etcd")
                     .arg("--etcd-endpoints")
-                    .arg(format!("{}:{}", etcds[0].address, etcds[0].port));
-                if etcds.len() > 1 {
-                    eprintln!("WARN: more than 1 etcd instance is detected, only using the first one for meta node.");
-                }
+                    .arg(
+                        etcds
+                            .iter()
+                            .map(|etcd| format!("{}:{}", etcd.address, etcd.port))
+                            .join(","),
+                    );
             }
         }
 

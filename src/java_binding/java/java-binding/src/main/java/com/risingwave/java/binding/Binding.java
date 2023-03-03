@@ -5,6 +5,8 @@ public class Binding {
         System.loadLibrary("risingwave_java_binding");
     }
 
+    public static native int vnodeCount();
+
     // iterator method
     // Return a pointer to the iterator
     static native long iteratorNew(byte[] readPlan);

@@ -70,8 +70,8 @@ pub(super) async fn handle_show(
         vec![row].into(),
         vec![PgFieldDescriptor::new(
             name.to_ascii_lowercase(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
         )],
     ))
 }
@@ -99,18 +99,18 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         vec![
             PgFieldDescriptor::new(
                 "Name".to_string(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Setting".to_string(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Description".to_string(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))
@@ -136,13 +136,13 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         vec![
             PgFieldDescriptor::new(
                 "Name".to_string(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Value".to_string(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))

@@ -13,11 +13,13 @@
 // limitations under the License.
 
 pub mod model;
+
 use std::ops::DerefMut;
 use std::sync::Arc;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::system_param::set_system_param;
+use risingwave_common::system_param::{default, set_system_param};
+use risingwave_common::{for_all_undeprecated_params, key_of};
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::RwLock;
 
@@ -45,12 +47,12 @@ impl<S: MetaStore> SystemParamManager<S> {
         let persisted = SystemParams::get(meta_store.as_ref()).await?;
 
         let params = if let Some(persisted) = persisted {
-            Self::validate_init_params(&persisted, &init_params);
-            persisted
+            merge_params(persisted, init_params)
         } else {
-            SystemParams::insert(&init_params, meta_store.as_ref()).await?;
             init_params
         };
+
+        SystemParams::insert(&params, meta_store.as_ref()).await?;
 
         Ok(Self {
             meta_store,
@@ -89,13 +91,32 @@ impl<S: MetaStore> SystemParamManager<S> {
 
         Ok(())
     }
-
-    fn validate_init_params(persisted: &SystemParams, init: &SystemParams) {
-        // Only compare params from CLI and config file.
-        // TODO: Currently all fields are from CLI/config, but after CLI becomes the only source of
-        // `init`, should only compare them
-        if persisted != init {
-            tracing::warn!("System parameters from CLI and config file differ from the persisted")
-        }
-    }
 }
+
+// For each field in `persisted` and `init`
+// 1. Some, None: Params not from CLI need not be validated. Use persisted value.
+// 2. Some, Some: Check equality and warn if they differ.
+// 3. None, Some: A new version of RW cluster is launched for the first time and newly introduced
+// params are not set. Use init value.
+// 4. None, None: Same as 3, but the init param is not from CLI. Use default value.
+macro_rules! impl_merge_params {
+    ($({ $field:ident, $type:ty, $default:expr },)*) => {
+        fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
+            $(
+                match (persisted.$field.as_ref(), init.$field) {
+                    (Some(persisted), Some(init)) => {
+                        if persisted != &init {
+                            tracing::warn!("System parameters \"{:?}\" from CLI and config file ({}) differ from persisted ({})", key_of!($field), init, persisted);
+                        }
+                    },
+                    (None, Some(init)) => persisted.$field = Some(init),
+                    (None, None) => { persisted.$field = Some(default::$field()) },
+                    _ => {},
+                }
+            )*
+            persisted
+        }
+    };
+}
+
+for_all_undeprecated_params!(impl_merge_params);
