@@ -36,11 +36,8 @@ RUN cargo fetch
 RUN mkdir -p /risingwave/bin/connector-node
 
 RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level" && \
-  mv /risingwave/target/release/{frontend,compute-node,meta-node,compactor,risingwave} /risingwave/bin/ && \
+  mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cargo clean
-RUN for component in "risingwave" "compute-node" "meta-node" "frontend" "compactor"; do \
-  objcopy --compress-debug-sections=zlib-gnu /risingwave/bin/${component}; \
-  done
 
 RUN cd risingwave-connector-node && mvn -B package -Dmaven.test.skip=true
 RUN tar -zxvf /risingwave/risingwave-connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
