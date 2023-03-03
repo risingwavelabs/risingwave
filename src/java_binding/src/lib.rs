@@ -209,9 +209,6 @@ where
     }
 }
 
-// JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_vnodeCount
-// (JNIEnv *, jclass);
-
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     _env: EnvParam<'_>,
