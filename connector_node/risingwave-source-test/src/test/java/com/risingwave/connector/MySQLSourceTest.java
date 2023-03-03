@@ -11,6 +11,10 @@ import java.sql.SQLException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
@@ -77,8 +81,16 @@ public class MySQLSourceTest {
 
     @Test
     public void testLines() throws InterruptedException, SQLException {
+        Lock lock = new ReentrantLock();
+        Condition done  = lock.newCondition();
         Connection connection = SourceTestClient.connect(mysql);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
+        SourceTestClient.performQuery(connection, query);
+        query =
+                "LOAD DATA INFILE '/home/orders.tbl' "
+                        + "INTO TABLE orders "
+                        + "CHARACTER SET UTF8 "
+                        + "FIELDS TERMINATED BY '|' LINES TERMINATED BY '\n';";
         SourceTestClient.performQuery(connection, query);
         Iterator<GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(mysql, SourceType.MYSQL, "test", "orders");
@@ -91,17 +103,23 @@ public class MySQLSourceTest {
                                 for (CdcMessage ignored : messages) {
                                     count.getAndIncrement();
                                 }
+                                if (count.get() == 10000) {
+                                    lock.lock();
+                                    try {
+                                        done.signal();
+                                    } finally {
+                                        lock.unlock();
+                                    }
+                                }
                             }
                         });
         t1.start();
-        Thread.sleep(5000);
-        query =
-                "LOAD DATA INFILE '/home/orders.tbl' "
-                        + "INTO TABLE orders "
-                        + "CHARACTER SET UTF8 "
-                        + "FIELDS TERMINATED BY '|' LINES TERMINATED BY '\n';";
-        SourceTestClient.performQuery(connection, query);
-        Thread.sleep(10000);
+        lock.lock();
+        try {
+            done.await();
+        } finally {
+            lock.unlock();
+        }
         logger.info("count: {}", count.get());
         assertThat(count.get()).isEqualTo(10000);
         connection.close();

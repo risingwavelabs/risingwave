@@ -15,6 +15,10 @@ import java.sql.SQLException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Condition;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -87,8 +91,12 @@ public class PostgresSourceTest {
 
     @Test
     public void testLines() throws InterruptedException, SQLException {
+        Lock lock = new ReentrantLock();
+        Condition done  = lock.newCondition();
         Connection connection = SourceTestClient.connect(pg);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
+        SourceTestClient.performQuery(connection, query);
+        query = "COPY orders FROM '/home/orders.tbl' WITH DELIMITER '|'";
         SourceTestClient.performQuery(connection, query);
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
@@ -103,13 +111,23 @@ public class PostgresSourceTest {
                                 for (ConnectorServiceProto.CdcMessage ignored : messages) {
                                     count.getAndIncrement();
                                 }
+                                if (count.get() == 10000) {
+                                    lock.lock();
+                                    try {
+                                        done.signal();
+                                    } finally {
+                                        lock.unlock();
+                                    }
+                                }
                             }
                         });
         t1.start();
-        Thread.sleep(10000);
-        query = "COPY orders FROM '/home/orders.tbl' WITH DELIMITER '|'";
-        SourceTestClient.performQuery(connection, query);
-        Thread.sleep(10000);
+        lock.lock();
+        try {
+            done.await();
+        } finally {
+            lock.unlock();
+        }
         logger.info("count: {}", count.get());
         assertThat(count.get()).isEqualTo(10000);
         connection.close();
