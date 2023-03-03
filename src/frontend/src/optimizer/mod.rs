@@ -44,11 +44,9 @@ use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
     StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
+use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{
-    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update,
-};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -196,32 +194,6 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    /// As we always run the root stage locally, we should ensure that singleton table scan is not
-    /// the root stage. Returns `true` if we must insert an additional exchange to ensure this.
-    fn require_additional_exchange_on_root(plan: PlanRef) -> bool {
-        fn is_candidate_table_scan(plan: &PlanRef) -> bool {
-            if let Some(node) = plan.as_batch_seq_scan()
-            && !node.logical().is_sys_table() {
-                true
-            } else {
-                plan.node_type() == PlanNodeType::BatchSource
-            }
-        }
-
-        fn no_exchange_before_table_scan(plan: PlanRef) -> bool {
-            if plan.node_type() == PlanNodeType::BatchExchange {
-                return false;
-            }
-            is_candidate_table_scan(&plan)
-                || plan.inputs().into_iter().any(no_exchange_before_table_scan)
-        }
-
-        assert_eq!(plan.distribution(), &Distribution::Single);
-        no_exchange_before_table_scan(plan)
-
-        // TODO: join between a normal table and a system table is not supported yet
-    }
-
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_distributed_plan(&mut self) -> Result<PlanRef> {
         self.set_required_dist(RequiredDist::single());
@@ -241,11 +213,7 @@ impl PlanRoot {
             ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        if has_batch_insert(plan.clone())
-            || has_batch_delete(plan.clone())
-            || has_batch_update(plan.clone())
-            || Self::require_additional_exchange_on_root(plan.clone())
-        {
+        if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
@@ -263,7 +231,7 @@ impl PlanRoot {
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
         let insert_exchange = match plan.distribution() {
-            Distribution::Single => Self::require_additional_exchange_on_root(plan.clone()),
+            Distribution::Single => require_additional_exchange_on_root_in_local_mode(plan.clone()),
             _ => true,
         };
         if insert_exchange {
@@ -530,6 +498,76 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
 fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
     let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
     Ok(plan)
+}
+
+fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bool) -> bool {
+    if plan.node_type() == PlanNodeType::BatchExchange {
+        return false;
+    }
+    is_candidate(plan)
+        || plan
+            .inputs()
+            .iter()
+            .any(|input| exist_and_no_exchange_before(input, is_candidate))
+}
+
+/// As we always run the root stage locally, for some plan in root stage which need to execute in
+/// compute node we insert an additional exhchange before it to avoid to include it in the root
+/// stage.
+///
+/// Returns `true` if we must insert an additional exchange to ensure this.
+fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
+    fn is_user_table(plan: &PlanRef) -> bool {
+        plan.as_batch_seq_scan()
+            .map(|node| !node.logical().is_sys_table())
+            .unwrap_or(false)
+    }
+
+    fn is_source(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchSource
+    }
+
+    fn is_insert(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchInsert
+    }
+
+    fn is_update(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchUpdate
+    }
+
+    fn is_delete(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchDelete
+    }
+
+    assert_eq!(plan.distribution(), &Distribution::Single);
+    exist_and_no_exchange_before(&plan, is_user_table)
+        || exist_and_no_exchange_before(&plan, is_source)
+        || exist_and_no_exchange_before(&plan, is_insert)
+        || exist_and_no_exchange_before(&plan, is_update)
+        || exist_and_no_exchange_before(&plan, is_delete)
+}
+
+/// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
+/// them for the different requirement of plan node in different execute mode.
+fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
+    fn is_user_table(plan: &PlanRef) -> bool {
+        plan.as_batch_seq_scan()
+            .map(|node| !node.logical().is_sys_table())
+            .unwrap_or(false)
+    }
+
+    fn is_source(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchSource
+    }
+
+    fn is_insert(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchInsert
+    }
+
+    assert_eq!(plan.distribution(), &Distribution::Single);
+    exist_and_no_exchange_before(&plan, is_user_table)
+        || exist_and_no_exchange_before(&plan, is_source)
+        || exist_and_no_exchange_before(&plan, is_insert)
 }
 
 #[cfg(test)]

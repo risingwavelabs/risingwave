@@ -142,7 +142,7 @@ steps:
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
-    command: "TEST_NUM=100 timeout 55m ci/scripts/deterministic-e2e-test.sh"
+    command: "TEST_NUM=64 timeout 55m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:

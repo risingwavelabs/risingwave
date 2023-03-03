@@ -15,6 +15,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(once_cell)]
+#![feature(type_alias_impl_trait)]
 
 mod iterator;
 
@@ -30,6 +31,7 @@ use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::hash::VirtualNode;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -205,6 +207,13 @@ where
             Ret::default()
         }
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
+    _env: EnvParam<'_>,
+) -> jint {
+    VirtualNode::COUNT as jint
 }
 
 #[no_mangle]
