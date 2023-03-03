@@ -22,7 +22,7 @@
         └─LogicalProject { exprs: [t1.v1] }
           └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], pk_columns: [t2._row_id, t1._row_id, v3, v1], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v3, v4, v1, t2._row_id(hidden), t1._row_id(hidden)], pk_columns: [t2._row_id, t1._row_id, v3], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t2.v3 = t1.v1, output: [t2.v3, t2.v4, t1.v1, t2._row_id, t1._row_id] }
       ├─StreamExchange { dist: HashShard(t2.v3) }
       | └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
