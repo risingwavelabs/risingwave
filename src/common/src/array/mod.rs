@@ -30,6 +30,7 @@ mod jsonb_array;
 pub mod list_array;
 mod macros;
 mod primitive_array;
+pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod struct_array;

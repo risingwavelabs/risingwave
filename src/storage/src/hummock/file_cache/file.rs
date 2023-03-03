@@ -274,6 +274,7 @@ impl CacheFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hummock::file_cache::test_utils::tempdir;
 
     fn is_send_sync_clone<T: Send + Sync + Clone + 'static>() {}
 
@@ -284,7 +285,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_file_cache() {
-        let tempdir = tempfile::tempdir().unwrap();
+        let tempdir = tempdir();
         let path = tempdir.path().join("test-cache-file");
         let options = CacheFileOptions {
             block_size: 4096,
