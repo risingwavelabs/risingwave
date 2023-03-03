@@ -120,6 +120,7 @@ export default function AwaitTreeDump() {
             <SpinnerOverlay></SpinnerOverlay>
           ) : (
             <Editor
+              language="sql"
               options={{
                 fontSize: 13,
                 readOnly: true,
