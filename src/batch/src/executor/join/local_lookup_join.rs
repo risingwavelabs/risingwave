@@ -86,11 +86,6 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             .map(|&k| k as usize)
             .collect_vec();
 
-        // It is a singleton table.
-        if dist_keys.is_empty() {
-            return Ok(VirtualNode::from_index(0));
-        }
-
         let pk_indices = self
             .table_desc
             .pk
