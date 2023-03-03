@@ -1326,32 +1326,53 @@ impl ToStream for LogicalJoin {
             .filter(|i| l2i.try_map(*i).is_none())
             .collect_vec();
 
-        let right_to_add = right
+        let mut right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
             .filter(|i| r2i.try_map(*i).is_none())
-            .map(|i| i + left_len);
+            .map(|i| i + left_len)
+            .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
+        let (need_left_jk, need_right_jk) = match self.join_type() {
+            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                (true, false)
+            }
+            JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => (false, true),
+            JoinType::FullOuter => (true, true),
+            JoinType::Unspecified => unreachable!(),
+        };
+
         for (lk, rk) in eq_predicate.eq_indexes() {
             // Check before add join keys.
-            if l2i.try_map(lk).is_some() {
-                continue;
+            if !need_right_jk {
+                if l2i.try_map(lk).is_some() {
+                    continue;
+                }
             }
-            if r2i.try_map(rk).is_some() {
-                continue;
+            if !need_left_jk {
+                if r2i.try_map(rk).is_some() {
+                    continue;
+                }
             }
-            // Add left one is enough.
-            left_to_add.push(lk);
+            if need_left_jk {
+                if l2i.try_map(lk).is_none() {
+                    left_to_add.push(lk);
+                }
+            }
+            if need_right_jk {
+                if r2i.try_map(rk).is_none() {
+                    right_to_add.push(rk + left_len)
+                }
+            }
         }
-
         let left_to_add = left_to_add.into_iter().unique();
-        let right_to_add = right_to_add.unique();
+        let right_to_add = right_to_add.into_iter().unique();
         // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices().clone();

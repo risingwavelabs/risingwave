@@ -639,36 +639,32 @@
           └─BatchExchange { order: [], dist: HashShard(a.k1) }
             └─BatchScan { table: a, columns: [a.k1], distribution: SomeShard }
   stream_plan: |
-    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1], pk_conflict: "no check" }
-    └─StreamExchange { dist: HashShard(ak1.a._row_id, a.k1) }
-      └─StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
-        ├─StreamExchange { dist: HashShard(ak1.k1) }
-        | └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
-        └─StreamProject { exprs: [count, a.k1] }
-          └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
-            └─StreamExchange { dist: HashShard(a.k1) }
-              └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
+    StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1, ak1.k1], pk_conflict: "no check" }
+    └─StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
+      ├─StreamExchange { dist: HashShard(ak1.k1) }
+      | └─StreamTableScan { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
+      └─StreamProject { exprs: [count, a.k1] }
+        └─StreamHashAgg { group_key: [a.k1], aggs: [count] }
+          └─StreamExchange { dist: HashShard(a.k1) }
+            └─StreamTableScan { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
   stream_dist_plan: |
     Fragment 0
-      StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1], pk_conflict: "no check" }
+      StreamMaterialize { columns: [v, bv, ak1.a._row_id(hidden), ak1.k1(hidden), a.k1(hidden)], pk_columns: [ak1.a._row_id, a.k1, ak1.k1], pk_conflict: "no check" }
           materialized table: 4294967294
-        StreamExchange Hash([2, 4]) from 1
+        StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
+            left table: 0, right table 2, left degree table: 1, right degree table: 3,
+          StreamExchange Hash([0]) from 1
+          StreamProject { exprs: [count, a.k1] }
+            StreamHashAgg { group_key: [a.k1], aggs: [count] }
+                result table: 4, state tables: []
+              StreamExchange Hash([0]) from 2
 
     Fragment 1
-      StreamHashJoin { type: Inner, predicate: ak1.k1 = a.k1, output: [ak1.v, count, ak1.a._row_id, ak1.k1, a.k1] }
-          left table: 0, right table 2, left degree table: 1, right degree table: 3,
-        StreamExchange Hash([0]) from 2
-        StreamProject { exprs: [count, a.k1] }
-          StreamHashAgg { group_key: [a.k1], aggs: [count] }
-              result table: 4, state tables: []
-            StreamExchange Hash([0]) from 3
-
-    Fragment 2
       Chain { table: ak1, columns: [ak1.k1, ak1.v, ak1.a._row_id], pk: [ak1.a._row_id], dist: UpstreamHashShard(ak1.k1) }
         Upstream
         BatchPlanNode
 
-    Fragment 3
+    Fragment 2
       Chain { table: a, columns: [a.k1, a._row_id], pk: [a._row_id], dist: UpstreamHashShard(a._row_id) }
         Upstream
         BatchPlanNode
@@ -678,7 +674,7 @@
      Table 2 { columns: [count, a_k1], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
      Table 3 { columns: [a_k1, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
      Table 4 { columns: [a_k1, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [v, bv, ak1.a._row_id, ak1.k1, a.k1], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2, 4] }
+     Table 4294967294 { columns: [v, bv, ak1.a._row_id, ak1.k1, a.k1], primary key: [$2 ASC, $4 ASC, $3 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [3] }
 - id: aggk1_join_Ak1_onk1
   before:
   - create_tables

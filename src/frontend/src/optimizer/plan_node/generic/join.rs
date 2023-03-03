@@ -97,39 +97,51 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
             let i2o =
                 ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
+            let (need_left_jk, need_right_jk) = match self.join_type {
+                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
+                    (true, false)
+                }
+                JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => (false, true),
+                JoinType::FullOuter => (true, true),
+                JoinType::Unspecified => unreachable!(),
+            };
+
             for (lk, rk) in eq_predicate.eq_indexes() {
                 // Check before add join keys.
-                if let Some(lk) = l2i.try_map(lk) {
-                    if let Some(out_k) = i2o.try_map(lk) {
-                        if pk_indices.contains(&out_k) {
-                            continue;
+                if !need_right_jk {
+                    if let Some(lk) = l2i.try_map(lk) {
+                        if let Some(out_k) = i2o.try_map(lk) {
+                            if pk_indices.contains(&out_k) {
+                                continue;
+                            }
                         }
                     }
                 }
-                if let Some(rk) = r2i.try_map(rk) {
-                    if let Some(out_k) = i2o.try_map(rk) {
-                        if pk_indices.contains(&out_k) {
-                            continue;
+                if !need_left_jk {
+                    if let Some(rk) = r2i.try_map(rk) {
+                        if let Some(out_k) = i2o.try_map(rk) {
+                            if pk_indices.contains(&out_k) {
+                                continue;
+                            }
                         }
                     }
                 }
-                if let Some(lk) = l2i.try_map(lk) {
-                    if let Some(out_k) = i2o.try_map(lk) {
+                if need_left_jk {
+                    if let Some(lk) = l2i.try_map(lk) {
+                        let out_k = i2o.try_map(lk)?;
                         if !pk_indices.contains(&out_k) {
                             pk_indices.push(out_k);
-                            continue;
                         }
                     }
                 }
-                if let Some(rk) = r2i.try_map(rk) {
-                    if let Some(out_k) = i2o.try_map(rk) {
+                if need_right_jk {
+                    if let Some(rk) = r2i.try_map(rk) {
+                        let out_k = i2o.try_map(rk)?;
                         if !pk_indices.contains(&out_k) {
                             pk_indices.push(out_k);
-                            continue;
                         }
                     }
                 }
-                return None;
             }
             Some(pk_indices)
         })
