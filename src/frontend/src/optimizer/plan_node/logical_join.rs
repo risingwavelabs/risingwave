@@ -1319,11 +1319,12 @@ impl ToStream for LogicalJoin {
         let r2i = join.core.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = left
+        let mut left_to_add = left
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i).is_none());
+            .filter(|i| l2i.try_map(*i).is_none())
+            .collect_vec();
 
         let right_to_add = right
             .logical_pk()
@@ -1337,23 +1338,18 @@ impl ToStream for LogicalJoin {
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
-        let left_to_add = left_to_add
-            .chain(
-                eq_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .filter(|i| l2i.try_map(*i).is_none()),
-            )
-            .unique();
-        let right_to_add = right_to_add
-            .chain(
-                eq_predicate
-                    .right_eq_indexes()
-                    .into_iter()
-                    .filter(|i| r2i.try_map(*i).is_none())
-                    .map(|i| i + left_len),
-            )
-            .unique();
+        for (lk, rk) in eq_predicate.eq_indexes() {
+            if l2i.try_map(lk).is_some() {
+                continue;
+            }
+            if r2i.try_map(rk).is_some() {
+                continue;
+            }
+            left_to_add.push(lk);
+        }
+
+        let left_to_add = left_to_add.into_iter().unique();
+        let right_to_add = right_to_add.unique();
         // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices().clone();

@@ -99,13 +99,22 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
             for (lk, rk) in eq_predicate.eq_indexes() {
                 if let Some(lk) = l2i.try_map(lk) {
-                    let out_k = i2o.try_map(lk)?;
-                    if !pk_indices.contains(&out_k) {
-                        pk_indices.push(out_k);
+                    if let Some(out_k) = i2o.try_map(lk) {
+                        if pk_indices.contains(&out_k) {
+                            continue;
+                        }
                     }
                 }
                 if let Some(rk) = r2i.try_map(rk) {
-                    let out_k = i2o.try_map(rk)?;
+                    if let Some(out_k) = i2o.try_map(rk) {
+                        if pk_indices.contains(&out_k) {
+                            continue;
+                        }
+                    }
+                }
+                // Just add the left join key is enough, as it is equal with the right one.
+                if let Some(lk) = l2i.try_map(lk) {
+                    let out_k = i2o.try_map(lk)?;
                     if !pk_indices.contains(&out_k) {
                         pk_indices.push(out_k);
                     }
