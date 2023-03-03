@@ -35,7 +35,7 @@ RUN rustup self update \
 RUN cargo fetch
 RUN mkdir -p /risingwave/bin/connector-node
 
-RUN cargo build -p risingwave_cmd -p risingwave_cmd_all --release --features "static-link static-log-level" && \
+RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
   mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cargo clean
 
