@@ -181,8 +181,14 @@ message MaterializeNode {
   repeated plan_common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  // Used to handle pk conflict, open it when upstream executor is source executor.
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message AggCallState {
@@ -219,6 +225,7 @@ message SimpleAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message HashAggNode {
@@ -230,6 +237,7 @@ message HashAggNode {
   // It is true when the input is append-only
   bool is_append_only = 5;
   map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message TopNNode {
@@ -411,7 +419,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.

@@ -92,7 +92,7 @@ pub async fn handle_add_column(
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
     let col_id_gen = ColumnIdGenerator::new_alter(&original_catalog);
-    let Statement::CreateTable { columns, constraints, source_watermarks, .. } = definition else {
+    let Statement::CreateTable { columns, constraints, source_watermarks, append_only, .. } = definition else {
         panic!("unexpected statement type: {:?}", definition);
     };
 
@@ -105,6 +105,7 @@ pub async fn handle_add_column(
             constraints,
             col_id_gen,
             source_watermarks,
+            append_only,
         )?;
 
         // We should already have rejected the case where the table has a connector.

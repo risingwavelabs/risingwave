@@ -21,9 +21,7 @@ use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pulsar::consumer::InitialPosition;
 use pulsar::message::proto::MessageIdData;
-use pulsar::{
-    Authentication, Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor,
-};
+use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
@@ -102,25 +100,14 @@ impl SplitReader for PulsarSplitReader {
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-
-        let service_url = &props.service_url;
+        let pulsar = props.build_pulsar_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let mut pulsar_builder = Pulsar::builder(service_url, TokioExecutor);
-        if let Some(auth_token) = props.auth_token {
-            pulsar_builder = pulsar_builder.with_auth(Authentication {
-                name: "token".to_string(),
-                data: Vec::from(auth_token),
-            });
-        }
-
-        let pulsar = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
-
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
-            .with_topic(topic)
+            .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
                 "consumer-{}",
@@ -131,17 +118,35 @@ impl SplitReader for PulsarSplitReader {
             ));
 
         let builder = match split.start_offset.clone() {
-            PulsarEnumeratorOffset::Earliest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
-            ),
+            PulsarEnumeratorOffset::Earliest => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("Earliest offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                    )
+                }
+            }
             PulsarEnumeratorOffset::Latest => builder.with_options(
                 ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
-            PulsarEnumeratorOffset::MessageId(m) => builder.with_options(pulsar::ConsumerOptions {
-                durable: Some(false),
-                start_message_id: parse_message_id(m.as_str()).ok(),
-                ..Default::default()
-            }),
+            PulsarEnumeratorOffset::MessageId(m) => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("MessageId offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(pulsar::ConsumerOptions {
+                        durable: Some(false),
+                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        ..Default::default()
+                    })
+                }
+            }
 
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };

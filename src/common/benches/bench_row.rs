@@ -180,7 +180,7 @@ fn bench_row(c: &mut Criterion) {
     let cases = vec![
         Case::new(
             "Int16",
-            vec![DataType::INT16],
+            vec![DataType::Int16],
             vec![ColumnId::new(0)],
             vec![OwnedRow::new(vec![Some(ScalarImpl::Int16(5))]); 100000],
             None,

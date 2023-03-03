@@ -16,7 +16,7 @@ use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
@@ -382,7 +382,7 @@ impl LocalHummockStorage {
                 .expect("should be able to send");
             let tracker = limiter
                 .require_memory(size as u64)
-                .verbose_stack_trace("hummock_require_memory")
+                .verbose_instrument_await("hummock_require_memory")
                 .await;
             warn!(
                 "successfully requiring memory: {}, current {}",

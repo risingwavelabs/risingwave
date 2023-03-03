@@ -432,7 +432,14 @@ impl StageRunner {
                         break;
                     }
                 }
-
+                TaskStatusProst::Aborted => {
+                    // Currently, the only reason that we receive an abort status is that the task's
+                    // memory usage is too high so it's aborted.
+                    tracing::error!(
+                        "Abort task {:?} because of excessive memory usage. Please try again later.",
+                        status.task_info.as_ref().unwrap().task_id
+                    );
+                }
                 status => {
                     // The remain possible variant is Failed, but now they won't be pushed from CN.
                     unreachable!("Unexpected task status {:?}", status);

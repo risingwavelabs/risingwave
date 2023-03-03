@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
@@ -58,7 +58,7 @@ where
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(self.schema(), Some(self.batch_size))
-            .stack_trace("batch_query_executor_collect_chunk")
+            .instrument_await("batch_query_executor_collect_chunk")
             .await?
         {
             let ops = vec![Op::Insert; data_chunk.capacity()];

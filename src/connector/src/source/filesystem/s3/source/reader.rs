@@ -27,9 +27,10 @@ use tokio_util::io;
 use tokio_util::io::ReaderStream;
 
 use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
-use crate::parser::{ByteStreamSourceParserImpl, ParserConfig};
+use crate::parser::{ByteStreamSourceParser, ByteStreamSourceParserImpl, ParserConfig};
 use crate::source::base::{SplitMetaData, SplitReader, MAX_CHUNK_SIZE};
 use crate::source::filesystem::file_common::FsSplit;
+use crate::source::filesystem::nd_streaming::NdByteStreamWrapper;
 use crate::source::filesystem::s3::S3Properties;
 use crate::source::{
     BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitImpl,
@@ -197,7 +198,11 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)?;
-            let msg_stream = parser.into_stream(Box::pin(data_stream));
+            let msg_stream = if matches!(parser, ByteStreamSourceParserImpl::Json(_)) {
+                NdByteStreamWrapper::new(parser).into_stream(Box::pin(data_stream))
+            } else {
+                parser.into_stream(Box::pin(data_stream))
+            };
             #[for_await]
             for msg in msg_stream {
                 let msg = msg?;
@@ -231,6 +236,7 @@ mod tests {
             match_pattern: None,
             access: None,
             secret: None,
+            endpoint_url: None,
         };
         let mut enumerator = S3SplitEnumerator::new(props.clone()).await.unwrap();
         let splits = enumerator.list_splits().await.unwrap();

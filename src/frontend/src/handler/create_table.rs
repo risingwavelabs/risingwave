@@ -281,6 +281,7 @@ pub fn bind_sql_table_constraints(
 
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -289,6 +290,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_schema: SourceSchema,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
+    append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     let properties = context.with_options().inner().clone().into_iter().collect();
@@ -326,6 +328,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         Some(source_info),
         definition,
         watermark_descs,
+        append_only,
         Some(col_id_gen.into_version()),
     )
 }
@@ -339,6 +342,7 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
@@ -351,6 +355,7 @@ pub(crate) fn gen_create_table_plan(
         constraints,
         definition,
         source_watermarks,
+        append_only,
         Some(col_id_gen.into_version()),
     )
 }
@@ -364,6 +369,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     constraints: Vec<TableConstraint>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
@@ -385,6 +391,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         None,
         definition,
         watermark_descs,
+        append_only,
         version,
     )
 }
@@ -399,6 +406,7 @@ fn gen_table_plan_inner(
     source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
+    append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
@@ -456,8 +464,6 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    let append_only = context.with_options().append_only();
-
     if append_only && row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
             "PRIMARY KEY constraint can not be appiled on a append only table.".to_owned(),
@@ -468,7 +474,7 @@ fn gen_table_plan_inner(
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
-            "Set the option `appendonly=true`".to_owned(),
+            "Use the key words `APPEND ONLY`".to_owned(),
         )
         .into());
     }
@@ -489,6 +495,7 @@ fn gen_table_plan_inner(
     Ok((materialize.into(), source, table))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -497,6 +504,7 @@ pub async fn handle_create_table(
     if_not_exists: bool,
     source_schema: Option<SourceSchema>,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -526,6 +534,7 @@ pub async fn handle_create_table(
                     source_schema,
                     source_watermarks,
                     col_id_gen,
+                    append_only,
                 )
                 .await?
             }
@@ -536,6 +545,7 @@ pub async fn handle_create_table(
                 constraints,
                 col_id_gen,
                 source_watermarks,
+                append_only,
             )?,
         };
         let mut graph = build_graph(plan);
@@ -621,7 +631,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
+        let sql =
+            "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) append only;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 
