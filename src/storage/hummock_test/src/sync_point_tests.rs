@@ -366,22 +366,22 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         read_version_from_backup: false,
     };
     let get_result = storage
-        .get(b"hhh", 120, read_options.clone())
+        .get(Bytes::from("hhh"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(b"ggg", 120, read_options.clone())
+        .get(Bytes::from("ggg"), 120, read_options.clone())
         .await
         .unwrap();
     assert!(get_result.is_none());
     let get_result = storage
-        .get(b"aaa", 120, read_options.clone())
+        .get(Bytes::from("aaa"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val1);
     let get_result = storage
-        .get(b"aab", 120, read_options.clone())
+        .get(Bytes::from("aab"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);
@@ -394,7 +394,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         }
     });
     let get_result = storage
-        .get(b"kkk", 120, read_options.clone())
+        .get(Bytes::from("kkk"), 120, read_options.clone())
         .await
         .unwrap();
     assert_eq!(get_result.unwrap(), val0);

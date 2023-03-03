@@ -289,7 +289,7 @@ impl<S: StateStore> StorageTable<S> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        self.store.try_wait_epoch(wait_epoch.clone()).await?;
+        self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
@@ -409,7 +409,7 @@ impl<S: StateStore> StorageTable<S> {
         // For each key range, construct an iterator.
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
-            let wait_epoch = wait_epoch.clone();
+            let wait_epoch = wait_epoch;
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
                 let read_options = ReadOptions {

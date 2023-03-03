@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use async_stack_trace::StackTrace;
@@ -129,11 +129,7 @@ impl LocalHummockStorage {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
-        let bytes_key_range = (
-            key_range.start_bound().map(|v| Bytes::from(v.clone())),
-            key_range.end_bound().map(|v| Bytes::from(v.clone())),
-        );
-        if self.mem_table.iter(bytes_key_range).next().is_some() {
+        if self.mem_table.iter(key_range.clone()).next().is_some() {
             return Ok(true);
         }
 

@@ -410,8 +410,8 @@ impl HummockVersionReader {
 }
 
 impl HummockVersionReader {
-    pub async fn get<'a>(
-        &'a self,
+    pub async fn get(
+        &self,
         table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,

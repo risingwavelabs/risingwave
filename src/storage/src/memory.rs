@@ -753,8 +753,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -763,13 +763,13 @@ mod tests {
                 .unwrap(),
             vec![
                 (
-                    FullKey::for_test(Default::default(), b"a".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("a"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
                 ),
                 (
-                    FullKey::for_test(Default::default(), b"b".to_vec(), 0)
+                    FullKey::for_test(Default::default(), Bytes::from("b"), 0)
                         .encode()
                         .into(),
                     b"v1".to_vec().into()
@@ -780,8 +780,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     0,
                     TableId::default(),
@@ -799,8 +799,8 @@ mod tests {
             state_store
                 .scan(
                     (
-                        Bound::Included(b"a".to_vec()),
-                        Bound::Included(b"b".to_vec()),
+                        Bound::Included(Bytes::from("a")),
+                        Bound::Included(Bytes::from("b")),
                     ),
                     1,
                     TableId::default(),
@@ -816,42 +816,42 @@ mod tests {
         );
         assert_eq!(
             state_store
-                .get(b"a", 0, ReadOptions::default(),)
+                .get(Bytes::from("a"), 0, ReadOptions::default(),)
+                .await
+                .unwrap(),
+            Some(Bytes::from("v1"))
+        );
+        assert_eq!(
+            state_store
+                .get(Bytes::copy_from_slice(b"b"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v1".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 0, ReadOptions::default(),)
-                .await
-                .unwrap(),
-            Some(b"v1".to_vec().into())
-        );
-        assert_eq!(
-            state_store
-                .get(b"c", 0, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"c"), 0, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"a", 1, ReadOptions::default(),)
+                .get(Bytes::copy_from_slice(b"a"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             Some(b"v2".to_vec().into())
         );
         assert_eq!(
             state_store
-                .get(b"b", 1, ReadOptions::default(),)
+                .get(Bytes::from("b"), 1, ReadOptions::default(),)
                 .await
                 .unwrap(),
             None
         );
         assert_eq!(
             state_store
-                .get(b"c", 1, ReadOptions::default())
+                .get(Bytes::from("c"), 1, ReadOptions::default())
                 .await
                 .unwrap(),
             None

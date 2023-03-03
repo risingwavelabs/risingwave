@@ -268,8 +268,8 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         gen_iterator_test_sstable_with_range_tombstones, iterator_test_bytes_key_of,
-        iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of,
-        iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::UnorderedMergeIteratorInner;
     use crate::hummock::sstable::{
@@ -525,8 +525,8 @@ mod tests {
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
@@ -608,8 +608,8 @@ mod tests {
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Excluded(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Excluded(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
@@ -675,7 +675,7 @@ mod tests {
             read_options,
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let end_key = Included(iterator_test_user_key_of(7));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
 
@@ -744,7 +744,7 @@ mod tests {
             read_options,
         )];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let begin_key = Included(iterator_test_user_key_of(2));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
 

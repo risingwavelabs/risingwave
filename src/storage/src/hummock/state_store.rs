@@ -174,7 +174,7 @@ impl StateStore for HummockStorage {
     /// we will only check whether it is le `sealed_epoch` and won't wait.
     fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            self.validate_read_epoch(wait_epoch.clone())?;
+            self.validate_read_epoch(wait_epoch)?;
             let wait_epoch = match wait_epoch {
                 HummockReadEpoch::Committed(epoch) => {
                     assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
