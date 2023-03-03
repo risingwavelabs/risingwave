@@ -94,7 +94,7 @@ impl ArrayDistinctExpression {
             ).into()
            ),
             _ => {
-                panic!("the operands must be two arrays with the same data type");
+                panic!("the operand must be a list type");
             }
         }
     }
