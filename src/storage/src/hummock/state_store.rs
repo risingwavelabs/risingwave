@@ -53,13 +53,13 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(
         &self,
-        key: &[u8],
+        key: Bytes,
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (
-            Bound::Included(TableKey(key.to_vec())),
-            Bound::Included(TableKey(key.to_vec())),
+            Bound::Included(TableKey(key.clone())),
+            Bound::Included(TableKey(key.clone())),
         );
 
         let read_version_tuple = if read_options.read_version_from_backup {
@@ -149,12 +149,7 @@ impl StateStoreRead for HummockStorage {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         self.get(key, epoch, read_options)
     }
 

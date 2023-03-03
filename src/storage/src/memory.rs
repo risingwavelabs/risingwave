@@ -542,14 +542,9 @@ impl<R: RangeKv> StateStoreRead for RangeKvStateStore<R> {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            let range_bounds = (Bound::Included(key.to_vec()), Bound::Included(key.to_vec()));
+            let range_bounds = (Bound::Included(key.clone()), Bound::Included(key));
             // We do not really care about vnodes here, so we just use the default value.
             let res = self.scan(range_bounds, epoch, read_options.table_id, Some(1))?;
 

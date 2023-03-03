@@ -385,7 +385,7 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                key,
+                Bytes::copy_from_slice(key),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
@@ -408,8 +408,8 @@ impl NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -439,8 +439,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,

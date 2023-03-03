@@ -88,12 +88,7 @@ pub trait StateStoreRead: StaticSendSync {
 
     /// Point gets a value from the state store.
     /// The result is based on a snapshot corresponding to the given `epoch`.
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_>;
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and
@@ -269,7 +264,7 @@ pub trait LocalStateStore: StaticSendSync {
 
     /// Point gets a value from the state store.
     /// The result is based on the latest written snapshot.
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_>;
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_>;
 
     /// Opens and returns an iterator for given `prefix_hint` and `full_key_range`
     /// Internally, `prefix_hint` will be used to for checking `bloom_filter` and

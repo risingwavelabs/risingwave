@@ -412,7 +412,7 @@ impl HummockVersionReader {
 impl HummockVersionReader {
     pub async fn get<'a>(
         &'a self,
-        table_key: TableKey<&'a [u8]>,
+        table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
@@ -429,7 +429,11 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if let Some(data) = get_from_batch(imm, table_key, &mut stats_guard.local_stats) {
+            if let Some(data) = get_from_batch(
+                imm,
+                TableKey(table_key.as_ref()),
+                &mut stats_guard.local_stats,
+            ) {
                 return Ok(data.into_user_value());
             }
         }
@@ -439,13 +443,13 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
+        let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
         for local_sst in &uncommitted_ssts {
             stats_guard.local_stats.sub_iter_count += 1;
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                full_key,
+                full_key.to_ref(),
                 &read_options,
                 dist_key_hash,
                 &mut stats_guard.local_stats,
@@ -467,7 +471,7 @@ impl HummockVersionReader {
 
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let single_table_key_range = table_key..=table_key;
+                    let single_table_key_range = table_key.clone()..=table_key.clone();
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
                         read_options.table_id,
@@ -478,7 +482,7 @@ impl HummockVersionReader {
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            full_key,
+                            full_key.to_ref(),
                             &read_options,
                             dist_key_hash,
                             &mut stats_guard.local_stats,
@@ -516,7 +520,7 @@ impl HummockVersionReader {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        full_key,
+                        full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
                         &mut stats_guard.local_stats,
