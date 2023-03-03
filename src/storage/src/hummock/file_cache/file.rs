@@ -297,7 +297,7 @@ mod tests {
         //! common function
         let fs_stat = statfs(path).unwrap();
         let fst = fs_stat.filesystem_type();
-        let fs_type = match fst {
+        match fst {
             // FYI: https://github.com/nix-rust/nix/issues/1742
             // FYI: Aftere https://github.com/nix-rust/nix/pull/1743 is release,
             //      we can bump to the new nix version and use nix type instead of libc's.
@@ -306,9 +306,7 @@ mod tests {
             nix::sys::statfs::BTRFS_SUPER_MAGIC => FsType::Btrfs,
             nix::sys::statfs::TMPFS_MAGIC => FsType::Tmpfs,
             nix_fs_type => panic!("Unknown Unix Filesystem type: {nix_fs_type:?}"),
-        };
-
-        fs_type
+        }
     }
 
     #[tokio::test]
