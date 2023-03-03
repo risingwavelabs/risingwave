@@ -838,7 +838,7 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.serialize(ser)?,
             Self::Int32(v) => v.serialize(ser)?,
             Self::Int64(v) => v.serialize(ser)?,
-            Self::Serial(v) => v.0.serialize(ser)?,
+            Self::Serial(v) => v.serialize(ser)?,
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
