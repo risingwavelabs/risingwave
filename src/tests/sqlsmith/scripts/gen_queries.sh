@@ -41,6 +41,7 @@ extract_queries() {
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
 generate_deterministic() {
+  # Allows us to use other functions defined in this file within `parallel`.
   . $(which env_parallel.bash)
   # Even if fails early, it should still generate some queries, do not exit script.
   set +e
@@ -74,7 +75,7 @@ check_different_queries() {
 }
 
 # Check if any query generation step failed, and any query file not generated.
-check_failing_queries() {
+check_failed_to_generate_queries() {
   echo "Query files generated:"
   ls "$OUTDIR"/* | grep -c queries.sql
 }
@@ -100,17 +101,18 @@ check_failed_to_run_queries() {
   fi
 }
 
+extract_failed_reasons() {
+}
+
 main() {
   pushd $RW_HOME
   build_madsim
   generate_deterministic
   check_different_queries
-  check_failing_queries
+  check_failed_to_generate_queries
   run_queries
   check_failed_to_run_queries
   upload_queries
   popd
   echo "successfully generated"
 }
-
-main
