@@ -23,7 +23,7 @@ use nix::sys::stat::fstat;
 use nix::unistd::ftruncate;
 use tracing::Instrument;
 
-use super::error::{Error, Result};
+use super::error::Result;
 use super::store::FsType;
 use super::{asyncify, utils, DioBuffer, DIO_BUFFER_ALLOCATOR, LOGICAL_BLOCK_SIZE, ST_BLOCK_SIZE};
 
