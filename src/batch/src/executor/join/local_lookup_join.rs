@@ -85,7 +85,6 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-
         let pk_indices = self
             .table_desc
             .pk
