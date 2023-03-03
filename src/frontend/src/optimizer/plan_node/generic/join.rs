@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::EitherOrBoth;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
@@ -97,51 +98,41 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
             let i2o =
                 ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
-            let (need_left_jk, need_right_jk) = match self.join_type {
-                JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => {
-                    (true, false)
-                }
-                JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => (false, true),
-                JoinType::FullOuter => (true, true),
-                JoinType::Unspecified => unreachable!(),
-            };
+            let either_or_both = self.add_which_join_key_to_pk();
 
             for (lk, rk) in eq_predicate.eq_indexes() {
-                // Check before add join keys.
-                if !need_right_jk {
-                    if let Some(lk) = l2i.try_map(lk) {
-                        if let Some(out_k) = i2o.try_map(lk) {
-                            if pk_indices.contains(&out_k) {
-                                continue;
+                match either_or_both {
+                    EitherOrBoth::Left(_) => {
+                        if let Some(lk) = l2i.try_map(lk) {
+                            let out_k = i2o.try_map(lk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
                             }
                         }
                     }
-                }
-                if !need_left_jk {
-                    if let Some(rk) = r2i.try_map(rk) {
-                        if let Some(out_k) = i2o.try_map(rk) {
-                            if pk_indices.contains(&out_k) {
-                                continue;
+                    EitherOrBoth::Right(_) => {
+                        if let Some(rk) = r2i.try_map(rk) {
+                            let out_k = i2o.try_map(rk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
                             }
                         }
                     }
-                }
-                if need_left_jk {
-                    if let Some(lk) = l2i.try_map(lk) {
-                        let out_k = i2o.try_map(lk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
+                    EitherOrBoth::Both(_, _) => {
+                        if let Some(lk) = l2i.try_map(lk) {
+                            let out_k = i2o.try_map(lk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
+                        }
+                        if let Some(rk) = r2i.try_map(rk) {
+                            let out_k = i2o.try_map(rk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
                         }
                     }
-                }
-                if need_right_jk {
-                    if let Some(rk) = r2i.try_map(rk) {
-                        let out_k = i2o.try_map(rk)?;
-                        if !pk_indices.contains(&out_k) {
-                            pk_indices.push(out_k);
-                        }
-                    }
-                }
+                };
             }
             Some(pk_indices)
         })
@@ -242,5 +233,22 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     /// Get the Mapping of columnIndex from right column index to internal column index.
     pub fn r2i_col_mapping(&self) -> ColIndexMapping {
         self.i2r_col_mapping().inverse()
+    }
+
+    pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
+        match self.join_type {
+            JoinType::Inner => {
+                // Theoretically add either side is ok, but the distribution key of inner join
+                // derives based on the left side by default, so we choose left side here to ensure
+                // the pk comprise the distribution key.
+                EitherOrBoth::Left(())
+            }
+            JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => EitherOrBoth::Left(()),
+            JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                EitherOrBoth::Right(())
+            }
+            JoinType::FullOuter => EitherOrBoth::Both((), ()),
+            JoinType::Unspecified => unreachable!(),
+        }
     }
 }
