@@ -11,3 +11,6 @@ jobs:
 
     - name: Check spelling of the entire repository
       uses: crate-ci/typos@v1.11.1
+      with:
+        files:
+          - !risingwave-source-test/src/test/resources/orders.tbl

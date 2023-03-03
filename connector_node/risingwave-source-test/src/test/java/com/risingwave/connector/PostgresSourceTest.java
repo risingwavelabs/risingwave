@@ -18,7 +18,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -92,7 +91,7 @@ public class PostgresSourceTest {
     @Test
     public void testLines() throws InterruptedException, SQLException {
         Lock lock = new ReentrantLock();
-        Condition done  = lock.newCondition();
+        Condition done = lock.newCondition();
         Connection connection = SourceTestClient.connect(pg);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
         SourceTestClient.performQuery(connection, query);

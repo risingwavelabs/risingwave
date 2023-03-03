@@ -14,7 +14,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
@@ -82,7 +81,7 @@ public class MySQLSourceTest {
     @Test
     public void testLines() throws InterruptedException, SQLException {
         Lock lock = new ReentrantLock();
-        Condition done  = lock.newCondition();
+        Condition done = lock.newCondition();
         Connection connection = SourceTestClient.connect(mysql);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
         SourceTestClient.performQuery(connection, query);
