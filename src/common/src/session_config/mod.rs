@@ -335,6 +335,7 @@ pub struct ConfigMap {
     /// Enable delta join in streaming query. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
 
+    /// Enable bushy join in the streaming query. Defaults to false.
     streaming_enable_bushy_join: StreamingEnableBushyJoin,
 
     /// Enable two phase agg optimization. Defaults to true.
@@ -391,6 +392,8 @@ impl ConfigMap {
             self.streaming_parallelism = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            self.streaming_enable_bushy_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
             if !*self.enable_two_phase_agg {
@@ -443,6 +446,8 @@ impl ConfigMap {
             Ok(self.streaming_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             Ok(self.streaming_enable_delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            Ok(self.streaming_enable_bushy_join.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
@@ -530,6 +535,11 @@ impl ConfigMap {
                 name : StreamingEnableDeltaJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_delta_join.to_string(),
                 description: String::from("Enable delta join in streaming query.")
+            },
+            VariableInfo{
+                name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
+                setting : self.streaming_enable_bushy_join.to_string(),
+                description: String::from("Enable bushy join in streaming query.")
             },
             VariableInfo{
                 name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
