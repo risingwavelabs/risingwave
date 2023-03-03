@@ -598,11 +598,11 @@ else
   MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
 fi
 
-artifact="risingwave-connector-1.0.0.tar.gz"
+ARTIFACT="risingwave-connector-1.0.0.tar.gz"
 
 cd "${CONNECTOR_NODE_DIR}"
 "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
-tar xf "assembly/target/${artifact}" -C "${PREFIX_BIN}/connector-node"
+tar xf "assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
 '''
 
 

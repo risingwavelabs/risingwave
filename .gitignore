@@ -18,12 +18,6 @@
 cmake-build-debug/
 /cmake-build-wsl_profile/
 
-# Java
-connector_node/target/
-connector_node/risingwave-sink-jdbc/test_db/
-connector_node/risingwave-sink-jdbc/*.log
-connector_node/risingwave-connector-service/*.log
-
 # build
 *.exe
 *.app
