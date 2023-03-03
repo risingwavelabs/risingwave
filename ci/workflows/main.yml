@@ -217,7 +217,7 @@ steps:
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
-    command: "TEST_NUM=50 timeout 10m ci/scripts/deterministic-unit-test.sh"
+    command: "MADSIM_TEST_NUM=50 timeout 10m ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
