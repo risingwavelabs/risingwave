@@ -109,8 +109,9 @@ pub struct RwConfig {
     #[serde(default)]
     pub storage: StorageConfig,
 
-    // #[serde(default)]
-    // pub backup: BackupConfig,
+    #[serde(default)]
+    pub backup: BackupConfig,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
