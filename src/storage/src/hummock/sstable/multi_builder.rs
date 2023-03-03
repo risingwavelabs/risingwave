@@ -201,7 +201,7 @@ where
 
                 if builder_output.epoch_count != 0 {
                     self.compactor_metrics
-                        .sstable_avg_epoch_count
+                        .sstable_distinct_epoch_count
                         .observe(builder_output.epoch_count as _);
                 }
             }

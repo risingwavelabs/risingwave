@@ -200,7 +200,6 @@ impl Sstable {
             uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,
-            avg_key_size: 0,
         }
     }
 }

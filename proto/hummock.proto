@@ -22,9 +22,6 @@ message SstableInfo {
   uint64 min_epoch = 9;
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
-
-  // Used to estimate the size of the newly generated sst key size 
-  uint32 avg_key_size = 12;
 }
 
 enum LevelType {

@@ -113,7 +113,6 @@ pub fn gen_dummy_sst_info(
         uncompressed_file_size: file_size,
         min_epoch: 0,
         max_epoch: 0,
-        avg_key_size: 0,
     }
 }
 
@@ -189,7 +188,6 @@ pub async fn put_sst(
         uncompressed_file_size: meta.estimated_size as u64,
         min_epoch: 0,
         max_epoch: 0,
-        avg_key_size: 0,
     };
     let writer_output = writer.finish(meta).await?;
     writer_output.await.unwrap()?;
