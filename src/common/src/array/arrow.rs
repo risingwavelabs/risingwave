@@ -156,7 +156,9 @@ impl From<&DataType> for arrow_schema::DataType {
             DataType::List { datatype } => {
                 Self::List(Box::new(Field::new("", datatype.as_ref().into(), true)))
             }
-            _ => todo!("Unsupported arrow data type: {value:?}"),
+            DataType::Timestamptz | DataType::Jsonb => {
+                todo!("Unsupported arrow data type: {value:?}")
+            }
         }
     }
 }

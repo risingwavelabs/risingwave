@@ -268,7 +268,11 @@ fn parse_string(dtype: &DataType, v: String) -> Result<Datum> {
         DataType::Time => str_to_date(v.as_str())?.into(),
         DataType::Timestamp => str_to_timestamp(v.as_str())?.into(),
         DataType::Timestamptz => str_with_time_zone_to_timestamptz(v.as_str())?.into(),
-        _ => {
+        DataType::Interval
+        | DataType::Bytea
+        | DataType::Jsonb
+        | DataType::List { .. }
+        | DataType::Struct(_) => {
             return Err(RwError::from(InternalError(format!(
                 "CSV data source not support type {}",
                 dtype

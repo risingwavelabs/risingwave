@@ -222,7 +222,11 @@ fn cannal_do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> R
         DataType::Timestamptz => {
             str_with_time_zone_to_timestamptz(ensure_str!(v, "string"))?.into()
         }
-        _ => {
+        DataType::Interval
+        | DataType::Bytea
+        | DataType::Jsonb
+        | DataType::List { .. }
+        | DataType::Struct(_) => {
             return Err(RwError::from(InternalError(format!(
                 "cannal data source not support type {}",
                 dtype
