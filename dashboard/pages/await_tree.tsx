@@ -53,22 +53,28 @@ export default function AwaitTreeDump() {
     const title = `Await-Tree Dump of Compute Node ${computeNodeId}:`
     setDump(undefined)
 
-    const response: StackTraceResponse = StackTraceResponse.fromJSON(
-      await api.get(`/api/monitor/await_tree/${computeNodeId}`)
-    )
+    let result
 
-    const actorTraces = _(response.actorTraces)
-      .entries()
-      .map(([k, v]) => `[Actor ${k}]\n${v}`)
-      .join("\n")
-    const rpcTraces = _(response.rpcTraces)
-      .entries()
-      .map(([k, v]) => `[RPC ${k}]\n${v}`)
-      .join("\n")
+    try {
+      const response: StackTraceResponse = StackTraceResponse.fromJSON(
+        await api.get(`/api/monitor/await_tree/${computeNodeId}`)
+      )
 
-    const allTraces = `${title}\n\n${actorTraces}\n${rpcTraces}`
+      const actorTraces = _(response.actorTraces)
+        .entries()
+        .map(([k, v]) => `[Actor ${k}]\n${v}`)
+        .join("\n")
+      const rpcTraces = _(response.rpcTraces)
+        .entries()
+        .map(([k, v]) => `[RPC ${k}]\n${v}`)
+        .join("\n")
 
-    setDump(allTraces)
+      result = `${title}\n\n${actorTraces}\n${rpcTraces}`
+    } catch (e: any) {
+      result = `${title}\n\nError: ${e.message}`
+    }
+
+    setDump(result)
   }
 
   const retVal = (
