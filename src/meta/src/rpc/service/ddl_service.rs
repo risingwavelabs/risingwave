@@ -184,12 +184,12 @@ where
     ) -> Result<Response<CreateSourceResponse>, Status> {
         let mut source = request.into_inner().get_source()?.clone();
 
-        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
-        source.id = id;
-
         // resolve private links before starting the DDL procedure
         self.resolve_private_link_info(&mut source.properties)
             .await?;
+
+        let id = self.gen_unique_id::<{ IdCategory::Table }>().await?;
+        source.id = id;
 
         let version = self
             .ddl_controller
@@ -587,7 +587,6 @@ where
 
         match req.payload.unwrap() {
             create_connection_request::Payload::PrivateLink(link) => {
-                // connection info will be updated if it already exists (upsert)
                 let cli = self.aws_client.as_ref().unwrap();
                 let private_link_svc = cli
                     .create_aws_private_link(&link.service_name, &link.availability_zones)
@@ -601,8 +600,8 @@ where
                 };
 
                 // save private link info to catalog
-                self.catalog_manager
-                    .create_connection(&link.service_name, connection)
+                self.ddl_controller
+                    .run_command(DdlCommand::CreateConnection(connection))
                     .await?;
 
                 Ok(Response::new(CreateConnectionResponse {
@@ -620,8 +619,20 @@ where
         let conns = self.catalog_manager.list_connections().await;
         Ok(Response::new(ListConnectionsResponse {
             connections: conns,
-            version: 0,
         }))
+    }
+
+    async fn drop_connection(
+        &self,
+        request: Request<DropConnectionRequest>,
+    ) -> Result<Response<DropConnectionResponse>, Status> {
+        let req = request.into_inner();
+
+        self.ddl_controller
+            .run_command(DdlCommand::DropConnection(req.connection_name))
+            .await?;
+
+        Ok(Response::new(DropConnectionResponse {}))
     }
 }
 

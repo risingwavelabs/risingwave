@@ -43,6 +43,13 @@ pub async fn create_connection(
     Ok(())
 }
 
+pub async fn drop_connection(context: &CtlContext, conn_name: String) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    meta_client.drop_connection(&conn_name).await?;
+    println!("Drop connection {} success", conn_name);
+    Ok(())
+}
+
 pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let connections = meta_client.list_connections(None).await?;

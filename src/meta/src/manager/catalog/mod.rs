@@ -335,22 +335,38 @@ where
         }
     }
 
+    /// Each connection is identified by a unique name
     pub async fn create_connection(
         &self,
-        service_name: &str,
         connection: Connection,
-    ) -> MetaResult<()> {
+    ) -> MetaResult<NotificationVersion> {
         let core = &mut self.core.lock().await.connection;
+        core.check_connection_duplicated(&connection.name)?;
 
         let conn_id = connection.id;
+        let conn_name = connection.name.clone();
         let mut connections = BTreeMapTransaction::new(&mut core.connections);
-        // if there is a connection with the same service name, just overwrite it
         connections.insert(conn_id, connection);
         commit_meta!(self, connections)?;
 
-        core.connection_by_name
-            .insert(service_name.to_string(), conn_id);
-        Ok(())
+        core.connection_by_name.insert(conn_name, conn_id);
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
+    }
+
+    pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.connection;
+
+        let conn_id = core
+            .connection_by_name
+            .remove(conn_name)
+            .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
+
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        connections.remove(conn_id);
+        commit_meta!(self, connections)?;
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {

@@ -259,9 +259,13 @@ message ListConnectionsRequest {}
 
 message ListConnectionsResponse {
   repeated catalog.Connection connections = 1;
-  // global catalog version
-  uint64 version = 2;
 }
+
+message DropConnectionRequest {
+  string connection_name = 1;
+}
+
+message DropConnectionResponse {}
 
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
@@ -288,4 +292,5 @@ service DdlService {
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
   rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
   rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
 }

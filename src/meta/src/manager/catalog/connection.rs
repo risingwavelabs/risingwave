@@ -19,7 +19,7 @@ use risingwave_pb::catalog::Connection;
 use crate::manager::{ConnectionId, MetaSrvEnv};
 use crate::model::MetadataModel;
 use crate::storage::MetaStore;
-use crate::MetaResult;
+use crate::{MetaError, MetaResult};
 
 pub struct ConnectionManager {
     pub connections: BTreeMap<ConnectionId, Connection>,
@@ -43,6 +43,18 @@ impl ConnectionManager {
             connections,
             connection_by_name,
         })
+    }
+
+    pub(crate) fn check_connection_duplicated(&self, conn_name: &str) -> MetaResult<()> {
+        if self
+            .connections
+            .values()
+            .any(|conn| conn.name.eq(conn_name))
+        {
+            Err(MetaError::catalog_duplicated("connection", conn_name))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_connection_by_name(&self, name: &str) -> Option<&Connection> {

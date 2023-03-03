@@ -133,6 +133,14 @@ impl MetaClient {
         Ok(resp.connections)
     }
 
+    pub async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+        let request = DropConnectionRequest {
+            connection_name: connection_name.to_string(),
+        };
+        let _ = self.inner.drop_connection(request).await?;
+        Ok(())
+    }
+
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
         if meta_addr.starts_with(Self::META_ADDRESS_LOAD_BALANCE_MODE_PREFIX) {
             let addr = meta_addr
@@ -1379,6 +1387,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
             ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
+            ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

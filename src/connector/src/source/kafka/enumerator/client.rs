@@ -58,8 +58,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         common_props.set_security_properties(&mut config);
-
-        tracing::info!("private_links: {:?}", private_links);
+        tracing::debug!("private_links: {:?}", private_links);
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
