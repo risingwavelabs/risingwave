@@ -38,7 +38,6 @@ impl SystemParamsModel for SystemParams {
         SYSTEM_PARAMS_CF_NAME.to_string()
     }
 
-    /// All undeprecated fields are guaranteed to be `Some`.
     /// Return error if there are missing or unrecognized fields.
     async fn get<S>(store: &S) -> MetadataModelResult<Option<Self>>
     where
