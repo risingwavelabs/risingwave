@@ -160,7 +160,9 @@ mod tests {
     use risingwave_common::array::{JsonbVal, Op};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl, NaiveTimeWrapper};
+    use risingwave_common::types::{
+        DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
+    };
     use serde_json::Value;
 
     use super::*;
@@ -234,15 +236,19 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
             ))))
         );
-        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
-            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
-        )))));
+        #[expect(clippy::disallowed_methods)]
+        let jsonval = ScalarImpl::Jsonb(JsonbVal::from_serde(Value::String(
+            "{\"k1\":\"v1\",\"k2\":11}".to_string(),
+        )));
+        assert!(row[11].eq(&Some(jsonval)));
     }
 
     #[tokio::test]
@@ -265,15 +271,19 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
             ))))
         );
-        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
-            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
-        )))));
+        #[expect(clippy::disallowed_methods)]
+        let jsonval = ScalarImpl::Jsonb(JsonbVal::from_serde(Value::String(
+            "{\"k1\":\"v1\",\"k2\":11}".to_string(),
+        )));
+        assert!(row[11].eq(&Some(jsonval)));
     }
 
     #[tokio::test]
@@ -297,15 +307,19 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2012-12-12T12:12:12".parse().unwrap()
             ))))
         );
-        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
-            Value::String("{\"k1\":\"v1_updated\",\"k2\":33}".to_string())
-        )))));
+        #[expect(clippy::disallowed_methods)]
+        let jsonval = ScalarImpl::Jsonb(JsonbVal::from_serde(Value::String(
+            "{\"k1\":\"v1_updated\",\"k2\":33}".to_string(),
+        )));
+        assert!(row[11].eq(&Some(jsonval)));
     }
 
     #[tokio::test]
@@ -333,15 +347,21 @@ mod tests {
                 NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
             ))))
         );
-        assert!(row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(
+            row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+                NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+            ))))
+        );
         assert!(
             row1[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
             ))))
         );
-        assert!(row1[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
-            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
-        )))));
+        #[expect(clippy::disallowed_methods)]
+        let mut jsonval = ScalarImpl::Jsonb(JsonbVal::from_serde(Value::String(
+            "{\"k1\":\"v1\",\"k2\":11}".to_string(),
+        )));
+        assert!(row1[11].eq(&Some(jsonval)));
         assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
         assert!(row2[1].eq(&Some(ScalarImpl::Int16(0))));
         assert!(row2[2].eq(&Some(ScalarImpl::Int16(3))));
@@ -355,15 +375,21 @@ mod tests {
                 NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
             ))))
         );
-        assert!(row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(
+            row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+                NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap()
+            ))))
+        );
         assert!(
             row2[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-12-12T12:12:12".parse().unwrap()
             ))))
         );
-        assert!(row2[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
-            Value::String("{\"k1\":\"v1_updated\",\"k2\":33}".to_string())
-        )))));
+        #[expect(clippy::disallowed_methods)]
+        jsonval = ScalarImpl::Jsonb(JsonbVal::from_serde(Value::String(
+            "{\"k1\":\"v1_updated\",\"k2\":33}".to_string(),
+        )));
+        assert!(row2[11].eq(&Some(jsonval)));
     }
 
     #[tokio::test]
