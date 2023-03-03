@@ -67,6 +67,7 @@ export interface ReadPlan {
   epoch: number;
   version: HummockVersion | undefined;
   tableCatalog: Table | undefined;
+  vnodeIds: number[];
 }
 
 function createBaseKeyRange(): KeyRange {
@@ -118,6 +119,7 @@ function createBaseReadPlan(): ReadPlan {
     epoch: 0,
     version: undefined,
     tableCatalog: undefined,
+    vnodeIds: [],
   };
 }
 
@@ -131,6 +133,7 @@ export const ReadPlan = {
       epoch: isSet(object.epoch) ? Number(object.epoch) : 0,
       version: isSet(object.version) ? HummockVersion.fromJSON(object.version) : undefined,
       tableCatalog: isSet(object.tableCatalog) ? Table.fromJSON(object.tableCatalog) : undefined,
+      vnodeIds: Array.isArray(object?.vnodeIds) ? object.vnodeIds.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -145,6 +148,11 @@ export const ReadPlan = {
       (obj.version = message.version ? HummockVersion.toJSON(message.version) : undefined);
     message.tableCatalog !== undefined &&
       (obj.tableCatalog = message.tableCatalog ? Table.toJSON(message.tableCatalog) : undefined);
+    if (message.vnodeIds) {
+      obj.vnodeIds = message.vnodeIds.map((e) => Math.round(e));
+    } else {
+      obj.vnodeIds = [];
+    }
     return obj;
   },
 
@@ -163,6 +171,7 @@ export const ReadPlan = {
     message.tableCatalog = (object.tableCatalog !== undefined && object.tableCatalog !== null)
       ? Table.fromPartial(object.tableCatalog)
       : undefined;
+    message.vnodeIds = object.vnodeIds?.map((e) => e) || [];
     return message;
   },
 };
