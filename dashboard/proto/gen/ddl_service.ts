@@ -264,8 +264,13 @@ export interface ListConnectionsRequest {
 
 export interface ListConnectionsResponse {
   connections: Connection[];
-  /** global catalog version */
-  version: number;
+}
+
+export interface DropConnectionRequest {
+  connectionName: string;
+}
+
+export interface DropConnectionResponse {
 }
 
 function createBaseCreateDatabaseRequest(): CreateDatabaseRequest {
@@ -1647,14 +1652,13 @@ export const ListConnectionsRequest = {
 };
 
 function createBaseListConnectionsResponse(): ListConnectionsResponse {
-  return { connections: [], version: 0 };
+  return { connections: [] };
 }
 
 export const ListConnectionsResponse = {
   fromJSON(object: any): ListConnectionsResponse {
     return {
       connections: Array.isArray(object?.connections) ? object.connections.map((e: any) => Connection.fromJSON(e)) : [],
-      version: isSet(object.version) ? Number(object.version) : 0,
     };
   },
 
@@ -1665,14 +1669,54 @@ export const ListConnectionsResponse = {
     } else {
       obj.connections = [];
     }
-    message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ListConnectionsResponse>, I>>(object: I): ListConnectionsResponse {
     const message = createBaseListConnectionsResponse();
     message.connections = object.connections?.map((e) => Connection.fromPartial(e)) || [];
-    message.version = object.version ?? 0;
+    return message;
+  },
+};
+
+function createBaseDropConnectionRequest(): DropConnectionRequest {
+  return { connectionName: "" };
+}
+
+export const DropConnectionRequest = {
+  fromJSON(object: any): DropConnectionRequest {
+    return { connectionName: isSet(object.connectionName) ? String(object.connectionName) : "" };
+  },
+
+  toJSON(message: DropConnectionRequest): unknown {
+    const obj: any = {};
+    message.connectionName !== undefined && (obj.connectionName = message.connectionName);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropConnectionRequest>, I>>(object: I): DropConnectionRequest {
+    const message = createBaseDropConnectionRequest();
+    message.connectionName = object.connectionName ?? "";
+    return message;
+  },
+};
+
+function createBaseDropConnectionResponse(): DropConnectionResponse {
+  return {};
+}
+
+export const DropConnectionResponse = {
+  fromJSON(_: any): DropConnectionResponse {
+    return {};
+  },
+
+  toJSON(_: DropConnectionResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<DropConnectionResponse>, I>>(_: I): DropConnectionResponse {
+    const message = createBaseDropConnectionResponse();
     return message;
   },
 };
