@@ -4,10 +4,15 @@ import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.proto.Data;
+import io.delta.standalone.DeltaLog;
 import io.delta.standalone.types.*;
+import io.delta.standalone.util.ParquetSchemaConverter;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.avro.Schema;
+import org.apache.parquet.avro.AvroSchemaConverter;
+import org.apache.parquet.schema.MessageType;
 
 class DeltaLakeSinkUtil {
     public static void checkSchema(TableSchema tableSchema, StructType schema) {
@@ -92,5 +97,11 @@ class DeltaLakeSinkUtil {
                         .withDescription("unspecified type" + typeName)
                         .asRuntimeException();
         }
+    }
+
+    public static Schema convertSchema(DeltaLog log, TableSchema tableSchema) {
+        StructType schema = log.snapshot().getMetadata().getSchema();
+        MessageType parquetSchema = ParquetSchemaConverter.deltaToParquet(schema);
+        return new AvroSchemaConverter().convert(parquetSchema);
     }
 }

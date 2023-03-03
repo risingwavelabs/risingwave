@@ -16,6 +16,8 @@ message TableSchema {
   repeated uint32 pk_indices = 2;
 }
 
+/* Sink Service */
+
 message SinkConfig {
   string sink_type = 1;
   map<string, string> properties = 2;
@@ -84,6 +86,12 @@ message SinkResponse {
   }
 }
 
+message ValidateSinkRequest {
+  SinkConfig sink_config = 1;
+}
+
+message ValidateSinkResponse {}
+
 /* Source Service */
 
 message CdcMessage {
@@ -126,5 +134,6 @@ message GetEventStreamResponse {
 
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
+  rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
 }
