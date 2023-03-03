@@ -18,6 +18,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::{Buf, BufMut};
+use risingwave_common::util::env_var::is_ci;
 use tokio::sync::{mpsc, Mutex};
 
 use super::cache::FlushBufferHook;
@@ -203,17 +204,23 @@ pub fn datasize(path: impl AsRef<Path>) -> Result<usize> {
     Ok(size)
 }
 
-/// Create a temporary directory.  If the env var `RISINGWAVE_CI` is `true` the temp directory
-/// will be created in `/risingwave`, otherwise it will be created in `/tmp/`
+/// Returns a temporary directory that can be used for storing files created by RW during unit
+/// tests.
+///
+/// If the environment variable `RISINGWAVE_CI` is set to `true` then this will create a temp
+/// directory under `/risingwave`. Otherwise, if the environment variable `RISINGWAVE_TEST_DIR`
+/// exists, then this will create a temp directory under the path given in the variable. Otherwise,
+/// this will create the temp directory under `/tmp`
 pub fn tempdir() -> tempfile::TempDir {
-    let ci: bool = std::env::var("RISINGWAVE_CI")
-        .unwrap_or_else(|_| "false".to_string())
-        .parse()
-        .expect("env $RISINGWAVE_CI must be 'true' or 'false'");
-
-    if ci {
+    if is_ci() {
         tempfile::Builder::new().tempdir_in("/risingwave").unwrap()
     } else {
-        tempfile::tempdir().unwrap()
+        match std::env::var("RISINGWAVE_TEST_DIR") {
+            Ok(test_dir) => {
+                println!("Using {test_dir} for temporary data files.");
+                tempfile::Builder::new().tempdir_in(test_dir).unwrap()
+            }
+            _ => tempfile::tempdir().unwrap(),
+        }
     }
 }
