@@ -74,4 +74,22 @@ mod tests {
             _ => panic!("Expected ExprError::FloatUnderflow"),
         }
     }
+
+    #[test]
+    fn nan() {
+        let res = exp_f64(f64::NAN.into()).unwrap();
+        assert_eq!(res, OrderedF64::from(f64::NAN));
+
+        let res = exp_f64((-f64::NAN).into()).unwrap();
+        assert_eq!(res, OrderedF64::from(-f64::NAN));
+    }
+
+    #[test]
+    fn infinity() {
+        let res = exp_f64(f64::INFINITY.into()).unwrap();
+        assert_eq!(res, OrderedF64::from(f64::INFINITY));
+
+        let res = exp_f64(f64::NEG_INFINITY.into()).unwrap();
+        assert_eq!(res, OrderedF64::from(0.0));
+    }
 }
