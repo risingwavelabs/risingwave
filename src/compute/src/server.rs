@@ -354,7 +354,7 @@ fn validate_compute_node_memory_config(
 ) -> usize {
     if storage_memory_bytes > cn_total_memory_bytes {
         tracing::warn!(
-            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 1 GiB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations.",
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
             convert(cn_total_memory_bytes as _),
             convert(storage_memory_bytes as _)
         );
