@@ -523,6 +523,33 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayDistinct => {
+            ensure_arity!("array_distinct", | inputs | == 1);
+            let ret_type = inputs[0].return_type();
+            let return_type = match ret_type {
+                DataType::List {
+                    datatype: _ret_elem_type,
+                } => {
+                    if let Ok(res) = align_types(inputs.iter_mut()) {
+                        Some(res)
+                    }
+                    else {
+                        let common_type = align_array_and_element(0, 1, inputs)
+                            .or_else(|_| align_array_and_element(1, 0, inputs));
+                        match common_type {
+                            Ok(casted) => Some(casted),
+                            Err(err) => return Err(err.into()),
+                        }
+                    }
+                }
+                _ => None,
+            };
+            Ok(Some(return_type.ok_or_else(|| {
+                ErrorCode::BindError(format!(
+                    "Array contains different values types"
+                ))
+            })?))
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))

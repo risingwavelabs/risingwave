@@ -125,6 +125,7 @@ export const ExprNode_Type = {
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
   ARRAY_TO_STRING: "ARRAY_TO_STRING",
+  ARRAY_DISTINCT: "ARRAY_DISTINCT",
   /** ARRAY_CAT - Array functions */
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
@@ -396,6 +397,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 524:
     case "ARRAY_TO_STRING":
       return ExprNode_Type.ARRAY_TO_STRING;
+    case 525:
+      case "ARRAY_DISTINCT":
+        return ExprNode_Type.ARRAY_DISTINCT;
     case 531:
     case "ARRAY_CAT":
       return ExprNode_Type.ARRAY_CAT;
@@ -600,6 +604,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ROW";
     case ExprNode_Type.ARRAY_TO_STRING:
       return "ARRAY_TO_STRING";
+    case ExprNode_Type.ARRAY_DISTINCT:
+      return "ARRAY_DISTINCT";
     case ExprNode_Type.ARRAY_CAT:
       return "ARRAY_CAT";
     case ExprNode_Type.ARRAY_APPEND:
