@@ -417,32 +417,15 @@ pub fn hit_sstable_bloom_filter(
     may_exist
 }
 
-// /// Get `user_value` from `SharedBufferBatch`
-// pub fn get_from_batch(
-//     batch: &SharedBufferBatch,
-//     table_key: TableKey<&[u8]>,
-//     local_stats: &mut StoreLocalStatistic,
-// ) -> Option<HummockValue<Bytes>> {
-//     if batch.check_delete_by_range(table_key) {
-//         return Some(HummockValue::Delete);
-//     }
-//     batch.get(table_key).map(|v| {
-//         local_stats.get_shared_buffer_hit_counts += 1;
-//         v
-//     })
-// }
-
+/// Get `user_value` from `ImmutableMemtable`
 pub fn get_from_imm(
     imm: &ImmutableMemtable,
     table_key: TableKey<&[u8]>,
     read_epoch: HummockEpoch,
     local_stats: &mut StoreLocalStatistic,
 ) -> Option<HummockValue<Bytes>> {
-    Some(
-        imm.get(table_key, read_epoch)
-            .map_or(HummockValue::Delete, |v| {
-                local_stats.get_shared_buffer_hit_counts += 1;
-                v
-            }),
-    )
+    imm.get(table_key, read_epoch).map(|v| {
+        local_stats.get_shared_buffer_hit_counts += 1;
+        v
+    })
 }

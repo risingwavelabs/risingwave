@@ -211,6 +211,7 @@ impl SharedBufferBatchInner {
                 assert_eq!(item.0.as_ref(), *table_key);
                 // Scan to find the first version <= epoch
                 for (e, v) in &item.1 {
+                    // skip invisible versions
                     if read_epoch < *e {
                         continue;
                     }
@@ -219,12 +220,14 @@ impl SharedBufferBatchInner {
                             if *e > del_epoch {
                                 Some(v.clone())
                             } else {
-                                None
+                                // key has been deleted by del_epoch
+                                Some(HummockValue::Delete)
                             }
                         }
                         None => Some(v.clone()),
                     };
                 }
+                // cannot find a visible version
                 None
             }
             Err(_) => None,
@@ -364,6 +367,8 @@ impl SharedBufferBatch {
         self.inner.len()
     }
 
+    /// Return `None` if the key doesn't exist
+    /// Return `HummockValue::Delete` if the key has been deleted by some epoch > read_epoch
     pub fn get(
         &self,
         table_key: TableKey<&[u8]>,
@@ -1424,7 +1429,10 @@ mod tests {
         );
 
         // 555 is deleted in epoch=1
-        assert_eq!(None, merged_imm.get(TableKey(b"555"), 1));
+        assert_eq!(
+            Some(HummockValue::Delete),
+            merged_imm.get(TableKey(b"555"), 1)
+        );
 
         // 555 is inserted again in epoch=2
         assert_eq!(
@@ -1433,8 +1441,15 @@ mod tests {
         );
 
         // "666" is deleted in epoch=1 and isn't inserted in later epochs
-        assert_eq!(None, merged_imm.get(TableKey(b"666"), 2));
-        assert_eq!(None, merged_imm.get(TableKey(b"888"), 2));
+        assert_eq!(
+            Some(HummockValue::Delete),
+            merged_imm.get(TableKey(b"666"), 2)
+        );
+        // "888" is deleted in epoch=2
+        assert_eq!(
+            Some(HummockValue::Delete),
+            merged_imm.get(TableKey(b"888"), 2)
+        );
 
         // 888 exists in the snapshot of epoch=1
         assert_eq!(

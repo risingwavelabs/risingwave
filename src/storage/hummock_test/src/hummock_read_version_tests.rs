@@ -26,9 +26,6 @@ use risingwave_storage::hummock::iterator::test_utils::{
     iterator_test_table_key_of, iterator_test_user_key_of,
 };
 use risingwave_storage::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
-use risingwave_storage::hummock::store::immutable_memtable::MergedImmutableMemtable;
-use risingwave_storage::hummock::store::immutable_memtable_impl::ImmutableMemtableImpl;
-use risingwave_storage::hummock::store::version::StagingData::MergedImmMem;
 use risingwave_storage::hummock::store::version::{
     read_filter_for_batch, read_filter_for_local, HummockReadVersion, StagingData,
     StagingSstableInfo, VersionUpdate,
