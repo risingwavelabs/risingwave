@@ -43,6 +43,14 @@ macro_rules! ensure_int {
 }
 
 #[macro_export]
+macro_rules! ensure_i32 {
+    ($v:ident, $t:ty) => {
+        $v.as_i32()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
+    };
+}
+
+#[macro_export]
 macro_rules! ensure_str {
     ($v:ident, $t:literal) => {
         $v.as_str()

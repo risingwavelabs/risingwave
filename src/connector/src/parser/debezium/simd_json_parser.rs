@@ -156,48 +156,41 @@ mod tests {
 
     use std::convert::TryInto;
 
-    use risingwave_common::array::Op;
+    use chrono::{NaiveDate, NaiveTime};
+    use risingwave_common::array::{JsonbVal, Op};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl, NaiveTimeWrapper};
+    use serde_json::Value;
 
     use super::*;
     use crate::parser::{SourceColumnDesc, SourceStreamChunkBuilder};
 
-    fn get_test_columns() -> Vec<SourceColumnDesc> {
+    fn get_test1_columns() -> Vec<SourceColumnDesc> {
         let descs = vec![
-            SourceColumnDesc {
-                name: "id".to_string(),
-                data_type: DataType::Int32,
-                column_id: ColumnId::from(0),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "name".to_string(),
-                data_type: DataType::Varchar,
-                column_id: ColumnId::from(1),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "description".to_string(),
-                data_type: DataType::Varchar,
-                column_id: ColumnId::from(2),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "weight".to_string(),
-                data_type: DataType::Float64,
-                column_id: ColumnId::from(3),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
+            SourceColumnDesc::simple("id", DataType::Int32, ColumnId::from(0)),
+            SourceColumnDesc::simple("name", DataType::Varchar, ColumnId::from(1)),
+            SourceColumnDesc::simple("description", DataType::Varchar, ColumnId::from(2)),
+            SourceColumnDesc::simple("weight", DataType::Float64, ColumnId::from(3)),
+        ];
+
+        descs
+    }
+
+    fn get_test2_columns() -> Vec<SourceColumnDesc> {
+        let descs = vec![
+            SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
+            SourceColumnDesc::simple("O_BOOL", DataType::Int16, ColumnId::from(1)),
+            SourceColumnDesc::simple("O_TINY", DataType::Int16, ColumnId::from(2)),
+            SourceColumnDesc::simple("O_INT", DataType::Int32, ColumnId::from(3)),
+            SourceColumnDesc::simple("O_REAL", DataType::Float32, ColumnId::from(4)),
+            SourceColumnDesc::simple("O_DOUBLE", DataType::Float64, ColumnId::from(5)),
+            SourceColumnDesc::simple("O_DECIMAL", DataType::Decimal, ColumnId::from(6)),
+            SourceColumnDesc::simple("O_CHAR", DataType::Varchar, ColumnId::from(7)),
+            SourceColumnDesc::simple("O_DATE", DataType::Date, ColumnId::from(8)),
+            SourceColumnDesc::simple("O_TIME", DataType::Time, ColumnId::from(9)),
+            SourceColumnDesc::simple("O_TIMESTAMP", DataType::Timestamp, ColumnId::from(10)),
+            SourceColumnDesc::simple("O_JSON", DataType::Jsonb, ColumnId::from(11)),
         ];
 
         descs
@@ -221,7 +214,160 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_debezium_json_parser_read() {
+    async fn test2_debezium_json_parser_read() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_Test.orders.Test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_Test.orders.Test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_Test.orders.Test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":-1,"O_INT":-1111,"O_REAL":-11.11,"O_DOUBLE":-111.11111,"O_DECIMAL":-111.11,"O_CHAR":"yes please","O_DATE":15289,"O_TIME":40271000000,"O_TIMESTAMP":"2011-11-11T11:11:11Z","O_JSON":"{\"k1\":\"v1\",\"k2\":11}"},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_Test.orders","ts_ms":1677575058000,"snapshot":"last","db":"Test","sequence":null,"table":"orders","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":1207,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1677575058918,"transaction":null}}"#;
+
+        let columns = get_test2_columns();
+
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+
+        let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+
+        assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
+        assert!(row[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row[2].eq(&Some(ScalarImpl::Int16(-1))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int32(-1111))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
+        assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
+        assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
+        )))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(
+            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                "2011-11-11T11:11:11".parse().unwrap()
+            ))))
+        );
+        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
+            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
+        )))));
+    }
+
+    #[tokio::test]
+    async fn test2_debezium_json_parser_insert() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":-1,"O_INT":-1111,"O_REAL":-11.11,"O_DOUBLE":-111.11111,"O_DECIMAL":-111.11,"O_CHAR":"yes please","O_DATE":15289,"O_TIME":40271000000,"O_TIMESTAMP":"2011-11-11T11:11:11Z","O_JSON":"{\"k1\":\"v1\",\"k2\":11}"},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1677725979000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":766,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1677725980009,"transaction":null}}"#;
+
+        let columns = get_test2_columns();
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+        assert_eq!(op, Op::Insert);
+
+        assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
+        assert!(row[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row[2].eq(&Some(ScalarImpl::Int16(-1))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int32(-1111))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
+        assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
+        assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
+        )))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(
+            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                "2011-11-11T11:11:11".parse().unwrap()
+            ))))
+        );
+        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
+            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
+        )))));
+    }
+
+    #[tokio::test]
+    async fn test2_debezium_json_parser_delete() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":{"O_KEY":111,"O_BOOL":0,"O_TINY":3,"O_INT":3333,"O_REAL":33.33,"O_DOUBLE":333.33333,"O_DECIMAL":333.33,"O_CHAR":"no thanks","O_DATE":15686,"O_TIME":43932000000,"O_TIMESTAMP":"2012-12-12T12:12:12Z","O_JSON":"{\"k1\":\"v1_updated\",\"k2\":33}"},"after":null,"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1677725980000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1601,"row":0,"thread":4,"query":null},"op":"d","ts_ms":1677725980014,"transaction":null}}"#;
+
+        let columns = get_test2_columns();
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
+
+        assert_eq!(op, Op::Delete);
+
+        assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
+        assert!(row[1].eq(&Some(ScalarImpl::Int16(0))));
+        assert!(row[2].eq(&Some(ScalarImpl::Int16(3))));
+        assert!(row[3].eq(&Some(ScalarImpl::Int32(3333))));
+        assert!(row[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
+        assert!(row[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
+        assert!(row[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
+        assert!(row[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
+        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
+        )))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(
+            row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                "2012-12-12T12:12:12".parse().unwrap()
+            ))))
+        );
+        assert!(row[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
+            Value::String("{\"k1\":\"v1_updated\",\"k2\":33}".to_string())
+        )))));
+    }
+
+    #[tokio::test]
+    async fn test2_debezium_json_parser_update() {
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"},{"type":"double","optional":true,"field":"O_DECIMAL"},{"type":"string","optional":true,"field":"O_CHAR"},{"type":"int32","optional":true,"name":"io.debezium.time.Date","version":1,"field":"O_DATE"},{"type":"int64","optional":true,"name":"io.debezium.time.MicroTime","version":1,"field":"O_TIME"},{"type":"string","optional":false,"name":"io.debezium.time.ZonedTimestamp","version":1,"default":"1970-01-01T00:00:00Z","field":"O_TIMESTAMP"},{"type":"string","optional":true,"name":"io.debezium.data.Json","version":1,"field":"O_JSON"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":{"O_KEY":111,"O_BOOL":1,"O_TINY":-1,"O_INT":-1111,"O_REAL":-11.11,"O_DOUBLE":-111.11111,"O_DECIMAL":-111.11,"O_CHAR":"yes please","O_DATE":15289,"O_TIME":40271000000,"O_TIMESTAMP":"2011-11-11T11:11:11Z","O_JSON":"{\"k1\":\"v1\",\"k2\":11}"},"after":{"O_KEY":111,"O_BOOL":0,"O_TINY":3,"O_INT":3333,"O_REAL":33.33,"O_DOUBLE":333.33333,"O_DECIMAL":333.33,"O_CHAR":"no thanks","O_DATE":15686,"O_TIME":43932000000,"O_TIMESTAMP":"2011-12-12T12:12:12Z","O_JSON":"{\"k1\":\"v1_updated\",\"k2\":33}"},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1677725069000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1426,"row":0,"thread":4,"query":null},"op":"u","ts_ms":1677725069137,"transaction":null}}"#;
+
+        let columns = get_test2_columns();
+
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let [(op1, row1), (op2, row2)]: [_; 2] =
+            parse_one(parser, columns, data).await.try_into().unwrap();
+
+        assert_eq!(op1, Op::UpdateDelete);
+        assert_eq!(op2, Op::UpdateInsert);
+        assert!(row1[0].eq(&Some(ScalarImpl::Int64(111))));
+        assert!(row1[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row1[2].eq(&Some(ScalarImpl::Int16(-1))));
+        assert!(row1[3].eq(&Some(ScalarImpl::Int32(-1111))));
+        assert!(row1[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
+        assert!(row1[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
+        assert!(row1[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
+        assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
+        assert!(
+            row1[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+                NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
+            ))))
+        );
+        assert!(row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(
+            row1[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                "2011-11-11T11:11:11".parse().unwrap()
+            ))))
+        );
+        assert!(row1[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
+            Value::String("{\"k1\":\"v1\",\"k2\":11}".to_string())
+        )))));
+        assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
+        assert!(row2[1].eq(&Some(ScalarImpl::Int16(0))));
+        assert!(row2[2].eq(&Some(ScalarImpl::Int16(3))));
+        assert!(row2[3].eq(&Some(ScalarImpl::Int32(3333))));
+        assert!(row2[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
+        assert!(row2[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
+        assert!(row2[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
+        assert!(row2[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
+        assert!(
+            row2[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+                NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
+            ))))
+        );
+        assert!(row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(
+            row2[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
+                "2011-12-12T12:12:12".parse().unwrap()
+            ))))
+        );
+        assert!(row2[11].eq(&Some(ScalarImpl::Jsonb(JsonbVal::from_serde(
+            Value::String("{\"k1\":\"v1_updated\",\"k2\":33}".to_string())
+        )))));
+    }
+
+    #[tokio::test]
+    async fn test1_debezium_json_parser_read() {
         //     "before": null,
         //     "after": {
         //       "id": 101,
@@ -231,7 +377,7 @@ mod tests {
         //     },
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":null,"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null},"op":"r","ts_ms":1639547113602,"transaction":null}}"#;
 
-        let columns = get_test_columns();
+        let columns = get_test1_columns();
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
 
@@ -244,7 +390,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_debezium_json_parser_insert() {
+    async fn test1_debezium_json_parser_insert() {
         //     "before": null,
         //     "after": {
         //       "id": 102,
@@ -254,7 +400,7 @@ mod tests {
         //     },
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"c","ts_ms":1639551564960,"transaction":null}}"#;
 
-        let columns = get_test_columns();
+        let columns = get_test1_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
         let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
         assert_eq!(op, Op::Insert);
@@ -266,7 +412,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_debezium_json_parser_delete() {
+    async fn test1_debezium_json_parser_delete() {
         //     "before": {
         //       "id": 101,
         //       "name": "scooter",
@@ -276,7 +422,7 @@ mod tests {
         //     "after": null,
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":1.234},"after":null,"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551767000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1045,"row":0,"thread":null,"query":null},"op":"d","ts_ms":1639551767775,"transaction":null}}"#;
 
-        let columns = get_test_columns();
+        let columns = get_test1_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
         let [(op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
 
@@ -289,7 +435,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_debezium_json_parser_update() {
+    async fn test1_debezium_json_parser_update() {
         //     "before": {
         //       "id": 102,
         //       "name": "car battery",
@@ -304,7 +450,7 @@ mod tests {
         //     },
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"after":{"id":102,"name":"car battery","description":"24V car battery","weight":9.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551901000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":1382,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551901165,"transaction":null}}"#;
 
-        let columns = get_test_columns();
+        let columns = get_test1_columns();
 
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
         let [(op1, row1), (op2, row2)]: [_; 2] =
@@ -325,7 +471,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_update_with_before_null() {
+    async fn test1_update_with_before_null() {
         // the test case it identical with test_debezium_json_parser_insert but op is 'u'
         //     "before": null,
         //     "after": {
@@ -336,7 +482,7 @@ mod tests {
         //     },
         let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"before"},{"type":"struct","fields":[{"type":"int32","optional":false,"field":"id"},{"type":"string","optional":false,"field":"name"},{"type":"string","optional":true,"field":"description"},{"type":"double","optional":true,"field":"weight"}],"optional":true,"name":"dbserver1.inventory.products.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"dbserver1.inventory.products.Envelope"},"payload":{"before":null,"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"source":{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639551564000,"snapshot":"false","db":"inventory","sequence":null,"table":"products","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":717,"row":0,"thread":null,"query":null},"op":"u","ts_ms":1639551564960,"transaction":null}}"#;
 
-        let columns = get_test_columns();
+        let columns = get_test1_columns();
         let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
 
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
