@@ -32,9 +32,7 @@ public class PostgresSourceTest {
             new PostgreSQLContainer<>("postgres:12.3-alpine")
                     .withDatabaseName("test")
                     .withUsername("postgres")
-                    .withCommand("postgres -c wal_level=logical -c max_wal_senders=10")
-                    .withCopyFileToContainer(
-                            MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
+                    .withCommand("postgres -c wal_level=logical -c max_wal_senders=10");
 
     public static Server connectorServer =
             ServerBuilder.forPort(ConnectorService.DEFAULT_PORT)
@@ -50,10 +48,14 @@ public class PostgresSourceTest {
 
     @BeforeClass
     public static void init() {
+        // generate orders.tbl test data
+        SourceTestClient.genOrdersTable(10000);
         // start connector server and postgres...
         try {
             connectorServer.start();
             logger.info("connector service started");
+            pg.withCopyFileToContainer(
+                    MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             pg.start();
             pg.withUsername("postgres")
                     .execInContainer(
@@ -136,9 +138,6 @@ public class PostgresSourceTest {
     @Test
     public void getTestJson() throws InterruptedException, SQLException {
         Connection connection = SourceTestClient.connect(pg);
-        //        String query =
-        //                "CREATE TYPE COMPLEX AS (r DOUBLE PRECISION, i DOUBLE PRECISION)";
-        //        SourceTestClient.performQuery(connection, query);
         String query =
                 "CREATE TABLE IF NOT EXISTS orders ("
                         + "O_KEY BIGINT NOT NULL, "

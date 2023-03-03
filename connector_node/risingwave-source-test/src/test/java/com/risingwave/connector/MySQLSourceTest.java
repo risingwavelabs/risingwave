@@ -32,9 +32,7 @@ public class MySQLSourceTest {
                     .withDatabaseName("test")
                     .withUsername("root")
                     .withCopyFileToContainer(
-                            MountableFile.forClasspathResource("my.cnf"), "/etc/my.cnf")
-                    .withCopyFileToContainer(
-                            MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
+                            MountableFile.forClasspathResource("my.cnf"), "/etc/my.cnf");
 
     public static Server connectorServer =
             ServerBuilder.forPort(ConnectorService.DEFAULT_PORT)
@@ -50,10 +48,14 @@ public class MySQLSourceTest {
 
     @BeforeClass
     public static void init() {
+        // generate orders.tbl test data
+        SourceTestClient.genOrdersTable(10000);
         // start connector server and mysql...
         try {
             connectorServer.start();
             logger.info("connector service started");
+            mysql.withCopyFileToContainer(
+                    MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             mysql.start();
             logger.info("mysql started");
         } catch (IOException e) {

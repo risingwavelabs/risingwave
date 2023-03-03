@@ -8,8 +8,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import io.grpc.Channel;
 import io.grpc.StatusRuntimeException;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.URI;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -17,6 +16,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Iterator;
 import java.util.Properties;
+import java.util.Random;
+import java.util.UUID;
 import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -104,5 +105,56 @@ public class SourceTestClient {
             fail("RPC failed: {}", e.getStatus());
         }
         return responses;
+    }
+
+    private static String[] orderStatusArr = {"O", "F"};
+    private static String[] orderPriorityArr = {
+        "1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"
+    };
+
+    // generates an orders table in class path if not exists
+    // data completely random
+    static void genOrdersTable(int numRows) {
+        String path =
+                PostgresSourceTest.class
+                        .getProtectionDomain()
+                        .getCodeSource()
+                        .getLocation()
+                        .getFile();
+        Random rand = new Random();
+        PrintWriter writer = null;
+        try {
+            writer = new PrintWriter(path + "orders.tbl", "UTF-8");
+        } catch (Exception e) {
+            fail("Runtime Exception: {}", e);
+        }
+        assert writer != null;
+        for (int i = 1; i <= numRows; i++) {
+            String custKey = String.valueOf(Math.abs(rand.nextLong()));
+            String orderStatus = orderStatusArr[rand.nextInt(orderStatusArr.length)];
+            String totalPrice = rand.nextInt(1000000) + "." + rand.nextInt(9) + rand.nextInt(9);
+            String orderDate =
+                    (rand.nextInt(60) + 1970)
+                            + "-"
+                            + String.format("%02d", rand.nextInt(12) + 1)
+                            + "-"
+                            + String.format("%02d", rand.nextInt(28) + 1);
+            String orderPriority = orderPriorityArr[rand.nextInt(orderPriorityArr.length)];
+            String clerk = "Clerk#" + String.format("%09d", rand.nextInt(1024));
+            String shipPriority = "0";
+            String comment = UUID.randomUUID() + " " + UUID.randomUUID();
+            writer.printf(
+                    "%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
+                    i,
+                    custKey,
+                    orderStatus,
+                    totalPrice,
+                    orderDate,
+                    orderPriority,
+                    clerk,
+                    shipPriority,
+                    comment);
+        }
+        writer.close();
     }
 }
