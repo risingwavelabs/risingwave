@@ -63,7 +63,9 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
 
 #[inline(always)]
 pub fn i64_to_time(t: i64) -> Result<NaiveTimeWrapper> {
-    let (time, _) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0).unwrap().overflowing_add_signed(Duration::microseconds(t));
+    let (time, _) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
+        .unwrap()
+        .overflowing_add_signed(Duration::microseconds(t));
     Ok(NaiveTimeWrapper::new(time))
 }
 

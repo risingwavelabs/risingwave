@@ -160,7 +160,9 @@ mod tests {
     use risingwave_common::array::{JsonbVal, Op};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{DataType, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl, NaiveTimeWrapper};
+    use risingwave_common::types::{
+        DataType, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
+    };
     use serde_json::Value;
 
     use super::*;
@@ -234,7 +236,9 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
@@ -265,7 +269,9 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
@@ -297,7 +303,9 @@ mod tests {
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
             NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap()
+        )))));
         assert!(
             row[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2012-12-12T12:12:12".parse().unwrap()
@@ -333,7 +341,11 @@ mod tests {
                 NaiveDate::from_ymd_opt(2011, 11, 11).unwrap()
             ))))
         );
-        assert!(row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap())))));
+        assert!(
+            row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+                NaiveTime::from_hms_micro_opt(11, 11, 11, 0).unwrap()
+            ))))
+        );
         assert!(
             row1[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-11-11T11:11:11".parse().unwrap()
@@ -355,7 +367,11 @@ mod tests {
                 NaiveDate::from_ymd_opt(2012, 12, 12).unwrap()
             ))))
         );
-        assert!(row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap())))));
+        assert!(
+            row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+                NaiveTime::from_hms_micro_opt(12, 12, 12, 0).unwrap()
+            ))))
+        );
         assert!(
             row2[10].eq(&Some(ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::new(
                 "2011-12-12T12:12:12".parse().unwrap()
