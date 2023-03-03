@@ -47,30 +47,25 @@ pub(crate) struct Opts {
     #[clap(name = "PG_USERNAME", short = 'u', long = "user", default_value="postgres", value_hint=ValueHint::Username)]
     pg_user_name: String,
     /// Postgresql server address to test against.
-    #[clap(
-        name = "PG_SERVER_ADDRESS",
-        short = 'h',
-        long = "host",
-        default_value = "localhost"
-    )]
+    #[clap(name = "PG_SERVER_ADDRESS", long = "host", default_value = "localhost")]
     pg_server_host: String,
     /// Postgresql server port to test against.
     #[clap(name = "PG_SERVER_PORT", short = 'p', long = "port")]
     pg_server_port: u16,
     /// Input directory containing sqls, expected outputs.
-    #[clap(name = "INPUT_DIR", short = 'i', long = "input", parse(from_os_str), value_hint = ValueHint::DirPath)]
+    #[clap(name = "INPUT_DIR", short = 'i', long = "input", value_parser, value_hint = ValueHint::DirPath)]
     input_dir: PathBuf,
     /// Output directory containing output files, diff reuslts.
-    #[clap(name = "OUTPUT_DIR", short = 'o', long = "output", parse(from_os_str), value_hint = ValueHint::DirPath)]
+    #[clap(name = "OUTPUT_DIR", short = 'o', long = "output", value_parser, value_hint = ValueHint::DirPath)]
     output_dir: PathBuf,
     /// Schedule file containing each parallel schedule.
-    #[clap(name = "SCHEDULE", short = 's', long = "schedule", parse(from_os_str), value_hint = ValueHint::FilePath)]
+    #[clap(name = "SCHEDULE", short = 's', long = "schedule", value_parser, value_hint = ValueHint::FilePath)]
     schedule: PathBuf,
     /// Location for customized log file.
-    #[clap(long, parse(from_os_str), default_value = "config/log4rs.yaml", value_hint=ValueHint::FilePath)]
+    #[clap(long, value_parser, default_value = "config/log4rs.yaml", value_hint=ValueHint::FilePath)]
     log4rs_config: PathBuf,
     /// Database mode
-    #[clap(name = "DATABASE_MODE", long = "mode", parse(from_os_str))]
+    #[clap(name = "DATABASE_MODE", long = "mode", value_parser)]
     database_mode: DatabaseMode,
 }
 

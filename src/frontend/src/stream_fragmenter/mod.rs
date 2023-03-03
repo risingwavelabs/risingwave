@@ -30,6 +30,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::optimizer::plan_node::reorganize_elements_id;
 use crate::optimizer::PlanRef;
 
 /// The mutable state when building fragment graph.
@@ -95,6 +96,8 @@ impl BuildFragmentGraphState {
 }
 
 pub fn build_graph(plan_node: PlanRef) -> StreamFragmentGraphProto {
+    let plan_node = reorganize_elements_id(plan_node);
+
     let mut state = BuildFragmentGraphState::default();
     let stream_node = plan_node.to_stream_prost(&mut state);
     generate_fragment_graph(&mut state, stream_node).unwrap();
