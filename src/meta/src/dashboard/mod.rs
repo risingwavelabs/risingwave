@@ -94,7 +94,7 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service<S>>,
     ) -> Result<Json<Vec<WorkerNode>>> {
         use risingwave_pb::common::WorkerType;
-        let result = srv
+        let mut result = srv
             .cluster_manager
             .list_worker_node(
                 WorkerType::from_i32(ty)
@@ -103,6 +103,7 @@ pub(super) mod handlers {
                 None,
             )
             .await;
+        result.sort_unstable_by_key(|n| n.id);
         Ok(result.into())
     }
 
