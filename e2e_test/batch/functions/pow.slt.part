@@ -132,12 +132,8 @@ select exp(2::smallint)
 ----
 7.38905609893065
 
-statement error QueryError: Expr error: Numeric out of range
+statement error QueryError: Expr error: Numeric out of range: overflow
 select exp(10000000);
 
-# We remark that this test case underflows in PG. TODO: We can make it fully compatible if necessary
-# https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/float.c#L1649
-query T
+statement error QueryError: Expr error: Numeric out of range: underflow
 select exp(-10000000);
-----
-0

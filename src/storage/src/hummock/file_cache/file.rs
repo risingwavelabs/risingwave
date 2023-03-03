@@ -313,7 +313,6 @@ mod tests {
     #[tokio::test]
     async fn test_file_cache() {
         let tempdir = tempdir();
-
         let fs_type = get_fs_type(tempdir.path());
         let path = tempdir.path().join("test-cache-file");
         let options = CacheFileOptions {
