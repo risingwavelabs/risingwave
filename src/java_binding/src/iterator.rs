@@ -20,7 +20,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::select_all;
-use risingwave_hummock_sdk::key::{next_key, TableKey, TableKeyRange};
+use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
@@ -185,42 +185,18 @@ impl Iterator {
 }
 
 fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange {
+    let map_bound = |b, v| match b {
+        Bound::Unbounded => std::ops::Bound::Unbounded,
+        Bound::Included => std::ops::Bound::Included(v),
+        Bound::Excluded => std::ops::Bound::Excluded(v),
+        _ => unreachable!(),
+    };
+    let left_bound = r.left_bound();
+    let right_bound = r.right_bound();
+    let left = map_bound(left_bound, r.left);
+    let right = map_bound(right_bound, r.right);
+
     let vnode_slice = vnode.to_be_bytes();
-    let mut left = Vec::with_capacity(vnode_slice.len());
-    left.extend(&vnode_slice[..]);
-    let mut right = left.clone();
 
-    let left = match r.left_bound() {
-        Bound::Unbounded => std::ops::Bound::Included(TableKey(left)),
-        Bound::Included => {
-            left.extend_from_slice(&r.left);
-            std::ops::Bound::Included(TableKey(left))
-        }
-        Bound::Excluded => {
-            left.extend_from_slice(&r.left);
-            std::ops::Bound::Excluded(TableKey(left))
-        }
-        _ => unreachable!(),
-    };
-
-    let right = match r.right_bound() {
-        Bound::Unbounded => {
-            let next_key = next_key(&right);
-            if next_key.is_empty() {
-                std::ops::Bound::Unbounded
-            } else {
-                std::ops::Bound::Excluded(TableKey(next_key))
-            }
-        }
-        Bound::Included => {
-            right.extend_from_slice(&r.right);
-            std::ops::Bound::Included(TableKey(right))
-        }
-        Bound::Excluded => {
-            right.extend_from_slice(&r.right);
-            std::ops::Bound::Excluded(TableKey(right))
-        }
-        _ => unreachable!(),
-    };
-    (left, right)
+    map_table_key_range(prefixed_range((left, right), &vnode_slice[..]))
 }
