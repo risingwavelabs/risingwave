@@ -159,15 +159,12 @@ impl SstableIterator {
                 } else {
                     let sst = self.sst.value();
                     if is_empty {
-                        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(idx);
                         self.prefetched_blocks.push_back((
                             idx,
                             self.sstable_store
-                                .get_with_block_info(
-                                    sst.id,
-                                    idx as u64,
-                                    block_loc,
-                                    uncompressed_capacity,
+                                .get_block_response(
+                                    sst,
+                                    idx,
                                     crate::hummock::CachePolicy::Fill,
                                     &mut self.stats,
                                 )
@@ -175,16 +172,12 @@ impl SstableIterator {
                         ));
                     }
                     if next_prefetch_idx <= dest_idx {
-                        let (block_loc, uncompressed_capacity) =
-                            sst.calculate_block_info(next_prefetch_idx);
                         self.prefetched_blocks.push_back((
                             next_prefetch_idx,
                             self.sstable_store
-                                .get_with_block_info(
-                                    sst.id,
-                                    next_prefetch_idx as u64,
-                                    block_loc,
-                                    uncompressed_capacity,
+                                .get_block_response(
+                                    sst,
+                                    next_prefetch_idx,
                                     crate::hummock::CachePolicy::Fill,
                                     &mut self.stats,
                                 )
@@ -202,7 +195,7 @@ impl SstableIterator {
                 self.sstable_store
                     .get(
                         self.sst.value(),
-                        idx as u64,
+                        idx,
                         crate::hummock::CachePolicy::Fill,
                         &mut self.stats,
                     )

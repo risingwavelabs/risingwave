@@ -208,15 +208,16 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub async fn get_with_block_info(
+    pub async fn get_block_response(
         &self,
-        sst_id: HummockSstableId,
-        block_index: u64,
-        block_loc: BlockLocation,
-        uncompressed_capacity: usize,
+        sst: &Sstable,
+        block_index: usize,
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
+        let sst_id = sst.id;
+        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
+
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
             let tiered_cache = self.tiered_cache.clone();
@@ -227,7 +228,7 @@ impl SstableStore {
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(sst_id, block_index))
+                    .get(&(sst_id, block_index as u64))
                     .await
                     .map_err(HummockError::tiered_cache)?
                 {
@@ -256,13 +257,13 @@ impl SstableStore {
             CachePolicy::Fill => {
                 Ok(self
                     .block_cache
-                    .get_or_insert_with(sst_id, block_index, fetch_block))
+                    .get_or_insert_with(sst_id, block_index as u64, fetch_block))
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst_id, block_index) {
+            CachePolicy::NotFill => match self.block_cache.get(sst_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
                 None => match self
                     .tiered_cache
-                    .get(&(sst_id, block_index))
+                    .get(&(sst_id, block_index as u64))
                     .await
                     .map_err(HummockError::tiered_cache)?
                 {
@@ -285,20 +286,12 @@ impl SstableStore {
     pub async fn get(
         &self,
         sst: &Sstable,
-        block_index: u64,
+        block_index: usize,
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index as usize);
         match self
-            .get_with_block_info(
-                sst.id,
-                block_index,
-                block_loc,
-                uncompressed_capacity,
-                policy,
-                stats,
-            )
+            .get_block_response(sst, block_index, policy, stats)
             .await
         {
             Ok(block_response) => block_response.wait().await,
