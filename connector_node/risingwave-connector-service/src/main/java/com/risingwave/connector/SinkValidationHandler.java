@@ -18,9 +18,19 @@ public class SinkValidationHandler {
     }
 
     public void handle(ConnectorServiceProto.ValidateSinkRequest request) {
-        SinkConfig sinkConfig = request.getSinkConfig();
-        TableSchema tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
-        sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
+        try {
+            SinkConfig sinkConfig = request.getSinkConfig();
+            TableSchema tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
+            SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
+            sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
+        } catch (Exception e) {
+            responseObserver.onNext(
+                    ConnectorServiceProto.ValidateSinkResponse.newBuilder()
+                            .setError(
+                                    ConnectorServiceProto.ValidationError.newBuilder()
+                                            .setErrorMessage(e.toString())
+                                            .build())
+                            .build());
+        }
     }
 }

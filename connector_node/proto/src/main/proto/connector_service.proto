@@ -16,6 +16,10 @@ message TableSchema {
   repeated uint32 pk_indices = 2;
 }
 
+message ValidationError {
+  string error_message = 1;
+}
+
 /* Sink Service */
 
 message SinkConfig {
@@ -90,7 +94,9 @@ message ValidateSinkRequest {
   SinkConfig sink_config = 1;
 }
 
-message ValidateSinkResponse {}
+message ValidateSinkResponse {
+  ValidationError error = 1;
+}
 
 /* Source Service */
 
