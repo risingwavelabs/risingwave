@@ -25,7 +25,7 @@ impl Rule for ReorderMultiJoinRule {
             .ctx()
             .session_ctx()
             .config()
-            .get_streaming_enable_delta_join()
+            .get_streaming_enable_bushy_join()
         {
             let join = plan.as_logical_multi_join()?;
             join.as_bushy_tree_join().ok()
