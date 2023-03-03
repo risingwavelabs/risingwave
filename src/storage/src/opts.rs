@@ -79,7 +79,9 @@ impl Default for StorageOpts {
             data_directory: Some(c.storage.data_directory.clone()),
             backup_storage_url: Some(c.backup.storage_url.clone()),
             backup_storage_directory: Some(c.backup.storage_directory.clone()),
-            ..Default::default()
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+            state_store: None,
         };
         Self::from((&c, &p.into()))
     }
