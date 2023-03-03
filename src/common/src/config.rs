@@ -51,7 +51,7 @@ macro_rules! impl_warn_unrecognized_fields {
         fn warn_unrecognized_fields(config: &RwConfig) {
             $(
                 if !config.$($field_path).+.unrecognized.is_empty() {
-                    println!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
+                    tracing::warn!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
                 }
             )*
         }
