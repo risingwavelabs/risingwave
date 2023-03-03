@@ -28,6 +28,7 @@ use axum::routing::{get, get_service};
 use axum::Router;
 use hyper::Request;
 use parking_lot::Mutex;
+use risingwave_rpc_client::ComputeClientPool;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
 use tower_http::cors::{self, CorsLayer};
@@ -43,6 +44,7 @@ pub struct DashboardService<S: MetaStore> {
     pub prometheus_client: Option<prometheus_http_query::Client>,
     pub cluster_manager: ClusterManagerRef<S>,
     pub fragment_manager: FragmentManagerRef<S>,
+    pub compute_clients: ComputeClientPool,
 
     // TODO: replace with catalog manager.
     pub meta_store: Arc<S>,
@@ -51,16 +53,19 @@ pub struct DashboardService<S: MetaStore> {
 pub type Service<S> = Arc<DashboardService<S>>;
 
 pub(super) mod handlers {
+    use anyhow::Context;
     use axum::Json;
     use itertools::Itertools;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
     use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
+    use risingwave_pb::monitor_service::StackTraceResponse;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
 
     use super::*;
+    use crate::manager::WorkerId;
     use crate::model::TableFragments;
 
     pub struct DashboardError(anyhow::Error);
@@ -208,6 +213,25 @@ pub(super) mod handlers {
             .collect_vec();
         Ok(Json(table_fragments))
     }
+
+    pub async fn dump_await_tree<S: MetaStore>(
+        Path(worker_id): Path<WorkerId>,
+        Extension(srv): Extension<Service<S>>,
+    ) -> Result<Json<StackTraceResponse>> {
+        let worker_node = srv
+            .cluster_manager
+            .get_worker_by_id(worker_id)
+            .await
+            .context("worker node not found")
+            .map_err(err)?
+            .worker_node;
+
+        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+
+        let result = client.stack_trace().await.map_err(err)?;
+
+        Ok(result.into())
+    }
 }
 
 impl<S> DashboardService<S>
@@ -237,6 +261,7 @@ where
                 "/metrics/cluster",
                 get(prometheus::list_prometheus_cluster::<S>),
             )
+            .route("/monitor/await_tree/:worker_id", get(dump_await_tree::<S>))
             .layer(
                 ServiceBuilder::new()
                     .layer(AddExtensionLayer::new(srv.clone()))

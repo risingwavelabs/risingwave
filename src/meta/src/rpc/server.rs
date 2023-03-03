@@ -36,6 +36,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -358,14 +359,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
-            meta_store: env.meta_store_ref(),
             prometheus_endpoint: prometheus_endpoint.clone(),
             prometheus_client: prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            cluster_manager: cluster_manager.clone(),
+            fragment_manager: fragment_manager.clone(),
+            compute_clients: ComputeClientPool::default(),
+            meta_store: env.meta_store_ref(),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
