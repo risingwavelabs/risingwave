@@ -107,11 +107,10 @@ pub async fn compute_node_serve(
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
-    validate_compute_node_memory_config(
-        opts.total_memory_bytes,
-        embedded_compactor_enabled,
-        &config.storage,
-    );
+    let storage_memory_bytes =
+        total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
+    let compute_memory_bytes =
+        validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -233,15 +232,15 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
-    let mgr = GlobalMemoryManager::new(
-        opts.total_memory_bytes,
+    let memory_mgr = GlobalMemoryManager::new(
+        compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
     );
     // Run a background memory monitor
-    tokio::spawn(mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+    tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
 
-    let watermark_epoch = mgr.get_watermark_epoch();
+    let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
@@ -347,38 +346,48 @@ pub async fn compute_node_serve(
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
-/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
-/// for other system usage. Otherwise, it is not allowed to start.
+/// it is recommended to reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and
+/// `SYSTEM_RESERVED_MEMORY_MB` for other system usage. If the requirement is not met, we will print
+/// out a warning and enforce the memory used for computing tasks as `MIN_COMPUTE_MEMORY_MB`.
 fn validate_compute_node_memory_config(
     cn_total_memory_bytes: usize,
-    embedded_compactor_enabled: bool,
-    storage_config: &StorageConfig,
-) {
-    let storage_memory_mb = {
-        let total_memory = storage_config.block_cache_capacity_mb
-            + storage_config.meta_cache_capacity_mb
-            + storage_config.shared_buffer_capacity_mb
-            + storage_config.file_cache.total_buffer_capacity_mb;
-        if embedded_compactor_enabled {
-            total_memory + storage_config.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
-    };
-    if storage_memory_mb << 20 > cn_total_memory_bytes {
-        panic!(
-            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.", 
+    storage_memory_bytes: usize,
+) -> usize {
+    if storage_memory_bytes > cn_total_memory_bytes {
+        tracing::warn!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
             convert(cn_total_memory_bytes as _),
-            convert((storage_memory_mb << 20) as _)
+            convert(storage_memory_bytes as _)
         );
-    } else if (storage_memory_mb + MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20
+        MIN_COMPUTE_MEMORY_MB << 20
+    } else if storage_memory_bytes + ((MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20)
         >= cn_total_memory_bytes
     {
-        panic!(
-            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+        tracing::warn!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
             convert(cn_total_memory_bytes as _),
-            convert((storage_memory_mb << 20) as _)
+            convert(storage_memory_bytes as _)
         );
+        MIN_COMPUTE_MEMORY_MB << 20
+    } else {
+        cn_total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20)
+    }
+}
+
+/// The maximal memory that storage components may use based on the configurations in bytes. Note
+/// that this is the total storage memory for one compute node instead of the whole cluster.
+fn total_storage_memory_limit_bytes(
+    storage_config: &StorageConfig,
+    embedded_compactor_enabled: bool,
+) -> usize {
+    let total_memory = storage_config.block_cache_capacity_mb
+        + storage_config.meta_cache_capacity_mb
+        + storage_config.shared_buffer_capacity_mb
+        + storage_config.file_cache.total_buffer_capacity_mb;
+    if embedded_compactor_enabled {
+        (total_memory + storage_config.compactor_memory_limit_mb) << 20
+    } else {
+        total_memory << 20
     }
 }
 
