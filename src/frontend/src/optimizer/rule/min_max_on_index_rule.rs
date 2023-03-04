@@ -24,7 +24,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
-use crate::expr::{AggCall, ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
 };
@@ -37,8 +37,20 @@ pub struct MinMaxOnIndexRule {}
 impl Rule for MinMaxOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
+        if logical_agg.group_key().len() > 0 {
+            return None;
+        }
         let calls = logical_agg.agg_calls();
-        if calls.len() == 1 && matches!(calls.first()?.agg_kind, AggKind::Min | AggKind::Max) {
+        if calls.len() == 0 {
+            return None;
+        }
+        let first_call = calls.first()?;
+        if calls.len() == 1
+            && matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
+            && first_call.distinct == false
+            && first_call.filter.always_true()
+            && first_call.order_by_fields.len() == 0
+        {
             let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
             let kind = calls.first()?.agg_kind;
             if !logical_scan.predicate().always_true() {
@@ -138,7 +150,7 @@ impl MinMaxOnIndexRule {
             .into(),
         );
 
-        let limit = LogicalLimit::create(non_null_filter.into(), 1, 0);
+        let limit = LogicalLimit::create(non_null_filter, 1, 0);
 
         let formatting_agg = LogicalAgg::new(
             vec![PlanAggCall {
@@ -155,7 +167,7 @@ impl MinMaxOnIndexRule {
                 },
             }],
             vec![],
-            limit.into(),
+            limit,
         );
 
         Some(formatting_agg.into())
@@ -197,7 +209,7 @@ impl MinMaxOnIndexRule {
                 .into(),
             );
 
-            let limit = LogicalLimit::create(non_null_filter.into(), 1, 0);
+            let limit = LogicalLimit::create(non_null_filter, 1, 0);
 
             let formatting_agg = LogicalAgg::new(
                 vec![PlanAggCall {
@@ -214,7 +226,7 @@ impl MinMaxOnIndexRule {
                     },
                 }],
                 vec![],
-                limit.into(),
+                limit,
             );
 
             Some(formatting_agg.into())
