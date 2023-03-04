@@ -600,9 +600,9 @@ fi
 
 ARTIFACT="risingwave-connector-1.0.0.tar.gz"
 
-cd "${CONNECTOR_NODE_DIR}"
+cd "${JAVA_DIR}"
 "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
-tar xf "assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
+tar xf "${JAVA_DIR}/assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
 '''
 
 
@@ -731,7 +731,7 @@ set -e
 cargo llvm-cov run -p risingwave_simulation --html "$@"
 """
 
-[tasks.check-connector-node]
+[tasks.check-java]
 category = "RiseDev - Check"
 description = "Run mvn spotless:check in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -746,11 +746,11 @@ else
   MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
 fi
 
-cd "${CONNECTOR_NODE_DIR}"
+cd "${JAVA_DIR}"
 "${MAVEN_PATH}" spotless:check
 """
 
-[tasks.check-connector-node-fix]
+[tasks.check-java-fix]
 category = "RiseDev - Check"
 description = "Run mvn spotless:apply in connector-node"
 dependencies = ["warn-on-missing-tools"]
@@ -765,7 +765,7 @@ else
   MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
 fi
 
-cd "${CONNECTOR_NODE_DIR}"
+cd "${JAVA_DIR}"
 "${MAVEN_PATH}" spotless:apply
 """
 
@@ -877,7 +877,7 @@ dependencies = [
   "check-fmt",
   "check-clippy",
   "check-typos",
-  "check-connector-node",
+  "check-java",
 ]
 script = """
 #!/usr/bin/env bash
@@ -899,7 +899,7 @@ dependencies = [
   "check-fmt",
   "check-clippy-fix",
   "check-typos",
-  "check-connector-node-fix",
+  "check-java-fix",
 ]
 script = """
 #!/usr/bin/env bash

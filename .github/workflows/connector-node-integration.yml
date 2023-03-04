@@ -3,10 +3,10 @@ name: Connector Node Integration tests
 on:
   push:
     branches: [main]
-    path: [connector_node/**, proto/**]
+    path: [java/**, proto/**]
   pull_request:
     branches: [main]
-    paths: [connector_node/**, proto/**]
+    paths: [java/**, proto/**]
 
 jobs:
   build:
@@ -22,8 +22,9 @@ jobs:
           cache: 'maven'
       - name: run integration tests
         run: |
-          cd connector_node
+          cd java
           mvn --batch-mode --update-snapshots clean package  -DskipTests=true
+          cd connector-node
           sudo apt install postgresql postgresql-contrib libpq-dev
           sudo systemctl start postgresql || sudo pg_ctlcluster 12 main start
           # disable password encryption

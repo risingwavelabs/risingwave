@@ -11,7 +11,7 @@ INSERT INTO ${TABLE_NAME} values (1, 1, 1, 1.0, 1.0, false, 'aaa', 1), (2, 2, 2,
 FLUSH;
 EOF
 
-cd ${JAVA_BINDING_ROOT}/java
+cd ${RISINGWAVE_ROOT}/java
 
 mvn exec:exec \
     -pl java-binding \
