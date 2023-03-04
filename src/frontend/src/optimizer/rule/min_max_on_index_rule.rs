@@ -37,19 +37,19 @@ pub struct MinMaxOnIndexRule {}
 impl Rule for MinMaxOnIndexRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_agg: &LogicalAgg = plan.as_logical_agg()?;
-        if logical_agg.group_key().len() > 0 {
+        if !logical_agg.group_key().is_empty() {
             return None;
         }
         let calls = logical_agg.agg_calls();
-        if calls.len() == 0 {
+        if calls.is_empty() {
             return None;
         }
         let first_call = calls.first()?;
         if calls.len() == 1
             && matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
-            && first_call.distinct == false
+            && !first_call.distinct
             && first_call.filter.always_true()
-            && first_call.order_by_fields.len() == 0
+            && first_call.order_by_fields.is_empty()
         {
             let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
             let kind = calls.first()?.agg_kind;
