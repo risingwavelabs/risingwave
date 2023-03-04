@@ -371,6 +371,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
+                            true,
                         )
                         .await?
                 }
@@ -382,6 +383,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
+                            true,
                         )
                         .await?
                 }

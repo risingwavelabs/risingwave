@@ -83,7 +83,7 @@ impl<S: StateStore> NowExecutor<S> {
         yield Message::Barrier(barrier);
 
         let state_row = {
-            let data_iter = state_table.iter().await?;
+            let data_iter = state_table.iter(false).await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)

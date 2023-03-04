@@ -132,8 +132,11 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
-        read_options: ReadOptions,
+        mut read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        if limit.is_some() {
+            read_options.exhaust_iter = false;
+        }
         let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
@@ -316,6 +319,7 @@ pub struct ReadOptions {
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
+    pub exhaust_iter: bool,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,

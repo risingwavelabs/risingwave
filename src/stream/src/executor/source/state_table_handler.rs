@@ -83,7 +83,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_with_pk_range(&(start, end), VirtualNode::ZERO)
+            .iter_with_pk_range(&(start, end), VirtualNode::ZERO, true)
             .await?;
 
         let mut set = HashSet::new();

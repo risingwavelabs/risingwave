@@ -417,6 +417,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
+                true,
             )
             .await?;
 

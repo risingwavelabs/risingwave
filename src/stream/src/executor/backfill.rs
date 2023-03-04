@@ -332,6 +332,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
+                true,
             )
             .await?;
 

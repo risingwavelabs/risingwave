@@ -279,7 +279,10 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
-    let iter = state_table.iter_with_pk_prefix(&pk_prefix).await.unwrap();
+    let iter = state_table
+        .iter_with_pk_prefix(&pk_prefix, false)
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and shared_storage
@@ -408,7 +411,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, false)
         .await
         .unwrap();
     pin_mut!(iter);
@@ -433,7 +436,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, false)
         .await
         .unwrap();
     pin_mut!(iter);
@@ -572,7 +575,7 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter().await.unwrap();
+        let iter = state_table.iter(false).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -627,7 +630,7 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter().await.unwrap();
+    let iter = state_table.iter(false).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -733,7 +736,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter().await.unwrap();
+        let iter = state_table.iter(false).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -809,7 +812,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter().await.unwrap();
+    let iter = state_table.iter(false).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -996,7 +999,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(true)
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1113,7 +1116,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(true)
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1225,7 +1228,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(true)
         .await
         .unwrap()
         .collect::<Vec<_>>()

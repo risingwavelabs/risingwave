@@ -232,7 +232,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter().await?;
+        let rhs_stream = self.right_table.iter(false).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -387,8 +387,10 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                         // TODO: prefetching for append-only case.
                         for vnode in self.left_table.vnodes().iter_vnodes() {
-                            let row_stream =
-                                self.left_table.iter_with_pk_range(&range, vnode).await?;
+                            let row_stream = self
+                                .left_table
+                                .iter_with_pk_range(&range, vnode, true)
+                                .await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {
                                 let row = res?;

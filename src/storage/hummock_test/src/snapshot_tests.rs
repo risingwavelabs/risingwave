@@ -43,6 +43,7 @@ macro_rules! assert_count_range_scan {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: true,
                 },
             )
             .await

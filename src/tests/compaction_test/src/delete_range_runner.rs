@@ -392,6 +392,7 @@ impl NormalState {
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
+                    exhaust_iter: false,
                 },
             )
             .await
@@ -417,6 +418,7 @@ impl NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        exhaust_iter: true,
                     },
                 )
                 .await
@@ -448,6 +450,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        exhaust_iter: true,
                     },
                 )
                 .await

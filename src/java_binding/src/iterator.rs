@@ -149,6 +149,7 @@ impl Iterator {
                         retention_seconds: None,
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
+                        exhaust_iter: false,
                     },
                     (vec![], vec![], pin_version.clone()),
                 )

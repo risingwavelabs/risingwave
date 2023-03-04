@@ -662,7 +662,10 @@ impl HummockVersionReader {
         drop(buffered);
         timer.observe_duration();
 
-        let sst_read_options = SstableIteratorReadOptions::default();
+        let mut sst_read_options = SstableIteratorReadOptions::default();
+        if read_options.exhaust_iter {
+            sst_read_options.must_iterated_pos = Some(user_key_range.1.map(|key| key.cloned()));
+        }
         let sst_read_options = Arc::new(sst_read_options);
 
         for (level_type, fetch_meta_req) in fetch_meta_reqs {

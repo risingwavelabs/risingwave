@@ -568,6 +568,7 @@ where
             table_id: self.table_id,
             ignore_range_tombstone: false,
             read_version_from_backup: false,
+            exhaust_iter: false,
         };
         if let Some(storage_row_bytes) = self.local_store.get(serialized_pk, read_options).await? {
             Ok(Some(CompactedRow {
@@ -835,16 +836,20 @@ where
     W: WatermarkBufferStrategy,
 {
     /// This function scans rows from the relational table.
-    pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        self.iter_with_pk_prefix(row::empty()).await
+    pub async fn iter(&self, exhaust_iter: bool) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+        self.iter_with_pk_prefix(row::empty(), exhaust_iter).await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: impl Row,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
-        Ok(self.iter_key_and_val(pk_prefix).await?.map(get_second))
+        Ok(self
+            .iter_key_and_val(pk_prefix, exhaust_iter)
+            .await?
+            .map(get_second))
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -855,6 +860,7 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
@@ -862,7 +868,7 @@ where
             prefixed_range(memcomparable_range, &vnode.to_be_bytes());
 
         // TODO: provide a trace of useful params.
-        self.iter_inner(memcomparable_range_with_vnode, None)
+        self.iter_inner(memcomparable_range_with_vnode, None, exhaust_iter)
             .await
             .map_err(StreamExecutorError::from)
     }
@@ -874,9 +880,10 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         Ok(self
-            .iter_key_and_val_with_pk_range(pk_range, vnode)
+            .iter_key_and_val_with_pk_range(pk_range, vnode, exhaust_iter)
             .await?
             .map(get_second))
     }
@@ -888,9 +895,10 @@ where
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
         // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
-            self.iter_with_pk_range_inner(pk_range, vnode).await?,
+            self.iter_with_pk_range_inner(pk_range, vnode, exhaust_iter).await?,
             &self.row_serde,
         ))
     }
@@ -900,9 +908,10 @@ where
     pub async fn iter_key_and_val(
         &self,
         pk_prefix: impl Row,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
-            self.iter_with_pk_prefix_inner(pk_prefix).await?,
+            self.iter_with_pk_prefix_inner(pk_prefix, exhaust_iter).await?,
             &self.row_serde,
         ))
     }
@@ -910,6 +919,7 @@ where
     async fn iter_with_pk_prefix_inner(
         &self,
         pk_prefix: impl Row,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
@@ -945,7 +955,7 @@ where
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, prefix_hint)
+        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, exhaust_iter)
             .await
     }
 
@@ -953,6 +963,7 @@ where
         &self,
         key_range: (Bound<Bytes>, Bound<Bytes>),
         prefix_hint: Option<Bytes>,
+        exhaust_iter: bool,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
@@ -960,6 +971,7 @@ where
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: false,
+            exhaust_iter,
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -1005,6 +1017,7 @@ where
             retention_seconds: None,
             table_id: self.table_id,
             read_version_from_backup: false,
+            exhaust_iter: false,
         };
 
         self.local_store

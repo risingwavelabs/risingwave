@@ -94,7 +94,7 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
         );
         let streams = stream::iter(vnodes.iter_vnodes())
-            .map(|vnode| state_table.iter_with_pk_range(&pk_range, vnode))
+            .map(|vnode| state_table.iter_with_pk_range(&pk_range, vnode, true))
             .buffer_unordered(10)
             .try_collect::<Vec<_>>()
             .await?

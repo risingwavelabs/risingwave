@@ -303,6 +303,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: false,
                 },
             )
             .await
@@ -321,6 +322,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: false,
                 },
             )
             .await;
@@ -436,6 +438,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: false,
                 },
             )
             .await
@@ -801,6 +804,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: true,
                 },
             )
             .await
@@ -982,6 +986,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: true,
                 },
             )
             .await
@@ -1165,6 +1170,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    exhaust_iter: true,
                 },
             )
             .await

@@ -81,7 +81,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         offset: usize,
         limit: Option<usize>,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(&group_key, false)
+            .await?;
         pin_mut!(state_table_iter);
 
         // here we don't expect users to have large OFFSET.
@@ -115,7 +118,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(&group_key, cache_size_limit == usize::MAX)
+            .await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
@@ -155,7 +161,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
 
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(&group_key, topn_cache.limit == usize::MAX)
+            .await?;
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {

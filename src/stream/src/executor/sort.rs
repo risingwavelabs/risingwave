@@ -268,6 +268,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                     ),
                     owned_vnode,
+                    true,
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);

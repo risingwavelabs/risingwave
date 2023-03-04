@@ -394,7 +394,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
+                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false, true)
                 .await?;
 
             pin_mut!(iter);
