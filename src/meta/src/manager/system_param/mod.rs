@@ -111,11 +111,11 @@ impl<S: MetaStore> SystemParamsManager<S> {
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
                 tokio::select! {
-                    biased;
+                    _ = interval.tick() => {},
                     _ = &mut shutdown_rx => {
+                        tracing::info!("System params notifier is stopped");
                         return;
                     }
-                    _ = interval.tick() => {},
                 }
                 system_params_manager
                     .notify_workers(&*system_params_manager.params.read().await)
