@@ -254,7 +254,7 @@ pub async fn compute_node_serve(
     let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
-    join_handle_vec.push(observer_manager.start().await);
+    observer_manager.start().await;
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
