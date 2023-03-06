@@ -13,13 +13,14 @@
 // limitations under the License.
 
 use anyhow::Context;
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
-use risingwave_sqlparser::ast::{ColumnDef, ObjectName, Statement};
+use risingwave_sqlparser::ast::{AlterTableOperation, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
 
 use super::create_table::{gen_create_table_plan, ColumnIdGenerator};
@@ -28,10 +29,12 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::{build_graph, Binder, OptimizerContext, TableCatalog};
 
-pub async fn handle_add_column(
+/// Handle `ALTER TABLE [ADD|DROP] COLUMN` statements. The `operation` must be either `AddColumn` or
+/// `DropColumn`.
+pub async fn handle_alter_table_column(
     handler_args: HandlerArgs,
     table_name: ObjectName,
-    new_column: ColumnDef,
+    operation: AlterTableOperation,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = session.database();
@@ -48,7 +51,6 @@ pub async fn handle_add_column(
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
 
         match table.table_type() {
-            TableType::Table if !table.has_associated_source() => {}
             // Do not allow altering a table with a connector. It should be done passively according
             // to the messages from the connector.
             TableType::Table if table.has_associated_source() => {
@@ -56,6 +58,8 @@ pub async fn handle_add_column(
                     "cannot alter table \"{table_name}\" because it has a connector"
                 )))?
             }
+            TableType::Table => {}
+
             _ => Err(ErrorCode::InvalidInputSyntax(format!(
                 "\"{table_name}\" is not a table or cannot be altered"
             )))?,
@@ -75,19 +79,62 @@ pub async fn handle_add_column(
         panic!("unexpected statement: {:?}", definition);
     };
 
-    // Duplicated names can actually be checked by `StreamMaterialize`. We do here for better error
-    // reporting.
-    let new_column_name = new_column.name.real_value();
-    if columns
-        .iter()
-        .any(|c| c.name.real_value() == new_column_name)
-    {
-        Err(ErrorCode::InvalidInputSyntax(format!(
-            "column \"{new_column_name}\" of table \"{table_name}\" already exists"
-        )))?
+    match operation {
+        AlterTableOperation::AddColumn {
+            column_def: new_column,
+        } => {
+            // Duplicated names can actually be checked by `StreamMaterialize`. We do here for
+            // better error reporting.
+            let new_column_name = new_column.name.real_value();
+            if columns
+                .iter()
+                .any(|c| c.name.real_value() == new_column_name)
+            {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "column \"{new_column_name}\" of table \"{table_name}\" already exists"
+                )))?
+            }
+            // Add the new column to the table definition.
+            columns.push(new_column);
+        }
+
+        AlterTableOperation::DropColumn {
+            column_name,
+            if_exists,
+            cascade,
+        } => {
+            if cascade {
+                Err(ErrorCode::NotImplemented(
+                    "drop column cascade".to_owned(),
+                    6903.into(),
+                ))?
+            }
+
+            // Locate the column by name and remove it.
+            let column_name = column_name.real_value();
+            let removed_column = columns
+                .drain_filter(|c| c.name.real_value() == column_name)
+                .at_most_one()
+                .ok()
+                .unwrap();
+
+            if removed_column.is_some() {
+                // PASS
+            } else if if_exists {
+                return Ok(PgResponse::empty_result_with_notice(
+                    StatementType::ALTER_TABLE,
+                    format!("column \"{}\" does not exist, skipping", column_name),
+                ));
+            } else {
+                Err(ErrorCode::InvalidInputSyntax(format!(
+                    "column \"{}\" of table \"{}\" does not exist",
+                    column_name, table_name
+                )))?
+            }
+        }
+
+        _ => unreachable!(),
     }
-    // Add the new column to the table definition.
-    columns.push(new_column);
 
     // Create handler args as if we're creating a new table with the altered definition.
     let handler_args = HandlerArgs::new(session.clone(), &definition, "")?;
