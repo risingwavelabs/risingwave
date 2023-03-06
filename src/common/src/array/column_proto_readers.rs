@@ -101,7 +101,7 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
 fn read_serial(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Serial> {
     I64ValueReader::read(cursor)
         .map_err(|e| anyhow!("Failed to read i64 from Serial buffer: {}", e))
-        .map(|t| Serial::from(t))
+        .map(Serial::from)
         .map_err(Into::into)
 }
 
