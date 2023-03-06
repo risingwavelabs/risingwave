@@ -19,7 +19,7 @@
 
         <!-- scripts -->
         <fileSet>
-            <directory>${project.parent.basedir}/assembly/scripts</directory>
+            <directory>${project.parent.basedir}/connector-node/assembly/scripts</directory>
             <outputDirectory>/</outputDirectory>
             <includes>
                 <include>*.sh</include>
