@@ -50,7 +50,7 @@ jobs:
           ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
           echo "--- starting connector-node service"
-          cd $RISINGWAVE_ROOT}/java/connector-node/assembly/target/
+          cd ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
           tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
           sh ./start-service.sh &
           sleep 3
@@ -58,7 +58,7 @@ jobs:
 
         
           echo "--- prepare integration tests"
-          cd $RISINGWAVE_ROOT}/java/connector-node
+          cd ${RISINGWAVE_ROOT}/java/connector-node
           pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark
           cd python-client && bash gen-stub.sh
 
