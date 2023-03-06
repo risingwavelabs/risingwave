@@ -47,9 +47,7 @@ statement ok
 create table taxi_trips (trip_id int, taxi_id int, completed_at timestamp, distance double precision);
 
 statement ok 
-insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4) 
-(2, 1002, '2022-07-01 22:01:00', 6)
-(3, 1003, '2022-07-01 22:02:00	', 3);
+insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4), (2, 1002, '2022-07-01 22:01:00', 6), (3, 1003, '2022-07-01 22:02:00	', 3);
 
 statement ok
 SELECT trip_id,  taxi_id, completed_at, window_start, window_end
