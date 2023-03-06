@@ -537,6 +537,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 // stage, it may early stop receiving data from downstream, which
                                 // leads to close of channel.
                                 warn!("Task receiver closed!");
+                                state = TaskStatus::Finished;
                                 break;
                             },
                             x => {
