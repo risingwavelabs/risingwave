@@ -42,8 +42,8 @@ impl MinOverlappingPicker {
             max_select_bytes,
             level,
             target_level,
-            overlap_strategy,
             split_by_table,
+            overlap_strategy,
         }
     }
 
