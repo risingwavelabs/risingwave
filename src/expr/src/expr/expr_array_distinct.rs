@@ -34,24 +34,24 @@ use crate::{bail, ensure, ExprError, Result};
 /// Examples:
 ///
 /// ```slt
-// query T
-// select array_distinct(array[NULL]);
-// ----
-// {NULL}
-
-// query T
-// select array_distinct(null::int[]);
-// ----
-
-// query T
-// select array_distinct(array[1,2,1,1]);
-// ----
-// {1,2}
-
-// quert T
-// select array_distinct(array[1,2,1,NULL]);
-// ----
-// {1,2,NULL}
+/// query T
+/// select array_distinct(array[NULL]);
+/// ----
+/// {NULL}
+/// 
+/// query T
+/// select array_distinct(null::int[]);
+/// ----
+///
+/// query T
+/// select array_distinct(array[1,2,1,1]);
+/// ----
+/// {1,2}
+///
+/// query T
+/// select array_distinct(array[1,2,1,NULL]);
+/// ----
+/// {1,2,NULL}
 /// query error polymorphic type
 /// select array_distinct(null);
 /// ```
