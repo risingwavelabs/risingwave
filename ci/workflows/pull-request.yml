@@ -281,7 +281,7 @@ steps:
     retry: *auto-retry
 
   - label: "recovery test (deterministic simulation)"
-    command: "TEST_NUM=8 KILL_RATE=0.5 timeout 19m ci/scripts/deterministic-recovery-test.sh"
+    command: "TEST_NUM=8 KILL_RATE=0.5 timeout 14m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -296,7 +296,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 20
+    timeout_in_minutes: 15
     retry: *auto-retry
 
   - label: "misc check"
