@@ -114,6 +114,7 @@ pub struct StateTableInner<
     watermark_buffer_strategy: W,
 }
 
+/// `StateTable` will use `BasicSerde` as default
 pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 
 // initialize

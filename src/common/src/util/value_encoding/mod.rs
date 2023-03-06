@@ -15,6 +15,7 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
+use std::marker::{Send, Sync};
 use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
@@ -52,7 +53,10 @@ pub trait ValueRowSerdeNew: Clone {
 }
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
-pub trait ValueRowSerde: ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew {}
+pub trait ValueRowSerde:
+    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send
+{
+}
 
 /// Wrap of the original `Row` serializing function
 #[derive(Clone)]
