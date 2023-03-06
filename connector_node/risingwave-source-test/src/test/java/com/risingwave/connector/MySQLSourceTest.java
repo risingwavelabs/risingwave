@@ -126,6 +126,7 @@ public class MySQLSourceTest {
         connection.close();
     }
 
+    // generates test cases for risingwave debezium parser
     @Ignore
     @Test
     public void getTestJson() throws InterruptedException, SQLException {
@@ -142,6 +143,7 @@ public class MySQLSourceTest {
                         + "O_CHAR CHAR(15), "
                         + "O_DATE DATE, "
                         + "O_TIME TIME, "
+                        + "O_DATETIME DATETIME, "
                         + "O_TIMESTAMP TIMESTAMP, "
                         + "O_JSON JSON, "
                         + "PRIMARY KEY (O_KEY))";
@@ -163,10 +165,10 @@ public class MySQLSourceTest {
         Thread.sleep(3000);
         t1.start();
         Thread.sleep(3000);
-        // Q1: ordinary insert (read)
+        // Q1: ordinary insert
         query =
-                "INSERT INTO orders (O_KEY, O_BOOL, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_TIMESTAMP, O_JSON)"
-                        + "VALUES(111, TRUE, -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\":\"v1\",\"k2\":11}')";
+                "INSERT INTO orders (O_KEY, O_BOOL, O_TINY, O_INT, O_REAL, O_DOUBLE, O_DECIMAL, O_CHAR, O_DATE, O_TIME, O_DATETIME, O_TIMESTAMP, O_JSON)"
+                        + "VALUES(111, TRUE, -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '1000-01-01', '00:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:01.000000', '{\"k1\": \"v1\", \"k2\": 11}')";
         SourceTestClient.performQuery(connection, query);
         // Q2: update value of Q1 (value -> new value)
         query =
@@ -177,10 +179,11 @@ public class MySQLSourceTest {
                         + "O_DOUBLE = 333.33333, "
                         + "O_DECIMAL = 333.33, "
                         + "O_CHAR = 'no thanks', "
-                        + "O_DATE = '2012-12-12', "
-                        + "O_TIME = '12:12:12', "
-                        + "O_TIMESTAMP = '2011-12-12 12:12:12.121212', "
-                        + "O_JSON = '{\"k1\":\"v1_updated\",\"k2\":33}' "
+                        + "O_DATE = '9999-12-31', "
+                        + "O_TIME = '23:59:59', "
+                        + "O_DATETIME = '5138-11-16 09:46:39', "
+                        + "O_TIMESTAMP = '2038-01-09 03:14:07', "
+                        + "O_JSON = '{\"k1\": \"v1_updated\", \"k2\": 33}' "
                         + "WHERE orders.O_KEY = 111";
         SourceTestClient.performQuery(connection, query);
         // Q3: delete value from Q1

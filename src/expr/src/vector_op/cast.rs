@@ -38,6 +38,7 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
+const ERROR_INT_TO_TIME: &str = "Can't cast i64 to date, date/time field value out of range (expected time in range 00:00:00 to 23:59:59)";
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
 const PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ: &str = concat!(
     "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
@@ -63,9 +64,12 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
 
 #[inline(always)]
 pub fn i64_to_time(t: i64) -> Result<NaiveTimeWrapper> {
-    let (time, _) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
+    let (time, overflow_cnt) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
         .unwrap()
-        .overflowing_add_signed(Duration::microseconds(t));
+        .overflowing_add_signed(Duration::milliseconds(t));
+    if overflow_cnt != 0 {
+        return Err(ExprError::Parse(ERROR_INT_TO_TIME.into()));
+    }
     Ok(NaiveTimeWrapper::new(time))
 }
 
