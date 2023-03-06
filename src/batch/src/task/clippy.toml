@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "risingwave_pb::task_service::task_info_response::TaskStatus::Unspecified", reason = "Exists for compatibility with proto3, should not be used." },
+]
