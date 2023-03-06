@@ -19,6 +19,7 @@
 
 use std::collections::BTreeMap;
 
+use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
@@ -45,7 +46,8 @@ impl Rule for MinMaxOnIndexRule {
             return None;
         }
         let first_call = calls.iter().exactly_one().ok()?;
-            && matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
+
+        if matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
             && !first_call.distinct
             && first_call.filter.always_true()
             && first_call.order_by_fields.is_empty()
