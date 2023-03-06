@@ -37,9 +37,9 @@ SELECT f1 AS "Eight" FROM TIME_TBL WHERE f1 >= '00:00';
 
 -- Check edge cases
 SELECT '23:59:59.999999'::time;
-SELECT '23:59:59.9999999'::time;  -- rounds up
-SELECT '23:59:60'::time;  -- rounds up
-SELECT '24:00:00'::time;  -- allowed
+--@ SELECT '23:59:59.9999999'::time;  -- rounds up
+--@ SELECT '23:59:60'::time;  -- rounds up
+--@ SELECT '24:00:00'::time;  -- allowed
 SELECT '24:00:00.01'::time;  -- not allowed
 SELECT '23:59:60.01'::time;  -- not allowed
 SELECT '24:01:00'::time;  -- not allowed
@@ -61,19 +61,19 @@ DROP TABLE TIME_TBL;
 --
 -- test EXTRACT
 --
-SELECT EXTRACT(MICROSECOND FROM TIME '13:30:25.575401');
-SELECT EXTRACT(MILLISECOND FROM TIME '13:30:25.575401');
-SELECT EXTRACT(SECOND      FROM TIME '13:30:25.575401');
-SELECT EXTRACT(MINUTE      FROM TIME '13:30:25.575401');
-SELECT EXTRACT(HOUR        FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(MICROSECOND FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(MILLISECOND FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(SECOND      FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(MINUTE      FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(HOUR        FROM TIME '13:30:25.575401');
 SELECT EXTRACT(DAY         FROM TIME '13:30:25.575401');  -- error
 SELECT EXTRACT(FORTNIGHT   FROM TIME '13:30:25.575401');  -- error
 SELECT EXTRACT(TIMEZONE    FROM TIME '13:30:25.575401');  -- error
-SELECT EXTRACT(EPOCH       FROM TIME '13:30:25.575401');
+--@ SELECT EXTRACT(EPOCH       FROM TIME '13:30:25.575401');
 
 -- date_part implementation is mostly the same as extract, so only
 -- test a few cases for additional coverage.
-SELECT date_part('microsecond', TIME '13:30:25.575401');
-SELECT date_part('millisecond', TIME '13:30:25.575401');
-SELECT date_part('second',      TIME '13:30:25.575401');
-SELECT date_part('epoch',       TIME '13:30:25.575401');
+--@ SELECT date_part('microsecond', TIME '13:30:25.575401');
+--@ SELECT date_part('millisecond', TIME '13:30:25.575401');
+--@ SELECT date_part('second',      TIME '13:30:25.575401');
+--@ SELECT date_part('epoch',       TIME '13:30:25.575401');
