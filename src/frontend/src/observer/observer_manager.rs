@@ -17,6 +17,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use risingwave_common::catalog::CatalogVersion;
 use risingwave_common::hash::ParallelUnitMapping;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::observer_manager::{ObserverState, SubscribeFrontend};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -36,6 +37,7 @@ pub struct FrontendObserverNode {
     user_info_manager: Arc<RwLock<UserInfoManager>>,
     user_info_updated_tx: Sender<UserInfoVersion>,
     hummock_snapshot_manager: HummockSnapshotManagerRef,
+    system_params_manager: LocalSystemParamsManagerRef,
 }
 
 impl ObserverState for FrontendObserverNode {
@@ -46,7 +48,7 @@ impl ObserverState for FrontendObserverNode {
             return;
         };
 
-        match info {
+        match info.to_owned() {
             Info::Database(_)
             | Info::Schema(_)
             | Info::Table(_)
@@ -58,7 +60,7 @@ impl ObserverState for FrontendObserverNode {
                 self.handle_catalog_notification(resp);
             }
             Info::Node(node) => {
-                self.update_worker_node_manager(resp.operation(), node.clone());
+                self.update_worker_node_manager(resp.operation(), node);
             }
             Info::User(_) => {
                 self.handle_user_notification(resp);
@@ -78,6 +80,9 @@ impl ObserverState for FrontendObserverNode {
             }
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
+            }
+            Info::SystemParams(p) => {
+                self.system_params_manager.try_set_params(p);
             }
         }
     }
@@ -155,6 +160,7 @@ impl FrontendObserverNode {
         user_info_manager: Arc<RwLock<UserInfoManager>>,
         user_info_updated_tx: Sender<UserInfoVersion>,
         hummock_snapshot_manager: HummockSnapshotManagerRef,
+        system_params_manager: LocalSystemParamsManagerRef,
     ) -> Self {
         Self {
             worker_node_manager,
@@ -163,6 +169,7 @@ impl FrontendObserverNode {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager,
+            system_params_manager,
         }
     }
 

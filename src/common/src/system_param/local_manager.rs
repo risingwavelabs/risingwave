@@ -22,13 +22,14 @@ use tokio::sync::watch::{channel, Receiver, Sender};
 use super::reader::SystemParamsReader;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
+pub type LocalSystemParamsManagerRef = Arc<LocalSystemParamsManager>;
 
 /// The system parameter manager on worker nodes. It provides two methods for other components to
 /// read the latest system parameters:
 /// - `get_params` returns a reference to the latest parameters that is atomically updated.
 /// - `watch_params` returns a channel on which calling `recv` will get the latest parameters.
 ///   Compared with `get_params`, the caller can be explicitly notified of parameter change.
-pub struct LocalSystemParamManager {
+pub struct LocalSystemParamsManager {
     /// The latest parameters.
     params: SystemParamsReaderRef,
 
@@ -36,7 +37,7 @@ pub struct LocalSystemParamManager {
     tx: Sender<SystemParamsReaderRef>,
 }
 
-impl LocalSystemParamManager {
+impl LocalSystemParamsManager {
     pub fn new(params: SystemParamsReader) -> Self {
         let params = Arc::new(ArcSwap::from_pointee(params));
         let (tx, _) = channel(params.clone());
@@ -56,7 +57,7 @@ impl LocalSystemParamManager {
         }
     }
 
-    pub fn watch_parmams(&self) -> Receiver<SystemParamsReaderRef> {
+    pub fn watch_params(&self) -> Receiver<SystemParamsReaderRef> {
         self.tx.subscribe()
     }
 }
@@ -68,7 +69,7 @@ mod tests {
     #[tokio::test]
     async fn test_manager() {
         let p = SystemParams::default().into();
-        let manager = LocalSystemParamManager::new(p);
+        let manager = LocalSystemParamsManager::new(p);
         let shared_params = manager.get_params();
 
         let new_params = SystemParams {
@@ -76,7 +77,7 @@ mod tests {
             ..Default::default()
         };
 
-        let mut params_rx = manager.watch_parmams();
+        let mut params_rx = manager.watch_params();
 
         manager.try_set_params(new_params.clone());
         params_rx.changed().await.unwrap();
