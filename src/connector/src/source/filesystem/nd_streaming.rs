@@ -70,7 +70,7 @@ impl<T> NdByteStreamWrapper<T> {
                     .as_ref()
                     .map(|p| p.len())
                     .unwrap_or_default();
-            for msg in batch.into_iter() {
+            for msg in batch {
                 let payload = msg.payload.unwrap_or_default();
                 buf.extend(payload);
             }
