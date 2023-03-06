@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
@@ -597,7 +596,12 @@ where
             .into_iter()
             .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
             .collect::<Option<_>>()
-            .context("failed to map columns")?;
+            .ok_or_else(|| {
+                // The `rewrite` only fails if some column is dropped.
+                MetaError::invalid_parameter(
+                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                )
+            })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,
