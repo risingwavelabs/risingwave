@@ -67,15 +67,21 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
-    let mut rng = generate_rng(seed);
-    let (tables, base_tables, mviews, mut setup_sql) =
-        create_tables(&mut rng, testdata, client).await.unwrap();
-
+    let mut setup_sql = String::with_capacity(1000);
     let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
     setup_sql.push_str(&session_sql);
     let session_sql = set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
     setup_sql.push_str(&session_sql);
     tracing::info!("Set session variables");
+
+    let mut rng = generate_rng(seed);
+    let (base_tables, ddl) = create_base_tables(&mut rng, testdata, client)
+        .await
+        .unwrap();
+    setup_sql.push_str(&ddl);
+
+    let (tables, mviews, ddl) = create_mviews(&mut rng, tables, client).await.unwrap();
+    setup_sql.push_str(&ddl);
 
     let rows_per_table = 10;
     let max_rows_inserted = rows_per_table * base_tables.len();
@@ -152,8 +158,12 @@ pub async fn generate(
 /// e2e test runner for sqlsmith
 pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
     let mut rng = generate_rng(seed);
-    let (tables, base_tables, mviews, mut setup_sql) =
-        create_tables(&mut rng, testdata, client).await.unwrap();
+    let (base_tables, ddl) = create_base_tables(&mut rng, testdata, client)
+        .await
+        .unwrap();
+    setup_sql.push_str(&ddl);
+    let (tables, mviews, ddl) = create_mviews(&mut rng, tables, client).await.unwrap();
+    setup_sql.push_str(&ddl);
     tracing::info!("Created tables");
 
     let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
@@ -351,14 +361,14 @@ fn get_seed_table_sql(testdata: &str) -> String {
 
 /// Create the tables defined in testdata, along with some mviews.
 /// TODO: Generate indexes and sinks.
-async fn create_tables(
+async fn create_base_tables(
     rng: &mut impl Rng,
     testdata: &str,
     client: &Client,
-) -> Result<(Vec<Table>, Vec<Table>, Vec<Table>, String)> {
+) -> Result<(Vec<Table>, String)> {
     tracing::info!("Preparing tables...");
 
-    let mut setup_sql = String::with_capacity(1000);
+    let mut ddl = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
     let statements = parse_sql(&sql);
     let mut mvs_and_base_tables = vec![];
@@ -372,9 +382,20 @@ async fn create_tables(
         let create_sql = stmt.to_string();
         tracing::info!("[EXECUTING CREATE TABLE]: {}", &create_sql);
         client.simple_query(&create_sql).await.unwrap();
-        setup_sql.push_str(&format!("{};\n", &create_sql));
+        ddl.push_str(&format!("{};\n", &create_sql));
     }
 
+    Ok((base_tables, ddl))
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// TODO: Generate indexes and sinks.
+async fn create_mviews(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+) -> Result<(Vec<Table>, Vec<Table>, String)> {
+    let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
     for i in 0..10 {
@@ -389,7 +410,7 @@ async fn create_tables(
             mviews.push(table);
         }
     }
-    Ok((mvs_and_base_tables, base_tables, mviews, setup_sql))
+    Ok((mvs_and_base_tables, mviews, setup_sql))
 }
 
 fn format_drop_mview(mview: &Table) -> String {
