@@ -971,9 +971,9 @@ impl<D: HummockIteratorDirection> ImmutableMemtableSnapshotIterator<D> {
             }
             let values = &self.current_item().1;
             debug_assert!(!values.is_empty());
-            let max_epoch = values.first().unwrap().0;
             let min_epoch = values.last().unwrap().0;
-            if min_epoch <= self.read_epoch && self.read_epoch <= max_epoch {
+            // read_epoch greater and equal than min_epoch there exists a visible version
+            if min_epoch <= self.read_epoch {
                 break;
             }
             self.current_key_idx += 1;
