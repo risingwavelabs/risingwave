@@ -68,8 +68,14 @@ pub async fn generate(
     seed: Option<u64>,
 ) {
     let mut rng = generate_rng(seed);
-    let (tables, base_tables, mviews, setup_sql) =
+    let (tables, base_tables, mviews, mut setup_sql) =
         create_tables(&mut rng, testdata, client).await.unwrap();
+
+    let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    setup_sql.push_str(&session_sql);
+    let session_sql = set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    setup_sql.push_str(&session_sql);
+    tracing::info!("Set session variables");
 
     let rows_per_table = 10;
     let max_rows_inserted = rows_per_table * base_tables.len();
