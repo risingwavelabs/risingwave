@@ -11,15 +11,16 @@ buildkite-agent artifact download risingwave_simulation .
 chmod +x ./risingwave_simulation
 
 echo "--- Extract data for Kafka"
-cd ./scripts/source/
+pushd ./scripts/source/
 mkdir -p ./test_data
 unzip -o test_data.zip -d .
-cd ../../
+popd
 
 echo "--- Extract data for SqlSmith"
-cd ./src/tests/sqlsmith/tests
+pushd ./src/tests/sqlsmith/tests
 git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/sqlsmith-query-snapshots.git
-cd ../../../../
+pushd sqlsmith-query-snapshots && git checkout stage && popd
+popd
 
 export RUST_LOG=info
 export LOGDIR=.risingwave/log
