@@ -214,19 +214,19 @@ mod tests {
         }
     }
 
-    fn make_i64_array_expr(values: Vec<Option<i64>>) -> BoxedExpression {
+    fn make_i64_array_expr(values: Vec<i64>) -> BoxedExpression {
         LiteralExpression::new(
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
-            Some(ListValue::new(values.into_iter().map(|x| x.into()).collect()).into()),
+            Some(ListValue::new(values.into_iter().map(|x| Some(x.into())).collect()).into()),
         )
         .boxed()
     }
 
     #[test]
     fn test_array_distinct_array_of_primitives() {
-        let array = make_i64_array_expr(vec![Some(42), Some(43), Some(42), None]);
+        let array = make_i64_array_expr(vec![42, 43, 42]);
         let expr = ArrayDistinctExpression {
             return_type: DataType::List {
                 datatype: Box::new(DataType::Int64),
@@ -239,7 +239,6 @@ mod tests {
         let expected_array = Some(ScalarImpl::List(ListValue::new(vec![
             Some(42i64.into()),
             Some(43i64.into()),
-            None,
         ])));
         let expected = vec![
             expected_array.clone(),
