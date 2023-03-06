@@ -402,10 +402,12 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
+        Expr::Extract { .. } => Some("extract".to_string()),
         Expr::Case { .. } => Some("case".to_string()),
         Expr::Cast { expr, data_type } => {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
         }
+        Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),
