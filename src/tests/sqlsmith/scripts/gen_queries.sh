@@ -85,7 +85,7 @@ extract_fail_info_from_logs() {
       QUERY=$(extract_failing_query < "$LOGFILE")
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "$GLOBAL_SESSION" "$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
+      echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
       echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.log"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
