@@ -152,5 +152,8 @@ SELECT (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
 statement ok
 SELECT ROW(1, ROW('1', 1)) = ROW('1', ROW(1, '1'));
 
+statement ok
+drop table x, y, trip;
+
 
 
