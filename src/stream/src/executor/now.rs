@@ -20,6 +20,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row;
 use risingwave_common::types::{DataType, ScalarImpl, ToDatumRef};
 use risingwave_common::util::epoch::Epoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -83,7 +84,11 @@ impl<S: StateStore> NowExecutor<S> {
         yield Message::Barrier(barrier);
 
         let state_row = {
-            let data_iter = state_table.iter(false).await?;
+            let data_iter = state_table
+                .iter(PrefetchOptions {
+                    exhaust_iter: false,
+                })
+                .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)

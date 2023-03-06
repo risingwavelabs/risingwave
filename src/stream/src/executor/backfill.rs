@@ -27,6 +27,7 @@ use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
@@ -332,7 +333,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                true,
+                PrefetchOptions { exhaust_iter: true },
             )
             .await?;
 

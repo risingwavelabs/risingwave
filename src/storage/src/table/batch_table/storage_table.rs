@@ -43,7 +43,7 @@ use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
 use crate::row_serde::{find_columns_by_ids, ColumnMapping};
-use crate::store::ReadOptions;
+use crate::store::{PrefetchOptions, ReadOptions};
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
@@ -315,7 +315,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             ignore_range_tombstone: false,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            exhaust_iter: false,
+            prefetch_options: PrefetchOptions {
+                exhaust_iter: false,
+            },
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
@@ -387,7 +389,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
-        exhaust_iter: bool,
+        prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         let raw_key_ranges = if !ordered
             && matches!(encoded_key_range.start_bound(), Unbounded)
@@ -431,7 +433,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     retention_seconds: self.table_option.retention_seconds,
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
-                    exhaust_iter,
+                    prefetch_options,
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
                     true => None,
@@ -478,7 +480,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
-        exhaust_iter: bool,
+        prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
@@ -588,7 +590,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             epoch,
             self.try_compute_vnode_by_pk_prefix(pk_prefix),
             ordered,
-            exhaust_iter,
+            prefetch_options,
         )
         .await
     }
@@ -601,9 +603,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
-        exhaust_iter: bool,
+        prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
-        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, exhaust_iter)
+        self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered, prefetch_options)
             .await
     }
 
@@ -612,9 +614,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         &self,
         epoch: HummockReadEpoch,
         ordered: bool,
-        exhaust_iter: bool,
+        prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
-        self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered, exhaust_iter)
+        self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered, prefetch_options)
             .await
     }
 }

@@ -135,7 +135,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         mut read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
         if limit.is_some() {
-            read_options.exhaust_iter = false;
+            read_options.prefetch_options.exhaust_iter = false;
         }
         let limit = limit.unwrap_or(usize::MAX);
         async move {
@@ -312,6 +312,13 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> Self::MayExistFuture<'_>;
 }
 
+#[derive(Default, Clone, Copy)]
+pub struct PrefetchOptions {
+    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
+    /// exhausted, i.e., will iterate until end.
+    pub exhaust_iter: bool,
+}
+
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
@@ -319,7 +326,7 @@ pub struct ReadOptions {
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
-    pub exhaust_iter: bool,
+    pub prefetch_options: PrefetchOptions,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,

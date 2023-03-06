@@ -22,6 +22,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::OrderPair;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
@@ -371,7 +372,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            true,
+                            PrefetchOptions { exhaust_iter: true },
                         )
                         .await?
                 }
@@ -383,7 +384,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            true,
+                            PrefetchOptions { exhaust_iter: true },
                         )
                         .await?
                 }

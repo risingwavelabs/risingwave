@@ -21,6 +21,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 
@@ -446,7 +447,13 @@ async fn test_batch_scan_with_value_indices() {
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table
-        .batch_iter(HummockReadEpoch::Committed(epoch.prev), false, false)
+        .batch_iter(
+            HummockReadEpoch::Committed(epoch.prev),
+            false,
+            PrefetchOptions {
+                exhaust_iter: false,
+            },
+        )
         .await
         .unwrap();
     pin_mut!(iter);

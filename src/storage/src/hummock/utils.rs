@@ -31,7 +31,7 @@ use tokio::sync::Notify;
 use super::{HummockError, HummockResult};
 use crate::error::StorageResult;
 use crate::mem_table::{KeyOp, MemTableError};
-use crate::store::{ReadOptions, StateStoreRead};
+use crate::store::{PrefetchOptions, ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -351,7 +351,9 @@ pub(crate) async fn do_insert_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
-        exhaust_iter: false,
+        prefetch_options: PrefetchOptions {
+            exhaust_iter: false,
+        },
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -381,7 +383,9 @@ pub(crate) async fn do_delete_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
-        exhaust_iter: false,
+        prefetch_options: PrefetchOptions {
+            exhaust_iter: false,
+        },
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -421,7 +425,9 @@ pub(crate) async fn do_update_sanity_check(
         retention_seconds: table_option.retention_seconds,
         table_id,
         read_version_from_backup: false,
-        exhaust_iter: false,
+        prefetch_options: PrefetchOptions {
+            exhaust_iter: false,
+        },
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {

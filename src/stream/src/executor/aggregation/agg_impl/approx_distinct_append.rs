@@ -20,6 +20,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ScalarImpl};
 use risingwave_common::{bail, row};
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::approx_distinct_utils::{
@@ -115,7 +116,14 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<()> {
         let state_row = {
-            let data_iter = state_table.iter_with_pk_prefix(&group_key, false).await?;
+            let data_iter = state_table
+                .iter_with_pk_prefix(
+                    &group_key,
+                    PrefetchOptions {
+                        exhaust_iter: false,
+                    },
+                )
+                .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)
@@ -158,7 +166,14 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
         let current_row = group_key.chain(row::once(list));
 
         let state_row = {
-            let data_iter = state_table.iter_with_pk_prefix(&group_key, false).await?;
+            let data_iter = state_table
+                .iter_with_pk_prefix(
+                    &group_key,
+                    PrefetchOptions {
+                        exhaust_iter: false,
+                    },
+                )
+                .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
                 Some(state_row?)

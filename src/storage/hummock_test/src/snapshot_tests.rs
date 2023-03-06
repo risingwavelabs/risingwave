@@ -21,7 +21,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, WriteOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
@@ -43,7 +45,7 @@ macro_rules! assert_count_range_scan {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    exhaust_iter: true,
+                    prefetch_options: PrefetchOptions { exhaust_iter: true },
                 },
             )
             .await

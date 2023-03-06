@@ -25,6 +25,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, PkIndices, StreamExecutorResult};
@@ -94,7 +95,13 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
         );
         let streams = stream::iter(vnodes.iter_vnodes())
-            .map(|vnode| state_table.iter_with_pk_range(&pk_range, vnode, true))
+            .map(|vnode| {
+                state_table.iter_with_pk_range(
+                    &pk_range,
+                    vnode,
+                    PrefetchOptions { exhaust_iter: true },
+                )
+            })
             .buffer_unordered(10)
             .try_collect::<Vec<_>>()
             .await?

@@ -210,7 +210,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         prefetch: true,
-        must_iterated_pos: None,
+        must_iterated_end_user_key: None,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
         b.to_async(FuturesExecutor).iter(|| {

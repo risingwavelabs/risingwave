@@ -31,6 +31,7 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -83,7 +84,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_with_pk_range(&(start, end), VirtualNode::ZERO, true)
+            .iter_with_pk_range(
+                &(start, end),
+                VirtualNode::ZERO,
+                PrefetchOptions { exhaust_iter: true },
+            )
             .await?;
 
         let mut set = HashSet::new();

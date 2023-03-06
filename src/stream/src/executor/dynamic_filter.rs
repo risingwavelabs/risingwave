@@ -32,6 +32,7 @@ use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -232,7 +233,12 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter(false).await?;
+        let rhs_stream = self
+            .right_table
+            .iter(PrefetchOptions {
+                exhaust_iter: false,
+            })
+            .await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -389,7 +395,11 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                         for vnode in self.left_table.vnodes().iter_vnodes() {
                             let row_stream = self
                                 .left_table
-                                .iter_with_pk_range(&range, vnode, true)
+                                .iter_with_pk_range(
+                                    &range,
+                                    vnode,
+                                    PrefetchOptions { exhaust_iter: true },
+                                )
                                 .await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {

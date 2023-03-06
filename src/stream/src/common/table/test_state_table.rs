@@ -22,6 +22,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
 use risingwave_storage::StateStore;
 
@@ -280,7 +281,12 @@ async fn test_state_table_iter_with_prefix() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_with_pk_prefix(&pk_prefix, false)
+        .iter_with_pk_prefix(
+            &pk_prefix,
+            PrefetchOptions {
+                exhaust_iter: false,
+            },
+        )
         .await
         .unwrap();
     pin_mut!(iter);
@@ -411,7 +417,13 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, false)
+        .iter_with_pk_range(
+            &pk_range,
+            DEFAULT_VNODE,
+            PrefetchOptions {
+                exhaust_iter: false,
+            },
+        )
         .await
         .unwrap();
     pin_mut!(iter);
@@ -436,7 +448,13 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, false)
+        .iter_with_pk_range(
+            &pk_range,
+            DEFAULT_VNODE,
+            PrefetchOptions {
+                exhaust_iter: false,
+            },
+        )
         .await
         .unwrap();
     pin_mut!(iter);
@@ -575,7 +593,12 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter(false).await.unwrap();
+        let iter = state_table
+            .iter(PrefetchOptions {
+                exhaust_iter: false,
+            })
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -630,7 +653,12 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter(false).await.unwrap();
+    let iter = state_table
+        .iter(PrefetchOptions {
+            exhaust_iter: false,
+        })
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -736,7 +764,12 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter(false).await.unwrap();
+        let iter = state_table
+            .iter(PrefetchOptions {
+                exhaust_iter: false,
+            })
+            .await
+            .unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -812,7 +845,12 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter(false).await.unwrap();
+    let iter = state_table
+        .iter(PrefetchOptions {
+            exhaust_iter: false,
+        })
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -999,7 +1037,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(true)
+        .iter(PrefetchOptions { exhaust_iter: true })
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1116,7 +1154,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(true)
+        .iter(PrefetchOptions { exhaust_iter: true })
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1228,7 +1266,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(true)
+        .iter(PrefetchOptions { exhaust_iter: true })
         .await
         .unwrap()
         .collect::<Vec<_>>()

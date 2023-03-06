@@ -39,7 +39,7 @@ use risingwave_storage::monitor::{
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{ReadOptions, StateStoreRead};
+use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
@@ -623,7 +623,9 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
-                    exhaust_iter: false,
+                    prefetch_options: PrefetchOptions {
+                        exhaust_iter: false,
+                    },
                 },
             )
             .await?;

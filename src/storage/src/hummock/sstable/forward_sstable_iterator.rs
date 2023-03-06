@@ -72,10 +72,12 @@ struct PrefetchContext {
     dest_idx: usize,
 }
 
+const DEFAULT_PREFETCH_BLOCK_NUM: usize = 1;
+
 impl PrefetchContext {
     fn new(dest_idx: usize) -> Self {
         Self {
-            prefetched_blocks: VecDeque::with_capacity(2),
+            prefetched_blocks: VecDeque::with_capacity(DEFAULT_PREFETCH_BLOCK_NUM + 1),
             dest_idx,
         }
     }
@@ -131,13 +133,14 @@ impl PrefetchContext {
                 true
             }
         };
-        if in_prefetch {
+        let ret = if in_prefetch {
             self.prefetched_blocks.pop_front().unwrap().1.wait().await
         } else {
             sstable_store
                 .get(sst, idx, crate::hummock::CachePolicy::Fill, stats)
                 .await
-        }
+        };
+        ret
     }
 }
 
@@ -177,8 +180,8 @@ impl SstableIterator {
         }
     }
 
-    fn calculate_dest_idx(&mut self, start_idx: usize) {
-        if let Some(bound) = self.options.must_iterated_pos.as_ref() {
+    fn init_block_fetcher(&mut self, start_idx: usize) {
+        if let Some(bound) = self.options.must_iterated_end_user_key.as_ref() {
             let block_metas = &self.sst.value().meta.block_metas;
             let next_to_start_idx = start_idx + 1;
             if next_to_start_idx < block_metas.len() {
@@ -295,7 +298,7 @@ impl HummockIterator for SstableIterator {
 
     fn rewind(&mut self) -> Self::RewindFuture<'_> {
         async move {
-            self.calculate_dest_idx(0);
+            self.init_block_fetcher(0);
             self.seek_idx(0, None).await
         }
     }
@@ -319,7 +322,7 @@ impl HummockIterator for SstableIterator {
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
-            self.calculate_dest_idx(block_idx);
+            self.init_block_fetcher(block_idx);
 
             self.seek_idx(block_idx, Some(encoded_key.as_slice()))
                 .await?;
@@ -505,7 +508,7 @@ mod tests {
             sstable_store,
             Arc::new(SstableIteratorReadOptions {
                 prefetch: true,
-                must_iterated_pos: None,
+                must_iterated_end_user_key: None,
             }),
         );
         let mut cnt = 0;

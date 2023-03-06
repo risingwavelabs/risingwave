@@ -26,6 +26,7 @@ use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -174,7 +175,12 @@ impl<S: StateStore> MaterializedInputState<S> {
             let mut cache_filler = self.cache.begin_syncing();
 
             let all_data_iter = state_table
-                .iter_with_pk_prefix(&group_key, cache_filler.capacity() == usize::MAX)
+                .iter_with_pk_prefix(
+                    &group_key,
+                    PrefetchOptions {
+                        exhaust_iter: cache_filler.capacity() == usize::MAX,
+                    },
+                )
                 .await?;
             pin_mut!(all_data_iter);
 

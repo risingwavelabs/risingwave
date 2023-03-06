@@ -105,7 +105,9 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: false,
+                prefetch_options: PrefetchOptions {
+                    exhaust_iter: false,
+                },
             },
         )
         .await
@@ -159,7 +161,9 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: false,
+                prefetch_options: PrefetchOptions {
+                    exhaust_iter: false,
+                },
             },
         )
         .await;
@@ -174,7 +178,9 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: false,
+                prefetch_options: PrefetchOptions {
+                    exhaust_iter: false,
+                },
             },
         )
         .await;
@@ -196,7 +202,9 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: false,
+                prefetch_options: PrefetchOptions {
+                    exhaust_iter: false,
+                },
             },
         )
         .await
@@ -237,7 +245,9 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: false,
+                prefetch_options: PrefetchOptions {
+                    exhaust_iter: false,
+                },
             },
         )
         .await
@@ -254,7 +264,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
-                exhaust_iter: true,
+                prefetch_options: PrefetchOptions { exhaust_iter: true },
             },
         )
         .await

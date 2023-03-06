@@ -15,6 +15,7 @@
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -83,7 +84,12 @@ impl<S: StateStore> ManagedTopNState<S> {
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(&group_key, false)
+            .iter_with_pk_prefix(
+                &group_key,
+                PrefetchOptions {
+                    exhaust_iter: false,
+                },
+            )
             .await?;
         pin_mut!(state_table_iter);
 
@@ -120,7 +126,12 @@ impl<S: StateStore> ManagedTopNState<S> {
         let cache = &mut topn_cache.high;
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(&group_key, cache_size_limit == usize::MAX)
+            .iter_with_pk_prefix(
+                &group_key,
+                PrefetchOptions {
+                    exhaust_iter: cache_size_limit == usize::MAX,
+                },
+            )
             .await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
@@ -163,7 +174,12 @@ impl<S: StateStore> ManagedTopNState<S> {
 
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(&group_key, topn_cache.limit == usize::MAX)
+            .iter_with_pk_prefix(
+                &group_key,
+                PrefetchOptions {
+                    exhaust_iter: topn_cache.limit == usize::MAX,
+                },
+            )
             .await?;
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {

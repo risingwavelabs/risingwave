@@ -393,7 +393,7 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub prefetch: bool,
-    pub must_iterated_pos: Option<Bound<UserKey<Vec<u8>>>>,
+    pub must_iterated_end_user_key: Option<Bound<UserKey<Vec<u8>>>>,
 }
 
 #[cfg(test)]
