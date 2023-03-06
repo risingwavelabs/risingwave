@@ -126,8 +126,7 @@ message Function {
   message TableFunction {
     repeated data.DataType return_types = 1;
   }
-  message AggregateFunction {
-  }
+  message AggregateFunction {}
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
