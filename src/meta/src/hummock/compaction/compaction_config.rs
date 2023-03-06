@@ -27,6 +27,7 @@ const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+const DEFAULT_SUB_LEVEL_NUMBER_LIMIT: u64 = u32::MAX as u64;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -61,6 +62,7 @@ impl CompactionConfigBuilder {
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
                 max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
+                sub_level_number_limit: DEFAULT_SUB_LEVEL_NUMBER_LIMIT,
             },
         }
     }
@@ -70,8 +72,24 @@ impl CompactionConfigBuilder {
     }
 
     pub fn build(self) -> CompactionConfig {
+        if let Err(reason) = validate_compaction_config(&self.config) {
+            tracing::warn!("Bad compaction config: {}", reason);
+        }
         self.config
     }
+}
+
+/// Returns Ok if `config` is valid,
+/// or the reason why it's invalid.
+pub fn validate_compaction_config(config: &CompactionConfig) -> Result<(), String> {
+    let min_sub_level_number_limit = 1000;
+    if config.sub_level_number_limit < min_sub_level_number_limit {
+        return Err(format!(
+            "{} is too small for sub_level_number_limit, expect >= {}",
+            config.sub_level_number_limit, min_sub_level_number_limit
+        ));
+    }
+    Ok(())
 }
 
 impl Default for CompactionConfigBuilder {
@@ -105,4 +123,5 @@ builder_field! {
     compaction_filter_mask: u32,
     max_sub_compaction: u32,
     max_space_reclaim_bytes: u64,
+    sub_level_number_limit: u64,
 }

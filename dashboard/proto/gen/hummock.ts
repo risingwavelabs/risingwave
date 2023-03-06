@@ -745,7 +745,8 @@ export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
     | { $case: "level0TierCompactFileNumber"; level0TierCompactFileNumber: number }
     | { $case: "targetFileSizeBase"; targetFileSizeBase: number }
     | { $case: "compactionFilterMask"; compactionFilterMask: number }
-    | { $case: "maxSubCompaction"; maxSubCompaction: number };
+    | { $case: "maxSubCompaction"; maxSubCompaction: number }
+    | { $case: "subLevelNumberLimit"; subLevelNumberLimit: number };
 }
 
 export interface RiseCtlUpdateCompactionConfigResponse {
@@ -790,6 +791,8 @@ export interface CompactionConfig {
   compactionFilterMask: number;
   maxSubCompaction: number;
   maxSpaceReclaimBytes: number;
+  /** soft limit for max number of sub level number */
+  subLevelNumberLimit: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -842,6 +845,21 @@ export interface HummockVersionStats {
 export interface HummockVersionStats_TableStatsEntry {
   key: number;
   value: TableStats | undefined;
+}
+
+export interface WriteLimits {
+  /** < compaction group id, write limit info > */
+  writeLimits: { [key: number]: WriteLimits_WriteLimit };
+}
+
+export interface WriteLimits_WriteLimit {
+  tableIds: number[];
+  reason: string;
+}
+
+export interface WriteLimits_WriteLimitsEntry {
+  key: number;
+  value: WriteLimits_WriteLimit | undefined;
 }
 
 function createBaseSstableInfo(): SstableInfo {
@@ -4005,6 +4023,8 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
         ? { $case: "compactionFilterMask", compactionFilterMask: Number(object.compactionFilterMask) }
         : isSet(object.maxSubCompaction)
         ? { $case: "maxSubCompaction", maxSubCompaction: Number(object.maxSubCompaction) }
+        : isSet(object.subLevelNumberLimit)
+        ? { $case: "subLevelNumberLimit", subLevelNumberLimit: Number(object.subLevelNumberLimit) }
         : undefined,
     };
   },
@@ -4027,6 +4047,8 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       (obj.compactionFilterMask = Math.round(message.mutableConfig?.compactionFilterMask));
     message.mutableConfig?.$case === "maxSubCompaction" &&
       (obj.maxSubCompaction = Math.round(message.mutableConfig?.maxSubCompaction));
+    message.mutableConfig?.$case === "subLevelNumberLimit" &&
+      (obj.subLevelNumberLimit = Math.round(message.mutableConfig?.subLevelNumberLimit));
     return obj;
   },
 
@@ -4110,6 +4132,16 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       object.mutableConfig?.maxSubCompaction !== null
     ) {
       message.mutableConfig = { $case: "maxSubCompaction", maxSubCompaction: object.mutableConfig.maxSubCompaction };
+    }
+    if (
+      object.mutableConfig?.$case === "subLevelNumberLimit" &&
+      object.mutableConfig?.subLevelNumberLimit !== undefined &&
+      object.mutableConfig?.subLevelNumberLimit !== null
+    ) {
+      message.mutableConfig = {
+        $case: "subLevelNumberLimit",
+        subLevelNumberLimit: object.mutableConfig.subLevelNumberLimit,
+      };
     }
     return message;
   },
@@ -4309,6 +4341,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     compactionFilterMask: 0,
     maxSubCompaction: 0,
     maxSpaceReclaimBytes: 0,
+    subLevelNumberLimit: 0,
   };
 }
 
@@ -4337,6 +4370,7 @@ export const CompactionConfig = {
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
       maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
+      subLevelNumberLimit: isSet(object.subLevelNumberLimit) ? Number(object.subLevelNumberLimit) : 0,
     };
   },
 
@@ -4362,6 +4396,7 @@ export const CompactionConfig = {
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
     message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
+    message.subLevelNumberLimit !== undefined && (obj.subLevelNumberLimit = Math.round(message.subLevelNumberLimit));
     return obj;
   },
 
@@ -4379,6 +4414,7 @@ export const CompactionConfig = {
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
+    message.subLevelNumberLimit = object.subLevelNumberLimit ?? 0;
     return message;
   },
 };
@@ -4484,6 +4520,109 @@ export const HummockVersionStats_TableStatsEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? TableStats.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseWriteLimits(): WriteLimits {
+  return { writeLimits: {} };
+}
+
+export const WriteLimits = {
+  fromJSON(object: any): WriteLimits {
+    return {
+      writeLimits: isObject(object.writeLimits)
+        ? Object.entries(object.writeLimits).reduce<{ [key: number]: WriteLimits_WriteLimit }>((acc, [key, value]) => {
+          acc[Number(key)] = WriteLimits_WriteLimit.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: WriteLimits): unknown {
+    const obj: any = {};
+    obj.writeLimits = {};
+    if (message.writeLimits) {
+      Object.entries(message.writeLimits).forEach(([k, v]) => {
+        obj.writeLimits[k] = WriteLimits_WriteLimit.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits>, I>>(object: I): WriteLimits {
+    const message = createBaseWriteLimits();
+    message.writeLimits = Object.entries(object.writeLimits ?? {}).reduce<{ [key: number]: WriteLimits_WriteLimit }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = WriteLimits_WriteLimit.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseWriteLimits_WriteLimit(): WriteLimits_WriteLimit {
+  return { tableIds: [], reason: "" };
+}
+
+export const WriteLimits_WriteLimit = {
+  fromJSON(object: any): WriteLimits_WriteLimit {
+    return {
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      reason: isSet(object.reason) ? String(object.reason) : "",
+    };
+  },
+
+  toJSON(message: WriteLimits_WriteLimit): unknown {
+    const obj: any = {};
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    message.reason !== undefined && (obj.reason = message.reason);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits_WriteLimit>, I>>(object: I): WriteLimits_WriteLimit {
+    const message = createBaseWriteLimits_WriteLimit();
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.reason = object.reason ?? "";
+    return message;
+  },
+};
+
+function createBaseWriteLimits_WriteLimitsEntry(): WriteLimits_WriteLimitsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const WriteLimits_WriteLimitsEntry = {
+  fromJSON(object: any): WriteLimits_WriteLimitsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? WriteLimits_WriteLimit.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: WriteLimits_WriteLimitsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined &&
+      (obj.value = message.value ? WriteLimits_WriteLimit.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits_WriteLimitsEntry>, I>>(object: I): WriteLimits_WriteLimitsEntry {
+    const message = createBaseWriteLimits_WriteLimitsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? WriteLimits_WriteLimit.fromPartial(object.value)
       : undefined;
     return message;
   },

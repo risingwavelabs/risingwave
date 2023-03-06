@@ -18,18 +18,24 @@ use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    get_compaction_group_ids, HummockVersionExt,
+};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
+use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     HummockPinnedSnapshot, HummockPinnedVersion, HummockVersion, HummockVersionDelta,
     HummockVersionStats,
 };
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{read_lock, write_lock};
 use crate::hummock::metrics_utils::{trigger_safepoint_stat, trigger_stale_ssts_stat};
+use crate::hummock::model::CompactionGroup;
 use crate::hummock::HummockManager;
 use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
@@ -80,6 +86,8 @@ pub struct Versioning {
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
     pub version_safe_points: Vec<HummockVersionId>,
+    /// Tables that write limit is trigger for.
+    pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
 
     // Persistent states below
     /// Mapping from id of each hummock version which succeeds checkpoint to its
@@ -204,14 +212,101 @@ where
         }
         trigger_safepoint_stat(&self.metrics, &wl.version_safe_points);
     }
+
+    /// Updates write limits for `target_groups` and sends notification.
+    /// Returns true if `write_limit` has been modified.
+    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
+    #[named]
+    pub(super) async fn try_update_write_limits(
+        &self,
+        target_group_ids: &[CompactionGroupId],
+    ) -> bool {
+        let mut guard = write_lock!(self, versioning).await;
+        let configs = self
+            .compaction_group_manager
+            .read()
+            .await
+            .get_compaction_group_configs(target_group_ids);
+        let mut new_write_limits =
+            calc_new_write_limits(configs, guard.write_limit.clone(), &guard.current_version);
+        let all_group_ids = get_compaction_group_ids(&guard.current_version);
+        new_write_limits.drain_filter(|group_id, _| !all_group_ids.contains(group_id));
+        if new_write_limits == guard.write_limit {
+            return false;
+        }
+        tracing::debug!(
+            "Hummock write limits is updated: {:#?} -> {:#?}",
+            guard.write_limit,
+            new_write_limits
+        );
+        guard.write_limit = new_write_limits;
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(
+                Operation::Add,
+                Info::HummockWriteLimits(risingwave_pb::hummock::WriteLimits {
+                    write_limits: guard.write_limit.clone(),
+                }),
+            );
+        true
+    }
+
+    /// Gets write limits.
+    /// The implementation acquires `versioning` lock.
+    #[named]
+    pub async fn write_limits(&self) -> HashMap<CompactionGroupId, WriteLimit> {
+        let guard = read_lock!(self, versioning).await;
+        guard.write_limit.clone()
+    }
+}
+
+/// Calculates write limits for `target_groups`.
+/// Returns a new complete write limits snapshot based on `origin_snapshot` and `version`.
+pub(super) fn calc_new_write_limits(
+    target_groups: HashMap<CompactionGroupId, CompactionGroup>,
+    origin_snapshot: HashMap<CompactionGroupId, WriteLimit>,
+    version: &HummockVersion,
+) -> HashMap<CompactionGroupId, WriteLimit> {
+    let mut new_write_limits = origin_snapshot;
+    for (id, config) in &target_groups {
+        let levels = version.get_compaction_group_levels(*id);
+        // Add write limit conditions here.
+        let threshold = config.compaction_config.sub_level_number_limit as usize;
+        let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
+        if threshold < l0_sub_level_number {
+            new_write_limits.insert(
+                *id,
+                WriteLimit {
+                    table_ids: levels.member_table_ids.clone(),
+                    reason: format!(
+                        "too many L0 sub levels: {} > {}",
+                        l0_sub_level_number, threshold
+                    ),
+                },
+            );
+            continue;
+        }
+        // No condition is met.
+        new_write_limits.remove(id);
+    }
+    new_write_limits
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::HummockVersionId;
-    use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionDelta};
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
-    use crate::hummock::manager::versioning::Versioning;
+    use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
+    use risingwave_pb::hummock::hummock_version::Levels;
+    use risingwave_pb::hummock::write_limits::WriteLimit;
+    use risingwave_pb::hummock::{
+        HummockPinnedVersion, HummockVersion, HummockVersionDelta, Level, OverlappingLevel,
+    };
+
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::manager::versioning::{calc_new_write_limits, Versioning};
+    use crate::hummock::model::CompactionGroup;
 
     #[tokio::test]
     async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
@@ -249,5 +344,102 @@ mod tests {
         assert_eq!(versioning.min_pinned_version_id(), 10);
         versioning.pinned_versions.clear();
         assert_eq!(versioning.min_pinned_version_id(), HummockVersionId::MAX);
+    }
+
+    #[test]
+    fn test_calc_new_write_limits() {
+        let add_level_to_l0 = |levels: &mut Levels| {
+            levels
+                .l0
+                .as_mut()
+                .unwrap()
+                .sub_levels
+                .push(Level::default());
+        };
+        let set_sub_level_number_limit_for_group_1 =
+            |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+             sub_level_number_limit: u64| {
+                target_groups.insert(
+                    1,
+                    CompactionGroup {
+                        group_id: 1,
+                        compaction_config: Arc::new(
+                            CompactionConfigBuilder::new()
+                                .sub_level_number_limit(sub_level_number_limit)
+                                .build(),
+                        ),
+                    },
+                );
+            };
+
+        let mut target_groups: HashMap<CompactionGroupId, CompactionGroup> = Default::default();
+        set_sub_level_number_limit_for_group_1(&mut target_groups, 10);
+        let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
+            2,
+            WriteLimit {
+                table_ids: vec![1, 2, 3],
+                reason: "for test".to_string(),
+            },
+        )]
+        .into_iter()
+        .collect();
+        let mut version: HummockVersion = Default::default();
+        for group_id in 1..=3 {
+            version.levels.insert(
+                group_id,
+                Levels {
+                    l0: Some(OverlappingLevel::default()),
+                    ..Default::default()
+                },
+            );
+        }
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+        assert_eq!(new_write_limits.len(), 1);
+        for _ in 1..=10 {
+            add_level_to_l0(version.levels.get_mut(&1).unwrap());
+            let new_write_limits =
+                calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+            assert_eq!(
+                new_write_limits, origin_snapshot,
+                "write limit should not be triggered for group 1"
+            );
+        }
+        add_level_to_l0(version.levels.get_mut(&1).unwrap());
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "too many L0 sub levels: 11 > 10"
+        );
+        assert_eq!(new_write_limits.len(), 2);
+
+        set_sub_level_number_limit_for_group_1(&mut target_groups, 100);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+
+        set_sub_level_number_limit_for_group_1(&mut target_groups, 5);
+        let new_write_limits =
+            calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "too many L0 sub levels: 11 > 5"
+        );
     }
 }
