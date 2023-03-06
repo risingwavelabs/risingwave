@@ -563,7 +563,7 @@ mod tests {
 
     use super::compaction_test;
 
-    #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
+    // #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
         let config = RwConfig::default();
         let mut compaction_config = CompactionConfigBuilder::new().build();

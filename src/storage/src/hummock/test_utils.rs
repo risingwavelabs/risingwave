@@ -268,7 +268,7 @@ pub fn test_user_key(table_key: impl AsRef<[u8]>) -> UserKey<Vec<u8>> {
     UserKey::for_test(TableId::default(), table_key.as_ref().to_vec())
 }
 
-/// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
+// /// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
 pub fn test_user_key_of(idx: usize) -> UserKey<Vec<u8>> {
     let table_key = format!("key_test_{:05}", idx * 2).as_bytes().to_vec();
     UserKey::for_test(TableId::default(), table_key)
@@ -281,6 +281,20 @@ pub fn test_key_of(idx: usize) -> FullKey<Vec<u8>> {
         epoch: 233,
     }
 }
+
+// /// Generates a user key with table id 0 and table key format of `key_test_{idx * 2}`
+// pub fn test_user_key_of_u8(idx: usize) -> UserKey<&'static [u8]> {
+//     let table_key = format!("key_test_{:05}", idx * 2.).as_bytes();
+//     UserKey::for_test(TableId::default(), table_key)
+// }
+
+// /// Generates a full key with table id 0 and epoch 123. User key is created with
+// `test_user_key_of`. pub fn test_key_of_u8(idx: usize) -> FullKey<&'static [u8]> {
+//     FullKey {
+//         user_key: test_user_key_of_u8(idx),
+//         epoch: 233,
+//     }
+// }
 
 /// The value of an index in the test table
 pub fn test_value_of(idx: usize) -> Vec<u8> {

@@ -156,7 +156,7 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
@@ -323,7 +323,7 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.sstable_iter.as_ref().expect("no table iter").key())
+        self.sstable_iter.as_ref().expect("no table iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {

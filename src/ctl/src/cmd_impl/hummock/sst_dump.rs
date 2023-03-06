@@ -128,6 +128,7 @@ async fn print_blocks(
             block_data,
             table_data,
             block_meta.uncompressed_size as usize,
+            block_meta.table_id,
         )?;
     }
 
@@ -139,17 +140,18 @@ fn print_kv_pairs(
     block_data: Bytes,
     table_data: &TableData,
     uncompressed_capacity: usize,
+    block_table_id: u32,
 ) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
-    let block = Box::new(Block::decode(block_data, uncompressed_capacity).unwrap());
+    let block = Box::new(Block::decode(block_data, uncompressed_capacity, block_table_id).unwrap());
     let holder = BlockHolder::from_owned_block(block);
     let mut block_iter = BlockIterator::new(holder);
     block_iter.seek_to_first();
 
     while block_iter.is_valid() {
         let raw_full_key = block_iter.key();
-        let full_key = FullKey::decode(block_iter.key());
+        let full_key = block_iter.key();
         let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();

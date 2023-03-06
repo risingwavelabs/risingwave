@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp::Ordering, ops::Deref, borrow::Borrow};
-use std::ops::Range;
-use bytes::BufMut;
-use bytes::BytesMut;
+use std::cmp::Ordering;
+use std::ops::{Deref, Range};
+
+use bytes::{Buf, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::{KeyComparator, key::{UserKey, TableKey}};
+use risingwave_hummock_sdk::key::{TableKey, UserKey};
+use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
-use crate::hummock::BlockHolder;
+use crate::hummock::key::{EPOCH_LEN, TABLE_PREFIX_LEN};
+use crate::hummock::{BlockHolder, FullKey};
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
@@ -70,16 +72,16 @@ impl BlockIterator {
         self.try_prev_inner()
     }
 
-    pub fn key(&self) -> &[u8] {
+    pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        let table_id = self.block.deref().table_id();
-        let key = &self.key[..];
-        let mut buf = vec![];
-        buf.put_u32(table_id);
-        buf.put_slice(key);
-        buf.as_ref()
-    }
+        let table_id = TableId::new(self.block.deref().table_id());
+        let epoch_pos = &self.key[..].len() - EPOCH_LEN;
+        let epoch = (&self.key[epoch_pos..]).get_u64();
+        let user_key = UserKey::new(table_id, TableKey(&self.key[..epoch_pos]));
+        let full_key = FullKey::from_user_key(user_key, epoch);
 
+        full_key
+    }
 
     pub fn value(&self) -> &[u8] {
         assert!(self.is_valid());
@@ -161,7 +163,7 @@ impl BlockIterator {
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
         while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
+            && KeyComparator::compare_encoded_full_key(&self.key[..], &key) == Ordering::Less
         {
             self.next_inner();
         }
@@ -252,21 +254,25 @@ impl BlockIterator {
 #[cfg(test)]
 mod tests {
     use bytes::{BufMut, Bytes};
+    use risingwave_hummock_sdk::key::UserKey;
 
     use super::*;
     use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
-
+    pub fn full_key_for_test(user_key_bytes: &[u8], epoch: u64) -> FullKey<&[u8]> {
+        let user_key = UserKey::new(TableId::default(), TableKey(user_key_bytes));
+        FullKey::from_user_key(user_key, epoch)
+    }
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k01", 1), b"v01");
-        builder.add(&full_key(b"k02", 2), b"v02");
-        builder.add(&full_key(b"k04", 4), b"v04");
-        builder.add(&full_key(b"k05", 5), b"v05");
+        builder.add(&full_key_for_test(b"k01", 1), b"v01");
+        builder.add(&full_key_for_test(b"k02", 2), b"v02");
+        builder.add(&full_key_for_test(b"k04", 4), b"v04");
+        builder.add(&full_key_for_test(b"k05", 5), b"v05");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(
-            Block::decode(buf.into(), capacity).unwrap(),
+            Block::decode(buf.into(), capacity, 0).unwrap(),
         )))
     }
 
@@ -275,7 +281,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(full_key_for_test(b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
     }
 
@@ -284,7 +290,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(full_key_for_test(b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
@@ -293,7 +299,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek(&full_key(b"k00", 0)[..]);
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(full_key_for_test(b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         let mut it = build_iterator_for_test();
@@ -311,7 +317,7 @@ mod tests {
         let mut it = build_iterator_for_test();
         it.seek_le(&full_key(b"k06", 6)[..]);
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(full_key_for_test(b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
     }
 
@@ -319,10 +325,16 @@ mod tests {
     fn bi_direction_seek() {
         let mut it = build_iterator_for_test();
         it.seek(&full_key(b"k03", 3)[..]);
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(
+            full_key_for_test(format!("k{:02}", 4).as_bytes(), 4),
+            it.key()
+        );
 
         it.seek_le(&full_key(b"k03", 3)[..]);
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+        assert_eq!(
+            full_key_for_test(format!("k{:02}", 2).as_bytes(), 2),
+            it.key()
+        );
     }
 
     #[test]
@@ -331,22 +343,22 @@ mod tests {
 
         it.seek_to_first();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(full_key_for_test(b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(full_key_for_test(b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(full_key_for_test(b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.next();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(full_key_for_test(b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.next();
@@ -359,22 +371,22 @@ mod tests {
 
         it.seek_to_last();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k05", 5)[..], it.key());
+        assert_eq!(full_key_for_test(b"k05", 5), it.key());
         assert_eq!(b"v05", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k04", 4)[..], it.key());
+        assert_eq!(full_key_for_test(b"k04", 4), it.key());
         assert_eq!(b"v04", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k02", 2)[..], it.key());
+        assert_eq!(full_key_for_test(b"k02", 2), it.key());
         assert_eq!(b"v02", it.value());
 
         it.prev();
         assert!(it.is_valid());
-        assert_eq!(&full_key(b"k01", 1)[..], it.key());
+        assert_eq!(full_key_for_test(b"k01", 1), it.key());
         assert_eq!(b"v01", it.value());
 
         it.prev();
@@ -386,13 +398,22 @@ mod tests {
         let mut it = build_iterator_for_test();
 
         it.seek(&full_key(b"k03", 3)[..]);
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(
+            full_key_for_test(format!("k{:02}", 4).as_bytes(), 4),
+            it.key()
+        );
 
         it.prev();
-        assert_eq!(&full_key(format!("k{:02}", 2).as_bytes(), 2)[..], it.key());
+        assert_eq!(
+            full_key_for_test(format!("k{:02}", 2).as_bytes(), 2),
+            it.key()
+        );
 
         it.next();
-        assert_eq!(&full_key(format!("k{:02}", 4).as_bytes(), 4)[..], it.key());
+        assert_eq!(
+            full_key_for_test(format!("k{:02}", 4).as_bytes(), 4),
+            it.key()
+        );
     }
 
     pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {

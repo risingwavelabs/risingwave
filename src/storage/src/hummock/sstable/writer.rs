@@ -92,6 +92,7 @@ mod tests {
         for i in 0..5 {
             block_metas.push(BlockMeta {
                 smallest_key: Vec::new(),
+                table_id: i,
                 len: 1000,
                 offset: i * 1000,
                 uncompressed_size: 0, // dummy value

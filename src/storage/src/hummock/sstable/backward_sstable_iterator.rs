@@ -104,8 +104,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        let a = self.block_iter.as_ref().expect("no block iter").key().clone().as_ref();
-        FullKey::decode(a)
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {

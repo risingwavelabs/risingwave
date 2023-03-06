@@ -638,7 +638,11 @@ impl SstableWriter for StreamingUploadWriter {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
         if let CachePolicy::Fill = self.policy {
-            let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize, meta.table_id)?;
+            let block = Block::decode(
+                block_data.clone(),
+                meta.uncompressed_size as usize,
+                meta.table_id,
+            )?;
             self.blocks.push(block);
         }
         self.object_uploader
@@ -837,7 +841,11 @@ impl BlockStream {
                 ),
             )));
         }
-        let boxed_block = Box::new(Block::decode(Bytes::from(buffer), block_full_size, self.table_id)?);
+        let boxed_block = Box::new(Block::decode(
+            Bytes::from(buffer),
+            block_full_size,
+            self.table_id,
+        )?);
         self.block_idx += 1;
 
         Ok(Some(boxed_block))
