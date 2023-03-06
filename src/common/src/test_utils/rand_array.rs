@@ -120,6 +120,7 @@ impl RandValue for bool {
 
 impl RandValue for Serial {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        // TODO(peng), serial should be in format of RowId
         i64::rand_value(rand).into()
     }
 }

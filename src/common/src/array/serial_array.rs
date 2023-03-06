@@ -19,17 +19,18 @@ use serde::{Serialize, Serializer};
 
 use crate::array::{PrimitiveArray, PrimitiveArrayBuilder};
 
+// Serial is an alias for i64
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Serial(i64);
+
+pub type SerialArray = PrimitiveArray<Serial>;
+pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
 
 impl From<i64> for Serial {
     fn from(value: i64) -> Self {
         Self(value)
     }
 }
-
-pub type SerialArray = PrimitiveArray<Serial>;
-pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
 
 impl Serial {
     #[inline]
