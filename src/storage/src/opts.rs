@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::config::RwConfig;
+use risingwave_common::system_param::default_system_params;
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_pb::meta::SystemParams;
 
 #[derive(Clone, Debug)]
 pub struct StorageOpts {
@@ -72,17 +72,7 @@ pub struct StorageOpts {
 impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
-        let p = SystemParams {
-            sstable_size_mb: Some(c.storage.sstable_size_mb),
-            block_size_kb: Some(c.storage.block_size_kb),
-            bloom_false_positive: Some(c.storage.bloom_false_positive),
-            data_directory: Some(c.storage.data_directory.clone()),
-            backup_storage_url: Some(c.backup.storage_url.clone()),
-            backup_storage_directory: Some(c.backup.storage_directory.clone()),
-            barrier_interval_ms: None,
-            checkpoint_frequency: None,
-            state_store: None,
-        };
+        let p = default_system_params();
         Self::from((&c, &p.into()))
     }
 }
