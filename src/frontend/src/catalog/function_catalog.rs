@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::function::FunctionType as ProstFunctionType;
+use risingwave_pb::catalog::function::Kind as ProstKind;
 use risingwave_pb::catalog::Function as ProstFunction;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
@@ -22,27 +22,31 @@ pub struct FunctionCatalog {
     pub id: FunctionId,
     pub name: String,
     pub owner: u32,
-    pub type_: FunctionType,
+    pub kind: FunctionKind,
     pub arg_types: Vec<DataType>,
-    pub return_types: Vec<DataType>,
     pub language: String,
     pub identifier: String,
     pub link: String,
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum FunctionType {
-    Scalar,
-    Table,
+pub enum FunctionKind {
+    Scalar { return_type: DataType },
+    Table { return_types: Vec<DataType> },
     Aggregate,
 }
 
-impl From<ProstFunctionType> for FunctionType {
-    fn from(prost: ProstFunctionType) -> Self {
+impl From<&ProstKind> for FunctionKind {
+    fn from(prost: &ProstKind) -> Self {
+        use risingwave_pb::catalog::function::*;
         match prost {
-            ProstFunctionType::Scalar => FunctionType::Scalar,
-            ProstFunctionType::Table => FunctionType::Table,
-            ProstFunctionType::Aggregate => FunctionType::Aggregate,
+            Kind::Scalar(ScalarFunction { return_type }) => Self::Scalar {
+                return_type: return_type.as_ref().unwrap().into(),
+            },
+            Kind::Table(TableFunction { return_types }) => Self::Table {
+                return_types: return_types.iter().map(|arg| arg.into()).collect(),
+            },
+            Kind::Aggregate(AggregateFunction {}) => Self::Aggregate,
         }
     }
 }
@@ -53,9 +57,8 @@ impl From<&ProstFunction> for FunctionCatalog {
             id: prost.id.into(),
             name: prost.name.clone(),
             owner: prost.owner,
-            type_: ProstFunctionType::from_i32(prost.r#type).unwrap().into(),
+            kind: prost.kind.as_ref().unwrap().into(),
             arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
-            return_types: prost.return_types.iter().map(|arg| arg.into()).collect(),
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
             link: prost.link.clone(),

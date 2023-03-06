@@ -110,17 +110,23 @@ message Function {
   uint32 database_id = 3;
   string name = 4;
   uint32 owner = 9;
-  FunctionType type = 11;
   repeated data.DataType arg_types = 5;
-  repeated data.DataType return_types = 6;
   string language = 7;
   string link = 8;
   string identifier = 10;
 
-  enum FunctionType {
-    SCALAR = 0;
-    TABLE = 1;
-    AGGREGATE = 2;
+  oneof kind {
+    ScalarFunction scalar = 11;
+    TableFunction table = 12;
+    AggregateFunction aggregate = 13;
+  }
+  message ScalarFunction {
+    data.DataType return_type = 1;
+  }
+  message TableFunction {
+    repeated data.DataType return_types = 1;
+  }
+  message AggregateFunction {
   }
 }
 

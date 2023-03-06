@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
-use risingwave_pb::catalog::function::FunctionType;
+use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
     CreateFunctionBody, FunctionDefinition, ObjectName, OperateFunctionArg,
@@ -77,16 +77,21 @@ pub async fn handle_create_function(
         .into());
     };
     let mut return_types = vec![];
-    let type_ = match returns {
+    let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
-            return_types.push(bind_data_type(&data_type)?);
-            FunctionType::Scalar
+            let return_type = bind_data_type(&data_type)?;
+            return_types.push(return_type.clone());
+            Kind::Scalar(ScalarFunction {
+                return_type: Some(return_type.into()),
+            })
         }
         Some(CreateFunctionReturns::Table(columns)) => {
             for column in columns {
                 return_types.push(bind_data_type(&column.data_type)?);
             }
-            FunctionType::Table
+            Kind::Table(TableFunction {
+                return_types: return_types.iter().map(|t| t.clone().into()).collect(),
+            })
         }
         None => {
             return Err(ErrorCode::InvalidParameterValue(
@@ -146,9 +151,8 @@ pub async fn handle_create_function(
         schema_id,
         database_id,
         name: function_name,
-        r#type: type_.into(),
+        kind: Some(kind),
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
-        return_types: return_types.into_iter().map(|t| t.into()).collect(),
         language,
         identifier,
         link,

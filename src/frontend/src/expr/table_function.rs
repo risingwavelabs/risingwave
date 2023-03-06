@@ -24,7 +24,7 @@ use risingwave_pb::expr::{
 };
 
 use super::{Expr, ExprImpl, ExprRewriter, RwResult};
-use crate::catalog::function_catalog::FunctionCatalog;
+use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -50,7 +50,7 @@ pub enum TableFunctionType {
 }
 
 impl TableFunctionType {
-    fn to_protobuf(&self) -> Type {
+    fn to_protobuf(self) -> Type {
         match self {
             TableFunctionType::Generate => Type::Generate,
             TableFunctionType::Range => Type::Range,
@@ -218,9 +218,12 @@ impl TableFunction {
 
     /// Create a user-defined `TableFunction`.
     pub fn new_user_defined(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
+        let FunctionKind::Table { return_types } = &catalog.kind else {
+            panic!("not a table function");
+        };
         TableFunction {
             args,
-            return_types: catalog.return_types.clone(),
+            return_types: return_types.clone(),
             function_type: TableFunctionType::Udtf,
             udtf_catalog: Some(catalog),
         }
