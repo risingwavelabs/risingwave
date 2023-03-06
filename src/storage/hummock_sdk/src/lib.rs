@@ -31,7 +31,6 @@ use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
 

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -52,7 +51,7 @@ impl StateStoreRead for PanicStateStore {
 
     fn iter(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: IterKeyRange,
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -88,7 +87,7 @@ impl LocalStateStore for PanicStateStore {
 
     fn may_exist(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: IterKeyRange,
         _read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         async move {
@@ -102,11 +101,7 @@ impl LocalStateStore for PanicStateStore {
         }
     }
 
-    fn iter(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, _key_range: IterKeyRange, _read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             panic!("should not operate on the panic state store!");
         }
