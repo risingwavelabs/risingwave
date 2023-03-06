@@ -159,7 +159,7 @@ upload_queries() {
 # Run it to make sure it should have no errors
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
-  seq $TEST_NUM | parallel MADSIM_TEST_SEED={} " \
+  seq $TEST_NUM | parallel "MADSIM_TEST_SEED={} \
     ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
       1>>$LOGDIR/run_deterministic.stdout.log \
       2>$LOGDIR/fuzzing-{}.log \
