@@ -106,68 +106,6 @@ impl RowEncoding {
     }
 }
 
-pub trait ValueRowSerializer: Clone {
-    fn serialize(&self, row: impl Row) -> Vec<u8>;
-}
-
-pub trait ValueRowDeserializer: Clone {
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
-}
-
-pub trait ValueRowSerdeNew: Clone {
-    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
-}
-
-pub trait ValueRowSerde: ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew {}
-
-#[derive(Clone)]
-pub struct BasicSerializer {}
-
-impl ValueRowSerializer for BasicSerializer {
-    fn serialize(&self, row: impl Row) -> Vec<u8> {
-        let mut buf = vec![];
-        for datum in row.iter() {
-            serialize_datum_into(datum, &mut buf);
-        }
-        buf
-    }
-}
-
-impl ValueRowDeserializer for BasicDeserializer {
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserialize(encoded_bytes)?.into_inner())
-    }
-}
-
-#[derive(Clone)]
-pub struct BasicSerde {
-    serializer: BasicSerializer,
-    deserializer: BasicDeserializer,
-}
-
-impl ValueRowSerdeNew for BasicSerde {
-    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
-        BasicSerde {
-            serializer: BasicSerializer {},
-            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
-        }
-    }
-}
-
-impl ValueRowSerializer for BasicSerde {
-    fn serialize(&self, row: impl Row) -> Vec<u8> {
-        self.serializer.serialize(row)
-    }
-}
-
-impl ValueRowDeserializer for BasicSerde {
-    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
-        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
-    }
-}
-
-impl ValueRowSerde for BasicSerde {}
-
 /// Column-Aware `Serializer` holds schema related information, and shall be
 /// created again once the schema changes
 #[derive(Clone)]
@@ -297,6 +235,8 @@ fn deserialize_width(len: usize, data: &mut impl Buf) -> usize {
     }
 }
 
+/// Combined column-aware `Serializer` and `Deserializer` given the same
+/// `column_ids` and `schema`
 #[derive(Clone)]
 pub struct ColumnAwareSerde {
     serializer: Serializer,

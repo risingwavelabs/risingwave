@@ -22,8 +22,9 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::{
-    BasicSerde, ColumnAwareSerde, ValueRowSerializer, ValueRowDeserializer, ValueRowSerdeNew,
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::{
+    BasicSerde, ValueRowDeserializer, ValueRowSerdeNew, ValueRowSerializer,
 };
 
 struct Case {
@@ -182,7 +183,7 @@ fn bench_row(c: &mut Criterion) {
     let cases = vec![
         Case::new(
             "Int16",
-            Arc::new([DataType::INT16]),
+            Arc::new([DataType::Int16]),
             vec![ColumnId::new(0)],
             vec![OwnedRow::new(vec![Some(ScalarImpl::Int16(5))]); 100000],
             None,

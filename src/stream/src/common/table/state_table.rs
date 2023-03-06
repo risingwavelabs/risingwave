@@ -23,15 +23,13 @@ use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::{
-    BasicSerde, ValueRowSerde,
-};
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
