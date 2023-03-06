@@ -521,7 +521,7 @@ pub(super) mod tests {
         );
     }
 
-    // #[tokio::test]
+    #[tokio::test]
     async fn test_basic() {
         // let opt = default_builder_opt_for_test();
         // let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);

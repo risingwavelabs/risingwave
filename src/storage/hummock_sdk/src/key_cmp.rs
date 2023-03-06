@@ -32,10 +32,6 @@ impl KeyComparator {
         l_p.cmp(r_p).then_with(|| r_s.cmp(l_s))
     }
 
-    pub fn compare_encoded_table_key(lhs: &[u8], rhs: &[u8]) -> cmp::Ordering {
-        lhs.cmp(rhs)
-    }
-
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn compare_user_key_cross_format(
         encoded: impl AsRef<[u8]>,

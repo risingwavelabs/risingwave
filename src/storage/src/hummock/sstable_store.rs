@@ -80,8 +80,8 @@ impl TieredCacheValue for Box<Block> {
     }
 
     fn decode(buf: Vec<u8>) -> Self {
-        let mut a: &[u8] = buf.as_ref();
-        let table_id = a.get_u32_le();
+        let mut key: &[u8] = buf.as_ref();
+        let table_id = key.get_u32_le();
         Box::new(Block::decode_from_raw(Bytes::from(buf), table_id))
     }
 }
