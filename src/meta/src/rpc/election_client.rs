@@ -23,7 +23,7 @@ use tokio::sync::{oneshot, watch};
 use tokio::time;
 use tokio_stream::StreamExt;
 
-use crate::storage::EtcdRefreshClient;
+use crate::storage::WrappedEtcdClient;
 use crate::MetaResult;
 
 const META_ELECTION_KEY: &str = "__meta_election_";
@@ -46,7 +46,7 @@ pub trait ElectionClient: Send + Sync + 'static {
 pub struct EtcdElectionClient {
     id: String,
     is_leader_sender: watch::Sender<bool>,
-    client: EtcdRefreshClient,
+    client: WrappedEtcdClient,
 }
 
 #[async_trait::async_trait]
@@ -319,10 +319,12 @@ impl EtcdElectionClient {
     pub(crate) async fn new(
         endpoints: Vec<String>,
         options: Option<ConnectOptions>,
+        auth_enabled: bool,
         id: String,
     ) -> MetaResult<Self> {
         let (sender, _) = watch::channel(false);
-        let client = EtcdRefreshClient::connect(endpoints, options).await?;
+
+        let client = WrappedEtcdClient::connect(endpoints, options, auth_enabled).await?;
 
         Ok(Self {
             id,
@@ -363,6 +365,7 @@ mod tests {
                     EtcdElectionClient::new(
                         vec!["localhost:2388".to_string()],
                         None,
+                        false,
                         format!("client_{}", i).to_string(),
                     )
                     .await
