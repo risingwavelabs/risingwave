@@ -236,15 +236,10 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
-    static ref TOP_N_ON_INDEX: OptimizationStage = OptimizationStage::new(
-        "Agg on Index",
-        vec![TopNOnIndexRule::create()],
-        ApplyOrder::TopDown,
-    );
-
-    static ref MIN_MAX_ON_INDEX: OptimizationStage = OptimizationStage::new(
-        "Min/Max on Index",
-        vec![MinMaxOnIndexRule::create()],
+    static ref TOP_N_AGG_ON_INDEX: OptimizationStage = OptimizationStage::new(
+        "TopN/SimpleAgg on Index",
+        vec![TopNOnIndexRule::create(),
+             MinMaxOnIndexRule::create()],
         ApplyOrder::TopDown,
     );
 }
@@ -476,9 +471,7 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&DEDUP_GROUP_KEYS);
 
-        plan = plan.optimize_by_rules(&TOP_N_ON_INDEX);
-
-        plan = plan.optimize_by_rules(&MIN_MAX_ON_INDEX);
+        plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX);
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
