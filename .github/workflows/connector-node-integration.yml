@@ -22,9 +22,15 @@ jobs:
           cache: 'maven'
       - name: run integration tests
         run: |
-          cd java
+          set -ex
+          
+          RISINGWAVE_ROOT=${PWD}
+          
+          echo "--- build connector node"
+          cd ${RISINGWAVE_ROOT}/java
           mvn --batch-mode --update-snapshots clean package  -DskipTests=true
-          cd connector-node
+          
+          echo "--- install postgresql client"
           sudo apt install postgresql postgresql-contrib libpq-dev
           sudo systemctl start postgresql || sudo pg_ctlcluster 12 main start
           # disable password encryption
@@ -32,6 +38,7 @@ jobs:
           sudo -u postgres createdb test
           sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
           
+          echo "--- starting minio"
           echo "setting up minio"
           wget https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
           chmod +x minio
@@ -42,18 +49,20 @@ jobs:
           chmod +x mc
           ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
-          echo "starting connector-node service"
-          cd assembly/target/
+          echo "--- starting connector-node service"
+          cd $RISINGWAVE_ROOT}/java/connector-node/assembly/target/
           tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
           sh ./start-service.sh &
           sleep 3
           cd ../../
 
-          echo "running jdbc integration tests"
-          bash python-client/build-venv.sh
+        
+          echo "--- prepare integration tests"
+          cd $RISINGWAVE_ROOT}/java/connector-node
+          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark
           cd python-client && bash gen-stub.sh
-          pip install pyspark
 
+          echo "--- running jdbc integration tests"
           if python3 integration_tests.py --file_sink; then
             echo "File sink test passed"
           else
