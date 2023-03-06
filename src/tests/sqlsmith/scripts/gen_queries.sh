@@ -106,6 +106,7 @@ generate_deterministic() {
       --sqlsmith 100 \
       --generate-sqlsmith-queries $OUTDIR/{} \
       $TESTDATA \
+      1>>$LOGDIR/generate_deterministic.stdout.log \
       2>$LOGDIR/generate-{}.log; \
     extract_queries $LOGDIR/generate-{}.log $OUTDIR/{}/queries.sql; \
     "
@@ -131,8 +132,13 @@ check_different_queries() {
 
 # Check if any query generation step failed, and any query file not generated.
 check_failed_to_generate_queries() {
-  echo "Query files generated:"
-  ls "$OUTDIR"/* | grep -c queries.sql
+  if [[ "$(ls "$OUTDIR"/* | grep -c queries.sql)" != "$TEST_NUM" ]]; then
+    echo "Queries not generated: "
+    ls "$OUTDIR"/* | grep queries.sql
+    exit 1
+  else
+    echo "Query files generated"
+  fi
 }
 
 # Upload step
@@ -154,10 +160,13 @@ run_queries() {
 }
 
 check_failed_to_run_queries() {
-  FAILED_LOGS=$(ls "$LOGDIR | grep fuzzing")
+  FAILED_LOGS=$(ls "$LOGDIR" | grep fuzzing)
   if [[ -n "$FAILED_LOGS" ]]; then
-    echo -e "FAILING_LOGS: $FAILED_LOGS"
+    echo -e "FAILING_LOGS: $FAILED_LOGS" && exit 1
+  else
+      echo "Generated queries successfully ran"
   fi
+
 }
 
 ################### TOP LEVEL INTERFACE
