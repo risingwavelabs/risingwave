@@ -3512,8 +3512,7 @@ dependencies = [
 [[package]]
 name = "madsim"
 version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7e3c98b41d46214f4ae435a95e246710ad7fb1100754f809dd7c18606a7607c4"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=c7b0b3d#c7b0b3d3ea82c8265ea78ca6722b30ad1a99f9f3"
 dependencies = [
  "ahash 0.7.6",
  "async-channel",
@@ -3527,6 +3526,7 @@ dependencies = [
  "madsim-macros",
  "naive-timer",
  "rand 0.8.5",
+ "rand_xoshiro",
  "rustversion",
  "serde",
  "spin 0.9.5",
@@ -3557,8 +3557,7 @@ dependencies = [
 [[package]]
 name = "madsim-etcd-client"
 version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb918383c4f5966f29760ec48820e1c2846739e4ae411c2a8aaa4466ce1421b7"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=c7b0b3d#c7b0b3d3ea82c8265ea78ca6722b30ad1a99f9f3"
 dependencies = [
  "etcd-client",
  "futures-util",
@@ -3577,8 +3576,7 @@ dependencies = [
 [[package]]
 name = "madsim-macros"
 version = "0.2.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3d248e97b1a48826a12c3828d921e8548e714394bf17274dd0a93910dc946e1"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=c7b0b3d#c7b0b3d3ea82c8265ea78ca6722b30ad1a99f9f3"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -5273,6 +5271,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca3129af7b92a17112d59ad498c6f81eaf463253766b90396d39ea7a39d6613c"
 dependencies = [
  "rand_core 0.5.1",
+]
+
+[[package]]
+name = "rand_xoshiro"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f97cdb2a36ed4183de61b2f824cc45c9f1037f28afe0a322e9fff4c108b5aaa"
+dependencies = [
+ "rand_core 0.6.4",
 ]
 
 [[package]]
