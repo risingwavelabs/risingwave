@@ -9,7 +9,7 @@
 
 export RUST_LOG="info"
 export OUTDIR=$SNAPSHOT_DIR
-export TEST_NUM=10
+export TEST_NUM=100
 export RW_HOME="../../../.."
 export LOGDIR=".risingwave/log"
 export TESTS_DIR="src/tests/sqlsmith/tests"
@@ -71,24 +71,18 @@ extract_failing_query() {
 extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
   do
-    echo_err "[INFO] Checking $LOGFILENAME for errors"
     LOGFILE="$LOGDIR/$LOGFILENAME"
     REASON=$(get_failure_reason < "$LOGFILE")
     if [[ -n "$REASON" ]]; then
       echo_err "[INFO] $LOGFILE Encountered bug due to $REASON"
 
+      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
       SEED=$(echo "$LOGFILENAME" | sed -E 's/generate\-(.*)\.log/\1/')
-      echo_err "1"
       DDL=$(extract_ddl < "$LOGFILE")
-      echo_err "2"
       GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
-      echo_err "3"
       DML=$(extract_dml < "$LOGFILE")
-      echo_err "4"
       TEST_SESSION=$(extract_last_session < "$LOGFILE")
-      echo_err "5"
       QUERY=$(extract_failing_query < "$LOGFILE")
-      echo_err "6"
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
       echo -e "$DDL" "$GLOBAL_SESSION" "$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
@@ -131,10 +125,10 @@ generate_sqlsmith() {
 
 # Check that queries are different
 check_different_queries() {
-  if [[ $(diff "$OUTDIR/1/queries.sql" "$OUTDIR/2/queries.sql") ]]; then
-    echo_err "Queries are different."
-  else
-    echo_err "Queries are the same! Something went wrong in the generation process." && exit 1
+  if [[ -z $(diff "$OUTDIR/1/queries.sql" "$OUTDIR/2/queries.sql") ]]; then
+    echo_err "[ERROR] Queries are the same! \
+      Something went wrong in the generation process." \
+      && exit 1
   fi
 }
 
@@ -145,8 +139,6 @@ check_failed_to_generate_queries() {
     # FIXME(noel): This doesn't list the files which failed to be generated.
     ls "$OUTDIR"/* | grep queries.sql
     exit 1
-  else
-    echo_err "Query files generated"
   fi
 }
 
@@ -157,7 +149,8 @@ upload_queries() {
   git checkout -b stage
   git add .
   git commit -m 'update queries'
-  git push origin stage
+  git push -f origin stage
+  git checkout -
   git branch -D stage
   popd
   set -x
@@ -165,7 +158,12 @@ upload_queries() {
 
 # Run it to make sure it should have no errors
 run_queries() {
- seq $TEST_NUM | parallel MADSIM_TEST_SEED={} './$MADSIM_BIN  --run-sqlsmith-queries $OUTDIR/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+  echo "" > $LOGDIR/run_deterministic.stdout.log
+  seq $TEST_NUM | parallel MADSIM_TEST_SEED={} " \
+    ./$MADSIM_BIN --run-sqlsmith-queries $OUTDIR/{} \
+      1>>$LOGDIR/run_deterministic.stdout.log \
+      2>$LOGDIR/fuzzing-{}.log \
+      && rm $LOGDIR/fuzzing-{}.log"
 }
 
 check_failed_to_run_queries() {
@@ -199,15 +197,15 @@ generate() {
 
 validate() {
   check_different_queries
-  echo_err "[CHECK] Generated queries should be different"
+  echo_err "[CHECK PASSED] Generated queries should be different"
   check_failed_to_generate_queries
-  echo_err "[CHECK] Checked which generated queries encountered new bugs"
+  echo_err "[CHECK PASSED] No seeds failed to generate queries"
   extract_fail_info_from_logs
-  echo_err "[CHECK] Extracted fail info from logs"
+  echo_err "[INFO] Recorded new bugs from  generated queries"
   run_queries
   echo_err "[INFO] Queries were ran"
   check_failed_to_run_queries
-  echo_err "[CHECK] Queries all ran without failure"
+  echo_err "[CHECK PASSED] Queries all ran without failure"
   echo_err "[INFO] Passed checks"
 }
 
