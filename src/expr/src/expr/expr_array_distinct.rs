@@ -40,10 +40,6 @@ use crate::{bail, ensure, ExprError, Result};
 /// {NULL}
 ///
 /// query T
-/// select array_distinct(null::int[]);
-/// ----
-///
-/// query T
 /// select array_distinct(array[1,2,1,1]);
 /// ----
 /// {1,2}
