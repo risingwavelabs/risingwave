@@ -61,6 +61,7 @@ impl CompactionConfigBuilder {
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
                 max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
+                split_by_state_table: false,
             },
         }
     }

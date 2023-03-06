@@ -590,6 +590,7 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
+  bool split_by_state_table = 14;
 }
 
 message TableStats {

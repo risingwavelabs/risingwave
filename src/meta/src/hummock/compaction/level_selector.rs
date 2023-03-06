@@ -41,7 +41,7 @@ use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
-const SCORE_BASE: u64 = 100;
+pub const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
     fn pick_compaction(
@@ -105,7 +105,6 @@ impl DynamicLevelSelectorCore {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
-                    overlap_strategy,
                 ))
             }
         } else {
@@ -114,6 +113,7 @@ impl DynamicLevelSelectorCore {
                 select_level,
                 target_level,
                 self.config.max_bytes_for_level_base,
+                self.config.split_by_state_table,
                 overlap_strategy,
             ))
         }
@@ -180,7 +180,7 @@ impl DynamicLevelSelectorCore {
         ctx
     }
 
-    fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
+    pub fn get_priority_levels(&self, levels: &Levels, handlers: &[LevelHandler]) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
         let idle_file_count = levels
@@ -947,7 +947,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let dynamic_level_core = DynamicLevelSelectorCore::new(Arc::new(config));
+        let dynamic_level_core = DynamicLevelSelectorCore::new(false, Arc::new(config));
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert_eq!(1, ctx.base_level);
         assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0
