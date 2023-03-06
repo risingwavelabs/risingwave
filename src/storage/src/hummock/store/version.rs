@@ -266,6 +266,7 @@ impl HummockReadVersion {
                         .staging
                         .imm
                         .iter()
+                        .chain(self.staging.merged_imm.iter())
                         .rev()
                         .is_sorted_by_key(|imm| imm.batch_id()));
 
@@ -275,7 +276,7 @@ impl HummockReadVersion {
                         .imm
                         .iter()
                         .chain(self.staging.merged_imm.iter())
-                        .flat_map(|imm| imm.get_imm_ids().clone())
+                        .map(|imm| imm.batch_id())
                         .collect();
 
                     // intersected batch_id order from oldest to newest
@@ -295,73 +296,54 @@ impl HummockReadVersion {
                                 .imm
                                 .iter()
                                 .chain(self.staging.merged_imm.iter())
-                                .flat_map(|imm| imm.get_imm_ids().clone())
+                                .map(|imm| imm.batch_id())
                                 .rev(),
                         ));
 
                         // Check 3) and replace imms with a staging sst
-                        let mut idx = 0;
-                        loop {
-                            if idx >= intersect_imm_ids.len() {
-                                break;
-                            }
-                            let clear_imm_id = &intersect_imm_ids[idx];
+                        for imm_id in &intersect_imm_ids {
                             // TODO(siyuan): confirm the correctness of this logic
                             if let Some(merged_imm) = self.staging.merged_imm.back() {
                                 // The reversed imm_ids (old to new) should be a prefix of
                                 // intersect_imm_ids. Here we compare the oldest and newest to check
                                 // whether the merged imm should be removed.
-                                let imm_ids = merged_imm.get_imm_ids();
-                                let (newest, oldest) =
-                                    (imm_ids.first().unwrap(), imm_ids.last().unwrap());
-                                let right_idx = idx + imm_ids.len() - 1;
-                                if right_idx < intersect_imm_ids.len()
-                                    && clear_imm_id == oldest
-                                    && intersect_imm_ids[right_idx] == *newest
-                                {
-                                    debug_assert!(
-                                        check_subset_preserve_order(
-                                            imm_ids.iter().rev(),
-                                            intersect_imm_ids.iter(),
-                                        ),
-                                        "intersect_imm_ids: {:?}, imm_ids: {:?}",
-                                        intersect_imm_ids,
-                                        imm_ids
-                                    );
+                                // let imm_ids = merged_imm.get_imm_ids();
+
+                                if *imm_id == merged_imm.batch_id() {
                                     self.staging.merged_imm.pop_back();
-                                    idx = right_idx + 1;
-                                    continue;
-                                } else {
-                                    let local_imm_ids = self
-                                        .staging
-                                        .imm
-                                        .iter()
-                                        .map(|imm| imm.batch_id())
-                                        .collect_vec();
-                                    unreachable!(
-                                        "should not reach here staging_sst.size {},
+                                }
+                            } else if let Some(imm) = self.staging.imm.back() {
+                                if *imm_id == imm.batch_id() {
+                                    self.staging.imm.pop_back();
+                                }
+                            } else {
+                                let local_imm_ids = self
+                                    .staging
+                                    .imm
+                                    .iter()
+                                    .map(|imm| imm.batch_id())
+                                    .collect_vec();
+
+                                let merged_imm_ids = self
+                                    .staging
+                                    .merged_imm
+                                    .iter()
+                                    .map(|imm| imm.batch_id())
+                                    .collect_vec();
+                                unreachable!(
+                                    "should not reach here staging_sst.size {},
                                     staging_sst.imm_ids {:?},
                                     staging_sst.epochs {:?},
                                     local_imm_ids {:?},
-                                    intersect_imm_ids {:?},
                                     merged_imm_ids {:?},
-                                    merged_epochs {:?}",
-                                        staging_sst.imm_size,
-                                        staging_sst.imm_ids,
-                                        staging_sst.epochs,
-                                        local_imm_ids,
-                                        intersect_imm_ids,
-                                        imm_ids,
-                                        merged_imm.epochs(),
-                                    )
-                                }
-                            }
-
-                            if let Some(imm) = self.staging.imm.back() {
-                                if *clear_imm_id == imm.batch_id() {
-                                    self.staging.imm.pop_back();
-                                }
-                                idx += 1;
+                                    intersect_imm_ids {:?}",
+                                    staging_sst.imm_size,
+                                    staging_sst.imm_ids,
+                                    staging_sst.epochs,
+                                    local_imm_ids,
+                                    merged_imm_ids,
+                                    intersect_imm_ids,
+                                );
                             }
                         }
 
@@ -686,7 +668,7 @@ impl HummockVersionReader {
             if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
                 delete_range_iter.add_batch_iter(imm.delete_range_iter());
             }
-            staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter(epoch)));
+            staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
         }
         let mut staging_sst_iter_count = 0;
         // encode once

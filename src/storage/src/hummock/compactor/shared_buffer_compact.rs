@@ -177,7 +177,7 @@ async fn compact_shared_buffer(
             sub_compaction_sstable_size as usize,
         );
         let iter = OrderedMergeIteratorInner::new(
-            payload.iter().map(|imm| imm.clone().into_forward_iter(imm.epoch())),
+            payload.iter().map(|imm| imm.clone().into_forward_iter()),
         );
         let compaction_executor = context.compaction_executor.clone();
         let multi_filter_key_extractor = multi_filter_key_extractor.clone();

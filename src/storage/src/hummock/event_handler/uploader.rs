@@ -158,10 +158,17 @@ impl UploadingTask {
         assert!(!payload.is_empty());
         let mut epochs = payload
             .iter()
-            .map(|imm| imm.epoch())
+            .flat_map(|imm| {
+                if imm.is_merged_imm() {
+                    imm.epochs().clone()
+                } else {
+                    vec![imm.epoch()]
+                }
+            })
             .sorted()
             .dedup()
             .collect_vec();
+
         // reverse to make newer epochs comes first
         epochs.reverse();
         let imm_ids = payload.iter().map(|imm| imm.batch_id()).collect_vec();
@@ -418,15 +425,15 @@ impl SealedData {
         let imms = self.imms.drain(..);
 
         // TODO(siyuan): drain merged_imms and feed to the uploading task
-        // imms should be newer than merged_imms, because imms that have been merged have been
-        // remove from the `imms` queue
-        // let merged_imms = self.merged_imms.drain(..);
+        // imms should be newer than merged_imms, because imms that have been merged are
+        // removed from the `imms` queue
+        let merged_imms = self.merged_imms.drain(..);
 
         let payload = imms
             .into_iter()
             // in `imms`, newer data comes first
             .flat_map(|(_epoch, imms)| imms)
-            // .chain(merged_imms.into_iter())
+            .chain(merged_imms.into_iter())
             .collect_vec();
 
         if !payload.is_empty() {
@@ -457,26 +464,6 @@ impl SealedData {
                     Poll::Ready(None)
                 }
             }
-
-            // match ready!(task.poll_unpin(cx)) {
-            //     Ok(merged_imm) => {
-            //         // pop the finished task
-            //         self.merging_tasks.pop_back().expect("must exist");
-            //
-            //         Poll::Ready(Some(MergeImmTaskOutput {
-            //             table_id: task.table_id,
-            //             shard_id: task.shard_id,
-            //             merged_imm,
-            //         }))
-            //     }
-            //     Err(e) => {
-            //         error!(
-            //             "poll merge imm task failed. table_id: {}, shard_id: {},  {}",
-            //             task.table_id, task.shard_id, e
-            //         );
-            //         Poll::Ready(None)
-            //     }
-            // }
         } else {
             Poll::Ready(None)
         }
