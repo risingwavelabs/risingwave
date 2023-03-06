@@ -19,13 +19,13 @@ use byteorder::{BigEndian, ReadBytesExt};
 use paste::paste;
 use risingwave_pb::data::Array as ProstArray;
 
-use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
+use crate::array::serial_array::Serial;
+use crate::array::value_reader::{I64ValueReader, PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
     NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType,SerialArrayBuilder,
+    PrimitiveArrayItemType, SerialArrayBuilder,
 };
-use crate::array::serial_array::Serial;
 use crate::buffer::Bitmap;
 use crate::types::interval::IntervalUnit;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
@@ -98,17 +98,12 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
         .map_err(Into::into)
 }
 
-
-fn read_serial(_cursor: &mut Cursor<&[u8]>) -> ArrayResult<Serial> {
-    todo!()
-    // cursor
-    //     .read_i64::<BigEndian>()
-    //     .map_err(|e| anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e))
-    //     .and_then(|t| NaiveDateTimeWrapper::with_macros(t).map_err(|e| anyhow!("{}", e)))
-    //     .map_err(Into::into)
+fn read_serial(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Serial> {
+    I64ValueReader::read(cursor)
+        .map_err(|e| anyhow!("Failed to read i64 from Serial buffer: {}", e))
+        .map(|t| Serial::from(t))
+        .map_err(Into::into)
 }
-
-
 
 pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
     let mut read = || {
