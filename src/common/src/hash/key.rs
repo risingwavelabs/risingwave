@@ -479,15 +479,14 @@ impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
 }
 
 impl<'a> HashKeySerDe<'a> for Serial {
-    type S = [u8; 8];
+    type S = <i64 as HashKeySerDe<'a>>::S;
 
     fn serialize(self) -> Self::S {
-        self.into_inner().to_ne_bytes()
+        self.into_inner().serialize()
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 8>(source);
-        Self::from(i64::from_ne_bytes(value))
+        i64::deserialize(source).into()
     }
 }
 
