@@ -65,6 +65,7 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+use crate::array::serial_array::{SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -347,6 +348,7 @@ macro_rules! for_all_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
+            { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -388,6 +390,12 @@ impl From<Utf8Array> for ArrayImpl {
 impl From<JsonbArray> for ArrayImpl {
     fn from(arr: JsonbArray) -> Self {
         Self::Jsonb(arr)
+    }
+}
+
+impl From<SerialArray> for ArrayImpl {
+    fn from(arr: SerialArray) -> Self {
+        Self::Serial(arr)
     }
 }
 
@@ -687,6 +695,7 @@ impl ArrayImpl {
             ProstArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
             }
+            ProstArrayType::Serial => read_serial_array(array, cardinality)?,
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),

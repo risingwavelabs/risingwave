@@ -23,8 +23,9 @@ use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
     NaiveDateArrayBuilder, NaiveDateTimeArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
-    PrimitiveArrayItemType,
+    PrimitiveArrayItemType,SerialArrayBuilder,
 };
+use crate::array::serial_array::Serial;
 use crate::buffer::Bitmap;
 use crate::types::interval::IntervalUnit;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
@@ -97,6 +98,18 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
         .map_err(Into::into)
 }
 
+
+fn read_serial(_cursor: &mut Cursor<&[u8]>) -> ArrayResult<Serial> {
+    todo!()
+    // cursor
+    //     .read_i64::<BigEndian>()
+    //     .map_err(|e| anyhow!("Failed to read i64 from NaiveDateTime buffer: {}", e))
+    //     .and_then(|t| NaiveDateTimeWrapper::with_macros(t).map_err(|e| anyhow!("{}", e)))
+    //     .map_err(Into::into)
+}
+
+
+
 pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
@@ -148,7 +161,8 @@ read_one_value_array! {
     { IntervalUnit, IntervalArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
-    { NaiveDateTime, NaiveDateTimeArrayBuilder }
+    { NaiveDateTime, NaiveDateTimeArrayBuilder },
+    { Serial, SerialArrayBuilder }
 }
 
 fn read_offset(offset_cursor: &mut Cursor<&[u8]>) -> ArrayResult<i64> {
