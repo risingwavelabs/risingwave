@@ -393,12 +393,6 @@ impl From<JsonbArray> for ArrayImpl {
     }
 }
 
-impl From<SerialArray> for ArrayImpl {
-    fn from(arr: SerialArray) -> Self {
-        Self::Serial(arr)
-    }
-}
-
 impl From<StructArray> for ArrayImpl {
     fn from(arr: StructArray) -> Self {
         Self::Struct(arr)
