@@ -497,10 +497,9 @@ where
         if let Some(source_id) = source_id {
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
-            assert_eq!(internal_table_ids.len(), 1);
             let (version, delete_jobs) = self
                 .catalog_manager
-                .drop_table_with_source(source_id, table_id, internal_table_ids[0])
+                .drop_table_with_source(source_id, table_id, internal_table_ids)
                 .await?;
             // Unregister source connector worker.
             self.source_manager

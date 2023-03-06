@@ -38,6 +38,7 @@ use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 use tokio::sync::{Mutex, MutexGuard};
+use tracing::trace;
 use user::*;
 
 use crate::manager::{IdCategory, MetaSrvEnv, NotificationVersion, StreamingJob};
@@ -1062,8 +1063,9 @@ where
         &self,
         source_id: SourceId,
         table_id: TableId,
-        internal_table_id: TableId,
+        internal_table_ids: Vec<TableId>,
     ) -> MetaResult<(NotificationVersion, Vec<StreamingJobId>)> {
+        trace!(%source_id, %table_id, ?internal_table_ids, "drop table with source");
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let user_core = &mut core.user;
@@ -1128,18 +1130,17 @@ where
                     }
                 }
 
-                let internal_table = tables
-                    .remove(internal_table_id)
-                    .expect("internal table should exist");
+                let internal_tables = internal_table_ids
+                    .iter()
+                    .copied()
+                    .map(|id| tables.remove(id).expect("internal table should exist"))
+                    .collect_vec();
 
-                let objects = [
-                    Object::SourceId(source_id),
-                    Object::TableId(table_id),
-                    Object::TableId(internal_table_id),
-                ]
-                .into_iter()
-                .chain(index_table_ids.iter().map(|id| Object::TableId(*id)))
-                .collect_vec();
+                let objects = [Object::SourceId(source_id), Object::TableId(table_id)]
+                    .into_iter()
+                    .chain(internal_table_ids.iter().map(|id| Object::TableId(*id)))
+                    .chain(index_table_ids.iter().map(|id| Object::TableId(*id)))
+                    .collect_vec();
 
                 let users_need_update = Self::update_user_privileges(&mut users, &objects);
 
@@ -1174,8 +1175,10 @@ where
                 }
                 self.notify_frontend(Operation::Delete, Info::Table(mview))
                     .await;
-                self.notify_frontend(Operation::Delete, Info::Table(internal_table))
-                    .await;
+                for internal_table in internal_tables {
+                    self.notify_frontend(Operation::Delete, Info::Table(internal_table))
+                        .await;
+                }
 
                 let version = self
                     .notify_frontend(Operation::Delete, Info::Source(source))

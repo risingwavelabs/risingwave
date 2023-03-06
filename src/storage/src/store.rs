@@ -21,7 +21,7 @@ use futures::{Stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType};
 use risingwave_hummock_sdk::{HummockReadEpoch, LocalSstableInfo};
 
 use crate::error::{StorageError, StorageResult};
@@ -76,6 +76,8 @@ pub trait StateStoreIterNextFutureTrait<'a> = NextFutureTrait<'a, StateStoreIter
 pub trait StateStoreIterItemStream = Stream<Item = StorageResult<StateStoreIterItem>> + Send;
 pub trait StateStoreReadIterStream = StateStoreIterItemStream + 'static;
 
+pub type IterKeyRange = (Bound<KeyPayloadType>, Bound<KeyPayloadType>);
+
 pub trait IterFutureTrait<'a, I: StateStoreReadIterStream> =
     Future<Output = StorageResult<I>> + Send + 'a;
 pub trait StateStoreRead: StaticSendSync {
@@ -100,7 +102,7 @@ pub trait StateStoreRead: StaticSendSync {
     /// corresponding to the given `epoch`.
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_>;
@@ -120,7 +122,7 @@ pub trait StateStoreReadExt: StaticSendSync {
     /// By default, this simply calls `StateStore::iter` to fetch elements.
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -132,7 +134,7 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
 
     fn scan(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
         read_options: ReadOptions,
@@ -274,11 +276,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// `full_key_range` used for iter. (if the `prefix_hint` not None, it should be be included
     /// in `key_range`) The returned iterator will iterate data based on the latest written
     /// snapshot.
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_>;
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_>;
 
     /// Inserts a key-value entry associated with a given `epoch` into the state store.
     fn insert(&mut self, key: Bytes, new_val: Bytes, old_val: Option<Bytes>) -> StorageResult<()>;
@@ -311,7 +309,7 @@ pub trait LocalStateStore: StaticSendSync {
     /// - true: `key_range` may or may not exist in storage.
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_>;
 }

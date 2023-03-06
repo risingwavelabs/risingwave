@@ -2738,19 +2738,6 @@ impl Parser {
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
                 Ok(Some(w.to_ident()?))
             }
-            // MSSQL supports single-quoted strings as aliases for columns
-            // We accept them as table aliases too, although MSSQL does not.
-            //
-            // Note, that this conflicts with an obscure rule from the SQL
-            // standard, which we don't implement:
-            // https://crate.io/docs/sql-99/en/latest/chapters/07.html#character-string-literal-s
-            //    "[Obscure Rule] SQL allows you to break a long <character
-            //    string literal> up into two or more smaller <character string
-            //    literal>s, split by a <separator> that includes a newline
-            //    character. When it sees such a <literal>, your DBMS will
-            //    ignore the <separator> and treat the multiple strings as
-            //    a single <literal>."
-            Token::SingleQuotedString(s) => Ok(Some(Ident::with_quote_unchecked('\'', s))),
             not_an_ident => {
                 if after_as {
                     return self.expected("an identifier after AS", not_an_ident);
