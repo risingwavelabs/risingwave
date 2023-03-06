@@ -44,8 +44,7 @@ impl Rule for MinMaxOnIndexRule {
         if calls.is_empty() {
             return None;
         }
-        let first_call = calls.first()?;
-        if calls.len() == 1
+        let first_call = calls.iter().exactly_one().ok()?;
             && matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
             && !first_call.distinct
             && first_call.filter.always_true()
