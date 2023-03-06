@@ -1,4 +1,4 @@
-package com.risingwave.connector.utils;
+package com.risingwave.java.utils;
 
 import static io.grpc.Status.INVALID_ARGUMENT;
 

@@ -5,7 +5,7 @@ import static io.grpc.Status.*;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
-import com.risingwave.connector.utils.MinioUrlParser;
+import com.risingwave.java.utils.MinioUrlParser;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.types.StructType;
 import java.nio.file.Paths;

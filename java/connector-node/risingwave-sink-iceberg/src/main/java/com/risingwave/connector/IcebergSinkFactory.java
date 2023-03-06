@@ -6,7 +6,7 @@ import static io.grpc.Status.UNIMPLEMENTED;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
-import com.risingwave.connector.utils.MinioUrlParser;
+import com.risingwave.java.utils.MinioUrlParser;
 import io.grpc.Status;
 import java.util.Map;
 import java.util.Set;

@@ -25,6 +25,10 @@
             <artifactId>proto</artifactId>
         </dependency>
         <dependency>
+            <groupId>com.risingwave.java</groupId>
+            <artifactId>common-utils</artifactId>
+        </dependency>
+        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.13.1</version>

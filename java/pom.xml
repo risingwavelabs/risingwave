@@ -9,14 +9,15 @@
     <modules>
         <module>proto</module>
         <module>java-binding</module>
-<!--        <module>connector-node/connector-api</module>-->
-<!--        <module>connector-node/common-utils</module>-->
-<!--        <module>connector-node/risingwave-sink-iceberg</module>-->
-<!--        <module>connector-node/risingwave-sink-deltalake</module>-->
-<!--        <module>connector-node/risingwave-sink-jdbc</module>-->
-<!--        <module>connector-node/risingwave-source-cdc</module>-->
-<!--        <module>connector-node/risingwave-connector-service</module>-->
-<!--        <module>connector-node/assembly</module>-->
+        <module>common-utils</module>
+        <module>java-binding-integration-test</module>
+        <module>connector-node/connector-api</module>
+        <module>connector-node/risingwave-sink-iceberg</module>
+        <module>connector-node/risingwave-sink-deltalake</module>
+        <module>connector-node/risingwave-sink-jdbc</module>
+        <module>connector-node/risingwave-source-cdc</module>
+        <module>connector-node/risingwave-connector-service</module>
+        <module>connector-node/assembly</module>
     </modules>
     <packaging>pom</packaging>
 
@@ -141,6 +142,11 @@
             <dependency>
                 <groupId>com.risingwave.java</groupId>
                 <artifactId>proto</artifactId>
+                <version>${module.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.risingwave.java</groupId>
+                <artifactId>java-binding</artifactId>
                 <version>${module.version}</version>
             </dependency>
             <dependency>

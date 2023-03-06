@@ -2,6 +2,7 @@ package com.risingwave.connector.utils;
 
 import static org.junit.Assert.assertEquals;
 
+import com.risingwave.java.utils.MinioUrlParser;
 import org.junit.Assert;
 import org.junit.Test;
 

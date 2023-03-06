@@ -1,4 +1,4 @@
-package com.risingwave.java.binding.rpc;
+package com.risingwave.java.utils;
 
 import com.risingwave.proto.Catalog.Table;
 import com.risingwave.proto.ClusterServiceGrpc;

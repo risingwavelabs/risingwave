@@ -1,9 +1,6 @@
-package com.risingwave.java;
+package com.risingwave.java.binding;
 
-import com.risingwave.java.binding.Binding;
-import com.risingwave.java.binding.Iterator;
-import com.risingwave.java.binding.KeyedRow;
-import com.risingwave.java.binding.rpc.MetaClient;
+import com.risingwave.java.utils.MetaClient;
 import com.risingwave.proto.Catalog.Table;
 import com.risingwave.proto.Hummock.HummockVersion;
 import com.risingwave.proto.JavaBinding.KeyRange;
