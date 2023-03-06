@@ -5,7 +5,6 @@ import grpc
 import connector_service_pb2_grpc
 import connector_service_pb2
 import psycopg2
-from risingwave import data_pb2 as data
 
 
 def make_mock_schema():
