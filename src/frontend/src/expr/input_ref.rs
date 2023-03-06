@@ -17,8 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::agg_call::Arg as ProstAggCallArg;
-use risingwave_pb::expr::InputRefExpr;
+use risingwave_pb::expr::ColumnRef as ProstColumnRef;
 
 use super::Expr;
 use crate::expr::ExprType;
@@ -107,27 +106,25 @@ impl InputRef {
         self.index = (self.index as isize + offset) as usize;
     }
 
-    /// Convert to [`InputRefExpr`].
-    pub fn to_proto(&self) -> InputRefExpr {
-        InputRefExpr {
-            column_idx: self.index as i32,
-        }
+    /// Convert to uint32 used in proto.
+    pub fn to_proto(&self) -> u32 {
+        self.index as _
     }
 
-    /// Convert [`InputRef`] to an arg of agg call.
-    pub fn to_agg_arg_proto(&self) -> ProstAggCallArg {
-        ProstAggCallArg {
-            input: Some(self.to_proto()),
+    /// Convert to a `ColumnRef` in proto.
+    pub fn to_column_ref_proto(&self) -> ProstColumnRef {
+        ProstColumnRef {
+            index: self.index as _,
             r#type: Some(self.data_type.to_protobuf()),
         }
     }
 
     pub(super) fn from_expr_proto(
-        input_ref: &risingwave_pb::expr::InputRefExpr,
+        column_index: usize,
         ret_type: DataType,
     ) -> risingwave_common::error::Result<Self> {
         Ok(Self {
-            index: input_ref.get_column_idx() as usize,
+            index: column_index,
             data_type: ret_type,
         })
     }

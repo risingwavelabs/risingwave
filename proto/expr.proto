@@ -141,7 +141,7 @@ message ExprNode {
   Type expr_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
-    InputRefExpr input_ref = 4;
+    uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
@@ -161,8 +161,10 @@ message TableFunction {
   data.DataType return_type = 3;
 }
 
-message InputRefExpr {
-  int32 column_idx = 1;
+// Reference to a column, containing its index and data type.
+message ColumnRef {
+  uint32 index = 1;
+  data.DataType type = 2;
 }
 
 // The items which can occur in the select list of `ProjectSet` operator.
@@ -221,16 +223,12 @@ message AggCall {
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
   }
-  message Arg {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-  }
   Type type = 1;
-  repeated Arg args = 2;
+  repeated ColumnRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
   message OrderByField {
-    InputRefExpr input = 1;
+    uint32 input = 1;
     plan_common.OrderType direction = 3;
     bool nulls_first = 4;
   }

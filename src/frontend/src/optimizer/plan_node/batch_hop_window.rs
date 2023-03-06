@@ -99,7 +99,7 @@ impl ToDistributedBatch for BatchHopWindow {
 impl ToBatchProst for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.core.time_col.to_proto()),
+            time_col: self.logical.core.time_col.to_proto(),
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),
             output_indices: self

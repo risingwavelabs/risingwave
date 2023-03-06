@@ -21,8 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::{enable_jemalloc_on_linux, hash};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::vector_op::agg::AggStateFactory;
-use risingwave_pb::expr::agg_call::Arg;
-use risingwave_pb::expr::{AggCall, InputRefExpr};
+use risingwave_pb::expr::{AggCall, ColumnRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
@@ -38,10 +37,8 @@ fn create_agg_call(
         r#type: agg_kind.to_prost() as i32,
         args: args
             .into_iter()
-            .map(|col_idx| Arg {
-                input: Some(InputRefExpr {
-                    column_idx: col_idx as i32,
-                }),
+            .map(|col_idx| ColumnRef {
+                index: col_idx as _,
                 r#type: Some(input_schema.fields()[col_idx].data_type().to_protobuf()),
             })
             .collect(),

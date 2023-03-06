@@ -75,7 +75,7 @@ impl AggStateFactory {
             .get_order_by_fields()
             .iter()
             .map(|field| {
-                let col_idx = field.get_input().unwrap().get_column_idx() as usize;
+                let col_idx = field.get_input() as usize;
                 let order_type =
                     OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
                 // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
@@ -87,7 +87,7 @@ impl AggStateFactory {
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
             (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
             (AggKind::ApproxCountDistinct, [arg]) => {
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+                let input_col_idx = arg.get_index() as usize;
                 Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
             }
             (AggKind::StringAgg, [agg_arg, delim_arg]) => {
@@ -99,18 +99,18 @@ impl AggStateFactory {
                     DataType::from(delim_arg.get_type().unwrap()),
                     DataType::Varchar
                 );
-                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
+                let agg_col_idx = agg_arg.get_index() as usize;
+                let delim_col_idx = delim_arg.get_index() as usize;
                 create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
             }
             (AggKind::ArrayAgg, [arg]) => {
-                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
+                let agg_col_idx = arg.get_index() as usize;
                 create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
             }
             (agg_kind, [arg]) => {
                 // other unary agg call
                 let input_type = DataType::from(arg.get_type()?);
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+                let input_col_idx = arg.get_index() as usize;
                 create_agg_state_unary(
                     input_type,
                     input_col_idx,
