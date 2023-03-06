@@ -15,7 +15,7 @@ aws-smithy-http = { workspace = true }
 bcc = { version = "0.0.33", optional = true }
 bytes = "1"
 bytesize = { version = "1", features = ["serde"] }
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hdrhistogram = "7"
 isahc = { version = "1", default-features = false }

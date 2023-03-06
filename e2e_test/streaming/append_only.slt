@@ -2,10 +2,10 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table t1 (v1 int, v2 int) with (appendonly = true);
+create table t1 (v1 int, v2 int) append only;
 
 statement ok
-create table t2 (v1 int, v3 int) with (appendonly = true);
+create table t2 (v1 int, v3 int) append only;
 
 statement ok
 insert into t1 values (1,2), (2,3);
@@ -37,7 +37,7 @@ select * from mv1;
 
 ## HashAgg
 statement ok
-create table t4 (v1 real, v2 int, v3 real) with (appendonly = true);
+create table t4 (v1 real, v2 int, v3 real) append only;
 
 statement ok
 insert into t4 values (1,1,4), (5,1,4), (1,9,1), (9,8,1), (0,2,3);
@@ -88,7 +88,7 @@ select * from mv5;
 16 9 1
 
 statement ok
-create table t5 (v1 int, v2 int) with (appendonly = true);
+create table t5 (v1 int, v2 int) append only;
 
 statement ok
 insert into t5 values (1,0), (1,1), (1,2), (1,3);

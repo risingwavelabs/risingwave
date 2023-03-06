@@ -8,4 +8,5 @@
 # test: tablespace
 
 test: boolean varchar int2 int4 int8 float4 float8 comments
+test: date
 test: jsonb

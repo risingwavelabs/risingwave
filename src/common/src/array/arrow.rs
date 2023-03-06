@@ -643,7 +643,7 @@ mod tests {
                 array! { BoolArray, [Some(false), Some(false), Some(true), None]}.into(),
                 array! { I32Array, [Some(42), Some(28), Some(19), None] }.into(),
             ],
-            vec![DataType::Boolean, DataType::INT32],
+            vec![DataType::Boolean, DataType::Int32],
             vec![String::from("a"), String::from("b")],
         );
         assert_eq!(

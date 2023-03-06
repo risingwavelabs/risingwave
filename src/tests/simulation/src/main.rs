@@ -137,7 +137,6 @@ pub struct Args {
 #[cfg(madsim)]
 #[madsim::main]
 async fn main() {
-    use std::env;
     use std::sync::Arc;
 
     use risingwave_simulation::client::RisingWave;
@@ -145,12 +144,12 @@ async fn main() {
     use risingwave_simulation::slt::*;
     use tracing_subscriber::EnvFilter;
 
-    tracing_subscriber::fmt()
+    _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
         .with_writer(std::io::stderr)
-        .init();
+        .try_init();
 
     let args = Args::parse();
     let config = Configuration {
@@ -194,6 +193,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        Some(seed),
                     )
                     .await;
                 } else {

@@ -171,6 +171,10 @@ where
             ..Default::default()
         }
     }
+
+    fn compute_subscribe(&self) -> MetaSnapshot {
+        MetaSnapshot::default()
+    }
 }
 
 #[async_trait::async_trait]
@@ -211,6 +215,7 @@ where
                     .await?;
                 self.hummock_subscribe().await
             }
+            SubscribeType::Compute => self.compute_subscribe(),
             SubscribeType::Unspecified => unreachable!(),
         };
 

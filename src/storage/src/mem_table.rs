@@ -16,7 +16,7 @@ use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::ops::{Bound, RangeBounds};
+use std::ops::RangeBounds;
 
 use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
@@ -347,7 +347,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
 
     fn may_exist(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: IterKeyRange,
         _read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         async { Ok(true) }
@@ -365,11 +365,7 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         }
     }
 
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             let stream = self
                 .inner

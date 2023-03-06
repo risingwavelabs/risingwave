@@ -16,7 +16,7 @@ use std::future::Future;
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
@@ -126,7 +126,7 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
         let bytes_key_range = (
@@ -169,7 +169,7 @@ impl StateStoreRead for LocalHummockStorage {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -189,7 +189,7 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         self.may_exist_inner(key_range, read_options)
@@ -210,11 +210,7 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             let stream = self
                 .iter_inner(
@@ -386,7 +382,7 @@ impl LocalHummockStorage {
                 .expect("should be able to send");
             let tracker = limiter
                 .require_memory(size as u64)
-                .verbose_stack_trace("hummock_require_memory")
+                .verbose_instrument_await("hummock_require_memory")
                 .await;
             warn!(
                 "successfully requiring memory: {}, current {}",

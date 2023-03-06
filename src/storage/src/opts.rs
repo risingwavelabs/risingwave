@@ -73,15 +73,15 @@ impl Default for StorageOpts {
     fn default() -> Self {
         let c = RwConfig::default();
         let p = SystemParams {
-            barrier_interval_ms: Some(c.streaming.barrier_interval_ms),
-            checkpoint_frequency: Some(c.streaming.checkpoint_frequency as u64),
             sstable_size_mb: Some(c.storage.sstable_size_mb),
             block_size_kb: Some(c.storage.block_size_kb),
             bloom_false_positive: Some(c.storage.bloom_false_positive),
             data_directory: Some(c.storage.data_directory.clone()),
             backup_storage_url: Some(c.backup.storage_url.clone()),
             backup_storage_directory: Some(c.backup.storage_directory.clone()),
-            state_store: None, // unused
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+            state_store: None,
         };
         Self::from((&c, &p.into()))
     }

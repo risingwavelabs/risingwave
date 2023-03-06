@@ -42,7 +42,7 @@ pub use self::query::{
     With,
 };
 pub use self::statement::*;
-pub use self::value::{DateTimeField, TrimWhereField, Value};
+pub use self::value::{DateTimeField, DollarQuotedString, TrimWhereField, Value};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, ParserError};
 
@@ -953,6 +953,8 @@ pub enum Statement {
         source_schema: Option<SourceSchema>,
         /// The watermark defined on source.
         source_watermarks: Vec<SourceWatermark>,
+        /// Append only table.
+        append_only: bool,
         /// `AS ( query )`
         query: Option<Box<Query>>,
     },
@@ -1303,6 +1305,7 @@ impl fmt::Display for Statement {
                 temporary,
                 source_schema,
                 source_watermarks,
+                append_only,
                 query,
             } => {
                 // We want to allow the following options
@@ -1325,6 +1328,9 @@ impl fmt::Display for Statement {
                 } else if query.is_none() {
                     // PostgreSQL allows `CREATE TABLE t ();`, but requires empty parens
                     write!(f, " ()")?;
+                }
+                if *append_only {
+                    write!(f, " APPEND ONLY")?;
                 }
                 if !with_options.is_empty() {
                     write!(f, " WITH ({})", display_comma_separated(with_options))?;

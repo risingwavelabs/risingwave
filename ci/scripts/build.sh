@@ -48,9 +48,6 @@ cargo build \
 # the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
 artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
-echo "--- Compress debug info for artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "objcopy --compress-debug-sections=zlib-gnu target/$target/{} && echo \"compressed {}\""
-
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 

@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use clap::StructOpt;
+use clap::Parser;
 use tempfile::TempPath;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;

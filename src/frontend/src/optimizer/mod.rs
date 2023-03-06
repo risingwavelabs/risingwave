@@ -33,8 +33,9 @@ pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::WatermarkDesc;
 
@@ -43,11 +44,9 @@ use self::plan_node::{
     BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
     StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
+use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
 use self::plan_visitor::InputRefValidator;
-use self::plan_visitor::{
-    has_batch_delete, has_batch_exchange, has_batch_insert, has_batch_update,
-};
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
@@ -195,32 +194,6 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    /// As we always run the root stage locally, we should ensure that singleton table scan is not
-    /// the root stage. Returns `true` if we must insert an additional exchange to ensure this.
-    fn require_additional_exchange_on_root(plan: PlanRef) -> bool {
-        fn is_candidate_table_scan(plan: &PlanRef) -> bool {
-            if let Some(node) = plan.as_batch_seq_scan()
-            && !node.logical().is_sys_table() {
-                true
-            } else {
-                plan.node_type() == PlanNodeType::BatchSource
-            }
-        }
-
-        fn no_exchange_before_table_scan(plan: PlanRef) -> bool {
-            if plan.node_type() == PlanNodeType::BatchExchange {
-                return false;
-            }
-            is_candidate_table_scan(&plan)
-                || plan.inputs().into_iter().any(no_exchange_before_table_scan)
-        }
-
-        assert_eq!(plan.distribution(), &Distribution::Single);
-        no_exchange_before_table_scan(plan)
-
-        // TODO: join between a normal table and a system table is not supported yet
-    }
-
     /// Optimize and generate a batch query plan for distributed execution.
     pub fn gen_batch_distributed_plan(&mut self) -> Result<PlanRef> {
         self.set_required_dist(RequiredDist::single());
@@ -240,11 +213,7 @@ impl PlanRoot {
             ctx.trace("To Batch Distributed Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-        if has_batch_insert(plan.clone())
-            || has_batch_delete(plan.clone())
-            || has_batch_update(plan.clone())
-            || Self::require_additional_exchange_on_root(plan.clone())
-        {
+        if require_additional_exchange_on_root_in_distributed_mode(plan.clone()) {
             plan =
                 BatchExchange::new(plan, self.required_order.clone(), Distribution::Single).into();
         }
@@ -262,7 +231,7 @@ impl PlanRoot {
         // We remark that since the `to_local_with_order_required` does not enforce single
         // distribution, we enforce at the root if needed.
         let insert_exchange = match plan.distribution() {
-            Distribution::Single => Self::require_additional_exchange_on_root(plan.clone()),
+            Distribution::Single => require_additional_exchange_on_root_in_local_mode(plan.clone()),
             _ => true,
         };
         if insert_exchange {
@@ -294,8 +263,35 @@ impl PlanRoot {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
-                let (plan, out_col_change) =
-                    plan.logical_rewrite_for_stream(&mut Default::default())?;
+                let (plan, out_col_change) = {
+                    let (plan, out_col_change) =
+                        plan.logical_rewrite_for_stream(&mut Default::default())?;
+                    if out_col_change.is_injective() {
+                        (plan, out_col_change)
+                    } else {
+                        let mut output_indices = (0..plan.schema().len()).collect_vec();
+                        #[allow(unused_assignments)]
+                        let (mut map, mut target_size) = out_col_change.into_parts();
+
+                        // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
+                        // assert_eq!(target_size, output_indices.len());
+                        target_size = plan.schema().len();
+                        let mut tar_exists = vec![false; target_size];
+                        for i in map.iter_mut().flatten() {
+                            if tar_exists[*i] {
+                                output_indices.push(*i);
+                                *i = target_size;
+                                target_size += 1;
+                            } else {
+                                tar_exists[*i] = true;
+                            }
+                        }
+                        let plan =
+                            LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
+                        let out_col_change = ColIndexMapping::with_target_size(map, target_size);
+                        (plan.into(), out_col_change)
+                    }
+                };
 
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
@@ -317,6 +313,12 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Add identity project between exchange and share",
+            vec![AvoidExchangeShareRule::create()],
+            ApplyOrder::BottomUp,
+        ));
 
         if ctx.session_ctx().config().get_streaming_enable_delta_join() {
             // TODO: make it a logical optimization.
@@ -382,6 +384,10 @@ impl PlanRoot {
             stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
         }
 
+        let conflict_behavior = match append_only {
+            true => ConflictBehavior::NoCheck,
+            false => ConflictBehavior::OverWrite,
+        };
         StreamMaterialize::create_for_table(
             stream_plan,
             table_name,
@@ -389,7 +395,7 @@ impl PlanRoot {
             self.required_order.clone(),
             columns,
             definition,
-            !append_only,
+            conflict_behavior,
             row_id_index,
             version,
         )
@@ -492,6 +498,76 @@ fn const_eval_exprs(plan: PlanRef) -> Result<PlanRef> {
 fn inline_session_timezone_in_exprs(ctx: OptimizerContextRef, plan: PlanRef) -> Result<PlanRef> {
     let plan = plan.rewrite_exprs_recursive(ctx.session_timezone().deref_mut());
     Ok(plan)
+}
+
+fn exist_and_no_exchange_before(plan: &PlanRef, is_candidate: fn(&PlanRef) -> bool) -> bool {
+    if plan.node_type() == PlanNodeType::BatchExchange {
+        return false;
+    }
+    is_candidate(plan)
+        || plan
+            .inputs()
+            .iter()
+            .any(|input| exist_and_no_exchange_before(input, is_candidate))
+}
+
+/// As we always run the root stage locally, for some plan in root stage which need to execute in
+/// compute node we insert an additional exhchange before it to avoid to include it in the root
+/// stage.
+///
+/// Returns `true` if we must insert an additional exchange to ensure this.
+fn require_additional_exchange_on_root_in_distributed_mode(plan: PlanRef) -> bool {
+    fn is_user_table(plan: &PlanRef) -> bool {
+        plan.as_batch_seq_scan()
+            .map(|node| !node.logical().is_sys_table())
+            .unwrap_or(false)
+    }
+
+    fn is_source(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchSource
+    }
+
+    fn is_insert(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchInsert
+    }
+
+    fn is_update(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchUpdate
+    }
+
+    fn is_delete(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchDelete
+    }
+
+    assert_eq!(plan.distribution(), &Distribution::Single);
+    exist_and_no_exchange_before(&plan, is_user_table)
+        || exist_and_no_exchange_before(&plan, is_source)
+        || exist_and_no_exchange_before(&plan, is_insert)
+        || exist_and_no_exchange_before(&plan, is_update)
+        || exist_and_no_exchange_before(&plan, is_delete)
+}
+
+/// The purpose is same as `require_additional_exchange_on_root_in_distributed_mode`. We separate
+/// them for the different requirement of plan node in different execute mode.
+fn require_additional_exchange_on_root_in_local_mode(plan: PlanRef) -> bool {
+    fn is_user_table(plan: &PlanRef) -> bool {
+        plan.as_batch_seq_scan()
+            .map(|node| !node.logical().is_sys_table())
+            .unwrap_or(false)
+    }
+
+    fn is_source(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchSource
+    }
+
+    fn is_insert(plan: &PlanRef) -> bool {
+        plan.node_type() == PlanNodeType::BatchInsert
+    }
+
+    assert_eq!(plan.distribution(), &Distribution::Single);
+    exist_and_no_exchange_before(&plan, is_user_table)
+        || exist_and_no_exchange_before(&plan, is_source)
+        || exist_and_no_exchange_before(&plan, is_insert)
 }
 
 #[cfg(test)]

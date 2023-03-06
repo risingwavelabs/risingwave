@@ -319,9 +319,11 @@ pub enum ByteStreamSourceParserImpl {
     CanalJson(CanalJsonParser),
     DebeziumAvro(DebeziumAvroParser),
 }
-
-impl ByteStreamSourceParserImpl {
-    pub fn into_stream(self, msg_stream: BoxSourceStream) -> BoxSourceWithStateStream {
+impl ByteStreamSourceParser for ByteStreamSourceParserImpl {
+    fn into_stream(
+        self,
+        msg_stream: crate::source::BoxSourceStream,
+    ) -> crate::source::BoxSourceWithStateStream {
         match self {
             Self::Csv(parser) => parser.into_stream(msg_stream),
             Self::Json(parser) => parser.into_stream(msg_stream),
@@ -333,7 +335,9 @@ impl ByteStreamSourceParserImpl {
             Self::DebeziumAvro(parser) => parser.into_stream(msg_stream),
         }
     }
+}
 
+impl ByteStreamSourceParserImpl {
     pub fn create(parser_config: ParserConfig, source_ctx: SourceContextRef) -> Result<Self> {
         let CommonParserConfig { rw_columns } = parser_config.common;
         match parser_config.specific {
