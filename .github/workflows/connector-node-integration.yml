@@ -47,7 +47,8 @@ jobs:
           sleep 3
           wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
           chmod +x mc
-          ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+          MC_PATH=${PWD}/mc
+          ${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
           echo "--- starting connector-node service"
           cd ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
@@ -87,7 +88,7 @@ jobs:
           echo "all jdbc tests passed"
           
           echo "running iceberg integration tests"
-          ./mc mb minio/bucket
+          ${MC_PATH} mb minio/bucket
           
           # test append-only mode
           cd python-client
@@ -114,12 +115,12 @@ jobs:
 
           # clean up minio
           cd ..
-          ./mc rm -r -force minio/bucket
-          ./mc rb minio/bucket
+          ${MC_PATH} rm -r -force minio/bucket
+          ${MC_PATH} rb minio/bucket
           echo "all iceberg tests passed"
           
           echo "running deltalake integration tests"
-          ./mc mb minio/bucket
+          ${MC_PATH} mb minio/bucket
           
           cd python-client
           # test append-only mode
@@ -134,7 +135,7 @@ jobs:
 
           # clean up minio
           cd ..
-          ./mc rm -r -force minio/bucket
-          ./mc rb minio/bucket
+          ${MC_PATH} rm -r -force minio/bucket
+          ${MC_PATH} rb minio/bucket
           echo "all deltalake tests passed"
           
