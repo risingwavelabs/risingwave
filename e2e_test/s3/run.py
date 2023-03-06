@@ -31,11 +31,11 @@ for i in range(1, 20):
         os.fsync(f.fileno())
 
 
-S3_ENDPOINT = os.environ["S3_ENDPOINT"]
-S3_ACCESS_KEY = os.environ["S3_ACCESS_KEY"]
-S3_SECRET_KEY = os.environ["S3_SECRET_KEY"]
+S3_ENDPOINT = os.environ.get("S3_ENDPOINT","s3.amazonaws.com")
+S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY","")
+S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY","")
 S3_BUCKET = os.environ.get("S3_BUCKET","s3-test-ci")
-S3_REGION = os.environ["S3_REGION"]
+S3_REGION = os.environ.get("S3_REGION","")
 
 print(f"{S3_ENDPOINT} AK:${len(S3_ACCESS_KEY)} SK:${len(S3_SECRET_KEY)} ${S3_BUCKET} ${S3_REGION}")
 
