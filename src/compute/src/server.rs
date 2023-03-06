@@ -285,6 +285,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store,
         dml_mgr,
+        system_params_manager,
         source_metrics,
     );
 

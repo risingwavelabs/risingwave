@@ -107,6 +107,18 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
+    /// State store url.
+    #[clap(long, env = "RW_STATE_STORE")]
+    state_store: Option<String>,
+
+    /// The interval of periodic barrier.
+    #[clap(long, env = "RW_BARRIER_INTERVAL_MS", default_value_t = default::barrier_interval_ms())]
+    barrier_interval_ms: u32,
+
+    /// There will be a checkpoint for every n barriers
+    #[clap(long, env = "RW_CHECKPOINT_FREQUENCY", default_value_t = default::checkpoint_frequency())]
+    pub checkpoint_frequency: u64,
+
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB", default_value_t = default::sstable_size_mb())]
     sstable_size_mb: u32,
@@ -118,10 +130,6 @@ pub struct MetaNodeOpts {
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE", default_value_t = default::bloom_false_positive())]
     bloom_false_positive: f64,
-
-    /// State store url.
-    #[clap(long, env = "RW_STATE_STORE")]
-    state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY", default_value_t = default::data_directory())]
@@ -240,6 +248,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .periodic_ttl_reclaim_compaction_interval_sec,
             },
             SystemParams {
+                barrier_interval_ms: Some(opts.barrier_interval_ms),
+                checkpoint_frequency: Some(opts.checkpoint_frequency),
                 sstable_size_mb: Some(opts.sstable_size_mb),
                 block_size_kb: Some(opts.block_size_kb),
                 bloom_false_positive: Some(opts.bloom_false_positive),
@@ -247,9 +257,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 data_directory: Some(opts.data_directory),
                 backup_storage_url: Some(opts.backup_storage_url),
                 backup_storage_directory: Some(opts.backup_storage_directory),
-                // Use persisted or default value
-                barrier_interval_ms: None,
-                checkpoint_frequency: None,
             },
         )
         .await
