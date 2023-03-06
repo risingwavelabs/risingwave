@@ -38,7 +38,7 @@ use crate::{bail, ensure, ExprError, Result};
 /// select array_distinct(array[NULL]);
 /// ----
 /// {NULL}
-/// 
+///
 /// query T
 /// select array_distinct(null::int[]);
 /// ----
@@ -219,18 +219,7 @@ mod tests {
             DataType::List {
                 datatype: Box::new(DataType::Int64),
             },
-            Some(
-                ListValue::new(
-                    values
-                        .into_iter()
-                        .map(|x| match x {
-                            Some(x) => Some(x.into()),
-                            None => None,
-                        })
-                        .collect(),
-                )
-                .into(),
-            ),
+            Some(ListValue::new(values.into_iter().map(|x| x.into()).collect()).into()),
         )
         .boxed()
     }
