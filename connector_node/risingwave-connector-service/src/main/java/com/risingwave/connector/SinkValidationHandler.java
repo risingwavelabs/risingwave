@@ -24,6 +24,7 @@ public class SinkValidationHandler {
             SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
             sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
         } catch (Exception e) {
+            LOG.error("sink validation failed", e);
             responseObserver.onNext(
                     ConnectorServiceProto.ValidateSinkResponse.newBuilder()
                             .setError(
@@ -31,6 +32,7 @@ public class SinkValidationHandler {
                                             .setErrorMessage(e.toString())
                                             .build())
                             .build());
+            responseObserver.onCompleted();
         }
     }
 }
