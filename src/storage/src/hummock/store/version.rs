@@ -668,7 +668,9 @@ impl HummockVersionReader {
             if imm.has_range_tombstone() && !read_options.ignore_range_tombstone {
                 delete_range_iter.add_batch_iter(imm.delete_range_iter());
             }
-            staging_iters.push(HummockIteratorUnion::First(imm.into_forward_iter()));
+            staging_iters.push(HummockIteratorUnion::First(
+                imm.into_forward_snapshot_iter(epoch),
+            ));
         }
         let mut staging_sst_iter_count = 0;
         // encode once
