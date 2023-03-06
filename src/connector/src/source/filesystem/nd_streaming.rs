@@ -53,34 +53,40 @@ impl<T> NdByteStreamWrapper<T> {
             if batch.is_empty() {
                 continue;
             }
+
+            // Never panic because we check batch is not empty
             let (offset, split_id, meta) = batch
                 .first()
                 .map(|msg| (msg.offset.clone(), msg.split_id.clone(), msg.meta.clone()))
-                .unwrap(); // Never panic because we check batch is not empty
+                .unwrap();
 
             let mut offset: usize = offset.parse()?;
 
             // Never panic because we check batch is not empty
-            let last_offset: usize = batch.last().map(|m| m.offset.clone()).unwrap().parse()?;
-            for (i, msg) in batch.into_iter().enumerate() {
+            let last_item = batch.last().unwrap();
+            let end_offset: usize = last_item.offset.parse::<usize>().unwrap()
+                + last_item
+                    .payload
+                    .as_ref()
+                    .map(|p| p.len())
+                    .unwrap_or_default();
+            for msg in batch.into_iter() {
                 let payload = msg.payload.unwrap_or_default();
-                if i == 0 {
-                    // The 'offset' field in 'SourceMessage' indicates the end position of a chunk.
-                    // But indicates the beginning here.
-                    offset -= payload.len();
-                }
                 buf.extend(payload);
             }
             let mut msgs = Vec::new();
             for (i, line) in buf.lines().enumerate() {
                 let mut line = line?;
-                offset += line.len();
+
                 // Insert the trailing of the last chunk in front of the first line, do not count
                 // the length here.
                 if i == 0 && last_message.is_some() {
                     let msg: SourceMessage = std::mem::take(&mut last_message).unwrap();
-                    line = String::from_utf8(msg.payload.unwrap().into()).unwrap() + &line;
+                    let last_payload = msg.payload.unwrap();
+                    offset -= last_payload.len();
+                    line = String::from_utf8(last_payload.into()).unwrap() + &line;
                 }
+                let len = line.as_bytes().len();
 
                 msgs.push(SourceMessage {
                     payload: Some(line.into()),
@@ -88,10 +94,11 @@ impl<T> NdByteStreamWrapper<T> {
                     split_id: split_id.clone(),
                     meta: meta.clone(),
                 });
+                offset += len;
                 offset += 1;
             }
 
-            if offset > last_offset {
+            if offset > end_offset {
                 last_message = msgs.pop();
             }
 
@@ -142,7 +149,7 @@ mod tests {
                     .enumerate()
                     .map(|(j, buf)| SourceMessage {
                         payload: Some(buf.to_owned().into()),
-                        offset: (i * N2 + (j + 1) * N3).to_string(),
+                        offset: (i * N2 + j * N3).to_string(),
                         split_id: split_id.clone(),
                         meta: crate::source::SourceMeta::Empty,
                     })
