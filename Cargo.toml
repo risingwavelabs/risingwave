@@ -67,7 +67,7 @@ aws-types = { version = "0.51", features = ["hardcoded-credentials"] }
 lto = 'off'
 
 [profile.release]
-debug = true
+debug = 1 # line tables only
 lto = 'thin'
 
 [profile.bench]
@@ -85,7 +85,6 @@ rpath = false
 # better catch bugs in CI.
 [profile.ci-release]
 inherits = "release"
-debug = true
 debug-assertions = true
 overflow-checks = true
 
