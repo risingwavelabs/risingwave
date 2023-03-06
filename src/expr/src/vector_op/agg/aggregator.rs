@@ -71,18 +71,18 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
-        let mut order_pairs = vec![];
-        let mut order_col_types = vec![];
-        prost.get_order_by_fields().iter().for_each(|field| {
-            let col_idx = field.get_input().unwrap().get_column_idx() as usize;
-            let col_type = DataType::from(field.get_type().unwrap());
-            let order_type =
-                OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
-            // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
-            // see also `risingwave_common::util::sort_util::compare_values`
-            order_pairs.push(OrderPair::new(col_idx, order_type));
-            order_col_types.push(col_type);
-        });
+        let order_pairs = prost
+            .get_order_by_fields()
+            .iter()
+            .map(|field| {
+                let col_idx = field.get_input().unwrap().get_column_idx() as usize;
+                let order_type =
+                    OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+                // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
+                // see also `risingwave_common::util::sort_util::compare_values`
+                OrderPair::new(col_idx, order_type)
+            })
+            .collect();
 
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
             (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),

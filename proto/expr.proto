@@ -231,7 +231,6 @@ message AggCall {
   bool distinct = 4;
   message OrderByField {
     InputRefExpr input = 1;
-    data.DataType type = 2;
     plan_common.OrderType direction = 3;
     bool nulls_first = 4;
   }

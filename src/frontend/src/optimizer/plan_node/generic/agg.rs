@@ -520,7 +520,6 @@ impl PlanAggOrderByField {
     fn to_protobuf(&self) -> ProstAggOrderByField {
         ProstAggOrderByField {
             input: Some(self.input.to_proto()),
-            r#type: Some(self.input.data_type.to_protobuf()),
             direction: self.direction.to_protobuf() as i32,
             nulls_first: self.nulls_first,
         }
