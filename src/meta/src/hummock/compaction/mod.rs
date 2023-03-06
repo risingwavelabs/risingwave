@@ -164,6 +164,7 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
+            split_by_state_table: group.compaction_config.split_by_state_table,
         };
         Some(compact_task)
     }

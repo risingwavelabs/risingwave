@@ -902,8 +902,15 @@ pub mod tests {
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
         assert_eq!(compaction.input.target_level, 4);
-        assert_eq!(compaction.input.input_levels[0].table_infos.len(), 1);
-        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 1);
+        assert_eq!(
+            compaction.input.input_levels[0]
+                .table_infos
+                .iter()
+                .map(|sst| sst.id)
+                .collect_vec(),
+            vec![5, 6, 7]
+        );
+        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 3);
         assert_eq!(
             compaction.target_file_size,
             config.target_file_size_base * 2
@@ -947,7 +954,7 @@ pub mod tests {
             ..Default::default()
         };
 
-        let dynamic_level_core = DynamicLevelSelectorCore::new(false, Arc::new(config));
+        let dynamic_level_core = DynamicLevelSelectorCore::new(Arc::new(config));
         let ctx = dynamic_level_core.calculate_level_base_size(&levels);
         assert_eq!(1, ctx.base_level);
         assert_eq!(1000, levels.l0.as_ref().unwrap().total_file_size); // l0

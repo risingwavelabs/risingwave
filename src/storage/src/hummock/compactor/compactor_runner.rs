@@ -91,7 +91,7 @@ impl CompactorRunner {
                 watermark: task.watermark,
                 stats_target_table_ids: Some(stats_target_table_ids),
                 task_type: task.task_type(),
-                split_by_table: true,
+                split_by_table: task.split_by_state_table,
             },
         );
 

@@ -302,8 +302,8 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if other.level_type == non_overlapping_type
-                    && other.total_file_size > self.config.sub_level_max_compaction_bytes
+                if other.level_type != non_overlapping_type
+                    || other.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
                     break;
                 }
@@ -324,8 +324,9 @@ impl TierCompactionPicker {
             // ln(max_compaction_bytes/flush_level_bytes) /
             // ln(self.config.level0_tier_compact_file_number/2) Here we only use half
             // of level0_tier_compact_file_number just for convenient.
-            let is_write_amp_large =
-                max_level_size * self.config.level0_tier_compact_file_number / 2 > compaction_bytes;
+            let is_write_amp_large = max_level_size * self.config.level0_tier_compact_file_number
+                / 2
+                >= compaction_bytes;
 
             // do not pick a compact task with large write amplification. But if the total bytes is
             // too large,  we can not check write amplification because it may cause

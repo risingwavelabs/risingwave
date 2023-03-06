@@ -219,22 +219,14 @@ pub mod tests {
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 3);
         assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &level_handlers, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels[0].level_idx, 1);
-        assert_eq!(ret.target_level, 2);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[1].table_infos[1].id, 6);
+        let ret = picker.pick_compaction(&levels, &level_handlers, &mut local_stats);
+        assert!(ret.is_none());
     }
 
     #[test]
