@@ -369,6 +369,8 @@ category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
   "download-connector",
+  "download-maven",
+  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -581,6 +583,29 @@ cargo nextest run "$@"
 """
 description = "Run unit tests"
 
+[tasks.build-connector-node]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+description = "Build RisingWave Connector from source"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+ARTIFACT="risingwave-connector-1.0.0.tar.gz"
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+tar xf "assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
+'''
+
+
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
@@ -706,6 +731,44 @@ set -e
 cargo llvm-cov run -p risingwave_simulation --html "$@"
 """
 
+[tasks.check-connector-node]
+category = "RiseDev - Check"
+description = "Run mvn spotless:check in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" spotless:check
+"""
+
+[tasks.check-connector-node-fix]
+category = "RiseDev - Check"
+description = "Run mvn spotless:apply in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" spotless:apply
+"""
+
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
@@ -814,6 +877,7 @@ dependencies = [
   "check-fmt",
   "check-clippy",
   "check-typos",
+  "check-connector-node",
 ]
 script = """
 #!/usr/bin/env bash
@@ -835,6 +899,7 @@ dependencies = [
   "check-fmt",
   "check-clippy-fix",
   "check-typos",
+  "check-connector-node-fix",
 ]
 script = """
 #!/usr/bin/env bash

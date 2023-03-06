@@ -12,10 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::ops::Bound;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use futures::{Future, TryFutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -74,7 +73,7 @@ impl<S> MonitoredStateStore<S> {
 
         // wait for iterator creation (e.g. seek)
         let iter_stream = iter_stream_future
-            .verbose_stack_trace("store_create_iter")
+            .verbose_instrument_await("store_create_iter")
             .await
             .inspect_err(|e| error!("Failed in iter: {:?}", e))?;
 
@@ -119,7 +118,7 @@ impl<S> MonitoredStateStore<S> {
             .with_label_values(&[table_id_label.as_str()])
             .start_timer();
         let value = get_future
-            .verbose_stack_trace("store_get")
+            .verbose_instrument_await("store_get")
             .await
             .inspect_err(|e| error!("Failed in get: {:?}", e))?;
         timer.observe_duration();
@@ -157,7 +156,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -180,7 +179,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
 
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         async move {
@@ -203,11 +202,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         self.monitored_get(self.inner.get(key, read_options), table_id, key_len)
     }
 
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
         let table_id = read_options.table_id;
         // TODO: may collect the metrics as local
         self.monitored_iter(table_id, self.inner.iter(key_range, read_options))
@@ -259,7 +254,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             self.inner
                 .try_wait_epoch(epoch)
-                .verbose_stack_trace("store_wait_epoch")
+                .verbose_instrument_await("store_wait_epoch")
                 .await
                 .inspect_err(|e| error!("Failed in wait_epoch: {:?}", e))
         }
@@ -273,7 +268,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
             let sync_result = self
                 .inner
                 .sync(epoch)
-                .verbose_stack_trace("store_await_sync")
+                .instrument_await("store_await_sync")
                 .await
                 .inspect_err(|e| error!("Failed in sync: {:?}", e))?;
             timer.observe_duration();
@@ -301,7 +296,7 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
         async move {
             self.inner
                 .clear_shared_buffer()
-                .verbose_stack_trace("store_clear_shared_buffer")
+                .verbose_instrument_await("store_clear_shared_buffer")
                 .await
                 .inspect_err(|e| error!("Failed in clear_shared_buffer: {:?}", e))
         }
@@ -310,7 +305,10 @@ impl<S: StateStore> StateStore for MonitoredStateStore<S> {
     fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
         async move {
             MonitoredStateStore::new(
-                self.inner.new_local(option).await,
+                self.inner
+                    .new_local(option)
+                    .instrument_await("store_new_local")
+                    .await,
                 self.storage_metrics.clone(),
             )
         }

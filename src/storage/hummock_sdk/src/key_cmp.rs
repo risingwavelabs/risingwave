@@ -14,10 +14,8 @@
 
 use std::cmp::{self, Ordering};
 
-use bytes::Buf;
-
 use super::key::split_key_epoch;
-use crate::key::{UserKey, TABLE_PREFIX_LEN};
+use crate::key::UserKey;
 
 /// A comparator for comparing [`FullKey`] and [`UserKey`] with possibly different table key types.
 pub struct KeyComparator;
@@ -37,11 +35,7 @@ impl KeyComparator {
         encoded: impl AsRef<[u8]>,
         unencoded: &UserKey<impl AsRef<[u8]>>,
     ) -> Ordering {
-        let encoded = encoded.as_ref();
-        (&encoded[..TABLE_PREFIX_LEN])
-            .get_u32()
-            .cmp(&unencoded.table_id.table_id())
-            .then_with(|| encoded[TABLE_PREFIX_LEN..].cmp(unencoded.table_key.as_ref()))
+        UserKey::decode(encoded.as_ref()).cmp(&unencoded.as_ref())
     }
 
     #[inline(always)]

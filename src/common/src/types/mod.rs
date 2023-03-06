@@ -65,6 +65,7 @@ use strum_macros::EnumDiscriminants;
 use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
+use crate::array::serial_array::Serial;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue,
     PrimitiveArrayItemType, StructRef, StructValue,
@@ -235,20 +236,6 @@ impl From<&ProstDataType> for DataType {
 }
 
 impl DataType {
-    pub const BOOLEAN: DataType = DataType::Boolean;
-    pub const DATE: DataType = DataType::Date;
-    pub const DECIMAL: DataType = DataType::Decimal;
-    pub const FLOAT32: DataType = DataType::Float32;
-    pub const FLOAT64: DataType = DataType::Float64;
-    pub const INT16: DataType = DataType::Int16;
-    pub const INT32: DataType = DataType::Int32;
-    pub const INT64: DataType = DataType::Int64;
-    pub const INTERVAL: DataType = DataType::Interval;
-    pub const TIME: DataType = DataType::Time;
-    pub const TIMESTAMP: DataType = DataType::Timestamp;
-    pub const TIMESTAMPTZ: DataType = DataType::Timestamptz;
-    pub const VARCHAR: DataType = DataType::Varchar;
-
     pub fn create_array_builder(&self, capacity: usize) -> ArrayBuilderImpl {
         use crate::array::*;
         match self {
@@ -471,6 +458,7 @@ macro_rules! for_all_scalar_variants {
             { Int16, int16, i16, i16 },
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
+            { Serial, serial, Serial, Serial },
             { Float32, float32, OrderedF32, OrderedF32 },
             { Float64, float64, OrderedF64, OrderedF64 },
             { Utf8, utf8, Box<str>, &'scalar str },
@@ -850,6 +838,7 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.serialize(ser)?,
             Self::Int32(v) => v.serialize(ser)?,
             Self::Int64(v) => v.serialize(ser)?,
+            Self::Serial(v) => v.serialize(ser)?,
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,
