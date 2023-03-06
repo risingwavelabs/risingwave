@@ -130,7 +130,7 @@ steps:
     retry: *auto-retry
 
   - label: "scaling test (deterministic simulation)"
-    command: "MADSIM_TEST_NUM=60 timeout 55m ci/scripts/deterministic-scale-test.sh"
+    command: "TEST_NUM=60 timeout 55m ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache

@@ -43,12 +43,14 @@ impl BatchServiceImpl {
         BatchServiceImpl { mgr, env }
     }
 }
-pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
-pub(crate) type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
+
+pub type TaskInfoResponseResult = Result<TaskInfoResponse, Status>;
+pub type GetDataResponseResult = Result<GetDataResponse, Status>;
+
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
-    type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(

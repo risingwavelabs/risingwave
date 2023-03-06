@@ -177,11 +177,19 @@ impl SharedBufferBatch {
         R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
+        let left = table_key_range
+            .start_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
+        let right = table_key_range
+            .end_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
         self.table_id == table_id
             && range_overlap(
-                table_key_range,
-                *self.start_table_key(),
-                *self.end_table_key(),
+                &(left, right),
+                &self.start_table_key(),
+                &self.end_table_key(),
             )
     }
 

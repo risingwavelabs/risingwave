@@ -19,10 +19,12 @@ use humantime::parse_duration;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::{json, Value};
+use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
 use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
+#[derive(Debug)]
 enum LocalNow {
     Relative,
     Absolute(NaiveDateTime),
@@ -57,6 +59,7 @@ impl TimestampField {
             // default max_past = 1 day
             DEFAULT_MAX_PAST
         };
+        debug!(?local_now, ?max_past, "parse timestamp field option");
         Ok(Self {
             // convert to chrono::Duration
             max_past: chrono::Duration::from_std(max_past)?,

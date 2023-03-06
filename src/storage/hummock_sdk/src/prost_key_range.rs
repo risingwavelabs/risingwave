@@ -17,7 +17,7 @@ use std::cmp;
 use risingwave_pb::hummock::KeyRange;
 
 use crate::key_range::KeyRangeCommon;
-use crate::{impl_key_range_common, key_range_cmp, user_key, KeyComparator};
+use crate::{impl_key_range_common, key_range_cmp, KeyComparator};
 
 impl_key_range_common!(KeyRange);
 
