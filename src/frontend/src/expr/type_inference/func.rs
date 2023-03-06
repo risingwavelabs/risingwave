@@ -539,9 +539,7 @@ fn infer_type_for_special(
                 } => Ok(Some(DataType::List {
                     datatype: list_elem_type,
                 })),
-                _ => Err(
-                    ErrorCode::BindError("Array contains different value types".to_string()).into(),
-                ),
+                _ => Ok(None),
             }
         }
         ExprType::Vnode => {
