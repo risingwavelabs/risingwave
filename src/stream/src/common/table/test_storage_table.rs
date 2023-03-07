@@ -450,9 +450,7 @@ async fn test_batch_scan_with_value_indices() {
         .batch_iter(
             HummockReadEpoch::Committed(epoch.prev),
             false,
-            PrefetchOptions {
-                exhaust_iter: false,
-            },
+            PrefetchOptions::new_for_exhaust_iter(false),
         )
         .await
         .unwrap();

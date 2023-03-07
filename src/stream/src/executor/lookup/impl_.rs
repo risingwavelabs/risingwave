@@ -372,7 +372,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions { exhaust_iter: true },
+                            PrefetchOptions::new_for_exhaust_iter(true),
                         )
                         .await?
                 }
@@ -384,7 +384,7 @@ impl<S: StateStore> LookupExecutor<S> {
                             &lookup_row,
                             ..,
                             false,
-                            PrefetchOptions { exhaust_iter: true },
+                            PrefetchOptions::new_for_exhaust_iter(true),
                         )
                         .await?
                 }

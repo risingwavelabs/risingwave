@@ -85,9 +85,7 @@ impl<S: StateStore> NowExecutor<S> {
 
         let state_row = {
             let data_iter = state_table
-                .iter(PrefetchOptions {
-                    exhaust_iter: false,
-                })
+                .iter(PrefetchOptions::new_for_exhaust_iter(false))
                 .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {

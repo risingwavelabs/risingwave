@@ -365,18 +365,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self.state.table.iter_key_and_val(
-                &key,
-                PrefetchOptions {
-                    exhaust_iter: false,
-                },
-            );
-            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(
-                &key,
-                PrefetchOptions {
-                    exhaust_iter: false,
-                },
-            );
+            let table_iter_fut = self
+                .state
+                .table
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter(false));
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter(false));
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -405,7 +401,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_with_pk_prefix(&key, PrefetchOptions { exhaust_iter: true })
+                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter(true))
                 .await?;
 
             #[for_await]

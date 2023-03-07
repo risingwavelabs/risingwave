@@ -281,12 +281,7 @@ async fn test_state_table_iter_with_prefix() {
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
     let iter = state_table
-        .iter_with_pk_prefix(
-            &pk_prefix,
-            PrefetchOptions {
-                exhaust_iter: false,
-            },
-        )
+        .iter_with_pk_prefix(&pk_prefix, PrefetchOptions::new_for_exhaust_iter(false))
         .await
         .unwrap();
     pin_mut!(iter);
@@ -420,9 +415,7 @@ async fn test_state_table_iter_with_pk_range() {
         .iter_with_pk_range(
             &pk_range,
             DEFAULT_VNODE,
-            PrefetchOptions {
-                exhaust_iter: false,
-            },
+            PrefetchOptions::new_for_exhaust_iter(false),
         )
         .await
         .unwrap();
@@ -451,9 +444,7 @@ async fn test_state_table_iter_with_pk_range() {
         .iter_with_pk_range(
             &pk_range,
             DEFAULT_VNODE,
-            PrefetchOptions {
-                exhaust_iter: false,
-            },
+            PrefetchOptions::new_for_exhaust_iter(false),
         )
         .await
         .unwrap();
@@ -594,9 +585,7 @@ async fn test_state_table_iter_with_value_indices() {
 
     {
         let iter = state_table
-            .iter(PrefetchOptions {
-                exhaust_iter: false,
-            })
+            .iter(PrefetchOptions::new_for_exhaust_iter(false))
             .await
             .unwrap();
         pin_mut!(iter);
@@ -654,9 +643,7 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     let iter = state_table
-        .iter(PrefetchOptions {
-            exhaust_iter: false,
-        })
+        .iter(PrefetchOptions::new_for_exhaust_iter(false))
         .await
         .unwrap();
     pin_mut!(iter);
@@ -765,9 +752,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
 
     {
         let iter = state_table
-            .iter(PrefetchOptions {
-                exhaust_iter: false,
-            })
+            .iter(PrefetchOptions::new_for_exhaust_iter(false))
             .await
             .unwrap();
         pin_mut!(iter);
@@ -846,9 +831,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     let iter = state_table
-        .iter(PrefetchOptions {
-            exhaust_iter: false,
-        })
+        .iter(PrefetchOptions::new_for_exhaust_iter(false))
         .await
         .unwrap();
     pin_mut!(iter);
@@ -1037,7 +1020,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions { exhaust_iter: true })
+        .iter(PrefetchOptions::new_for_exhaust_iter(true))
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1154,7 +1137,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions { exhaust_iter: true })
+        .iter(PrefetchOptions::new_for_exhaust_iter(true))
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1266,7 +1249,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions { exhaust_iter: true })
+        .iter(PrefetchOptions::new_for_exhaust_iter(true))
         .await
         .unwrap()
         .collect::<Vec<_>>()

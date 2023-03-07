@@ -84,12 +84,7 @@ impl<S: StateStore> ManagedTopNState<S> {
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
         let state_table_iter = self
             .state_table
-            .iter_with_pk_prefix(
-                &group_key,
-                PrefetchOptions {
-                    exhaust_iter: false,
-                },
-            )
+            .iter_with_pk_prefix(&group_key, PrefetchOptions::new_for_exhaust_iter(false))
             .await?;
         pin_mut!(state_table_iter);
 

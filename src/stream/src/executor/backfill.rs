@@ -333,7 +333,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
-                PrefetchOptions { exhaust_iter: true },
+                PrefetchOptions::new_for_exhaust_iter(true),
             )
             .await?;
 

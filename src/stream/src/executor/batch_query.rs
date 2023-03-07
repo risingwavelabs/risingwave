@@ -56,7 +56,7 @@ where
             .batch_iter(
                 HummockReadEpoch::Committed(epoch),
                 false,
-                PrefetchOptions { exhaust_iter: true },
+                PrefetchOptions::new_for_exhaust_iter(true),
             )
             .await?;
         pin_mut!(iter);

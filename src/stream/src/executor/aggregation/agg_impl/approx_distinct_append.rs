@@ -117,12 +117,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
     ) -> StreamExecutorResult<()> {
         let state_row = {
             let data_iter = state_table
-                .iter_with_pk_prefix(
-                    &group_key,
-                    PrefetchOptions {
-                        exhaust_iter: false,
-                    },
-                )
+                .iter_with_pk_prefix(&group_key, PrefetchOptions::new_for_exhaust_iter(false))
                 .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {
@@ -167,12 +162,7 @@ impl<S: StateStore> TableStateImpl<S> for AppendOnlyStreamingApproxCountDistinct
 
         let state_row = {
             let data_iter = state_table
-                .iter_with_pk_prefix(
-                    &group_key,
-                    PrefetchOptions {
-                        exhaust_iter: false,
-                    },
-                )
+                .iter_with_pk_prefix(&group_key, PrefetchOptions::new_for_exhaust_iter(false))
                 .await?;
             pin_mut!(data_iter);
             if let Some(state_row) = data_iter.next().await {

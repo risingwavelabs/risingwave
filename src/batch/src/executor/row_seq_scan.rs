@@ -418,7 +418,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
-                PrefetchOptions { exhaust_iter: true },
+                PrefetchOptions::new_for_exhaust_iter(true),
             )
             .await?;
 

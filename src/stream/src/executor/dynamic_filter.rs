@@ -235,9 +235,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         // Recover value for RHS if available
         let rhs_stream = self
             .right_table
-            .iter(PrefetchOptions {
-                exhaust_iter: false,
-            })
+            .iter(PrefetchOptions::new_for_exhaust_iter(false))
             .await?;
         pin_mut!(rhs_stream);
 
@@ -398,7 +396,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 .iter_with_pk_range(
                                     &range,
                                     vnode,
-                                    PrefetchOptions { exhaust_iter: true },
+                                    PrefetchOptions::new_for_exhaust_iter(true),
                                 )
                                 .await?;
                             pin_mut!(row_stream);

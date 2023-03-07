@@ -319,6 +319,12 @@ pub struct PrefetchOptions {
     pub exhaust_iter: bool,
 }
 
+impl PrefetchOptions {
+    pub fn new_for_exhaust_iter(exhaust_iter: bool) -> Self {
+        Self { exhaust_iter }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.

@@ -105,7 +105,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                         retention_seconds: None,
                         table_id: Default::default(),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions { exhaust_iter: true },
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
                     },
                 ))
                 .unwrap();

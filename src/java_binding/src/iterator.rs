@@ -151,9 +151,7 @@ impl Iterator {
                         retention_seconds: None,
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions {
-                            exhaust_iter: false,
-                        },
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
                     },
                     (vec![], vec![], pin_version.clone()),
                 )

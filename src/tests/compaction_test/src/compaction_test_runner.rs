@@ -623,9 +623,7 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions {
-                        exhaust_iter: false,
-                    },
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
                 },
             )
             .await?;

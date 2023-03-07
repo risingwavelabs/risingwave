@@ -315,9 +315,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             ignore_range_tombstone: false,
             table_id: self.table_id,
             read_version_from_backup: read_backup,
-            prefetch_options: PrefetchOptions {
-                exhaust_iter: false,
-            },
+            prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
