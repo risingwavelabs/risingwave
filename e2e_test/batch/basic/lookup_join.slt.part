@@ -2,9 +2,6 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-set rw_batch_enable_lookup_join to true;
-
-statement ok
 create table t1 (v1 int, v2 int);
 
 statement ok
@@ -270,6 +267,3 @@ drop materialized view mv;
 
 statement ok
 drop table t;
-
-statement ok
-set rw_batch_enable_lookup_join to false;

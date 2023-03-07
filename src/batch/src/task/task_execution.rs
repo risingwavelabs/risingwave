@@ -498,7 +498,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Notify frontend the task status.
         state_tx
             .send(TaskInfoResponse {
-                task_id: Some(TaskId::default().to_prost()),
+                task_id: Some(self.task_id.to_prost()),
                 task_status: task_status.into(),
                 error_message: err_str.unwrap_or("".to_string()),
             })
