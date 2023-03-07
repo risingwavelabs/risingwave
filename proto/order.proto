@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package order;
+
+option java_package = "com.risingwave.proto";
+option optimize_for = SPEED;
+
+enum Direction {
+    Direction_UNSPECIFIED = 0;
+    Direction_ASCENDING = 1;
+    Direction_DESCENDING = 2;
+}
+
+// TODO(): enable `NULLS FIRST | LAST`
+// enum NullsAre {
+//     NullsAre_UNSPECIFIED = 0;
+//     NullsAre_SMALLEST = 1;
+//     NullsAre_LARGEST = 2;
+// }
+
+message Order {
+    Direction direction = 1;
+    // TODO(): enable `NULLS FIRST | LAST`
+    // NullsAre nulls_are = 2;
+}
+
+message ColumnOrder {
+    uint32 column_index = 1;
+    Order order = 2;
+}

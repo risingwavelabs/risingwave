@@ -33,6 +33,9 @@ pub mod data;
 #[cfg_attr(madsim, path = "sim/ddl_service.rs")]
 pub mod ddl_service;
 #[rustfmt::skip]
+#[cfg_attr(madsim, path = "sim/order.rs")]
+pub mod order;
+#[rustfmt::skip]
 #[cfg_attr(madsim, path = "sim/expr.rs")]
 pub mod expr;
 #[rustfmt::skip]
@@ -98,6 +101,9 @@ pub mod data_serde;
 #[rustfmt::skip]
 #[path = "ddl_service.serde.rs"]
 pub mod ddl_service_serde;
+#[rustfmt::skip]
+#[path = "order.serde.rs"]
+pub mod order_serde;
 #[rustfmt::skip]
 #[path = "expr.serde.rs"]
 pub mod expr_serde;
