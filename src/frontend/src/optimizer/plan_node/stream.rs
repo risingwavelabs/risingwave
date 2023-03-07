@@ -684,7 +684,7 @@ pub fn to_stream_prost_body(
         Node::HopWindow(me) => {
             let me = &me.core;
             ProstNode::HopWindow(HopWindowNode {
-                time_col: me.time_col.to_proto(),
+                time_col: me.time_col.index() as _,
                 window_slide: Some(me.window_slide.into()),
                 window_size: Some(me.window_size.into()),
                 output_indices: me.output_indices.iter().map(|&x| x as u32).collect(),

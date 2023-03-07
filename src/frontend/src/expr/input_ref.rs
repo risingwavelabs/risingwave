@@ -23,6 +23,7 @@ use super::Expr;
 use crate::expr::ExprType;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct InputRef {
+    // TODO(rc): remove `pub`, use `new()`, `index()` and `data_type()` instead
     pub index: usize,
     pub data_type: DataType,
 }
@@ -106,13 +107,8 @@ impl InputRef {
         self.index = (self.index as isize + offset) as usize;
     }
 
-    /// Convert to uint32 used in proto.
-    pub fn to_proto(&self) -> u32 {
-        self.index as _
-    }
-
-    /// Convert to a `ColumnRef` in proto.
-    pub fn to_input_ref_proto(&self) -> ProstInputRef {
+    /// Convert to protobuf.
+    pub fn to_proto(&self) -> ProstInputRef {
         ProstInputRef {
             index: self.index as _,
             r#type: Some(self.data_type.to_protobuf()),
@@ -141,7 +137,7 @@ impl Expr for InputRef {
         ExprNode {
             expr_type: ExprType::InputRef.into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::InputRef(self.to_proto())),
+            rex_node: Some(RexNode::InputRef(self.index() as _)),
         }
     }
 }
