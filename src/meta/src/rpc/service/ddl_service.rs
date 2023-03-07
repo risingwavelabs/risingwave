@@ -81,13 +81,13 @@ where
 }
 
 #[inline(always)]
-fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+fn is_kafka_connector(with_properties: &HashMap<String, String>) -> bool {
     const UPSTREAM_SOURCE_KEY: &str = "connector";
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
         .to_lowercase()
-        .eq(KAFKA_CONNECTOR)
+        .eq_ignore_ascii_case(KAFKA_CONNECTOR)
 }
 
 #[inline(always)]
@@ -675,8 +675,15 @@ where
             }
         }
 
+        // if dns entries are not empty, but it is not a kafka connector, return error
+        if !is_kafka_connector(properties) && !dns_entries.is_empty() {
+            return Err(MetaError::from(anyhow!(
+                "Private link is only supported for Kafka connector",
+            )));
+        }
+
         // store the rewrite rules in properties
-        if is_kafka_source(properties) && !dns_entries.is_empty() {
+        if is_kafka_connector(properties) && !dns_entries.is_empty() {
             let broker_key = kafka_props_broker_key(properties);
             let servers = properties
                 .get(broker_key)
@@ -698,7 +705,7 @@ where
             // save private link dns names into source properties, which
             // will be extracted into KafkaProperties
             tracing::info!("private link broker address: {:?}", dns_entries);
-            const PRIVATE_LINK_DNS_KEY: &str = "private.links.dns.names";
+            const PRIVATE_LINK_DNS_KEY: &str = "private.links.endpoints";
             properties.insert(PRIVATE_LINK_DNS_KEY.to_string(), dns_entries.join(","));
         }
         Ok(())

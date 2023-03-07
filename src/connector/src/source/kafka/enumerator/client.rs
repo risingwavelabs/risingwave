@@ -80,7 +80,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(&broker_address, &private_links);
+        let client_ctx = PrivateLinkConsumerContext::new(&broker_address, &private_links)?;
         let client: BaseConsumer<PrivateLinkConsumerContext> =
             config.create_with_context(client_ctx).await?;
 

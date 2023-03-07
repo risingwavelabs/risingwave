@@ -196,7 +196,7 @@ enum MetaCommands {
 
     /// Create a new connection object
     CreateConnection {
-        #[clap(long, default_value = "aws")]
+        #[clap(long)]
         provider: String,
         #[clap(long)]
         service_name: String,
