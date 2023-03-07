@@ -500,19 +500,23 @@ impl StageRunner {
             finished_task_cnt
         );
 
+        if !sent_signal_to_next || finished_task_cnt != self.tasks.keys().len() {
+            // This situation may come from recovery test: CN may get killed before reporting
+            // status. In this case, batch query is expected to fail. Client in
+            // simulation test should retry this query (w/o kill nodes).
+            self.notify_stage_state_changed(
+                |_| StageState::Failed,
+                QueryMessage::Stage(Failed {
+                    id: self.stage.id,
+                    reason: SchedulerError::Internal(anyhow!(
+                        "Compute node lost connection before finishing responding"
+                    )),
+                }),
+            )
+            .await;
+        }
+
         if let Some(shutdown) = all_streams.take_future() {
-            // After processing all stream status, we must have sent signal (Either Scheduled or
-            // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do
-            // not receive any signals.
-            if !sent_signal_to_next {
-                // For now, this kind of situation may come from recovery test: CN may get
-                // killed before reporting status, so sent signal flag is not set yet.
-                // In this case, batch query is expected to fail. Client in simulation test
-                // should retry this query (w/o kill nodes).
-                return Err(TaskExecutionError(
-                    "Compute node lost connection before finishing responding".to_string(),
-                ));
-            }
             tracing::trace!(
                 "Stage [{:?}-{:?}] waiting for stopping signal.",
                 self.stage.query_id,

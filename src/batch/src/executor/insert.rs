@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         let epoch = u64::MAX;
-        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
+        let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
             .scan(
                 full_range,
@@ -353,6 +353,7 @@ mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;
