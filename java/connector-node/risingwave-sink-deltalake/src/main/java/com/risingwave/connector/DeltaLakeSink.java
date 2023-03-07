@@ -10,8 +10,6 @@ import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
-import io.delta.standalone.types.*;
-import io.delta.standalone.util.ParquetSchemaConverter;
 import java.io.IOException;
 import java.util.*;
 import org.apache.avro.Schema;
@@ -20,11 +18,9 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetWriter;
-import org.apache.parquet.avro.AvroSchemaConverter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
-import org.apache.parquet.schema.MessageType;
 
 public class DeltaLakeSink extends SinkBase {
     private static final CompressionCodecName codecName = CompressionCodecName.SNAPPY;
@@ -41,10 +37,7 @@ public class DeltaLakeSink extends SinkBase {
         super(tableSchema);
         this.conf = conf;
         this.log = log;
-
-        StructType schema = log.snapshot().getMetadata().getSchema();
-        MessageType parquetSchema = ParquetSchemaConverter.deltaToParquet(schema);
-        this.sinkSchema = new AvroSchemaConverter().convert(parquetSchema);
+        this.sinkSchema = DeltaLakeSinkUtil.convertSchema(log, tableSchema);
     }
 
     @Override

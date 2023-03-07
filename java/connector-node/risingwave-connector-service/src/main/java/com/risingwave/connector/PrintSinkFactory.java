@@ -11,4 +11,7 @@ public class PrintSinkFactory implements SinkFactory {
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
         return new PrintSink(tableProperties, tableSchema);
     }
+
+    @Override
+    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {}
 }

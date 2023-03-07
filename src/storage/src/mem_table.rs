@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::row::RowDeserializer;
+use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -204,7 +204,7 @@ impl KeyOp {
     /// # Panics
     ///
     /// The function will panic if it failed to decode the bytes with provided data types.
-    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
+    pub fn debug_fmt(&self, row_deserializer: &impl ValueRowSerde) -> String {
         match self {
             Self::Insert(after) => {
                 let after = row_deserializer.deserialize(after.as_ref());
