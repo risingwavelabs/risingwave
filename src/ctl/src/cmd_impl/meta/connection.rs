@@ -56,8 +56,9 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
 
     for conn in connections {
         println!(
-            "Connection#{}: {}",
+            "Connection#{}, service_name: {}, {}",
             conn.id,
+            conn.name,
             match conn.info {
                 Some(Info::PrivateLinkService(svc)) => format!(
                     "PrivateLink: endpoint_id: {}, dns_entries: {:?}",
