@@ -25,9 +25,11 @@ use risingwave_common::config::{
     STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
@@ -59,6 +61,7 @@ use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
 use crate::memory_management::policy::StreamingOnlyPolicy;
+use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -245,6 +248,13 @@ pub async fn compute_node_serve(
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
+
+    // Initialize observer manager.
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
+    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
+    observer_manager.start().await;
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));

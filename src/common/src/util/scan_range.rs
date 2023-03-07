@@ -68,6 +68,16 @@ impl ScanRange {
         self.eq_conds.is_empty() && self.range == full_range()
     }
 
+    pub fn has_eq_conds(&self) -> bool {
+        !self.eq_conds.is_empty()
+    }
+
+    pub fn two_side_bound(&self) -> bool {
+        let bounds = &self.range;
+        !matches!(bounds.start_bound(), Bound::Unbounded)
+            && !matches!(bounds.end_bound(), Bound::Unbounded)
+    }
+
     pub const fn full_table_scan() -> Self {
         Self {
             eq_conds: vec![],

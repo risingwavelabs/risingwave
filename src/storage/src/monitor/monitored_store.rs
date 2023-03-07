@@ -341,16 +341,18 @@ struct MonitoredStateStoreIterStats {
 
 impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(mut self) {
+    async fn into_stream_inner(self) {
         let inner = self.inner;
+
+        let mut stats = self.stats;
         futures::pin_mut!(inner);
         while let Some((key, value)) = inner
             .try_next()
             .await
             .inspect_err(|e| error!("Failed in next: {:?}", e))?
         {
-            self.stats.total_items += 1;
-            self.stats.total_size += key.encoded_len() + value.len();
+            stats.total_items += 1;
+            stats.total_size += key.encoded_len() + value.len();
             yield (key, value);
         }
     }

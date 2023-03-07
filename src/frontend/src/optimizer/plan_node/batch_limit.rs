@@ -61,6 +61,14 @@ impl BatchLimit {
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
     }
+
+    pub fn limit(&self) -> u64 {
+        self.logical.limit
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.logical.offset
+    }
 }
 
 impl fmt::Display for BatchLimit {

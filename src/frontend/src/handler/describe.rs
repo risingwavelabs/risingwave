@@ -176,7 +176,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // TODO: recover the original user statement
     Ok(PgResponse::new_for_stream(
-        StatementType::DESCRIBE_TABLE,
+        StatementType::DESCRIBE,
         None,
         rows.into(),
         vec![

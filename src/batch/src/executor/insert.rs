@@ -198,10 +198,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
-            insert_node
-                .row_id_index
-                .as_ref()
-                .map(|index| index.index as _),
+            insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
     }

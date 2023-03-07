@@ -38,7 +38,7 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::RowSetResult;
+use crate::pg_response::{RowSetResult, StatementType};
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
@@ -396,21 +396,24 @@ where
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
         tracing::trace!("(extended query)parse query: {}", sql);
 
-        // Flag indicate whether statement is a query statement.
-        // TODO: regard DML with RETURNING as a query
         let is_query_sql = {
-            let lower_sql = sql.to_ascii_lowercase();
-            lower_sql.starts_with("select")
-                || lower_sql.starts_with("values")
-                || lower_sql.starts_with("show")
-                || lower_sql.starts_with("with")
-                || lower_sql.starts_with("describe")
-                || lower_sql.starts_with("explain")
+            let stmts = Parser::parse_sql(sql)
+                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+                .map_err(|err| PsqlError::ParseError(err.into()))?;
+
+            if stmts.len() > 1 {
+                return Err(PsqlError::ParseError(
+                    "Only one statement is allowed in extended query mode".into(),
+                ));
+            }
+
+            StatementType::infer_from_statement(&stmts[0])
+                .map_or(false, |stmt_type| stmt_type.is_query())
         };
 
         let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;
 
-        // 2. Create the row description.
+        // Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
             let sql = prepared_statement.instance_default()?;
 
@@ -423,7 +426,6 @@ where
             vec![]
         };
 
-        // 3. Create the statement.
         let statement = PgStatement::new(
             cstr_to_str(&msg.statement_name).unwrap().to_string(),
             prepared_statement,
@@ -431,7 +433,6 @@ where
             is_query_sql,
         );
 
-        // 4. Insert the statement.
         let name = statement.name();
         if name.is_empty() {
             self.unnamed_statement.replace(statement);
