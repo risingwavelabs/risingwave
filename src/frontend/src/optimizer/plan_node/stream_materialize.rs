@@ -17,7 +17,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, FieldDisplay, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
@@ -252,6 +252,18 @@ impl fmt::Display for StreamMaterialize {
             pk_conflict_behavior = "ignore conflict";
         }
         builder.field("pk_conflict", &pk_conflict_behavior);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
 
         builder.finish()
     }

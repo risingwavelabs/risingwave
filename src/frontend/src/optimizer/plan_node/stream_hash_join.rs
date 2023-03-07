@@ -16,7 +16,7 @@ use std::fmt;
 use std::ops::BitAnd;
 
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -168,6 +168,18 @@ impl fmt::Display for StreamHashJoin {
                 input_schema: &concat_schema,
             },
         );
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
 
         if verbose {
             if self
