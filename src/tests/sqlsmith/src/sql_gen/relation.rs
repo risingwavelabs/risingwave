@@ -18,7 +18,7 @@ use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
-use risingwave_sqlparser::tokenizer::Whitespace::Tab;
+
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -41,13 +41,18 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             0..=0 => self.gen_simple_table(),
             1..=1 => self.gen_time_window_func(),
             2..=3 => self.gen_simple_join_clause(),
-            3..=4 => self.gen_more_joins(),
-            4..=5 => self.gen_table_subquery(),
+            4..=4 => self.gen_more_joins(),
+            5..=5 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
     }
 
     fn gen_simple_table(&mut self) -> (TableWithJoins, Vec<Table>) {
+        let (table_with_joins, table) = self.gen_simple_table_inner();
+        (table_with_joins, vec![table])
+    }
+
+    fn gen_simple_table_inner(&mut self) -> (TableWithJoins, Table) {
         let (relation, _, table) = self.gen_simple_table_factor();
 
         (
@@ -59,7 +64,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         )
     }
 
-    fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>, Vec<Table>) {
+    fn gen_simple_table_factor(&mut self) -> (TableFactor, Vec<Column>, Table) {
         let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
@@ -72,10 +77,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         };
         table.name = alias; // Rename the table.
         let columns = table.get_qualified_columns();
-        (table_factor, columns, vec![table])
+        (table_factor, columns, table)
     }
 
-    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>, Vec<Table>) {
+    fn gen_table_factor(&mut self) -> (TableFactor, Vec<Column>, Table) {
         let current_context = self.new_local_context();
         let factor = self.gen_table_factor_inner();
         self.restore_context(current_context);
@@ -84,7 +89,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates a table factor, and provides bound columns.
     /// Generated column names should be qualified by table name.
-    fn gen_table_factor_inner(&mut self) -> (TableFactor, Vec<Column>, Vec<Table>) {
+    fn gen_table_factor_inner(&mut self) -> (TableFactor, Vec<Column>, Table) {
         // TODO: TableFactor::Derived, TableFactor::TableFunction, TableFactor::NestedJoin
         self.gen_simple_table_factor()
     }
@@ -120,9 +125,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_join_on_expr(
         &mut self,
         left_columns: Vec<Column>,
-        left_table: Vec<Table>,
+        left_table: Table,
         right_columns: Vec<Column>,
-        right_table: Vec<Table>,
+        right_table: Table,
     ) -> Option<Expr> {
         // We always generate an equi join, to avoid stream nested loop join.
         let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) else {
@@ -132,8 +137,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Add extra boolean expressions
         if self.flip_coin() {
             let old_context = self.new_local_context();
-            self.add_relations_to_context(left_table);
-            self.add_relations_to_context(right_table);
+            self.add_relation_to_context(left_table);
+            self.add_relation_to_context(right_table);
             let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
             self.restore_context(old_context);
             // FIXME(noel): Hack to reduce streaming nested loop join occurrences.
@@ -154,9 +159,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_join_constraint(
         &mut self,
         left_columns: Vec<Column>,
-        left_table: Vec<Table>,
+        left_table: Table,
         right_columns: Vec<Column>,
-        right_table: Vec<Table>,
+        right_table: Table,
     ) -> Option<JoinConstraint> {
         let expr = self.gen_join_on_expr(left_columns, left_table, right_columns, right_table)?;
         Some(JoinConstraint::On(expr))
@@ -166,9 +171,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_join_operator(
         &mut self,
         left_columns: Vec<Column>,
-        left_table: Vec<Table>,
+        left_table: Table,
         right_columns: Vec<Column>,
-        right_table: Vec<Table>,
+        right_table: Table,
     ) -> Option<JoinOperator> {
         let Some(join_constraint) = self.gen_join_constraint(
             left_columns,
@@ -196,14 +201,13 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 
     /// Generates t1 JOIN t2 ON ...
     fn gen_simple_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
-        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+        let (left_factor, left_columns, left_table) = self.gen_table_factor();
+        let (right_factor, right_columns, right_table) = self.gen_table_factor();
         let Some(join_operator) =
-            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table) else {
+            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table.clone()) else {
             return self.gen_simple_table();
         };
 
-        left_table.append(&mut right_table);
         let right_factor_with_join = Join {
             relation: right_factor,
             join_operator,
@@ -213,26 +217,33 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 relation: left_factor,
                 joins: vec![right_factor_with_join],
             },
-            left_table,
+            vec![left_table, right_table],
         )
     }
 
     fn gen_more_joins(&mut self) -> (TableWithJoins, Vec<Table>) {
         // gen left
-        let (left_table_with_join, mut left_table) = self.gen_simple_join_clause();
-        let left_columns = left_table.get_qualified_columns();
+        let (left_table_with_join, mut left_tables) = self.gen_simple_join_clause();
+        let left_columns = left_tables
+            .iter()
+            .flat_map(|t| t.get_qualified_columns())
+            .collect();
 
         // gen right
-        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+        let (right_factor, right_columns, right_table) = self.gen_table_factor();
 
         // gen join
+        let left_table = left_tables.choose(&mut self.rng).unwrap();
         let Some(join_operator) =
-            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table) else {
-          return (left_table_with_join, left_table);
+            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table.clone()) else {
+          return (left_table_with_join, left_tables);
         };
 
+        let mut tables = vec![];
+        tables.append(&mut left_tables);
+        tables.push(right_table);
+
         // build result
-        left_table.append(&mut right_table);
         let right_join = Join {
             relation: right_factor,
             join_operator,
@@ -243,7 +254,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 relation: TableFactor::NestedJoin(Box::new(left_table_with_join)),
                 joins: vec![right_join],
             },
-            left_table,
+            tables,
         )
     }
 

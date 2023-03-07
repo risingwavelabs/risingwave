@@ -78,7 +78,6 @@ pub(crate) struct SqlGeneratorContext {
     // Used in top level, where we want to test queries
     // without aggregates.
     inside_agg: bool,
-    inside_explicit_cast: bool,
 }
 
 impl SqlGeneratorContext {
@@ -86,7 +85,6 @@ impl SqlGeneratorContext {
         SqlGeneratorContext {
             can_agg: true,
             inside_agg: false,
-            inside_explicit_cast: false,
         }
     }
 
@@ -94,7 +92,6 @@ impl SqlGeneratorContext {
         Self {
             can_agg,
             inside_agg: false,
-            inside_explicit_cast: false,
         }
     }
 
@@ -103,17 +100,6 @@ impl SqlGeneratorContext {
             inside_agg: true,
             ..self
         }
-    }
-
-    pub fn set_inside_explicit_cast(self) -> Self {
-        Self {
-            inside_explicit_cast: true,
-            ..self
-        }
-    }
-
-    pub fn can_implicit_cast(self) -> bool {
-        !self.inside_explicit_cast
     }
 
     pub fn can_gen_agg(self) -> bool {

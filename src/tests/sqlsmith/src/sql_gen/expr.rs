@@ -239,12 +239,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let casts = EXPLICIT_CAST_TABLE.get(ret)?;
         let cast_sig = casts.choose(&mut self.rng).unwrap();
 
-        use CastContext as T;
         match cast_sig.context {
-            T::Explicit => {
-                let expr = self
-                    .gen_expr(&cast_sig.from_type, context.set_inside_explicit_cast())
-                    .into();
+            CastContext::Explicit => {
+                let expr = self.gen_expr(&cast_sig.from_type, context).into();
                 let data_type = data_type_to_ast_data_type(&cast_sig.to_type);
                 Some(Expr::Cast { expr, data_type })
             }

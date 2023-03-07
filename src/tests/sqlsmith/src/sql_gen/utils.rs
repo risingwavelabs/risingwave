@@ -26,6 +26,12 @@ type Context = (Vec<Column>, Vec<Table>);
 
 /// Context utils
 impl<'a, R: Rng> SqlGenerator<'a, R> {
+    pub(crate) fn add_relation_to_context(&mut self, table: Table) {
+        let mut bound_columns = table.get_qualified_columns();
+        self.bound_columns.append(&mut bound_columns);
+        self.bound_relations.push(table);
+    }
+
     pub(crate) fn add_relations_to_context(&mut self, mut tables: Vec<Table>) {
         for rel in &tables {
             let mut bound_columns = rel.get_qualified_columns();
