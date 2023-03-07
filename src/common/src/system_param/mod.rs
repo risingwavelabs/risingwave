@@ -43,7 +43,6 @@ macro_rules! for_all_undeprecated_params {
             { backup_storage_url, String, "memory".to_string() },
             { backup_storage_directory, String, "backup".to_string() },
             { telemetry_enabled, bool, true},
-            { telemetry_tracking_id, String, "".to_string()},
             $({ $field, $type, $default },)*
         }
     };
@@ -308,7 +307,6 @@ mod tests {
             (BACKUP_STORAGE_URL_KEY, "a"),
             (BACKUP_STORAGE_DIRECTORY_KEY, "a"),
             (TELEMETRY_ENABLED_KEY, "false"),
-            (TELEMETRY_TRACKING_ID_KEY, "a"),
         ];
 
         // To kv - missing field.

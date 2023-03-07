@@ -18,7 +18,6 @@ pub mod report;
 use std::time::SystemTime;
 
 use anyhow::{anyhow, Result};
-use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, SystemExt};
 
@@ -26,7 +25,9 @@ use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
 /// Url of telemetry backend
-pub const TELEMETRY_REPORT_URL: &str = "http://localhost:8080/v1/report";
+/// It is hard-coded since we don't want users to config this url
+/// use prd url when prd is ready, !!! must be done before merge
+pub const TELEMETRY_REPORT_URL: &str = "http://localhost:8080/api/v1/report";
 
 /// Telemetry reporting interval in seconds, 24h
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
@@ -128,16 +129,21 @@ impl Default for SystemData {
 
 /// post a telemetry reporting request
 pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(), anyhow::Error> {
-    let http_client = hyper::Client::new();
-    let req = hyper::Request::post(url)
-        .header("Content-Type", "application/json")
-        .body(hyper::Body::from(report_body))?;
-
-    let res = http_client.request(req).await?;
-    if res.status() == StatusCode::OK {
+    let client = reqwest::Client::new();
+    let res = client
+        .post(url)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(report_body)
+        .send()
+        .await?;
+    if res.status().is_success() {
         Ok(())
     } else {
-        Err(anyhow!("invalid telemetry resp, status, {}", res.status()))
+        Err(anyhow!(
+            "invalid telemetry resp, url {}, status {}",
+            url,
+            res.status()
+        ))
     }
 }
 

@@ -17,8 +17,8 @@ use std::time::SystemTime;
 
 use anyhow::anyhow;
 use risingwave_common::telemetry::{
-    post_telemetry_report, telemetry_env_enabled, SystemData, TelemetryNodeType,
-    TelemetryReportBase, TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
+    post_telemetry_report, SystemData, TelemetryNodeType, TelemetryReportBase,
+    TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
 };
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot::Sender;
@@ -61,11 +61,6 @@ pub async fn start_meta_telemetry_reporting(
                 _ = &mut shutdown_rx => {
                     return;
                 }
-            }
-
-            if !telemetry_env_enabled() {
-                tracing::info!("Telemetry not enabled");
-                continue;
             }
 
             let tracking_id = match get_or_create_tracking_id(meta_store.clone()).await {

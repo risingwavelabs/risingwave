@@ -65,9 +65,11 @@ where
 
                                 match (telemetry_running, telemetry_enabled) {
                                     (false, true) => {
+                                        tracing::info!("telemetry config changed to true, start reporting");
                                         self.core.write().start();
                                     }
                                     (true, false) => {
+                                        tracing::info!("telemetry config changed to false, stop reporting");
                                         self.core.write().stop();
                                     }
                                     _ => {}

@@ -18,9 +18,6 @@ message TelemetryInfoRequest {
 
 message TelemetryInfoResponse {
   string tracking_id = 1;
-  bool telemetry_enabled = 2;
-  // set true if all nodes should kill its telemetry reporting
-  bool should_kill_telemetry = 3;
 }
 
 service TelemetryInfoService {
@@ -358,7 +355,6 @@ message SystemParams {
   optional string backup_storage_url = 8;
   optional string backup_storage_directory = 9;
   optional bool telemetry_enabled = 10;
-  optional string telemetry_tracking_id = 11;
 }
 
 message GetSystemParamsRequest {}

@@ -174,7 +174,7 @@ pub async fn compactor_serve(
     );
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
-    if config.server.telemetry_enabled && !telemetry_env_enabled() {
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
         telemetry_manager.start_telemetry_reporting();
         sub_tasks.push(telemetry_manager.watch_params_change());
     } else {

@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::config::MetaBackend;
-use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{TelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
@@ -46,13 +45,6 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
             MetaBackend::Mem => None,
         }
     }
-
-    fn should_kill_telemetry(&self) -> bool {
-        match self.meta_store.meta_store_type() {
-            MetaBackend::Mem => true,
-            MetaBackend::Etcd => false,
-        }
-    }
 }
 
 #[async_trait::async_trait]
@@ -62,16 +54,9 @@ impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
         _request: Request<TelemetryInfoRequest>,
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
         match self.get_tracking_id().await {
-            Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
-                tracking_id,
-                telemetry_enabled: telemetry_env_enabled(),
-                should_kill_telemetry: self.should_kill_telemetry(),
-            })),
+            Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse { tracking_id })),
             None => Ok(Response::new(TelemetryInfoResponse {
                 tracking_id: String::default(),
-                telemetry_enabled: false,
-                // It's possible that telemetry is disabled but reporting is alive
-                should_kill_telemetry: self.should_kill_telemetry(),
             })),
         }
     }

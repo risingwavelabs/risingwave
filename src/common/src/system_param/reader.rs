@@ -80,10 +80,6 @@ impl SystemParamsReader {
         self.prost.telemetry_enabled.unwrap()
     }
 
-    pub fn telemetry_tracking_id(&self) -> &str {
-        self.prost.telemetry_tracking_id.as_ref().unwrap()
-    }
-
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

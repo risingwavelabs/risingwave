@@ -52,6 +52,8 @@ where
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
 
     let join_handle = tokio::spawn(async move {
+        tracing::info!("start telemetry reporting");
+
         let begin_time = std::time::Instant::now();
         let session_id = Uuid::new_v4().to_string();
         let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
@@ -66,18 +68,13 @@ where
                 }
             }
             // fetch telemetry tracking_id and configs from the meta node
-            let (telemetry_enabled, tracking_id) = match info_fetcher.fetch_telemetry_info().await {
+            let (_, tracking_id) = match info_fetcher.fetch_telemetry_info().await {
                 Ok(resp) => resp,
                 Err(err) => {
                     tracing::error!("Telemetry failed to get tracking_id, err {}", err);
                     continue;
                 }
             };
-
-            if !telemetry_enabled {
-                tracing::info!("Telemetry is not enabled");
-                return;
-            }
 
             // create a report and serialize to json
             let report_json = match report_creator

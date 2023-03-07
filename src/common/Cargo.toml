@@ -35,7 +35,6 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
 hex = "0.4.3"
 humantime = "2.1"
-hyper = "0.14.23"
 itertools = "0.10"
 itoa = "1.0"
 memcomparable = { version = "0.1", features = ["decimal"] }
@@ -48,6 +47,7 @@ prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 ryu = "1.0"

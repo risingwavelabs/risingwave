@@ -257,8 +257,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 data_directory: Some(config.storage.data_directory),
                 backup_storage_url: Some(config.backup.storage_url),
                 backup_storage_directory: Some(config.backup.storage_directory),
-                telemetry_enabled: None,
-                telemetry_tracking_id: None,
+                telemetry_enabled: Some(config.server.telemetry_enabled),
             },
         )
         .await

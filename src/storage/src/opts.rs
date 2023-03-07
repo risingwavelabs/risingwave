@@ -83,7 +83,6 @@ impl Default for StorageOpts {
             checkpoint_frequency: None,
             state_store: None,
             telemetry_enabled: None,
-            telemetry_tracking_id: None,
         };
         Self::from((&c, &p.into()))
     }
