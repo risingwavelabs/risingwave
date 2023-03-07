@@ -48,6 +48,12 @@ use crate::{bail, ensure, ExprError, Result};
 /// select array_distinct(array[1,2,1,NULL]);
 /// ----
 /// {1,2,NULL}
+///
+/// query T
+/// select array_distinct(null::int[]);
+/// ----
+/// NULL
+///
 /// query error polymorphic type
 /// select array_distinct(null);
 /// ```
