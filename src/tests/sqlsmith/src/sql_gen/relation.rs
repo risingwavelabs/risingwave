@@ -138,8 +138,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     fn gen_non_equi_expr(&mut self, available_join_on_columns: Vec<(Column, Column)>) -> Expr {
-        let n = self.rng.gen_range(0..available_join_on_columns.len());
         let expr = Expr::Value(Value::Boolean(true));
+        if available_join_on_columns.is_empty() {
+            return expr;
+        }
+        let n = self.rng.gen_range(0..available_join_on_columns.len());
         let mut count = 0;
         for (l_col, r_col) in available_join_on_columns {
             if count >= n {
@@ -159,8 +162,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         &mut self,
         mut available_join_on_columns: Vec<(Column, Column)>,
     ) -> Expr {
-        let n = self.rng.gen_range(0..available_join_on_columns.len());
         let mut expr = Expr::Value(Value::Boolean(true));
+        if available_join_on_columns.is_empty() {
+            return expr;
+        }
+        let n = self.rng.gen_range(0..available_join_on_columns.len());
         for (l_col, r_col) in available_join_on_columns.drain(0..n) {
             let equi_expr = create_equi_expr(l_col.name, r_col.name);
             expr = Expr::BinaryOp {
