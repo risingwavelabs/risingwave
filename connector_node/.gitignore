@@ -1,5 +1,0 @@
-# Java
-target/
-risingwave-sink-jdbc/test_db/
-risingwave-sink-jdbc/*.log
-risingwave-connector-service/*.log
