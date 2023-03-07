@@ -1,34 +1,28 @@
-# examples in Get started
-
-
-statement ok
-CREATE TABLE taxi_trips_1(
-    id VARCHAR,
-    distance DOUBLE PRECISION,
-    duration DOUBLE PRECISION
-);
+# Examples in Get started
 
 statement ok
-INSERT INTO taxi_trips_1
-VALUES
-    ('1', 4, 10);
+drop table if exists taxi_trips;
+
+statement ok
+CREATE TABLE taxi_trips (trip_id int, taxi_id int, completed_at timestamp, distance double precision, duration double precision);
+
+statement ok
+INSERT INTO taxi_trips VALUES (1, 1001, '2022-07-01 22:00:00', 4, 6), (2, 1002, '2022-07-01 22:01:00', 6, 9);
 
 statement ok
 CREATE MATERIALIZED VIEW mv_avg_speed
 AS
-    SELECT COUNT(id) as no_of_trips,
+    SELECT COUNT(trip_id) as no_of_trips,
     SUM(distance) as total_distance,
     SUM(duration) as total_duration,
     SUM(distance) / SUM(duration) as avg_speed
-    FROM taxi_trips_1;
+    FROM taxi_trips;
 
 statement ok
 SELECT * FROM mv_avg_speed;
 
 statement ok
-INSERT INTO taxi_trips_1
-VALUES
-    ('2', 6, 10);
+INSERT INTO taxi_trips VALUES (3, 1003, '2022-07-01 22:02:00', 3, 5);
 
 statement ok
 SELECT * FROM mv_avg_speed;
@@ -37,14 +31,13 @@ statement ok
 drop materialized view mv_avg_speed;
 
 statement ok
-drop table taxi_trips_1;
-
-statement ok
-FLUSH;
-
+drop table taxi_trips;
 
 
 # Examples in "Array"
+
+statement ok
+drop table if exists taxi;
 
 statement ok
 CREATE TABLE taxi (
@@ -59,7 +52,7 @@ CREATE TABLE taxi (
 statement ok
 INSERT INTO taxi VALUES
         (
-            'FAST0001',
+            '1001',
             ARRAY['ABCD1234', 'ABCD1235', 'ABCD1236', 'ABCD1237'],
             'N5432N', 
             'FAST TAXI', 
@@ -77,14 +70,11 @@ SELECT unnest(array[1,2,3,4]);
 statement ok
 drop table taxi;
 
-statement ok
-FLUSH;
 
 # Examples in "Struct"
 
 statement ok
 drop table if exists x;
-
 
 statement ok
 drop table if exists y;
@@ -97,6 +87,18 @@ CREATE TABLE x (a struct <b integer, c integer>, d integer);
 
 statement ok
 CREATE TABLE y (a struct <b struct<c integer>, d integer>, e varchar);
+
+statement ok
+INSERT INTO x VALUES (ROW(3, 4), 5);
+
+statement ok
+INSERT INTO y VALUES (ROW(ROW(6), 7), 8);
+
+statement ok
+SELECT (a).b, d FROM x;
+
+statement ok
+SELECT ((a).b).c, e FROM y;
 
 statement ok
 CREATE TABLE trip (
@@ -113,22 +115,6 @@ CREATE TABLE trip (
         );
 
 statement ok
-INSERT INTO x VALUES (ROW(3, 4), 5);
-
-statement ok
-INSERT INTO y VALUES (ROW(ROW(6), 7), 8);
-
-statement ok
-SELECT (a).b, d FROM x;
-
-statement ok
-SELECT ((a).b).c, e FROM y;
-
-statement ok
-SELECT id, (fare).initial_charge FROM trip;
-
-
-statement ok
 INSERT INTO trip VALUES 
         (
             '1234ABCD', 
@@ -139,14 +125,8 @@ INSERT INTO trip VALUES
         );
 
 statement ok
-SELECT id, (fare).initial_charge 
-FROM trip;
+SELECT id, (fare).initial_charge FROM trip;
 
-statement ok
-SELECT (1, (2, 3))::STRUCT<i BIGINT, j STRUCT<a BIGINT, b VARCHAR>>;
-
-statement ok
-SELECT ROW(1, ROW('1', 1)) = ROW('1', ROW(1, '1'));
 
 statement ok
 drop table x;
@@ -164,13 +144,16 @@ FLUSH;
 # Examples in “Time window functions"
 
 statement ok
-create table taxi_trips (trip_id int, taxi_id int, completed_at timestamp, distance double precision);
-
-statement ok 
-insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4), (2, 1002, '2022-07-01 22:01:00', 6), (3, 1003, '2022-07-01 22:02:00', 3);
+drop table if exists taxi_trips;
 
 statement ok
-SELECT trip_id,  taxi_id, completed_at, window_start, window_end
+create table taxi_trips (trip_id varchar, taxi_id varchar, completed_at timestamp, distance double precision, duration double precision);
+
+statement ok 
+insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4, 6), (2, 1002, '2022-07-01 22:01:00', 6, 9), (3, 1003, '2022-07-01 22:02:00', 3, 5);
+
+statement ok
+SELECT trip_id, taxi_id, completed_at, window_start, window_end
 FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES');
 
 statement ok
@@ -179,7 +162,62 @@ FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTE', INTERVAL '2 MINUTES')
 ORDER BY window_start;
 
 statement ok
+SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance 
+FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') 
+GROUP BY window_start, window_end 
+ORDER BY window_start ASC;
+
+statement ok
+SELECT window_start, window_end, count(trip_id) as no_of_trips, sum(distance) as total_distance 
+FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTES', INTERVAL '2 MINUTES') 
+GROUP BY window_start, window_end 
+ORDER BY window_start ASC;
+
+
+statement ok
+drop table if exists taxi_simple;
+
+statement ok
+create table taxi_simple (taxi_id varchar, company varchar);
+
+statement ok
+insert into taxi_simple values (1001, 'SAFE TAXI'), (1002, 'SUPER TAXI'), (1003, 'FAST TAXI'), (1004, 'BEST TAXI'), (1005, 'WEST TAXI'), (1006, 'EAST TAXI');
+
+statement ok
+drop table if exists taxi_fare;
+
+statement ok
+CREATE TABLE taxi_fare (trip_id VARCHAR, completed_at TIMESTAMP, total_fare DOUBLE PRECISION, payment_status VARCHAR);
+
+statement ok
+INSERT INTO taxi_fare VALUES (1, '2022-07-01 22:00:00', 8, 'COMPLETED'), 
+(2, '2022-07-01 22:01:00', 12, 'PROCESSING'), 
+(3, '2022-07-01 22:02:10', 5, 'COMPLETED'), 
+(4, '2022-07-01 22:03:00', 15, 'COMPLETED'), 
+(5, '2022-07-01 22:06:00', 5, 'REJECTED'),
+(6, '2022-07-01 22:06:00', 20, 'COMPLETED');
+
+statement ok
+SELECT trip.window_start, trip.window_end, trip.distance, taxi_simple.company
+FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') as trip
+JOIN taxi_simple
+ON trip.taxi_id = taxi_simple.taxi_id
+ORDER BY trip.window_start ASC;
+
+statement ok
+SELECT trip.window_start, trip.window_end, trip.distance, fare.total_fare, fare.payment_status
+FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES') as trip
+JOIN TUMBLE (taxi_fare, completed_at, INTERVAL '2 MINUTES') as fare
+ON trip.trip_id = fare.trip_id AND trip.window_start = fare.window_start
+ORDER BY trip.window_start ASC;
+
+statement ok
 drop table taxi_trips;
+
+statement ok
+drop table taxi_simple;
+
+
 
 statement ok
 FLUSH;
