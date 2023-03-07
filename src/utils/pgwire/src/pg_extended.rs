@@ -415,6 +415,7 @@ impl PreparedStatement {
                     };
                     format!("{}::INT8", tmp)
                 }
+                DataType::Serial => todo!("SERIAL"),
                 DataType::Int16 => {
                     let tmp = match param_format {
                         Format::Binary => {
@@ -542,6 +543,7 @@ impl PreparedStatement {
             match oid {
                 DataType::Boolean => params.push("false".to_string()),
                 DataType::Int64 => params.push("0::BIGINT".to_string()),
+                DataType::Serial => todo!("SERIAL"),
                 DataType::Int16 => params.push("0::SMALLINT".to_string()),
                 DataType::Int32 => params.push("0::INT".to_string()),
                 DataType::Float32 => params.push("0::FLOAT4".to_string()),

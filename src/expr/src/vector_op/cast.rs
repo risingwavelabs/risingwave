@@ -449,6 +449,7 @@ pub fn literal_parsing(
         DataType::Int16 => str_parse::<i16>(s)?.into(),
         DataType::Int32 => str_parse::<i32>(s)?.into(),
         DataType::Int64 => str_parse::<i64>(s)?.into(),
+        DataType::Serial => str_parse::<i64>(s)?.into(),
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
         DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
