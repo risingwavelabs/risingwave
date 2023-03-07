@@ -25,7 +25,7 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 use utils::{bench_join, create_input};
 
 enable_jemalloc_on_linux!();
@@ -50,7 +50,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
 
         let right_input_ref = ExprNode {
@@ -59,7 +59,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 1 })),
+            rex_node: Some(RexNode::InputRef(1)),
         };
 
         let literal2 = ExprNode {

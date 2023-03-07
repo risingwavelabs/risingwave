@@ -519,8 +519,7 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
 impl PlanAggOrderByField {
     fn to_protobuf(&self) -> ProstAggOrderByField {
         ProstAggOrderByField {
-            input: Some(self.input.to_proto()),
-            r#type: Some(self.input.data_type.to_protobuf()),
+            input: self.input.index() as _,
             direction: self.direction.to_protobuf() as i32,
             nulls_first: self.nulls_first,
         }
@@ -612,7 +611,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
+            args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
             order_by_fields: self
                 .order_by_fields
