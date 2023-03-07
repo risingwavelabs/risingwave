@@ -15,8 +15,9 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
+use risingwave_common::array::serial_array::SerialArrayBuilder;
 use risingwave_common::array::stream_chunk::Ops;
-use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
+use risingwave_common::array::{ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
@@ -77,13 +78,13 @@ impl RowIdGenExecutor {
     /// Generate a row ID column according to ops.
     async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
         let len = column.array_ref().len();
-        let mut builder = I64ArrayBuilder::new(len);
+        let mut builder = SerialArrayBuilder::new(len);
 
         for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().await)),
-                _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap())),
+                Op::Insert => builder.append(Some(self.row_id_generator.next().await.into())),
+                _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap().into())),
             }
         }
 
