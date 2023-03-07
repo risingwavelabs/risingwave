@@ -95,6 +95,9 @@ public class MetaClient implements AutoCloseable {
     }
 
     public void unpinVersion(HummockVersion version) {
+        // TODO: we are calling UnpinBefore in this method. If there are multiple versions being
+        // used, unpin using UnpinBefore may accidentally unpin the version used by other thread. We
+        // may introduce reference counting in the meta client.
         UnpinVersionBeforeRequest req =
                 UnpinVersionBeforeRequest.newBuilder()
                         .setContextId(workerId)
