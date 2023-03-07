@@ -45,7 +45,11 @@ impl StreamUnion {
             .iter()
             .all(|input| *input.distribution() == dist));
         let watermark_columns = inputs.iter().fold(
-            FixedBitSet::with_capacity(schema.len()),
+            {
+                let mut bitset = FixedBitSet::with_capacity(schema.len());
+                bitset.toggle_range(..);
+                bitset
+            },
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
