@@ -313,6 +313,7 @@ steps:
     
   - label: "S3 source check on AWS"
     command: "ci/scripts/s3-source-test.sh -p ci-dev"
+    depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
