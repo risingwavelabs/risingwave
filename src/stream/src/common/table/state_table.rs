@@ -232,11 +232,18 @@ where
             false => Some(input_value_indices),
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
+
+        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        assert_eq!(
+            row_serde.kind().is_column_aware(),
+            table_catalog.version.is_some()
+        );
+
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
+            row_serde,
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -578,13 +585,18 @@ where
         &self,
         pk: impl Row,
     ) -> StreamExecutorResult<Option<CompactedRow>> {
-        // TODO: Compacted row requires the row in value-encoding format. However, for a generic
-        // `SD`, we cannot ensure whether we can directly use the bytes from the storage. So we must
-        // first deserialize from the column-aware row encoding first, then serialize it back into
-        // value-encoding format. May optimize this after we have specification.
-        self.get_row(pk)
-            .await
-            .map(|row| row.map(CompactedRow::from))
+        if self.row_serde.kind().is_basic() {
+            // Basic serde is in value-encoding format, which is compatible with the compacted row.
+            self.get_encoded_row(pk)
+                .await
+                .map(|bytes| bytes.map(CompactedRow::new))
+        } else {
+            // For other encodings, we must first deserialize from the column-aware row encoding
+            // first, then serialize it back into value-encoding format.
+            self.get_row(pk)
+                .await
+                .map(|row| row.map(CompactedRow::from))
+        }
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.

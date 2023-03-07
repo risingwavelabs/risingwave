@@ -266,7 +266,11 @@ impl ValueRowDeserializer for ColumnAwareSerde {
     }
 }
 
-impl ValueRowSerde for ColumnAwareSerde {}
+impl ValueRowSerde for ColumnAwareSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        ValueRowSerdeKind::ColumnAware
+    }
+}
 
 #[cfg(test)]
 mod tests {

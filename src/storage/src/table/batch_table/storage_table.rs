@@ -111,7 +111,8 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-/// `StorageTable` will use [`EitherSerde`] as default.
+/// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
+/// non-versioned tables with the same type.
 pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {

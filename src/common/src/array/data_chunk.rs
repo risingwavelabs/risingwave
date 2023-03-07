@@ -381,8 +381,8 @@ impl DataChunk {
     ///
     /// The returned vector's size is `self.capacity()` and for the invisible row will give a empty
     /// bytes.
-    // Note(bugen): why we include the invisible rows in the output and let the caller handle
-    // visibility again?
+    // Note(bugen): should we exclude the invisible rows in the output so that the caller won't need
+    // to handle visibility again?
     pub fn serialize(&self) -> Vec<Bytes> {
         let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {

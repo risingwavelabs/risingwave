@@ -5819,6 +5819,7 @@ dependencies = [
  "derivative",
  "easy-ext",
  "either",
+ "enum-as-inner",
  "fixedbitset",
  "futures",
  "futures-async-stream",

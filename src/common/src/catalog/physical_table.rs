@@ -51,7 +51,10 @@ pub struct TableDesc {
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
 
-    /// Whether the table is versioned. See `version` field in `TableCatalog` for more details.
+    /// Whether the table is versioned. If `true`, column-aware row encoding will be used
+    /// to be compatible with schema changes.
+    ///
+    /// See `version` field in `TableCatalog` for more details.
     pub versioned: bool,
 }
 
