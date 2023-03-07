@@ -29,18 +29,20 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ExecutorCache};
-use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
     Executor, ExecutorInfo, Message, PkIndicesRef, StreamExecutorResult,
 };
 use crate::task::AtomicU64Ref;
+
+type StateTable<S> = crate::common::table::state_table::StateTableInner<S, ColumnAwareSerde>;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
 pub struct MaterializeExecutor<S: StateStore> {
@@ -79,6 +81,10 @@ impl<S: StateStore> MaterializeExecutor<S> {
 
         let schema = input.schema().clone();
 
+        assert!(
+            table_catalog.version.is_some(),
+            "Table to materialize must be versioned."
+        );
         let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
 
         Self {

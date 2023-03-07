@@ -214,6 +214,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,
@@ -226,6 +227,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
 
             let inner_side_builder = InnerSideExecutorBuilder::new(

@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
+use either::{for_both, Either};
 use itertools::Itertools;
 
 use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
@@ -33,6 +34,8 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+
+use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
@@ -57,6 +60,37 @@ pub trait ValueRowSerde:
     ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send
 {
 }
+
+#[derive(Clone)]
+pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+
+impl From<BasicSerde> for EitherSerde {
+    fn from(value: BasicSerde) -> Self {
+        Self(Either::Left(value))
+    }
+}
+impl From<ColumnAwareSerde> for EitherSerde {
+    fn from(value: ColumnAwareSerde) -> Self {
+        Self(Either::Right(value))
+    }
+}
+
+impl ValueRowSerializer for EitherSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        for_both!(&self.0, s => s.serialize(row))
+    }
+}
+impl ValueRowDeserializer for EitherSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        for_both!(&self.0, s => s.deserialize(encoded_bytes))
+    }
+}
+impl ValueRowSerdeNew for EitherSerde {
+    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
+        unreachable!("should construct manually")
+    }
+}
+impl ValueRowSerde for EitherSerde {}
 
 /// Wrap of the original `Row` serializing function
 #[derive(Clone)]

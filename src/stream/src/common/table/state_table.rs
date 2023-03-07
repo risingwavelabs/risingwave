@@ -29,6 +29,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
@@ -532,21 +533,18 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
-        match compacted_row {
-            Some(compacted_row) => {
-                let row = self.row_serde.deserialize(compacted_row.row.as_ref())?;
+        let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
+        match encoded_row {
+            Some(encoded_row) => {
+                let row = self.row_serde.deserialize(&encoded_row)?;
                 Ok(Some(OwnedRow::new(row)))
             }
             None => Ok(None),
         }
     }
 
-    /// Get a compacted row from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
+    /// Get the raw encoded row from state table.
+    pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         assert!(pk.len() <= self.pk_indices.len());
 
         if self.prefix_hint_len != 0 {
@@ -569,13 +567,11 @@ where
             ignore_range_tombstone: false,
             read_version_from_backup: false,
         };
-        if let Some(storage_row_bytes) = self.local_store.get(&serialized_pk, read_options).await? {
-            Ok(Some(CompactedRow {
-                row: storage_row_bytes,
-            }))
-        } else {
-            Ok(None)
-        }
+
+        self.local_store
+            .get(&serialized_pk, read_options)
+            .await
+            .map_err(Into::into)
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
@@ -596,6 +592,39 @@ where
         self.cur_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
+    }
+}
+
+impl<S> StateTableInner<S, BasicSerde>
+where
+    S: StateStore,
+{
+    /// Get a compacted row from state table.
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        // The returned bytes is a valid compacted row, only for the basic serde.
+        self.get_encoded_row(pk)
+            .await
+            .map(|bytes| bytes.map(CompactedRow::new))
+    }
+}
+
+impl<S> StateTableInner<S, ColumnAwareSerde>
+where
+    S: StateStore,
+{
+    /// Get a compacted row from state table.
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        // Compacted row requires the row in value-encoding format. We must first deserialize from
+        // the column-aware row encoding first, then serialize it back into value-encoding format.
+        self.get_row(pk)
+            .await
+            .map(|row| row.map(CompactedRow::from))
     }
 }
 
@@ -703,7 +732,7 @@ where
         } else {
             chunk.clone()
         };
-        let values = value_chunk.serialize();
+        let values = value_chunk.serialize_with(&self.row_serde);
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
         let vnode_and_pks = key_chunk

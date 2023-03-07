@@ -41,6 +41,7 @@ message StorageTableDesc {
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;
   uint32 read_prefix_len_hint = 7;
+  bool versioned = 8;
 }
 
 enum JoinType {
