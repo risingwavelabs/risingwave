@@ -22,6 +22,7 @@ impl DataType {
             DataType::Boolean => 1,
             DataType::Int16 => 2,
             DataType::Int32 | DataType::Float32 | DataType::Date => 4,
+            DataType::Serial => todo!(),
             DataType::Int64
             | DataType::Serial
             | DataType::Float64

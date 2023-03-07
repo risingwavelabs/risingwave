@@ -35,9 +35,8 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
-use serial_array::Serial;
-
 use self::column_aware_row_encoding::ColumnAwareSerde;
+use serial_array::Serial;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
