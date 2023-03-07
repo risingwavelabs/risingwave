@@ -14,25 +14,26 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-use risingwave_common::array::Op;
-use risingwave_common::column_nonnull;
+
+
 use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
-use risingwave_sqlparser::test_utils::join;
 
+
+use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
-fn create_equi_expr(left: String, right: String) -> Expr {
+fn create_binary_expr(op: BinaryOperator, left: String, right: String) -> Expr {
     let left = Box::new(Expr::Identifier(Ident::new_unchecked(left)));
     let right = Box::new(Expr::Identifier(Ident::new_unchecked(right)));
-    Expr::BinaryOp {
-        left,
-        op: BinaryOperator::Eq,
-        right,
-    }
+    Expr::BinaryOp { left, op, right }
+}
+
+fn create_equi_expr(left: String, right: String) -> Expr {
+    create_binary_expr(BinaryOperator::Eq, left, right)
 }
 
 impl<'a, R: Rng> SqlGenerator<'a, R> {
@@ -105,8 +106,8 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         right_columns: Vec<Column>,
     ) -> Option<(Column, Column, Vec<(Column, Column)>)> {
         let mut available_join_on_columns = vec![];
-        for left_column in left_columns.iter() {
-            for right_column in right_columns.iter() {
+        for left_column in &left_columns {
+            for right_column in &right_columns {
                 if left_column.data_type == right_column.data_type {
                     available_join_on_columns.push((left_column.clone(), right_column.clone()))
                 }
@@ -118,7 +119,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         available_join_on_columns.shuffle(&mut self.rng);
         let remaining_columns = available_join_on_columns.split_off(1);
         let (left_column, right_column) = available_join_on_columns.drain(..).next().unwrap();
-        Some((left_column.clone(), right_column.clone(), remaining_columns))
+        Some((left_column, right_column, remaining_columns))
     }
 
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
@@ -141,11 +142,22 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Some((join_on_expr, remaining))
     }
 
-    fn gen_non_equi_expr(
-        &mut self,
-        available_join_on_columns: Vec<(Column, Column)>,
-    ) -> Option<Expr> {
-        todo!()
+    fn gen_non_equi_expr(&mut self, available_join_on_columns: Vec<(Column, Column)>) -> Expr {
+        let n = self.rng.gen_range(0..available_join_on_columns.len());
+        let expr = Expr::Value(Value::Boolean(true));
+        let mut count = 0;
+        for (l_col, r_col) in available_join_on_columns {
+            if count >= n {
+                break;
+            }
+            let Some(inequality_ops) = BINARY_INEQUALITY_OP_TABLE.get(&(l_col.data_type, r_col.data_type)) else {
+                continue;
+            };
+            let inequality_op = inequality_ops.choose(&mut self.rng).unwrap();
+            let _non_equi_expr = create_binary_expr(inequality_op.clone(), l_col.name, r_col.name);
+            count += 1;
+        }
+        expr
     }
 
     fn gen_more_equi_join_exprs(
@@ -200,7 +212,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         // Add more expressions
         let extra_expr = match self.rng.gen_range(1..=100) {
             1..=25 => None,
-            26..=50 => self.gen_non_equi_expr(remaining_equi_columns),
+            26..=50 => Some(self.gen_non_equi_expr(remaining_equi_columns)),
             51..=75 => Some(self.gen_more_equi_join_exprs(remaining_equi_columns)),
             76..=100 => self.gen_arbitrary_bool(left_table, right_table),
             _ => unreachable!(),

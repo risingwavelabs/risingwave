@@ -690,6 +690,9 @@ pub(crate) fn sql_null() -> Expr {
     Expr::Value(Value::Null)
 }
 
+// TODO(kwannoel):
+// Add variadic function signatures. Can add these functions
+// to a FUNC_TABLE too.
 pub fn print_function_table() -> String {
     let func_str = func_sigs()
         .map(|sign| {
