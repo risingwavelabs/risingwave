@@ -50,6 +50,7 @@ const PARSE_ERROR_STR_TO_TIME: &str =
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
+// input: the number of days since the epoch
 #[inline(always)]
 pub fn i32_to_date(d: i32) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(
@@ -62,6 +63,7 @@ pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
 }
 
+// input: the number of time in milliseconds since midnight (00:00:00.000)
 #[inline(always)]
 pub fn i64_to_time(t: i64) -> Result<NaiveTimeWrapper> {
     let (time, overflow_cnt) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
