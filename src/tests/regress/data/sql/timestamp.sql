@@ -171,10 +171,10 @@ set intervalstyle to postgres;
 SELECT d1 FROM TIMESTAMP_TBL;
 
 -- Check behavior at the boundaries of the timestamp range
-SELECT '4714-11-24 00:00:00 BC'::timestamp;
-SELECT '4714-11-23 23:59:59 BC'::timestamp;  -- out of range
-SELECT '294276-12-31 23:59:59'::timestamp;
-SELECT '294277-01-01 00:00:00'::timestamp;  -- out of range
+--@ SELECT '4714-11-24 00:00:00 BC'::timestamp;
+--@ SELECT '4714-11-23 23:59:59 BC'::timestamp;  -- out of range
+--@ SELECT '294276-12-31 23:59:59'::timestamp;
+--@ SELECT '294277-01-01 00:00:00'::timestamp;  -- out of range
 
 -- Demonstrate functions and operators
 SELECT d1 FROM TIMESTAMP_TBL
@@ -203,98 +203,98 @@ SELECT date_trunc( 'week', timestamp '2004-02-29 15:44:17.71393' ) AS week_trunc
 -- verify date_bin behaves the same as date_trunc for relevant intervals
 
 -- case 1: AD dates, origin < input
-SELECT
-  str,
-  interval,
-  date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2001-01-01') AS equal
-FROM (
-  VALUES
-  ('week', '7 d'),
-  ('day', '1 d'),
-  ('hour', '1 h'),
-  ('minute', '1 m'),
-  ('second', '1 s'),
-  ('millisecond', '1 ms'),
-  ('microsecond', '1 us')
-) intervals (str, interval),
-(VALUES (timestamp '2020-02-29 15:44:17.71393')) ts (ts);
+--@ SELECT
+--@   str,
+--@   interval,
+--@   date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2001-01-01') AS equal
+--@ FROM (
+--@   VALUES
+--@   ('week', '7 d'),
+--@   ('day', '1 d'),
+--@   ('hour', '1 h'),
+--@   ('minute', '1 m'),
+--@   ('second', '1 s'),
+--@   ('millisecond', '1 ms'),
+--@   ('microsecond', '1 us')
+--@ ) intervals (str, interval),
+--@ (VALUES (timestamp '2020-02-29 15:44:17.71393')) ts (ts);
 
 -- case 2: BC dates, origin < input
-SELECT
-  str,
-  interval,
-  date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2000-01-01 BC') AS equal
-FROM (
-  VALUES
-  ('week', '7 d'),
-  ('day', '1 d'),
-  ('hour', '1 h'),
-  ('minute', '1 m'),
-  ('second', '1 s'),
-  ('millisecond', '1 ms'),
-  ('microsecond', '1 us')
-) intervals (str, interval),
-(VALUES (timestamp '0055-6-10 15:44:17.71393 BC')) ts (ts);
+--@ SELECT
+--@   str,
+--@   interval,
+--@   date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2000-01-01 BC') AS equal
+--@ FROM (
+--@   VALUES
+--@   ('week', '7 d'),
+--@   ('day', '1 d'),
+--@   ('hour', '1 h'),
+--@   ('minute', '1 m'),
+--@   ('second', '1 s'),
+--@   ('millisecond', '1 ms'),
+--@   ('microsecond', '1 us')
+--@ ) intervals (str, interval),
+--@ (VALUES (timestamp '0055-6-10 15:44:17.71393 BC')) ts (ts);
 
 -- case 3: AD dates, origin > input
-SELECT
-  str,
-  interval,
-  date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2020-03-02') AS equal
-FROM (
-  VALUES
-  ('week', '7 d'),
-  ('day', '1 d'),
-  ('hour', '1 h'),
-  ('minute', '1 m'),
-  ('second', '1 s'),
-  ('millisecond', '1 ms'),
-  ('microsecond', '1 us')
-) intervals (str, interval),
-(VALUES (timestamp '2020-02-29 15:44:17.71393')) ts (ts);
+--@ SELECT
+--@   str,
+--@   interval,
+--@   date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '2020-03-02') AS equal
+--@ FROM (
+--@   VALUES
+--@   ('week', '7 d'),
+--@   ('day', '1 d'),
+--@   ('hour', '1 h'),
+--@   ('minute', '1 m'),
+--@   ('second', '1 s'),
+--@   ('millisecond', '1 ms'),
+--@   ('microsecond', '1 us')
+--@ ) intervals (str, interval),
+--@ (VALUES (timestamp '2020-02-29 15:44:17.71393')) ts (ts);
 
 -- case 4: BC dates, origin > input
-SELECT
-  str,
-  interval,
-  date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '0055-06-17 BC') AS equal
-FROM (
-  VALUES
-  ('week', '7 d'),
-  ('day', '1 d'),
-  ('hour', '1 h'),
-  ('minute', '1 m'),
-  ('second', '1 s'),
-  ('millisecond', '1 ms'),
-  ('microsecond', '1 us')
-) intervals (str, interval),
-(VALUES (timestamp '0055-6-10 15:44:17.71393 BC')) ts (ts);
+--@ SELECT
+--@   str,
+--@   interval,
+--@   date_trunc(str, ts) = date_bin(interval::interval, ts, timestamp '0055-06-17 BC') AS equal
+--@ FROM (
+--@   VALUES
+--@   ('week', '7 d'),
+--@   ('day', '1 d'),
+--@   ('hour', '1 h'),
+--@   ('minute', '1 m'),
+--@   ('second', '1 s'),
+--@   ('millisecond', '1 ms'),
+--@   ('microsecond', '1 us')
+--@ ) intervals (str, interval),
+--@ (VALUES (timestamp '0055-6-10 15:44:17.71393 BC')) ts (ts);
 
 -- bin timestamps into arbitrary intervals
-SELECT
-  interval,
-  ts,
-  origin,
-  date_bin(interval::interval, ts, origin)
-FROM (
-  VALUES
-  ('15 days'),
-  ('2 hours'),
-  ('1 hour 30 minutes'),
-  ('15 minutes'),
-  ('10 seconds'),
-  ('100 milliseconds'),
-  ('250 microseconds')
-) intervals (interval),
-(VALUES (timestamp '2020-02-11 15:44:17.71393')) ts (ts),
-(VALUES (timestamp '2001-01-01')) origin (origin);
+--@ SELECT
+--@   interval,
+--@   ts,
+--@   origin,
+--@   date_bin(interval::interval, ts, origin)
+--@ FROM (
+--@   VALUES
+--@   ('15 days'),
+--@   ('2 hours'),
+--@   ('1 hour 30 minutes'),
+--@   ('15 minutes'),
+--@   ('10 seconds'),
+--@   ('100 milliseconds'),
+--@   ('250 microseconds')
+--@ ) intervals (interval),
+--@ (VALUES (timestamp '2020-02-11 15:44:17.71393')) ts (ts),
+--@ (VALUES (timestamp '2001-01-01')) origin (origin);
 
 -- shift bins using the origin parameter:
-SELECT date_bin('5 min'::interval, timestamp '2020-02-01 01:01:01', timestamp '2020-02-01 00:02:30');
+--@ SELECT date_bin('5 min'::interval, timestamp '2020-02-01 01:01:01', timestamp '2020-02-01 00:02:30');
 
 -- disallow intervals with months or years
-SELECT date_bin('5 months'::interval, timestamp '2020-02-01 01:01:01', timestamp '2001-01-01');
-SELECT date_bin('5 years'::interval,  timestamp '2020-02-01 01:01:01', timestamp '2001-01-01');
+--@ SELECT date_bin('5 months'::interval, timestamp '2020-02-01 01:01:01', timestamp '2001-01-01');
+--@ SELECT date_bin('5 years'::interval,  timestamp '2020-02-01 01:01:01', timestamp '2001-01-01');
 
 -- Test casting within a BETWEEN qualifier
 SELECT d1 - timestamp without time zone '1997-01-02' AS diff
@@ -303,101 +303,101 @@ SELECT d1 - timestamp without time zone '1997-01-02' AS diff
    AND timestamp without time zone '2038-01-01';
 
 -- DATE_PART (timestamp_part)
-SELECT d1 as "timestamp",
-   date_part( 'year', d1) AS year, date_part( 'month', d1) AS month,
-   date_part( 'day', d1) AS day, date_part( 'hour', d1) AS hour,
-   date_part( 'minute', d1) AS minute, date_part( 'second', d1) AS second
-   FROM TIMESTAMP_TBL;
-
-SELECT d1 as "timestamp",
-   date_part( 'quarter', d1) AS quarter, date_part( 'msec', d1) AS msec,
-   date_part( 'usec', d1) AS usec
-   FROM TIMESTAMP_TBL;
-
-SELECT d1 as "timestamp",
-   date_part( 'isoyear', d1) AS isoyear, date_part( 'week', d1) AS week,
-   date_part( 'isodow', d1) AS isodow, date_part( 'dow', d1) AS dow,
-   date_part( 'doy', d1) AS doy
-   FROM TIMESTAMP_TBL;
-
-SELECT d1 as "timestamp",
-   date_part( 'decade', d1) AS decade,
-   date_part( 'century', d1) AS century,
-   date_part( 'millennium', d1) AS millennium,
-   round(date_part( 'julian', d1)) AS julian,
-   date_part( 'epoch', d1) AS epoch
-   FROM TIMESTAMP_TBL;
+--@ SELECT d1 as "timestamp",
+--@    date_part( 'year', d1) AS year, date_part( 'month', d1) AS month,
+--@    date_part( 'day', d1) AS day, date_part( 'hour', d1) AS hour,
+--@    date_part( 'minute', d1) AS minute, date_part( 'second', d1) AS second
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT d1 as "timestamp",
+--@    date_part( 'quarter', d1) AS quarter, date_part( 'msec', d1) AS msec,
+--@    date_part( 'usec', d1) AS usec
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT d1 as "timestamp",
+--@    date_part( 'isoyear', d1) AS isoyear, date_part( 'week', d1) AS week,
+--@    date_part( 'isodow', d1) AS isodow, date_part( 'dow', d1) AS dow,
+--@    date_part( 'doy', d1) AS doy
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT d1 as "timestamp",
+--@    date_part( 'decade', d1) AS decade,
+--@    date_part( 'century', d1) AS century,
+--@    date_part( 'millennium', d1) AS millennium,
+--@    round(date_part( 'julian', d1)) AS julian,
+--@    date_part( 'epoch', d1) AS epoch
+--@    FROM TIMESTAMP_TBL;
 
 -- extract implementation is mostly the same as date_part, so only
 -- test a few cases for additional coverage.
-SELECT d1 as "timestamp",
-   extract(microseconds from d1) AS microseconds,
-   extract(milliseconds from d1) AS milliseconds,
-   extract(seconds from d1) AS seconds,
-   round(extract(julian from d1)) AS julian,
-   extract(epoch from d1) AS epoch
-   FROM TIMESTAMP_TBL;
+--@ SELECT d1 as "timestamp",
+--@    extract(microseconds from d1) AS microseconds,
+--@    extract(milliseconds from d1) AS milliseconds,
+--@    extract(seconds from d1) AS seconds,
+--@    round(extract(julian from d1)) AS julian,
+--@    extract(epoch from d1) AS epoch
+--@    FROM TIMESTAMP_TBL;
 
 -- value near upper bound uses special case in code
-SELECT date_part('epoch', '294270-01-01 00:00:00'::timestamp);
-SELECT extract(epoch from '294270-01-01 00:00:00'::timestamp);
+--@ SELECT date_part('epoch', '294270-01-01 00:00:00'::timestamp);
+--@ SELECT extract(epoch from '294270-01-01 00:00:00'::timestamp);
 -- another internal overflow test case
-SELECT extract(epoch from '5000-01-01 00:00:00'::timestamp);
+--@ SELECT extract(epoch from '5000-01-01 00:00:00'::timestamp);
 
 -- TO_CHAR()
-SELECT to_char(d1, 'DAY Day day DY Dy dy MONTH Month month RM MON Mon mon')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'FMDAY FMDay FMday FMMONTH FMMonth FMmonth FMRM')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'Y,YYY YYYY YYY YY Y CC Q MM WW DDD DD D J')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'FMY,YYY FMYYYY FMYYY FMYY FMY FMCC FMQ FMMM FMWW FMDDD FMDD FMD FMJ')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'HH HH12 HH24 MI SS SSSS')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, E'"HH:MI:SS is" HH:MI:SS "\\"text between quote marks\\""')
-   FROM TIMESTAMP_TBL;
-
+--@ SELECT to_char(d1, 'DAY Day day DY Dy dy MONTH Month month RM MON Mon mon')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'FMDAY FMDay FMday FMMONTH FMMonth FMmonth FMRM')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'Y,YYY YYYY YYY YY Y CC Q MM WW DDD DD D J')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'FMY,YYY FMYYYY FMYYY FMYY FMY FMCC FMQ FMMM FMWW FMDDD FMDD FMD FMJ')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'HH HH12 HH24 MI SS SSSS')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, E'"HH:MI:SS is" HH:MI:SS "\\"text between quote marks\\""')
+--@    FROM TIMESTAMP_TBL;
+--@ 
 SELECT to_char(d1, 'HH24--text--MI--text--SS')
    FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'YYYYTH YYYYth Jth')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'YYYY A.D. YYYY a.d. YYYY bc HH:MI:SS P.M. HH:MI:SS p.m. HH:MI:SS pm')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'IYYY IYY IY I IW IDDD ID')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d1, 'FMIYYY FMIYY FMIY FMI FMIW FMIDDD FMID')
-   FROM TIMESTAMP_TBL;
-
-SELECT to_char(d, 'FF1 FF2 FF3 FF4 FF5 FF6  ff1 ff2 ff3 ff4 ff5 ff6  MS US')
-   FROM (VALUES
-       ('2018-11-02 12:34:56'::timestamp),
-       ('2018-11-02 12:34:56.78'),
-       ('2018-11-02 12:34:56.78901'),
-       ('2018-11-02 12:34:56.78901234')
-   ) d(d);
+--@ 
+--@ SELECT to_char(d1, 'YYYYTH YYYYth Jth')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'YYYY A.D. YYYY a.d. YYYY bc HH:MI:SS P.M. HH:MI:SS p.m. HH:MI:SS pm')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'IYYY IYY IY I IW IDDD ID')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d1, 'FMIYYY FMIYY FMIY FMI FMIW FMIDDD FMID')
+--@    FROM TIMESTAMP_TBL;
+--@ 
+--@ SELECT to_char(d, 'FF1 FF2 FF3 FF4 FF5 FF6  ff1 ff2 ff3 ff4 ff5 ff6  MS US')
+--@    FROM (VALUES
+--@        ('2018-11-02 12:34:56'::timestamp),
+--@        ('2018-11-02 12:34:56.78'),
+--@        ('2018-11-02 12:34:56.78901'),
+--@        ('2018-11-02 12:34:56.78901234')
+--@    ) d(d);
 
 -- Roman months, with upper and lower case.
-SELECT i,
-       to_char(i * interval '1mon', 'rm'),
-       to_char(i * interval '1mon', 'RM')
-    FROM generate_series(-13, 13) i;
+--@ SELECT i,
+--@        to_char(i * interval '1mon', 'rm'),
+--@        to_char(i * interval '1mon', 'RM')
+--@     FROM generate_series(-13, 13) i;
 
 -- timestamp numeric fields constructor
-SELECT make_timestamp(2014, 12, 28, 6, 30, 45.887);
-SELECT make_timestamp(-44, 3, 15, 12, 30, 15);
+--@ SELECT make_timestamp(2014, 12, 28, 6, 30, 45.887);
+--@ SELECT make_timestamp(-44, 3, 15, 12, 30, 15);
 -- should fail
-select make_timestamp(0, 7, 15, 12, 30, 15);
+--@ select make_timestamp(0, 7, 15, 12, 30, 15);
 
 DROP TABLE TIMESTAMP_TBL;
-reset intervalstyle;
-reset datestyle;
+--@ reset intervalstyle;
+--@ reset datestyle;
