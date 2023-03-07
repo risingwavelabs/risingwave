@@ -20,6 +20,8 @@ use risingwave_pb::catalog::connection::PrivateLinkService;
 
 use crate::MetaResult;
 
+const CLOUD_PROVIDER_AWS: &str = "aws";
+
 #[derive(Clone)]
 pub struct AwsEc2Client {
     client: aws_sdk_ec2::Client,
@@ -73,6 +75,7 @@ impl AwsEc2Client {
         }
         debug_assert!(az_to_dns_map.len() == availability_zones.len());
         Ok(PrivateLinkService {
+            provider: CLOUD_PROVIDER_AWS.to_string(),
             endpoint_id,
             dns_entries: az_to_dns_map,
         })

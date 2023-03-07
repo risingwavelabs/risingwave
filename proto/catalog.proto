@@ -92,8 +92,9 @@ message Sink {
 
 message Connection {
   message PrivateLinkService {
-    string endpoint_id = 1;
-    map<string, string> dns_entries = 2;
+    string provider = 1;
+    string endpoint_id = 2;
+    map<string, string> dns_entries = 3;
   }
 
   uint32 id = 1;
