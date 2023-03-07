@@ -74,10 +74,11 @@ impl AggStateFactory {
         let order_pairs = prost
             .get_order_by_fields()
             .iter()
-            .map(|field| {
-                let col_idx = field.get_input() as usize;
+            .map(|col_order| {
+                let col_idx = col_order.get_column_index() as usize;
+                let order = col_order.get_order().unwrap();
                 let order_type =
-                    OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+                    OrderType::from_prost(&ProstOrderType::from_i32(order.direction).unwrap());
                 // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
                 // see also `risingwave_common::util::sort_util::compare_values`
                 OrderPair::new(col_idx, order_type)

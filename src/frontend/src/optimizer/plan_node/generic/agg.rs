@@ -20,8 +20,10 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
+use risingwave_pb::order::{
+    ColumnOrder as ProstColumnOrder, Direction as ProstDirection, Order as ProstOrder,
+};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
 use super::super::utils::TableCatalogBuilder;
@@ -517,11 +519,16 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
 }
 
 impl PlanAggOrderByField {
-    fn to_protobuf(&self) -> ProstAggOrderByField {
-        ProstAggOrderByField {
-            input: self.input.index() as _,
-            direction: self.direction.to_protobuf() as i32,
-            nulls_first: self.nulls_first,
+    fn to_protobuf(&self) -> ProstColumnOrder {
+        ProstColumnOrder {
+            column_index: self.input.index() as _,
+            order: Some(ProstOrder {
+                direction: match self.direction {
+                    Direction::Asc => ProstDirection::Ascending,
+                    Direction::Desc => ProstDirection::Descending,
+                    Direction::Any => unreachable!(),
+                } as _, // TODO(): use `to_proto`
+            }),
         }
     }
 }
@@ -547,7 +554,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
-    pub order_by_fields: Vec<PlanAggOrderByField>,
+    pub order_by_fields: Vec<PlanAggOrderByField>, // TODO() rename
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
