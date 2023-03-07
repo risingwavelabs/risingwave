@@ -20,14 +20,15 @@ use crate::hash::HashCode;
 // TODO: make it a newtype
 pub type ParallelUnitId = u32;
 
-/// `VirtualNode` (a.k.a. VNode) is a minimal partition that a set of keys belong to. It is used for
+/// `VirtualNode` (a.k.a. Vnode) is a minimal partition that a set of keys belong to. It is used for
 /// consistent hashing.
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Display)]
 #[display("{0}")]
 pub struct VirtualNode(VirtualNodeInner);
 
-type VirtualNodeInner = u8;
+/// The internal representation of a virtual node.
+type VirtualNodeInner = u16;
 static_assertions::const_assert!(VirtualNodeInner::BITS >= VirtualNode::BITS as u32);
 
 impl From<HashCode> for VirtualNode {
@@ -41,6 +42,9 @@ impl From<HashCode> for VirtualNode {
 
 impl VirtualNode {
     /// The number of bits used to represent a virtual node.
+    ///
+    /// Note: Not all bits of the inner representation are used. One should rely on this constant
+    /// to determine the count of virtual nodes.
     pub const BITS: usize = 8;
     /// The total count of virtual nodes.
     pub const COUNT: usize = 1 << Self::BITS;
