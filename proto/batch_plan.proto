@@ -5,6 +5,7 @@ package batch_plan;
 import "catalog.proto";
 import "common.proto";
 import "data.proto";
+import "order.proto";
 import "expr.proto";
 import "plan_common.proto";
 
@@ -178,7 +179,7 @@ message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
-  plan_common.OrderType direction = 4;
+  order.Direction direction = 4;
   repeated uint32 output_indices = 5;
 }
 
