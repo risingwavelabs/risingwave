@@ -279,10 +279,13 @@ pub(crate) static BINARY_INEQUALITY_OP_TABLE: LazyLock<
                     .all(|t| *t != DataTypeName::Timestamptz)
         })
         .filter_map(|func| {
-            let args = (
-                data_type_name_to_ast_data_type(&func.inputs_type[0]).unwrap(),
-                data_type_name_to_ast_data_type(&func.inputs_type[1]).unwrap(),
-            );
+            let Some(lhs) = data_type_name_to_ast_data_type(&func.inputs_type[0]) else {
+                return None;
+            };
+            let Some(rhs) = data_type_name_to_ast_data_type(&func.inputs_type[1]) else {
+                return None;
+            };
+            let args = (lhs, rhs);
             let Some(op) = expr_type_to_inequality_op(func.func) else {
                 return None;
             };
