@@ -34,7 +34,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
-use risingwave_pb::expr::ColumnRef as ProstColumnRef;
+use risingwave_pb::expr::InputRef as ProstInputRef;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -615,7 +615,7 @@ impl Watermark {
 
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
-            column: Some(ProstColumnRef {
+            column: Some(ProstInputRef {
                 index: self.col_idx as _,
                 r#type: Some(self.data_type.to_protobuf()),
             }),

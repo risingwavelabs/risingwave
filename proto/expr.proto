@@ -161,8 +161,8 @@ message TableFunction {
   data.DataType return_type = 3;
 }
 
-// Reference to a column, containing its index and data type.
-message ColumnRef {
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
   uint32 index = 1;
   data.DataType type = 2;
 }
@@ -224,7 +224,7 @@ message AggCall {
     STDDEV_SAMP = 14;
   }
   Type type = 1;
-  repeated ColumnRef args = 2;
+  repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
   message OrderByField {

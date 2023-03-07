@@ -614,7 +614,7 @@ impl PlanAggCall {
             args: self
                 .inputs
                 .iter()
-                .map(InputRef::to_column_ref_proto)
+                .map(InputRef::to_input_ref_proto)
                 .collect(),
             distinct: self.distinct,
             order_by_fields: self

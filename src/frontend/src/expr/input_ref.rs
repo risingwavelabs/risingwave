@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::ColumnRef as ProstColumnRef;
+use risingwave_pb::expr::InputRef as ProstInputRef;
 
 use super::Expr;
 use crate::expr::ExprType;
@@ -112,8 +112,8 @@ impl InputRef {
     }
 
     /// Convert to a `ColumnRef` in proto.
-    pub fn to_column_ref_proto(&self) -> ProstColumnRef {
-        ProstColumnRef {
+    pub fn to_input_ref_proto(&self) -> ProstInputRef {
+        ProstInputRef {
             index: self.index as _,
             r#type: Some(self.data_type.to_protobuf()),
         }

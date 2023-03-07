@@ -25,7 +25,7 @@ use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
-use risingwave_pb::expr::{AggCall, ColumnRef, ExprNode, FunctionCall};
+use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRef as ProstInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -56,7 +56,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
         r#type: Type::Sum as i32,
-        args: vec![ColumnRef {
+        args: vec![ProstInputRef {
             index: idx,
             r#type: Some(DataType {
                 type_name: TypeName::Int64 as i32,

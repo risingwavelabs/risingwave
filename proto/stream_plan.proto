@@ -101,7 +101,7 @@ message Barrier {
 
 message Watermark {
   // The reference to the watermark column in the stream's schema.
-  expr.ColumnRef column = 1;
+  expr.InputRef column = 1;
   // The watermark value, there will be no record having a greater value in the watermark column.
   data.Datum val = 3;
 }

@@ -272,7 +272,7 @@ mod tests {
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::agg_call::Type;
-    use risingwave_pb::expr::{AggCall, ColumnRef};
+    use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
@@ -307,7 +307,7 @@ mod tests {
 
         let agg_call = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ColumnRef {
+            args: vec![InputRef {
                 index: 2,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,

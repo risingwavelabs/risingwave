@@ -294,7 +294,7 @@ mod tests {
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::{AggCall, ColumnRef, ExprNode};
+    use risingwave_pb::expr::{AggCall, ExprNode, InputRef as ProstInputRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -551,7 +551,7 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ColumnRef {
+            args: vec![ProstInputRef {
                 index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
@@ -636,7 +636,7 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ColumnRef {
+            args: vec![ProstInputRef {
                 index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
@@ -760,7 +760,7 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![ColumnRef {
+            args: vec![ProstInputRef {
                 index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
