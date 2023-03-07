@@ -97,7 +97,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -150,7 +150,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let result = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -164,7 +164,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -185,7 +185,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            b"ee".as_ref(),
+            Bytes::from("ee"),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -225,7 +225,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -241,7 +241,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let iters = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
