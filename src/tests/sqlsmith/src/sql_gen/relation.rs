@@ -40,9 +40,10 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=range) {
             0..=0 => self.gen_simple_table(),
             1..=1 => self.gen_time_window_func(),
-            2..=3 => self.gen_simple_join_clause(),
+            2..=3 => self.gen_simple_join_clause().unwrap_or_else(|| self.gen_simple_table()),
             4..=4 => self.gen_more_joins(),
             5..=5 => self.gen_table_subquery(),
+            // TODO(kwannoel): cycles, bushy joins.
             _ => unreachable!(),
         }
     }
@@ -118,6 +119,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         Some((left_column.clone(), right_column.clone()))
     }
 
+    fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
+        let old_context = self.new_local_context();
+        self.add_relations_to_context(tables);
+        let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
+        self.restore_context(old_context);
+        expr
+    }
+
     /// Generates the `ON` clause in `t JOIN t2 ON ...`
     /// It will generate at least one equi join condition
     /// This will reduce chance of nested loop join from being generated.
@@ -136,15 +145,14 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let mut join_on_expr = create_equi_expr(l.name, r.name);
         // Add extra boolean expressions
         if self.flip_coin() {
-            let old_context = self.new_local_context();
-            self.add_relation_to_context(left_table);
-            self.add_relation_to_context(right_table);
-            let expr = self.gen_expr(&Boolean, SqlGeneratorContext::new_with_can_agg(false));
-            self.restore_context(old_context);
+            let expr = self.gen_bool_with_tables(vec![left_table, right_table]);
             // FIXME(noel): Hack to reduce streaming nested loop join occurrences.
             // ... JOIN ON x=y AND false => ... JOIN ON x=y
             // We can use const folding, then remove the right expression,
             // if it evaluates to `false` after const folding.
+            // Have to first bind `Expr`, since it is AST form.
+            // Then if successfully bound, use `eval_row_const` to constant fold it.
+            // Take a look at <https://github.com/risingwavelabs/risingwave/pull/7541/files#diff-08400d774a613753da25dcb45e905e8fe3d20acaccca846f39a86834f4c01656>.
             if expr != Expr::Value(Value::Boolean(false)) {
                 join_on_expr = Expr::BinaryOp {
                     left: Box::new(join_on_expr),
@@ -200,30 +208,32 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates t1 JOIN t2 ON ...
-    fn gen_simple_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
+    fn gen_simple_join_clause(&mut self) -> Option<(TableWithJoins, Vec<Table>)> {
         let (left_factor, left_columns, left_table) = self.gen_table_factor();
         let (right_factor, right_columns, right_table) = self.gen_table_factor();
         let Some(join_operator) =
             self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table.clone()) else {
-            return self.gen_simple_table();
+            return None;
         };
 
         let right_factor_with_join = Join {
             relation: right_factor,
             join_operator,
         };
-        (
+        Some((
             TableWithJoins {
                 relation: left_factor,
                 joins: vec![right_factor_with_join],
             },
             vec![left_table, right_table],
-        )
+        ))
     }
 
     fn gen_more_joins(&mut self) -> (TableWithJoins, Vec<Table>) {
         // gen left
-        let (left_table_with_join, mut left_tables) = self.gen_simple_join_clause();
+        let Some((left_table_with_join, mut left_tables)) = self.gen_simple_join_clause() else {
+            return self.gen_simple_table();
+        };
         let left_columns = left_tables
             .iter()
             .flat_map(|t| t.get_qualified_columns())
@@ -239,11 +249,11 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
           return (left_table_with_join, left_tables);
         };
 
+        // build result
         let mut tables = vec![];
         tables.append(&mut left_tables);
         tables.push(right_table);
 
-        // build result
         let right_join = Join {
             relation: right_factor,
             join_operator,
