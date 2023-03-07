@@ -3,7 +3,6 @@ syntax = "proto3";
 package expr;
 
 import "data.proto";
-import "plan_common.proto";
 import "order.proto";
 
 option java_package = "com.risingwave.proto";
