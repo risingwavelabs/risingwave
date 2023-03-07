@@ -245,6 +245,13 @@ pub struct ColumnAwareSerde {
 
 impl ValueRowSerdeNew for ColumnAwareSerde {
     fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> ColumnAwareSerde {
+        if cfg!(debug_assertions) {
+            let duplicates = column_ids.iter().duplicates().collect_vec();
+            if !duplicates.is_empty() {
+                panic!("duplicated column ids: {duplicates:?}");
+            }
+        }
+
         let serializer = Serializer::new(column_ids);
         let deserializer = Deserializer::new(column_ids, schema);
         ColumnAwareSerde {
