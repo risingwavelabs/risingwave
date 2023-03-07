@@ -33,3 +33,13 @@
         └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
           └─StreamDml { columns: [v1, _row_id] }
             └─StreamSource
+- name: hash agg
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select count(v2) from t group by ts, v1;
+  stream_plan: |
+    StreamMaterialize { columns: [count, t.ts(hidden), t.v1(hidden)], pk_columns: [t.ts, t.v1], pk_conflict: "no check" }
+    └─StreamProject { exprs: [count(t.v2), t.ts, t.v1], output_watermarks: [t.ts] }
+      └─StreamAppendOnlyHashAgg { group_key: [t.ts, t.v1], aggs: [count(t.v2), count], output_watermarks: [t.ts] }
+        └─StreamExchange { dist: HashShard(t.ts, t.v1) }
+          └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

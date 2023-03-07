@@ -20,7 +20,6 @@ use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::generic::GenericPlanRef;
 use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -40,7 +39,6 @@ pub struct StreamProject {
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamProject");
-        let input = self.input();
         self.logical.fmt_fields_with_builder(&mut builder);
         if !self.watermark_derivations.is_empty() {
             builder.field(
