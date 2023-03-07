@@ -75,13 +75,13 @@ impl RowEncoding {
                 self.flag |= Flag::OFFSET16;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u16(*m as u16));
+                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
             }
             _n @ ..=const { u32::MAX as usize } => {
                 self.flag |= Flag::OFFSET32;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u32(*m as u32));
+                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
