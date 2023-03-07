@@ -746,7 +746,7 @@ export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
     | { $case: "targetFileSizeBase"; targetFileSizeBase: number }
     | { $case: "compactionFilterMask"; compactionFilterMask: number }
     | { $case: "maxSubCompaction"; maxSubCompaction: number }
-    | { $case: "subLevelNumberLimit"; subLevelNumberLimit: number };
+    | { $case: "level0StopWriteThresholdSubLevelNumber"; level0StopWriteThresholdSubLevelNumber: number };
 }
 
 export interface RiseCtlUpdateCompactionConfigResponse {
@@ -792,7 +792,7 @@ export interface CompactionConfig {
   maxSubCompaction: number;
   maxSpaceReclaimBytes: number;
   /** soft limit for max number of sub level number */
-  subLevelNumberLimit: number;
+  level0StopWriteThresholdSubLevelNumber: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -4023,8 +4023,11 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
         ? { $case: "compactionFilterMask", compactionFilterMask: Number(object.compactionFilterMask) }
         : isSet(object.maxSubCompaction)
         ? { $case: "maxSubCompaction", maxSubCompaction: Number(object.maxSubCompaction) }
-        : isSet(object.subLevelNumberLimit)
-        ? { $case: "subLevelNumberLimit", subLevelNumberLimit: Number(object.subLevelNumberLimit) }
+        : isSet(object.level0StopWriteThresholdSubLevelNumber)
+        ? {
+          $case: "level0StopWriteThresholdSubLevelNumber",
+          level0StopWriteThresholdSubLevelNumber: Number(object.level0StopWriteThresholdSubLevelNumber),
+        }
         : undefined,
     };
   },
@@ -4047,8 +4050,10 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       (obj.compactionFilterMask = Math.round(message.mutableConfig?.compactionFilterMask));
     message.mutableConfig?.$case === "maxSubCompaction" &&
       (obj.maxSubCompaction = Math.round(message.mutableConfig?.maxSubCompaction));
-    message.mutableConfig?.$case === "subLevelNumberLimit" &&
-      (obj.subLevelNumberLimit = Math.round(message.mutableConfig?.subLevelNumberLimit));
+    message.mutableConfig?.$case === "level0StopWriteThresholdSubLevelNumber" &&
+      (obj.level0StopWriteThresholdSubLevelNumber = Math.round(
+        message.mutableConfig?.level0StopWriteThresholdSubLevelNumber,
+      ));
     return obj;
   },
 
@@ -4134,13 +4139,13 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       message.mutableConfig = { $case: "maxSubCompaction", maxSubCompaction: object.mutableConfig.maxSubCompaction };
     }
     if (
-      object.mutableConfig?.$case === "subLevelNumberLimit" &&
-      object.mutableConfig?.subLevelNumberLimit !== undefined &&
-      object.mutableConfig?.subLevelNumberLimit !== null
+      object.mutableConfig?.$case === "level0StopWriteThresholdSubLevelNumber" &&
+      object.mutableConfig?.level0StopWriteThresholdSubLevelNumber !== undefined &&
+      object.mutableConfig?.level0StopWriteThresholdSubLevelNumber !== null
     ) {
       message.mutableConfig = {
-        $case: "subLevelNumberLimit",
-        subLevelNumberLimit: object.mutableConfig.subLevelNumberLimit,
+        $case: "level0StopWriteThresholdSubLevelNumber",
+        level0StopWriteThresholdSubLevelNumber: object.mutableConfig.level0StopWriteThresholdSubLevelNumber,
       };
     }
     return message;
@@ -4341,7 +4346,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     compactionFilterMask: 0,
     maxSubCompaction: 0,
     maxSpaceReclaimBytes: 0,
-    subLevelNumberLimit: 0,
+    level0StopWriteThresholdSubLevelNumber: 0,
   };
 }
 
@@ -4370,7 +4375,9 @@ export const CompactionConfig = {
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
       maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
-      subLevelNumberLimit: isSet(object.subLevelNumberLimit) ? Number(object.subLevelNumberLimit) : 0,
+      level0StopWriteThresholdSubLevelNumber: isSet(object.level0StopWriteThresholdSubLevelNumber)
+        ? Number(object.level0StopWriteThresholdSubLevelNumber)
+        : 0,
     };
   },
 
@@ -4396,7 +4403,8 @@ export const CompactionConfig = {
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
     message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
-    message.subLevelNumberLimit !== undefined && (obj.subLevelNumberLimit = Math.round(message.subLevelNumberLimit));
+    message.level0StopWriteThresholdSubLevelNumber !== undefined &&
+      (obj.level0StopWriteThresholdSubLevelNumber = Math.round(message.level0StopWriteThresholdSubLevelNumber));
     return obj;
   },
 
@@ -4414,7 +4422,7 @@ export const CompactionConfig = {
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
-    message.subLevelNumberLimit = object.subLevelNumberLimit ?? 0;
+    message.level0StopWriteThresholdSubLevelNumber = object.level0StopWriteThresholdSubLevelNumber ?? 0;
     return message;
   },
 };

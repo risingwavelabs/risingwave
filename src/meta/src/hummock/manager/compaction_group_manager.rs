@@ -386,7 +386,7 @@ impl<S: MetaStore> HummockManager<S> {
             .await?;
         if config_to_update
             .iter()
-            .any(|c| matches!(c, MutableConfig::SubLevelNumberLimit(_)))
+            .any(|c| matches!(c, MutableConfig::Level0StopWriteThresholdSubLevelNumber(_)))
         {
             self.try_update_write_limits(compaction_group_ids).await;
         }
@@ -703,8 +703,8 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::MaxSubCompaction(c) => {
                 target.max_sub_compaction = *c;
             }
-            MutableConfig::SubLevelNumberLimit(c) => {
-                target.sub_level_number_limit = *c;
+            MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
+                target.level0_stop_write_threshold_sub_level_number = *c;
             }
         }
     }

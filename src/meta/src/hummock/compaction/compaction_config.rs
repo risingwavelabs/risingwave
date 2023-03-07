@@ -27,7 +27,7 @@ const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
-const DEFAULT_SUB_LEVEL_NUMBER_LIMIT: u64 = u32::MAX as u64;
+const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = u32::MAX as u64;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -62,7 +62,8 @@ impl CompactionConfigBuilder {
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
                 max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
-                sub_level_number_limit: DEFAULT_SUB_LEVEL_NUMBER_LIMIT,
+                level0_stop_write_threshold_sub_level_number:
+                    DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER,
             },
         }
     }
@@ -82,11 +83,11 @@ impl CompactionConfigBuilder {
 /// Returns Ok if `config` is valid,
 /// or the reason why it's invalid.
 pub fn validate_compaction_config(config: &CompactionConfig) -> Result<(), String> {
-    let min_sub_level_number_limit = 1000;
-    if config.sub_level_number_limit < min_sub_level_number_limit {
+    let sub_level_number_threshold_min = 1;
+    if config.level0_stop_write_threshold_sub_level_number < sub_level_number_threshold_min {
         return Err(format!(
-            "{} is too small for sub_level_number_limit, expect >= {}",
-            config.sub_level_number_limit, min_sub_level_number_limit
+            "{} is too small for level0_stop_write_threshold_sub_level_number, expect >= {}",
+            config.level0_stop_write_threshold_sub_level_number, sub_level_number_threshold_min
         ));
     }
     Ok(())
@@ -123,5 +124,5 @@ builder_field! {
     compaction_filter_mask: u32,
     max_sub_compaction: u32,
     max_space_reclaim_bytes: u64,
-    sub_level_number_limit: u64,
+    level0_stop_write_threshold_sub_level_number: u64,
 }

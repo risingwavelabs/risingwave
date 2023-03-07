@@ -271,7 +271,9 @@ pub(super) fn calc_new_write_limits(
     for (id, config) in &target_groups {
         let levels = version.get_compaction_group_levels(*id);
         // Add write limit conditions here.
-        let threshold = config.compaction_config.sub_level_number_limit as usize;
+        let threshold = config
+            .compaction_config
+            .level0_stop_write_threshold_sub_level_number as usize;
         let l0_sub_level_number = levels.l0.as_ref().unwrap().sub_levels.len();
         if threshold < l0_sub_level_number {
             new_write_limits.insert(
@@ -356,16 +358,18 @@ mod tests {
                 .sub_levels
                 .push(Level::default());
         };
-        let set_sub_level_number_limit_for_group_1 =
+        let set_sub_level_number_threshold_for_group_1 =
             |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
-             sub_level_number_limit: u64| {
+             sub_level_number_threshold: u64| {
                 target_groups.insert(
                     1,
                     CompactionGroup {
                         group_id: 1,
                         compaction_config: Arc::new(
                             CompactionConfigBuilder::new()
-                                .sub_level_number_limit(sub_level_number_limit)
+                                .level0_stop_write_threshold_sub_level_number(
+                                    sub_level_number_threshold,
+                                )
                                 .build(),
                         ),
                     },
@@ -373,7 +377,7 @@ mod tests {
             };
 
         let mut target_groups: HashMap<CompactionGroupId, CompactionGroup> = Default::default();
-        set_sub_level_number_limit_for_group_1(&mut target_groups, 10);
+        set_sub_level_number_threshold_for_group_1(&mut target_groups, 10);
         let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
             2,
             WriteLimit {
@@ -422,7 +426,7 @@ mod tests {
         );
         assert_eq!(new_write_limits.len(), 2);
 
-        set_sub_level_number_limit_for_group_1(&mut target_groups, 100);
+        set_sub_level_number_threshold_for_group_1(&mut target_groups, 100);
         let new_write_limits =
             calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_eq!(
@@ -430,7 +434,7 @@ mod tests {
             "write limit should not be triggered for group 1"
         );
 
-        set_sub_level_number_limit_for_group_1(&mut target_groups, 5);
+        set_sub_level_number_threshold_for_group_1(&mut target_groups, 5);
         let new_write_limits =
             calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
         assert_ne!(
