@@ -1,6 +1,7 @@
 package com.risingwave.connector;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.junit.Assert.assertEquals;
 
 import com.risingwave.proto.ConnectorServiceProto.*;
 import io.grpc.*;
@@ -10,10 +11,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.*;
+import javax.sql.DataSource;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Ignore;
@@ -25,7 +24,7 @@ import org.testcontainers.utility.MountableFile;
 
 public class MySQLSourceTest {
 
-    private static final Logger logger = LoggerFactory.getLogger(MySQLSourceTest.class.getName());
+    static final Logger LOG = LoggerFactory.getLogger(MySQLSourceTest.class.getName());
 
     private static final MySQLContainer<?> mysql =
             new MySQLContainer<>("mysql:5.7.34")
@@ -46,6 +45,8 @@ public class MySQLSourceTest {
                                     InsecureChannelCredentials.create())
                             .build());
 
+    private static DataSource mysqlDataSource;
+
     @BeforeClass
     public static void init() {
         // generate orders.tbl test data
@@ -53,17 +54,18 @@ public class MySQLSourceTest {
         // start connector server and mysql...
         try {
             connectorServer.start();
-            logger.info("connector service started");
+            LOG.info("connector service started");
             mysql.withCopyFileToContainer(
                     MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             mysql.start();
-            logger.info("mysql started");
+            mysqlDataSource = SourceTestClient.getDataSource(mysql);
+            LOG.info("mysql started");
         } catch (IOException e) {
             fail("IO exception: ", e);
         }
         // check mysql configuration...
         try {
-            Connection connection = SourceTestClient.connect(mysql);
+            Connection connection = SourceTestClient.connect(mysqlDataSource);
             ResultSet resultSet =
                     SourceTestClient.performQuery(
                             connection, testClient.sqlStmts.getProperty("mysql.bin_log"));
@@ -80,11 +82,13 @@ public class MySQLSourceTest {
         mysql.stop();
     }
 
+    // create a TPC-H orders table in mysql
+    // insert 10,000 rows into orders
+    // check if the number of changes debezium captures is 10,000
     @Test
     public void testLines() throws InterruptedException, SQLException {
-        Lock lock = new ReentrantLock();
-        Condition done = lock.newCondition();
-        Connection connection = SourceTestClient.connect(mysql);
+        ExecutorService executorService = Executors.newFixedThreadPool(1);
+        Connection connection = SourceTestClient.connect(mysqlDataSource);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
         SourceTestClient.performQuery(connection, query);
         query =
@@ -95,42 +99,36 @@ public class MySQLSourceTest {
         SourceTestClient.performQuery(connection, query);
         Iterator<GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(mysql, SourceType.MYSQL, "test", "orders");
-        AtomicInteger count = new AtomicInteger();
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<CdcMessage> messages = eventStream.next().getEventsList();
-                                for (CdcMessage ignored : messages) {
-                                    count.getAndIncrement();
-                                }
-                                if (count.get() == 10000) {
-                                    lock.lock();
-                                    try {
-                                        done.signal();
-                                    } finally {
-                                        lock.unlock();
-                                    }
-                                }
-                            }
-                        });
-        t1.start();
-        lock.lock();
+        Callable<Integer> countTask =
+                () -> {
+                    int count = 0;
+                    while (eventStream.hasNext()) {
+                        List<CdcMessage> messages = eventStream.next().getEventsList();
+                        for (CdcMessage ignored : messages) {
+                            count++;
+                        }
+                        if (count == 10000) {
+                            return count;
+                        }
+                    }
+                    return count;
+                };
+        Future<Integer> countResult = executorService.submit(countTask);
         try {
-            done.await();
-        } finally {
-            lock.unlock();
+            int count = countResult.get();
+            LOG.info("number of cdc messages received: {}", count);
+            assertEquals(count, 10000);
+        } catch (ExecutionException e) {
+            fail("Execution exception: ", e);
         }
-        logger.info("count: {}", count.get());
-        assertThat(count.get()).isEqualTo(10000);
         connection.close();
     }
 
-    // generates test cases for risingwave debezium parser
+    // generates test cases for the risingwave debezium parser
     @Ignore
     @Test
     public void getTestJson() throws InterruptedException, SQLException {
-        Connection connection = SourceTestClient.connect(mysql);
+        Connection connection = SourceTestClient.connect(mysqlDataSource);
         String query =
                 "CREATE TABLE IF NOT EXISTS orders ("
                         + "O_KEY BIGINT NOT NULL, "
@@ -150,15 +148,13 @@ public class MySQLSourceTest {
         SourceTestClient.performQuery(connection, query);
         Iterator<GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(mysql, SourceType.MYSQL, "test", "orders");
-        AtomicInteger count = new AtomicInteger();
         Thread t1 =
                 new Thread(
                         () -> {
                             while (eventStream.hasNext()) {
                                 List<CdcMessage> messages = eventStream.next().getEventsList();
                                 for (CdcMessage msg : messages) {
-                                    count.getAndIncrement();
-                                    logger.info("{}", msg.getPayload());
+                                    LOG.info("{}", msg.getPayload());
                                 }
                             }
                         });

@@ -40,10 +40,10 @@ public class SourceTestClient {
         }
     }
 
-    protected static Connection connect(JdbcDatabaseContainer<?> container) {
+    protected static Connection connect(DataSource dataSource) {
         Connection connection = null;
         try {
-            connection = getDataSource(container).getConnection();
+            connection = dataSource.getConnection();
         } catch (SQLException e) {
             fail("SQL Exception: {}", e);
         }
@@ -107,54 +107,57 @@ public class SourceTestClient {
         return responses;
     }
 
-    private static String[] orderStatusArr = {"O", "F"};
-    private static String[] orderPriorityArr = {
-        "1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"
-    };
-
-    // generates an orders table in class path if not exists
-    // data completely random
+    // generates an orders.tbl in class path using random data
+    // if file does not contain 10000 lines
     static void genOrdersTable(int numRows) {
+        String[] orderStatusArr = {"O", "F"};
+        String[] orderPriorityArr = {"1-URGENT", "2-HIGH", "3-MEDIUM", "4-NOT SPECIFIED", "5-LOW"};
         String path =
-                PostgresSourceTest.class
-                        .getProtectionDomain()
-                        .getCodeSource()
-                        .getLocation()
-                        .getFile();
-        Random rand = new Random();
-        PrintWriter writer = null;
-        try {
-            writer = new PrintWriter(path + "orders.tbl", "UTF-8");
+                SourceTestClient.class.getProtectionDomain().getCodeSource().getLocation().getFile()
+                        + "orders.tbl";
+        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+            int lines = 0;
+            while (reader.readLine() != null) {
+                lines++;
+            }
+            if (lines == 10000) {
+                LOG.info("orders.tbl contains 10000 lines, skipping data generation");
+                return;
+            }
         } catch (Exception e) {
             fail("Runtime Exception: {}", e);
         }
-        assert writer != null;
-        for (int i = 1; i <= numRows; i++) {
-            String custKey = String.valueOf(Math.abs(rand.nextLong()));
-            String orderStatus = orderStatusArr[rand.nextInt(orderStatusArr.length)];
-            String totalPrice = rand.nextInt(1000000) + "." + rand.nextInt(9) + rand.nextInt(9);
-            String orderDate =
-                    (rand.nextInt(60) + 1970)
-                            + "-"
-                            + String.format("%02d", rand.nextInt(12) + 1)
-                            + "-"
-                            + String.format("%02d", rand.nextInt(28) + 1);
-            String orderPriority = orderPriorityArr[rand.nextInt(orderPriorityArr.length)];
-            String clerk = "Clerk#" + String.format("%09d", rand.nextInt(1024));
-            String shipPriority = "0";
-            String comment = UUID.randomUUID() + " " + UUID.randomUUID();
-            writer.printf(
-                    "%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
-                    i,
-                    custKey,
-                    orderStatus,
-                    totalPrice,
-                    orderDate,
-                    orderPriority,
-                    clerk,
-                    shipPriority,
-                    comment);
+        Random rand = new Random();
+        try (PrintWriter writer = new PrintWriter(path, "UTF-8")) {
+            for (int i = 1; i <= numRows; i++) {
+                String custKey = String.valueOf(Math.abs(rand.nextLong()));
+                String orderStatus = orderStatusArr[rand.nextInt(orderStatusArr.length)];
+                String totalPrice = rand.nextInt(1000000) + "." + rand.nextInt(9) + rand.nextInt(9);
+                String orderDate =
+                        (rand.nextInt(60) + 1970)
+                                + "-"
+                                + String.format("%02d", rand.nextInt(12) + 1)
+                                + "-"
+                                + String.format("%02d", rand.nextInt(28) + 1);
+                String orderPriority = orderPriorityArr[rand.nextInt(orderPriorityArr.length)];
+                String clerk = "Clerk#" + String.format("%09d", rand.nextInt(1024));
+                String shipPriority = "0";
+                String comment = UUID.randomUUID() + " " + UUID.randomUUID();
+                writer.printf(
+                        "%s|%s|%s|%s|%s|%s|%s|%s|%s\n",
+                        i,
+                        custKey,
+                        orderStatus,
+                        totalPrice,
+                        orderDate,
+                        orderPriority,
+                        clerk,
+                        shipPriority,
+                        comment);
+            }
+        } catch (Exception e) {
+            fail("Runtime Exception: {}", e);
         }
-        writer.close();
+        LOG.info("10000 lines written to orders.tbl");
     }
 }

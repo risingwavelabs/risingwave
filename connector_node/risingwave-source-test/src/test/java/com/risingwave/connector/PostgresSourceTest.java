@@ -2,6 +2,7 @@ package com.risingwave.connector;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
+import static org.junit.Assert.assertEquals;
 
 import com.risingwave.proto.ConnectorServiceProto;
 import io.grpc.Grpc;
@@ -14,10 +15,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Iterator;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.concurrent.*;
+import javax.sql.DataSource;
 import org.junit.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,8 +24,7 @@ import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.MountableFile;
 
 public class PostgresSourceTest {
-    private static final Logger logger =
-            LoggerFactory.getLogger(PostgresSourceTest.class.getName());
+    private static final Logger LOG = LoggerFactory.getLogger(PostgresSourceTest.class.getName());
 
     private static final PostgreSQLContainer<?> pg =
             new PostgreSQLContainer<>("postgres:12.3-alpine")
@@ -46,6 +44,8 @@ public class PostgresSourceTest {
                                     InsecureChannelCredentials.create())
                             .build());
 
+    private static DataSource pgDataSource;
+
     @BeforeClass
     public static void init() {
         // generate orders.tbl test data
@@ -53,7 +53,7 @@ public class PostgresSourceTest {
         // start connector server and postgres...
         try {
             connectorServer.start();
-            logger.info("connector service started");
+            LOG.info("connector service started");
             pg.withCopyFileToContainer(
                     MountableFile.forClasspathResource("orders.tbl"), "/home/orders.tbl");
             pg.start();
@@ -62,7 +62,8 @@ public class PostgresSourceTest {
                             "sh",
                             "-c",
                             "echo 'host replication postgres 172.17.0.1/32 trust' >> /var/lib/postgresql/data/pg_hba.conf");
-            logger.info("postgres started");
+            pgDataSource = SourceTestClient.getDataSource(pg);
+            LOG.info("postgres started");
         } catch (IOException e) {
             fail("IO exception: ", e);
         } catch (InterruptedException e) {
@@ -70,7 +71,7 @@ public class PostgresSourceTest {
         }
         // check pg configuration...
         try {
-            Connection connection = SourceTestClient.connect(pg);
+            Connection connection = SourceTestClient.connect(pgDataSource);
             SourceTestClient.performQuery(connection, "SELECT pg_reload_conf()");
             ResultSet resultSet =
                     SourceTestClient.performQuery(
@@ -90,11 +91,13 @@ public class PostgresSourceTest {
         pg.stop();
     }
 
+    // create a TPC-H orders table in postgres
+    // insert 10,000 rows into orders
+    // check if the number of changes debezium captures is 10,000
     @Test
     public void testLines() throws InterruptedException, SQLException {
-        Lock lock = new ReentrantLock();
-        Condition done = lock.newCondition();
-        Connection connection = SourceTestClient.connect(pg);
+        ExecutorService executorService = Executors.newFixedThreadPool(1);
+        Connection connection = SourceTestClient.connect(pgDataSource);
         String query = testClient.sqlStmts.getProperty("tpch.create.orders");
         SourceTestClient.performQuery(connection, query);
         query = "COPY orders FROM '/home/orders.tbl' WITH DELIMITER '|'";
@@ -102,42 +105,37 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        AtomicInteger count = new AtomicInteger();
-        Thread t1 =
-                new Thread(
-                        () -> {
-                            while (eventStream.hasNext()) {
-                                List<ConnectorServiceProto.CdcMessage> messages =
-                                        eventStream.next().getEventsList();
-                                for (ConnectorServiceProto.CdcMessage ignored : messages) {
-                                    count.getAndIncrement();
-                                }
-                                if (count.get() == 10000) {
-                                    lock.lock();
-                                    try {
-                                        done.signal();
-                                    } finally {
-                                        lock.unlock();
-                                    }
-                                }
-                            }
-                        });
-        t1.start();
-        lock.lock();
+        Callable<Integer> countTask =
+                () -> {
+                    int count = 0;
+                    while (eventStream.hasNext()) {
+                        List<ConnectorServiceProto.CdcMessage> messages =
+                                eventStream.next().getEventsList();
+                        for (ConnectorServiceProto.CdcMessage ignored : messages) {
+                            count++;
+                        }
+                        if (count == 10000) {
+                            return count;
+                        }
+                    }
+                    return count;
+                };
+        Future<Integer> countResult = executorService.submit(countTask);
         try {
-            done.await();
-        } finally {
-            lock.unlock();
+            int count = countResult.get();
+            LOG.info("number of cdc messages received: {}", count);
+            assertEquals(count, 10000);
+        } catch (ExecutionException e) {
+            fail("Execution exception: ", e);
         }
-        logger.info("count: {}", count.get());
-        assertThat(count.get()).isEqualTo(10000);
         connection.close();
     }
 
+    // generates test cases for the risingwave debezium parser
     @Ignore
     @Test
     public void getTestJson() throws InterruptedException, SQLException {
-        Connection connection = SourceTestClient.connect(pg);
+        Connection connection = SourceTestClient.connect(pgDataSource);
         String query =
                 "CREATE TABLE IF NOT EXISTS orders ("
                         + "O_KEY BIGINT NOT NULL, "
@@ -159,7 +157,6 @@ public class PostgresSourceTest {
         Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream =
                 testClient.getEventStreamStart(
                         pg, ConnectorServiceProto.SourceType.POSTGRES, "test", "orders");
-        AtomicInteger count = new AtomicInteger();
         Thread t1 =
                 new Thread(
                         () -> {
@@ -167,8 +164,7 @@ public class PostgresSourceTest {
                                 List<ConnectorServiceProto.CdcMessage> messages =
                                         eventStream.next().getEventsList();
                                 for (ConnectorServiceProto.CdcMessage msg : messages) {
-                                    count.getAndIncrement();
-                                    logger.info("{}", msg.getPayload());
+                                    LOG.info("{}", msg.getPayload());
                                 }
                             }
                         });
@@ -180,7 +176,6 @@ public class PostgresSourceTest {
                         + "VALUES(111, TRUE, b'111', -1, -1111, -11.11, -111.11111, -111.11, 'yes please', '2011-11-11', '11:11:11', '2011-11-11 11:11:11.123456', '{\"k1\": \"v1\", \"k2\": 11}', ARRAY[['meeting', 'lunch'], ['training', 'presentation']])";
         SourceTestClient.performQuery(connection, query);
         Thread.sleep(1000);
-        logger.info("count: {}", count.get());
         connection.close();
     }
 }
