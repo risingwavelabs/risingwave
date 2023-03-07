@@ -568,7 +568,7 @@ where
             table_id: self.table_id,
             ignore_range_tombstone: false,
             read_version_from_backup: false,
-            prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+            prefetch_options: Default::default(),
         };
         if let Some(storage_row_bytes) = self.local_store.get(serialized_pk, read_options).await? {
             Ok(Some(CompactedRow {
@@ -1023,7 +1023,7 @@ where
             retention_seconds: None,
             table_id: self.table_id,
             read_version_from_backup: false,
-            prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+            prefetch_options: Default::default(),
         };
 
         self.local_store

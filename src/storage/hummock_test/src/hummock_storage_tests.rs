@@ -96,7 +96,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -115,7 +115,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -136,7 +136,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -170,7 +170,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -206,7 +206,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -226,7 +226,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -246,7 +246,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -281,7 +281,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -302,7 +302,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -322,7 +322,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -364,7 +364,7 @@ async fn test_storage_basic() {
 
                 prefix_hint: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -510,7 +510,7 @@ async fn test_state_store_sync() {
 
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -556,7 +556,7 @@ async fn test_state_store_sync() {
 
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -580,7 +580,7 @@ async fn test_state_store_sync() {
 
                     prefix_hint: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -622,7 +622,7 @@ async fn test_state_store_sync() {
 
                     prefix_hint: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -725,7 +725,7 @@ async fn test_delete_get() {
                 table_id: TEST_TABLE_ID,
                 retention_seconds: None,
                 read_version_from_backup: false,
-                prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                prefetch_options: Default::default(),
             }
         )
         .await
@@ -814,7 +814,7 @@ async fn test_multiple_epoch_sync() {
 
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                            prefetch_options: Default::default(),
                         },
                     )
                     .await
@@ -833,7 +833,7 @@ async fn test_multiple_epoch_sync() {
 
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -851,7 +851,7 @@ async fn test_multiple_epoch_sync() {
 
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                            prefetch_options: Default::default(),
                         },
                     )
                     .await
@@ -1652,7 +1652,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -1672,7 +1672,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -1692,7 +1692,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -1712,7 +1712,7 @@ async fn test_get_with_min_epoch() {
                         retention_seconds: Some(1),
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -1758,7 +1758,7 @@ async fn test_get_with_min_epoch() {
 
                     prefix_hint: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -1779,7 +1779,7 @@ async fn test_get_with_min_epoch() {
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -1802,7 +1802,7 @@ async fn test_get_with_min_epoch() {
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -1824,7 +1824,7 @@ async fn test_get_with_min_epoch() {
 
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await

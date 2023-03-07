@@ -31,9 +31,7 @@ use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
-use risingwave_storage::store::{
-    PrefetchOptions, ReadOptions, StateStoreReadIterStream, StreamTypeOfIter,
-};
+use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
 
 type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
@@ -151,7 +149,7 @@ impl Iterator {
                         retention_seconds: None,
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                        prefetch_options: Default::default(),
                     },
                     (vec![], vec![], pin_version.clone()),
                 )

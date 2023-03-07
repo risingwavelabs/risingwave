@@ -233,10 +233,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self
-            .right_table
-            .iter(PrefetchOptions::new_for_exhaust_iter(false))
-            .await?;
+        let rhs_stream = self.right_table.iter(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {

@@ -40,7 +40,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{TableKey, UserKey};
+use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -393,7 +393,7 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub prefetch: bool,
-    pub must_iterated_end_user_key: Option<Bound<UserKey<Vec<u8>>>>,
+    pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
 }
 
 #[cfg(test)]

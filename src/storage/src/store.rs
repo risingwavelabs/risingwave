@@ -312,6 +312,8 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> Self::MayExistFuture<'_>;
 }
 
+/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// footprint of the CN process because the prefetched blocks cannot be evicted.
 #[derive(Default, Clone, Copy)]
 pub struct PrefetchOptions {
     /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be

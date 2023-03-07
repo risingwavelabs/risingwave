@@ -219,7 +219,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreReadExt};
+    use risingwave_storage::store::{ReadOptions, StateStoreReadExt};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -353,7 +353,7 @@ mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(false),
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;

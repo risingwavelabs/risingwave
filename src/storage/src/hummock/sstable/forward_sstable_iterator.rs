@@ -37,6 +37,9 @@ pub trait SstableIteratorType: HummockIterator + 'static {
         read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self;
 }
+
+/// Prefetching may increase the memory footprint of the CN process because the prefetched blocks
+/// cannot be evicted.
 enum BlockFetcher {
     Simple,
     Prefetch(PrefetchContext),
