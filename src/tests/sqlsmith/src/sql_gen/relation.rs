@@ -201,7 +201,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let extra_expr = match self.rng.gen_range(1..=100) {
             1..=25 => None,
             26..=50 => self.gen_non_equi_expr(remaining_equi_columns),
-            61..=75 => Some(self.gen_more_equi_join_exprs(remaining_equi_columns)),
+            51..=75 => Some(self.gen_more_equi_join_exprs(remaining_equi_columns)),
             76..=100 => self.gen_arbitrary_bool(left_table, right_table),
             _ => unreachable!(),
         };

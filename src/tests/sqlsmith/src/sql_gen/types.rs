@@ -244,3 +244,46 @@ pub(crate) static IMPLICIT_CAST_TABLE: LazyLock<HashMap<DataType, Vec<CastSig>>>
             .for_each(|cast| casts.entry(cast.to_type.clone()).or_default().push(cast));
         casts
     });
+
+/// List of inequality functions
+static INEQUALITY_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
+    [
+        ExprType::GreaterThan,
+        ExprType::GreaterThanOrEqual,
+        ExprType::LessThan,
+        ExprType::LessThanOrEqual,
+        ExprType::NotEqual,
+        ExprType::IsDistinctFrom,
+    ]
+    .into_iter()
+    .collect()
+});
+
+/// Build map for binary inequality functions like `>`, `<`, etc...
+/// Maps from LHS argument
+/// For instance:
+/// GreaterThanOrEqual(Int16, Int64) -> Boolean
+/// Will store an entry of:
+/// +++
+/// Key: Int16
+/// Value: GreaterThanOrEqual(Int16, Int64) -> Boolean
+/// +++
+/// in the table.
+pub(crate) static BINARY_INEQUALITY_LHS_ARG_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> =
+    LazyLock::new(|| {
+        let mut funcs = HashMap::<DataType, Vec<FuncSig>>::new();
+        func_sigs()
+            .filter(|func| {
+                !FUNC_BAN_LIST.contains(&func.func)
+                    && INEQUALITY_LIST.contains(&func.func)
+                    && func.ret_type == DataTypeName::Boolean
+                    && func.inputs_type.len() == 2
+                    && func
+                        .inputs_type
+                        .iter()
+                        .all(|t| *t != DataTypeName::Timestamptz)
+            })
+            .filter_map(|func| func.try_into().ok())
+            .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));
+        funcs
+    });
