@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod event_handler;
-pub mod immutable_memtable;
 pub mod memtable;
 pub mod state_store;
 pub mod version;

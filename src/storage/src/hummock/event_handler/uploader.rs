@@ -29,7 +29,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::{info_in_release, CompactionGroupId, HummockEpoch, LocalSstableInfo};
 use tokio::task::JoinHandle;
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
@@ -158,13 +158,7 @@ impl UploadingTask {
         assert!(!payload.is_empty());
         let mut epochs = payload
             .iter()
-            .flat_map(|imm| {
-                if imm.is_merged_imm() {
-                    imm.epochs().clone()
-                } else {
-                    vec![imm.epoch()]
-                }
-            })
+            .flat_map(|imm| imm.epochs().clone())
             .sorted()
             .dedup()
             .collect_vec();
@@ -314,14 +308,14 @@ struct SealedData {
     // newer epoch at the front and newer data at the front in the `VecDeque`
     imms: VecDeque<(HummockEpoch, VecDeque<ImmutableMemtable>)>,
 
-    // TODO: store the output of merge task that will be used for the flush procedure
+    /// store the output of merge task that will be feed into `flush_imms` procedure
     merged_imms: VecDeque<ImmutableMemtable>,
 
     // Sealed imms grouped by table shard.
     imms_by_table_shard: HashMap<(TableId, LocalInstanceId), VecDeque<ImmutableMemtable>>,
 
-    // merging tasks generated from sealed imms
-    // it should be safe to drop these tasks
+    // Merging tasks generated from sealed imms
+    // it should be safe to directly drop these tasks
     merging_tasks: VecDeque<MergingImmTask>,
 
     spilled_data: SpilledData,
@@ -412,22 +406,24 @@ impl SealedData {
         self.merged_imms.push_front(merged_imm.clone());
     }
 
-    // Flush can be triggered by either a sync_epoch or a spill(`may_flush`) request.
+    // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
     fn flush(&mut self, _is_sync: bool, context: &UploaderContext) {
         // clear imms waiting for merge
         self.imms_by_table_shard.clear();
         // drop unfinished merging tasks in the task queue
         self.merging_tasks.clear();
 
-        // FIXME(siyuan): When ImmMerged, we have removed those imms that have been merged from the
-        // `imms` queue, thus when a SyncEpoch request comes, we also need to feed merged_imms
-        // into the `flush` procedure.
         let imms = self.imms.drain(..);
 
-        // TODO(siyuan): drain merged_imms and feed to the uploading task
-        // imms should be newer than merged_imms, because imms that have been merged are
-        // removed from the `imms` queue
+        // When ImmMerged, we have removed those imms that have been merged from the
+        // `self.imms`, thus we need to feed merged_imms into the `flush` procedure
+        // to complete a checkpoint.
         let merged_imms = self.merged_imms.drain(..);
+        debug!(
+            "flushing {} imms and {} merged imms",
+            imms.len(),
+            merged_imms.len()
+        );
 
         let payload = imms
             .into_iter()
@@ -749,7 +745,6 @@ impl HummockUploader {
     }
 
     pub(crate) fn may_flush(&mut self) {
-        // TODO(siyuan): clear unmerge imms that will be flushed
         if self.context.buffer_tracker.need_more_flush() {
             self.sealed_data.flush(false, &self.context);
         }
@@ -774,6 +769,9 @@ impl HummockUploader {
         self.syncing_data.clear();
         self.sealed_data.spilled_data.clear();
         self.sealed_data.imms.clear();
+        self.sealed_data.merged_imms.clear();
+        self.sealed_data.imms_by_table_shard.clear();
+        self.sealed_data.merging_tasks.clear();
         self.unsealed_data.clear();
 
         // TODO: call `abort` on the uploading task join handle
