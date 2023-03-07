@@ -14,11 +14,13 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
+use risingwave_common::array::Op;
+use risingwave_common::column_nonnull;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
-
+use risingwave_sqlparser::test_utils::join;
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -40,7 +42,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=range) {
             0..=0 => self.gen_simple_table(),
             1..=1 => self.gen_time_window_func(),
-            2..=3 => self.gen_simple_join_clause().unwrap_or_else(|| self.gen_simple_table()),
+            2..=3 => self
+                .gen_simple_join_clause()
+                .unwrap_or_else(|| self.gen_simple_table()),
             4..=4 => self.gen_more_joins(),
             5..=5 => self.gen_table_subquery(),
             // TODO(kwannoel): cycles, bushy joins.
@@ -95,28 +99,26 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         self.gen_simple_table_factor()
     }
 
-    /// TODO:
-    /// Generate equi join with columns not of the same type,
-    /// use functions to transform to same type.
     fn gen_equi_join_columns(
         &mut self,
         left_columns: Vec<Column>,
         right_columns: Vec<Column>,
-    ) -> Option<(Column, Column)> {
+    ) -> Option<(Column, Column, Vec<(Column, Column)>)> {
         let mut available_join_on_columns = vec![];
-        for left_column in &left_columns {
-            for right_column in &right_columns {
+        for left_column in left_columns.iter() {
+            for right_column in right_columns.iter() {
                 if left_column.data_type == right_column.data_type {
-                    available_join_on_columns.push((left_column, right_column))
+                    available_join_on_columns.push((left_column.clone(), right_column.clone()))
                 }
             }
         }
         if available_join_on_columns.is_empty() {
             return None;
         }
-        let i = self.rng.gen_range(0..available_join_on_columns.len());
-        let (left_column, right_column) = available_join_on_columns[i];
-        Some((left_column.clone(), right_column.clone()))
+        available_join_on_columns.shuffle(&mut self.rng);
+        let remaining_columns = available_join_on_columns.split_off(1);
+        let (left_column, right_column) = available_join_on_columns.drain(..).next().unwrap();
+        Some((left_column.clone(), right_column.clone(), remaining_columns))
     }
 
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
@@ -127,10 +129,62 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         expr
     }
 
+    fn gen_single_equi_join_expr(
+        &mut self,
+        left_columns: Vec<Column>,
+        right_columns: Vec<Column>,
+    ) -> Option<(Expr, Vec<(Column, Column)>)> {
+        let Some((l, r, remaining)) = self.gen_equi_join_columns(left_columns, right_columns) else {
+            return None;
+        };
+        let join_on_expr = create_equi_expr(l.name, r.name);
+        Some((join_on_expr, remaining))
+    }
+
+    fn gen_non_equi_expr(
+        &mut self,
+        available_join_on_columns: Vec<(Column, Column)>,
+    ) -> Option<Expr> {
+        todo!()
+    }
+
+    fn gen_more_equi_join_exprs(
+        &mut self,
+        mut available_join_on_columns: Vec<(Column, Column)>,
+    ) -> Expr {
+        let n = self.rng.gen_range(0..available_join_on_columns.len());
+        let mut expr = Expr::Value(Value::Boolean(true));
+        for (l_col, r_col) in available_join_on_columns.drain(0..n) {
+            let equi_expr = create_equi_expr(l_col.name, r_col.name);
+            expr = Expr::BinaryOp {
+                left: Box::new(expr),
+                op: BinaryOperator::And,
+                right: Box::new(equi_expr),
+            }
+        }
+        expr
+    }
+
+    fn gen_arbitrary_bool(&mut self, left_table: Table, right_table: Table) -> Option<Expr> {
+        let expr = self.gen_bool_with_tables(vec![left_table, right_table]);
+
+        // FIXME(noel): This is a hack to reduce streaming nested loop join occurrences.
+        // ... JOIN ON x=y AND false => ... JOIN ON x=y
+        // We can use const folding, then remove the right expression,
+        // if it evaluates to `false` after const folding.
+        // Have to first bind `Expr`, since it is AST form.
+        // Then if successfully bound, use `eval_row_const` to constant fold it.
+        // Take a look at <https://github.com/risingwavelabs/risingwave/pull/7541/files#diff-08400d774a613753da25dcb45e905e8fe3d20acaccca846f39a86834f4c01656>.
+        if expr != Expr::Value(Value::Boolean(false)) {
+            Some(expr)
+        } else {
+            None
+        }
+    }
+
     /// Generates the `ON` clause in `t JOIN t2 ON ...`
     /// It will generate at least one equi join condition
     /// This will reduce chance of nested loop join from being generated.
-    /// TODO: Generate equi-join on different types.
     fn gen_join_on_expr(
         &mut self,
         left_columns: Vec<Column>,
@@ -139,29 +193,27 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         right_table: Table,
     ) -> Option<Expr> {
         // We always generate an equi join, to avoid stream nested loop join.
-        let Some((l, r)) = self.gen_equi_join_columns(left_columns, right_columns) else {
-            return None;
+        let Some((base_join_on_expr, remaining_equi_columns)) = self.gen_single_equi_join_expr(left_columns, right_columns) else {
+            return None
         };
-        let mut join_on_expr = create_equi_expr(l.name, r.name);
-        // Add extra boolean expressions
-        if self.flip_coin() {
-            let expr = self.gen_bool_with_tables(vec![left_table, right_table]);
-            // FIXME(noel): Hack to reduce streaming nested loop join occurrences.
-            // ... JOIN ON x=y AND false => ... JOIN ON x=y
-            // We can use const folding, then remove the right expression,
-            // if it evaluates to `false` after const folding.
-            // Have to first bind `Expr`, since it is AST form.
-            // Then if successfully bound, use `eval_row_const` to constant fold it.
-            // Take a look at <https://github.com/risingwavelabs/risingwave/pull/7541/files#diff-08400d774a613753da25dcb45e905e8fe3d20acaccca846f39a86834f4c01656>.
-            if expr != Expr::Value(Value::Boolean(false)) {
-                join_on_expr = Expr::BinaryOp {
-                    left: Box::new(join_on_expr),
-                    op: BinaryOperator::And,
-                    right: Box::new(expr),
-                }
-            }
+
+        // Add more expressions
+        let extra_expr = match self.rng.gen_range(1..=100) {
+            1..=25 => None,
+            26..=50 => self.gen_non_equi_expr(remaining_equi_columns),
+            61..=75 => Some(self.gen_more_equi_join_exprs(remaining_equi_columns)),
+            76..=100 => self.gen_arbitrary_bool(left_table, right_table),
+            _ => unreachable!(),
+        };
+        if let Some(extra_expr) = extra_expr {
+            Some(Expr::BinaryOp {
+                left: Box::new(base_join_on_expr),
+                op: BinaryOperator::And,
+                right: Box::new(extra_expr),
+            })
+        } else {
+            Some(base_join_on_expr)
         }
-        Some(join_on_expr)
     }
 
     fn gen_join_constraint(
