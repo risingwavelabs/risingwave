@@ -104,7 +104,7 @@ impl fmt::Display for StreamHashAgg {
         } else {
             f.debug_struct("StreamHashAgg")
         };
-        self.logical.fmt_feilds_with_builder(&mut builder);
+        self.logical.fmt_fields_with_builder(&mut builder);
 
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {

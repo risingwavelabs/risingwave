@@ -1028,7 +1028,7 @@ impl LogicalAgg {
         self.core.fmt_with_name(f, name)
     }
 
-    pub fn fmt_feilds_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
         self.core.fmt_fields_with_builder(builder)
     }
 

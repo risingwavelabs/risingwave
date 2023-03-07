@@ -191,6 +191,10 @@ impl LogicalHopWindow {
         self.core.fmt_with_name(f, name)
     }
 
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
+    }
+
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
