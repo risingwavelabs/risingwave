@@ -641,6 +641,7 @@ macro_rules! for_all_native_types {
             { i16, Int16 },
             { i32, Int32 },
             { i64, Int64 },
+            { Serial, Serial },
             { $crate::types::OrderedF32, Float32 },
             { $crate::types::OrderedF64, Float64 }
         }

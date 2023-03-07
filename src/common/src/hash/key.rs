@@ -30,6 +30,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
 
+use crate::array::serial_array::Serial;
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
@@ -474,6 +475,18 @@ impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
     /// This should never be called
     fn deserialize<R: Read>(_source: &mut R) -> Self {
         todo!()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for Serial {
+    type S = <i64 as HashKeySerDe<'a>>::S;
+
+    fn serialize(self) -> Self::S {
+        self.into_inner().serialize()
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        i64::deserialize(source).into()
     }
 }
 
