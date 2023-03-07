@@ -187,6 +187,8 @@ message HopWindowNode {
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message TableFunctionNode {
