@@ -297,7 +297,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     ) -> StorageResult<Option<OwnedRow>> {
         let epoch = wait_epoch.get_epoch();
         let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
-        self.store.try_wait_epoch(wait_epoch.clone()).await?;
+        self.store.try_wait_epoch(wait_epoch).await?;
         let serialized_pk =
             serialize_pk_with_vnode(&pk, &self.pk_serializer, self.compute_vnode_by_pk(&pk));
         assert!(pk.len() <= self.pk_indices.len());
@@ -316,7 +316,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_id: self.table_id,
             read_version_from_backup: read_backup,
         };
-        if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
+        if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
             self.store.validate_read_epoch(wait_epoch)?;
             let full_row = self.row_serde.deserialize(&value)?;
@@ -379,18 +379,14 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get multiple [`StorageTableInnerIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
-    async fn iter_with_encoded_key_range<R, B>(
+    async fn iter_with_encoded_key_range(
         &self,
         prefix_hint: Option<Bytes>,
-        encoded_key_range: R,
+        encoded_key_range: (Bound<Bytes>, Bound<Bytes>),
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
-    ) -> StorageResult<StorageTableInnerIter<S, SD>>
-    where
-        R: RangeBounds<B> + Send + Clone,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         let raw_key_ranges = if !ordered
             && matches!(encoded_key_range.start_bound(), Unbounded)
             && matches!(encoded_key_range.end_bound(), Unbounded)
@@ -403,7 +399,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             assert_eq!(vnode_hint.unwrap_or(DEFAULT_VNODE), DEFAULT_VNODE);
 
             Either::Left(self.vnodes.vnode_ranges().map(|r| {
-                let start = Included(r.start().to_be_bytes().to_vec());
+                let start = Included(Bytes::copy_from_slice(&r.start().to_be_bytes()[..]));
                 let end = end_bound_of_prefix(&r.end().to_be_bytes());
                 assert_matches!(end, Excluded(_) | Unbounded);
                 (start, end)
@@ -424,7 +420,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         // For each key range, construct an iterator.
         let iterators: Vec<_> = try_join_all(raw_key_ranges.map(|raw_key_range| {
             let prefix_hint = prefix_hint.clone();
-            let wait_epoch = wait_epoch.clone();
+            let wait_epoch = wait_epoch;
             let read_backup = matches!(wait_epoch, HummockReadEpoch::Backup(_));
             async move {
                 let read_options = ReadOptions {
@@ -486,7 +482,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             pk_prefix: impl Row,
             range_bound: Bound<&OwnedRow>,
             is_start_bound: bool,
-        ) -> Bound<Vec<u8>> {
+        ) -> Bound<Bytes> {
             match range_bound {
                 Included(k) => {
                     let pk_prefix_serializer = pk_serializer.prefix(pk_prefix.len() + k.len());
@@ -511,7 +507,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                         // so we can assert that the next_key would never be empty.
                         let next_serialized_key = next_key(&serialized_key);
                         assert!(!next_serialized_key.is_empty());
-                        Included(next_serialized_key)
+                        Included(Bytes::from(next_serialized_key))
                     } else {
                         Excluded(serialized_key)
                     }
@@ -643,7 +639,7 @@ struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
 impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     #[allow(clippy::too_many_arguments)]
-    async fn new<R, B>(
+    async fn new(
         store: &S,
         mapping: Arc<ColumnMapping>,
         pk_serializer: Option<Arc<OrderedRowSerde>>,
@@ -652,21 +648,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
         value_output_indices: Vec<usize>,
         output_row_in_key_indices: Vec<usize>,
         row_deserializer: Arc<SD>,
-        raw_key_range: R,
+        raw_key_range: (Bound<Bytes>, Bound<Bytes>),
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
-    ) -> StorageResult<Self>
-    where
-        R: RangeBounds<B> + Send,
-        B: AsRef<[u8]> + Send,
-    {
+    ) -> StorageResult<Self> {
         let raw_epoch = epoch.get_epoch();
-        let range = (
-            raw_key_range.start_bound().map(|b| b.as_ref().to_vec()),
-            raw_key_range.end_bound().map(|b| b.as_ref().to_vec()),
-        );
-        store.try_wait_epoch(epoch.clone()).await?;
-        let iter = store.iter(range, raw_epoch, read_options).await?;
+        store.try_wait_epoch(epoch).await?;
+        let iter = store.iter(raw_key_range, raw_epoch, read_options).await?;
         // For `HummockStorage`, a cluster recovery will clear storage data and make subsequent
         // `HummockReadEpoch::Current` read incomplete.
         // `validate_read_epoch` is a safeguard against that incorrect read. It rejects the read

@@ -87,7 +87,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("aa"),
+            Bytes::from("aa"),
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -105,7 +105,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("bb"),
+            Bytes::from("bb"),
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -125,7 +125,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("ab"),
+            Bytes::from("ab"),
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -158,7 +158,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("aa"),
+            Bytes::from("aa"),
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -193,7 +193,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("aa"),
+            Bytes::from("aa"),
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -212,7 +212,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("ff"),
+            Bytes::from("ff"),
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -231,7 +231,7 @@ async fn test_storage_basic() {
     let iter = test_env
         .storage
         .iter(
-            (Unbounded, Included(b"ee".to_vec())),
+            (Unbounded, Included(Bytes::from("ee"))),
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -265,7 +265,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("aa"),
+            Bytes::from("aa"),
             epoch1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -285,7 +285,7 @@ async fn test_storage_basic() {
     let value = test_env
         .storage
         .get(
-            &Bytes::from("aa"),
+            Bytes::from("aa"),
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -304,7 +304,7 @@ async fn test_storage_basic() {
     let iter = test_env
         .storage
         .iter(
-            (Unbounded, Included(b"ee".to_vec())),
+            (Unbounded, Included(Bytes::from("ee"))),
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -345,7 +345,7 @@ async fn test_storage_basic() {
     let iter = test_env
         .storage
         .iter(
-            (Unbounded, Included(b"ee".to_vec())),
+            (Unbounded, Included(Bytes::from("ee"))),
             epoch3,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -490,7 +490,7 @@ async fn test_state_store_sync() {
             let value = test_env
                 .storage
                 .get(
-                    k.as_bytes(),
+                    Bytes::from(k.to_owned()),
                     epoch1,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -535,7 +535,7 @@ async fn test_state_store_sync() {
             let value = test_env
                 .storage
                 .get(
-                    k.as_bytes(),
+                    Bytes::from(k.to_owned()),
                     epoch2,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -558,7 +558,7 @@ async fn test_state_store_sync() {
         let iter = test_env
             .storage
             .iter(
-                (Unbounded, Included(b"eeee".to_vec())),
+                (Unbounded, Included(Bytes::from("eeee"))),
                 epoch1,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -599,7 +599,7 @@ async fn test_state_store_sync() {
         let iter = test_env
             .storage
             .iter(
-                (Unbounded, Included(b"eeee".to_vec())),
+                (Unbounded, Included(Bytes::from("eeee"))),
                 epoch2,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -701,7 +701,7 @@ async fn test_delete_get() {
     assert!(test_env
         .storage
         .get(
-            "bb".as_bytes(),
+            Bytes::from("bb"),
             epoch2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -789,7 +789,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        "bb".as_bytes(),
+                        Bytes::from("bb"),
                         epoch1,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -807,7 +807,7 @@ async fn test_multiple_epoch_sync() {
             );
             assert!(hummock_storage_clone
                 .get(
-                    "bb".as_bytes(),
+                    Bytes::from("bb"),
                     epoch2,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -824,7 +824,7 @@ async fn test_multiple_epoch_sync() {
             assert_eq!(
                 hummock_storage_clone
                     .get(
-                        "bb".as_bytes(),
+                        Bytes::from("bb"),
                         epoch3,
                         ReadOptions {
                             ignore_range_tombstone: false,
@@ -1447,8 +1447,8 @@ async fn test_hummock_version_reader() {
             }
 
             {
-                let start_key = Bytes::from(gen_key(25)).to_vec();
-                let end_key = Bytes::from(gen_key(50)).to_vec();
+                let start_key = Bytes::from(gen_key(25));
+                let end_key = Bytes::from(gen_key(50));
 
                 let key_range = map_table_key_range((Included(start_key), Excluded(end_key)));
 
@@ -1599,7 +1599,7 @@ async fn test_get_with_min_epoch() {
 
     {
         // test before sync
-        let k = gen_key(0);
+        let k = Bytes::from(gen_key(0));
         let prefix_hint = {
             let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
             ret.put_u32(TEST_TABLE_ID.table_id());
@@ -1610,7 +1610,7 @@ async fn test_get_with_min_epoch() {
             let v = test_env
                 .storage
                 .get(
-                    k.as_ref(),
+                    k.clone(),
                     epoch1,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -1629,7 +1629,7 @@ async fn test_get_with_min_epoch() {
             let v = test_env
                 .storage
                 .get(
-                    k.as_ref(),
+                    k.clone(),
                     epoch1,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -1648,7 +1648,7 @@ async fn test_get_with_min_epoch() {
             let v = test_env
                 .storage
                 .get(
-                    k.as_ref(),
+                    k.clone(),
                     epoch2,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -1667,7 +1667,7 @@ async fn test_get_with_min_epoch() {
             let v = test_env
                 .storage
                 .get(
-                    k.as_ref(),
+                    k.clone(),
                     epoch2,
                     ReadOptions {
                         ignore_range_tombstone: false,
@@ -1699,7 +1699,7 @@ async fn test_get_with_min_epoch() {
         .unwrap();
 
     test_env.storage.try_wait_epoch_for_test(epoch2).await;
-    let k = gen_key(0);
+    let k = Bytes::from(gen_key(0));
     let prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + k.len());
         ret.put_u32(TEST_TABLE_ID.table_id());
@@ -1711,7 +1711,7 @@ async fn test_get_with_min_epoch() {
         let v = test_env
             .storage
             .get(
-                k.as_ref(),
+                k.clone(),
                 epoch1,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -1731,7 +1731,7 @@ async fn test_get_with_min_epoch() {
         let v = test_env
             .storage
             .get(
-                k.as_ref(),
+                k.clone(),
                 epoch1,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -1749,11 +1749,11 @@ async fn test_get_with_min_epoch() {
     }
 
     {
-        let k = gen_key(0);
+        let k = Bytes::from(gen_key(0));
         let v = test_env
             .storage
             .get(
-                k.as_ref(),
+                k.clone(),
                 epoch2,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -1770,11 +1770,11 @@ async fn test_get_with_min_epoch() {
     }
 
     {
-        let k = gen_key(0);
+        let k = Bytes::from(gen_key(0));
         let v = test_env
             .storage
             .get(
-                k.as_ref(),
+                k.clone(),
                 epoch2,
                 ReadOptions {
                     ignore_range_tombstone: false,

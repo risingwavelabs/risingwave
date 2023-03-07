@@ -569,7 +569,7 @@ where
             ignore_range_tombstone: false,
             read_version_from_backup: false,
         };
-        if let Some(storage_row_bytes) = self.local_store.get(&serialized_pk, read_options).await? {
+        if let Some(storage_row_bytes) = self.local_store.get(serialized_pk, read_options).await? {
             Ok(Some(CompactedRow {
                 row: storage_row_bytes,
             }))
@@ -951,7 +951,7 @@ where
 
     async fn iter_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Bytes>, Bound<Bytes>),
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let read_options = ReadOptions {
@@ -1038,7 +1038,7 @@ fn deserialize_row_stream<'a>(
 pub fn prefix_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
     range: &(Bound<impl Row>, Bound<impl Row>),
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+) -> (Bound<Bytes>, Bound<Bytes>) {
     (
         to_memcomparable(pk_serde, &range.0, false),
         to_memcomparable(pk_serde, &range.1, true),
@@ -1049,7 +1049,7 @@ fn to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
     is_upper: bool,
-) -> Bound<Vec<u8>> {
+) -> Bound<Bytes> {
     let serialize_pk_prefix = |pk_prefix: &R| {
         let prefix_serializer = pk_serde.prefix(pk_prefix.len());
         serialize_pk(pk_prefix, &prefix_serializer)
