@@ -27,7 +27,7 @@ pub type ParallelUnitId = u32;
 #[display("{0}")]
 pub struct VirtualNode(VirtualNodeInner);
 
-/// The internal representation of a virtual node.
+/// The internal representation of a virtual node id.
 type VirtualNodeInner = u16;
 static_assertions::const_assert!(VirtualNodeInner::BITS >= VirtualNode::BITS as u32);
 
