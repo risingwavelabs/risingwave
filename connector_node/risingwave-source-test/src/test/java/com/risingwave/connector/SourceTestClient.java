@@ -30,8 +30,7 @@ public class SourceTestClient {
     public Properties sqlStmts = new Properties();
 
     public SourceTestClient(Channel channel) {
-        blockingStub =
-                ConnectorServiceGrpc.newBlockingStub(channel).withMaxInboundMessageSize(16777216);
+        blockingStub = ConnectorServiceGrpc.newBlockingStub(channel);
         try (InputStream input =
                 getClass().getClassLoader().getResourceAsStream("stored_queries.properties")) {
             sqlStmts.load(input);

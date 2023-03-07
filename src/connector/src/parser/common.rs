@@ -32,6 +32,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             BorrowedValue::Static(StaticNode::Bool(_)) => {
                 v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into()
             }
+            // debezium converts bool to int, false -> 0, true -> 1, for mysql and postgres
             BorrowedValue::Static(StaticNode::I64(i)) => match i {
                 0i64 => ScalarImpl::Bool(false),
                 1i64 => ScalarImpl::Bool(true),
@@ -50,6 +51,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .map_err(|e| anyhow!("expect i32: {}", e))?,
         ),
         DataType::Int64 => ensure_int!(v, i64).into(),
+        // when f32 overflows, the value is converted to `inf` which is inappropriate
         DataType::Float32 => {
             let scalar_val = ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into());
             if let ScalarImpl::Float32(f) = scalar_val {
@@ -74,11 +76,13 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             .into(),
         DataType::Varchar => ensure_str!(v, "varchar").to_string().into(),
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
+        // debezium converts date to i32 for mysql and postgres
         DataType::Date => match v {
             BorrowedValue::String(_) => str_to_date(ensure_str!(v, "date"))?.into(),
             BorrowedValue::Static(_) => i32_to_date(ensure_i32!(v, i32))?.into(),
             _ => anyhow::bail!("expect date, but found {v}"),
         },
+        // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
             BorrowedValue::String(_) => str_to_time(ensure_str!(v, "time"))?.into(),
             BorrowedValue::Static(_) => i64_to_time(ensure_int!(v, i64))?.into(),
