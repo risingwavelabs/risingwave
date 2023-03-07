@@ -89,58 +89,47 @@ impl PrefetchContext {
         sstable_store: &SstableStore,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let in_prefetch = {
-            let is_empty = if let Some((prefetched_idx, _)) = self.prefetched_blocks.front() {
-                if *prefetched_idx == idx {
-                    false
-                } else {
-                    tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
-                    self.prefetched_blocks.clear();
-                    true
-                }
-            } else {
-                true
-            };
-            let next_prefetch_idx = self
-                .prefetched_blocks
-                .back()
-                .map_or(idx, |(latest_idx, _)| *latest_idx)
-                + 1;
-            if is_empty && next_prefetch_idx > self.dest_idx {
+        let is_empty = if let Some((prefetched_idx, _)) = self.prefetched_blocks.front() {
+            if *prefetched_idx == idx {
                 false
             } else {
-                if is_empty {
-                    self.prefetched_blocks.push_back((
-                        idx,
-                        sstable_store
-                            .get_block_response(sst, idx, crate::hummock::CachePolicy::Fill, stats)
-                            .await?,
-                    ));
-                }
-                if next_prefetch_idx <= self.dest_idx {
-                    self.prefetched_blocks.push_back((
-                        next_prefetch_idx,
-                        sstable_store
-                            .get_block_response(
-                                sst,
-                                next_prefetch_idx,
-                                crate::hummock::CachePolicy::Fill,
-                                stats,
-                            )
-                            .await?,
-                    ));
-                }
+                tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
+                self.prefetched_blocks.clear();
                 true
             }
-        };
-        let ret = if in_prefetch {
-            self.prefetched_blocks.pop_front().unwrap().1.wait().await
         } else {
-            sstable_store
-                .get(sst, idx, crate::hummock::CachePolicy::Fill, stats)
-                .await
+            true
         };
-        ret
+        if is_empty {
+            self.prefetched_blocks.push_back((
+                idx,
+                sstable_store
+                    .get_block_response(sst, idx, crate::hummock::CachePolicy::Fill, stats)
+                    .await?,
+            ));
+        }
+        let block_response = self.prefetched_blocks.pop_front().unwrap().1;
+
+        let next_prefetch_idx = self
+            .prefetched_blocks
+            .back()
+            .map_or(idx, |(latest_idx, _)| *latest_idx)
+            + 1;
+        if next_prefetch_idx <= self.dest_idx {
+            self.prefetched_blocks.push_back((
+                next_prefetch_idx,
+                sstable_store
+                    .get_block_response(
+                        sst,
+                        next_prefetch_idx,
+                        crate::hummock::CachePolicy::Fill,
+                        stats,
+                    )
+                    .await?,
+            ));
+        }
+
+        block_response.wait().await
     }
 }
 
