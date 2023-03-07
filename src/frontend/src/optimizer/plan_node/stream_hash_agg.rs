@@ -97,11 +97,14 @@ impl StreamHashAgg {
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical.fmt_with_name(f, "StreamAppendOnlyHashAgg")
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlyHashAgg")
         } else {
-            self.logical.fmt_with_name(f, "StreamHashAgg")
-        }
+            f.debug_struct("StreamHashAgg")
+        };
+        self.logical.fmt_feilds_with_builder(&mut builder);
+
+        builder.finish()
     }
 }
 
