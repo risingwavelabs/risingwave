@@ -94,12 +94,39 @@
     StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", output_watermarks: [t.ts, $expr1, $expr2] }
     └─StreamProject { exprs: [t.ts, t.v1, t.v2, TumbleStart(t.ts, '00:03:00':Interval) as $expr1, (AtTimeZone((AtTimeZone(TumbleStart(t.ts, '00:03:00':Interval), 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:03:00':Interval) as $expr2, t._row_id], output_watermarks: [t.ts, $expr1, $expr2] }
       └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: hop
+- name: hop all
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from hop(t, ts, interval '1' minute, interval '3' minute);
   stream_plan: |
-    StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], pk_columns: [t._row_id, window_start, window_end], pk_conflict: "no check", output_watermarks: [t.ts, window_end, t._row_id] }
-    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, t.v1, t.v2, window_start, window_end, t._row_id], output_watermarks: [t.ts, window_end, t._row_id] }
+    StreamMaterialize { columns: [ts, v1, v2, window_start, window_end, t._row_id(hidden)], pk_columns: [t._row_id, window_start, window_end], pk_conflict: "no check", output_watermarks: [t.ts, window_start, window_end] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, t.v1, t.v2, window_start, window_end, t._row_id], output_watermarks: [t.ts, window_start, window_end] }
       └─StreamFilter { predicate: IsNotNull(t.ts) }
         └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: hop ts
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select ts from hop(t, ts, interval '1' minute, interval '3' minute);
+  stream_plan: |
+    StreamMaterialize { columns: [ts, window_start(hidden), t._row_id(hidden)], pk_columns: [t._row_id, window_start], pk_conflict: "no check", output_watermarks: [t.ts, window_start] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [t.ts, window_start, t._row_id], output_watermarks: [t.ts, window_start] }
+      └─StreamFilter { predicate: IsNotNull(t.ts) }
+        └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: hop start
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select window_end from hop(t, ts, interval '1' minute, interval '3' minute);
+  stream_plan: |
+    StreamMaterialize { columns: [window_end, t._row_id(hidden)], pk_columns: [t._row_id, window_end], pk_conflict: "no check", output_watermarks: [window_end] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_end, t._row_id], output_watermarks: [window_end] }
+      └─StreamFilter { predicate: IsNotNull(t.ts) }
+        └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+- name: hop end
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select window_start from hop(t, ts, interval '1' minute, interval '3' minute);
+  stream_plan: |
+    StreamMaterialize { columns: [window_start, t._row_id(hidden)], pk_columns: [t._row_id, window_start], pk_conflict: "no check", output_watermarks: [window_start] }
+    └─StreamHopWindow { time_col: t.ts, slide: 00:01:00, size: 00:03:00, output: [window_start, t._row_id], output_watermarks: [window_start] }
+      └─StreamFilter { predicate: IsNotNull(t.ts) }
+        └─StreamTableScan { table: t, columns: [t.ts, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }

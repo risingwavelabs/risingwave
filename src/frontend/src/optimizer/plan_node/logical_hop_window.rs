@@ -136,11 +136,11 @@ impl LogicalHopWindow {
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
-    fn window_start_col_idx(&self) -> usize {
+    pub fn window_start_col_idx(&self) -> usize {
         self.input().schema().len()
     }
 
-    fn window_end_col_idx(&self) -> usize {
+    pub fn window_end_col_idx(&self) -> usize {
         self.window_start_col_idx() + 1
     }
 
@@ -154,7 +154,7 @@ impl LogicalHopWindow {
             .composite(&self.internal2output_col_mapping())
     }
 
-    fn internal_column_num(&self) -> usize {
+    pub fn internal_column_num(&self) -> usize {
         self.window_start_col_idx() + 2
     }
 
@@ -202,7 +202,7 @@ impl LogicalHopWindow {
     }
 
     /// Get output indices
-    fn output_indices(&self) -> &Vec<usize> {
+    pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
     }
 }
