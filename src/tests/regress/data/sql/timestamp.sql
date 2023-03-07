@@ -135,6 +135,9 @@ INSERT INTO TIMESTAMP_TBL VALUES ('Jan 01 17:32:01 2001');
 INSERT INTO TIMESTAMP_TBL VALUES ('Feb 16 17:32:01 -0097');
 INSERT INTO TIMESTAMP_TBL VALUES ('Feb 16 17:32:01 5097 BC');
 
+set datestyle to iso;
+set intervalstyle to postgres;
+
 SELECT d1 FROM TIMESTAMP_TBL;
 
 -- Check behavior at the boundaries of the timestamp range
@@ -364,3 +367,7 @@ SELECT make_timestamp(2014, 12, 28, 6, 30, 45.887);
 SELECT make_timestamp(-44, 3, 15, 12, 30, 15);
 -- should fail
 select make_timestamp(0, 7, 15, 12, 30, 15);
+
+DROP TABLE TIMESTAMP_TBL;
+reset intervalstyle;
+reset datestyle;
