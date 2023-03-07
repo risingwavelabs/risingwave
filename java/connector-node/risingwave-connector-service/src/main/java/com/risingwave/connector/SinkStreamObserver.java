@@ -196,28 +196,8 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
 
     private void bindSink(SinkConfig sinkConfig) {
         tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = getSinkFactory(sinkConfig.getSinkType());
+        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
         ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");
-    }
-
-    private SinkFactory getSinkFactory(String sinkType) {
-        switch (sinkType) {
-            case "print":
-            case "connector-node-print":
-                return new PrintSinkFactory();
-            case "file":
-                return new FileSinkFactory();
-            case "jdbc":
-                return new JDBCSinkFactory();
-            case "iceberg":
-                return new IcebergSinkFactory();
-            case "deltalake":
-                return new DeltaLakeSinkFactory();
-            default:
-                throw UNIMPLEMENTED
-                        .withDescription("unknown sink type: " + sinkType)
-                        .asRuntimeException();
-        }
     }
 }

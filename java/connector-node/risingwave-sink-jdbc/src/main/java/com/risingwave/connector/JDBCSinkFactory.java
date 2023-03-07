@@ -4,6 +4,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
 import io.grpc.Status;
+import java.sql.*;
 import java.util.Map;
 
 public class JDBCSinkFactory implements SinkFactory {
@@ -12,6 +13,16 @@ public class JDBCSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
+        validate(tableSchema, tableProperties);
+
+        String tableName = tableProperties.get(TABLE_NAME_PROP);
+        String jdbcUrl = tableProperties.get(JDBC_URL_PROP);
+        return new JDBCSink(tableName, jdbcUrl, tableSchema);
+    }
+
+    @Override
+    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(JDBC_URL_PROP)
                 || !tableProperties.containsKey(TABLE_NAME_PROP)) {
             throw Status.INVALID_ARGUMENT
@@ -21,8 +32,13 @@ public class JDBCSinkFactory implements SinkFactory {
                     .asRuntimeException();
         }
 
-        String tableName = tableProperties.get(TABLE_NAME_PROP);
         String jdbcUrl = tableProperties.get(JDBC_URL_PROP);
-        return new JDBCSink(tableName, jdbcUrl, tableSchema);
+
+        try {
+            Connection conn = DriverManager.getConnection(jdbcUrl);
+            conn.close();
+        } catch (SQLException e) {
+            throw Status.INTERNAL.withCause(e).asRuntimeException();
+        }
     }
 }

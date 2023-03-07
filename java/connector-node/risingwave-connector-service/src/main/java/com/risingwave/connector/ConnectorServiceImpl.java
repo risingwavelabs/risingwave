@@ -14,6 +14,13 @@ public class ConnectorServiceImpl extends ConnectorServiceGrpc.ConnectorServiceI
     }
 
     @Override
+    public void validateSink(
+            ConnectorServiceProto.ValidateSinkRequest request,
+            StreamObserver<ConnectorServiceProto.ValidateSinkResponse> responseObserver) {
+        new SinkValidationHandler(responseObserver).handle(request);
+    }
+
+    @Override
     public void getEventStream(
             ConnectorServiceProto.GetEventStreamRequest request,
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
