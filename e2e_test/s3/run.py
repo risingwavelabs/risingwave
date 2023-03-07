@@ -30,32 +30,21 @@ for i in range(1, 20):
         f.write(data)
         os.fsync(f.fileno())
 
-DEFAULT_S3_ENDPOINT  = "s3.amazonaws.com"
-S3_ENDPOINT = os.environ.get("S3_ENDPOINT",DEFAULT_S3_ENDPOINT)
-S3_ACCESS_KEY = os.environ.get("S3_ACCESS_KEY","")
-S3_SECRET_KEY = os.environ.get("S3_SECRET_KEY","")
-S3_BUCKET = os.environ.get("S3_BUCKET","s3-test-ci")
-S3_REGION = os.environ.get("S3_REGION","us-east-1")
 
-print(f"{S3_ENDPOINT} AK:${len(S3_ACCESS_KEY)} SK:${len(S3_SECRET_KEY)} ${S3_BUCKET} ${S3_REGION}")
-if S3_ENDPOINT == DEFAULT_S3_ENDPOINT:
-    client = Minio(
-        S3_ENDPOINT,
-        secure=True
-    )
-else:
-    client = Minio(
-        S3_ENDPOINT,
-        access_key=S3_ACCESS_KEY,
-        secret_key=S3_SECRET_KEY,
-        secure=True
-    )
+config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
+
+client = Minio(
+    config["S3_ENDPOINT"],
+    access_key=config["S3_ACCESS_KEY"],
+    secret_key=config["S3_SECRET_KEY"],
+    secure=True
+)
 
 
 for i in range(20):
     try:
         client.fput_object(
-            S3_BUCKET,
+            config["S3_BUCKET"],
             f"data_{i}.ndjson",
             f"data_{i}.ndjson"
         )
@@ -64,25 +53,20 @@ for i in range(20):
     except Exception as e:
         print(f"Error uploading data_{i}.ndjson: {e}")
 
-if S3_ENDPOINT == DEFAULT_S3_ENDPOINT:
-    with open("./e2e_test/s3/s3.aws.slt.tlp", "r") as f:
-        template_str = f.read()
+with open("./e2e_test/s3/s3.slt.tlp", "r") as f:
+    template_str = f.read()
 
 
-    template = string.Template(template_str)
+template = string.Template(template_str)
 
-    output_str = template.substitute(
-        S3_BUCKET=S3_BUCKET,
-        S3_REGION=S3_REGION,
-        COUNT=int(N*n),
-        SUM_ID=int(((N - 1) * N / 2) * n),
-        SUM_SEX=int(N*n / 2),
-        SUM_MARK=0
-    )
-else:
-    pass
-    # todo
-
+output_str = template.substitute(
+    **config,
+    S3_ENDPOINT="https://" + config["S3_ENDPOINT"],
+    COUNT=int(N*n),
+    SUM_ID=int(((N - 1) * N / 2) * n),
+    SUM_SEX=int(N*n / 2),
+    SUM_MARK=0,
+)
 # Output the resulting string to file
 with open("./e2e_test/s3/s3.slt", "w") as f:
     f.write(output_str)
@@ -94,7 +78,7 @@ result = subprocess.run(
 # Clean up
 for i in range(20):
     try:
-        client.remove_object(S3_BUCKET, f"data_{i}.ndjson")
+        client.remove_object(config["S3_BUCKET"], f"data_{i}.ndjson")
         print(f"Removed data_{i}.ndjson from S3")
     except Exception as e:
         print(f"Error removing data_{i}.ndjson: {e}")

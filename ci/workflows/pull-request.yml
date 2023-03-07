@@ -311,14 +311,17 @@ steps:
   #   timeout_in_minutes: 5
   #   retry: *auto-retry
     
-  - label: "S3 source check"
-    command: "python3 -m pip install minio && python3 e2e_test/s3/run.py"
+  - label: "S3 source check on AWS"
+    command: "ci/scripts/s3-source-test.sh"
     plugins:
-      - gencer/cache#v2.4.10: *cargo-cache
+      - seek-oss/aws-sm#v2.3.1:
+          env:
+            S3_SOURCE_TEST_CONF: ci_s3_source_test_aws
       - docker-compose#v4.9.0:
           run: rw-build-env
           config: ci/docker-compose.yml
-      - shellcheck#v1.2.0:
-          files: ./**/*.sh
+          mount-buildkite-agent: true
+          environment:
+            - S3_SOURCE_TEST_CONF
     timeout_in_minutes: 5
     retry: *auto-retry  
