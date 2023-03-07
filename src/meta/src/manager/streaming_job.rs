@@ -141,7 +141,8 @@ impl StreamingJob {
     /// Returns the [`TableVersionId`] if this job contains a table.
     pub fn table_version_id(&self) -> Option<TableVersionId> {
         self.table()
-            .map(|t| t.get_version().expect("table must be versioned").version)
+            .and_then(|t| t.get_version().ok())
+            .map(|v| v.version)
     }
 
     /// Returns the optional [`Source`] if this is a `Table` streaming job.
