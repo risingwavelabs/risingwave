@@ -18,6 +18,7 @@ use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
+use risingwave_sqlparser::tokenizer::Whitespace::Tab;
 
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
@@ -39,8 +40,9 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         match self.rng.gen_range(0..=range) {
             0..=0 => self.gen_simple_table(),
             1..=1 => self.gen_time_window_func(),
-            2..=3 => self.gen_join_clause(),
-            4..=4 => self.gen_table_subquery(),
+            2..=3 => self.gen_simple_join_clause(),
+            3..=4 => self.gen_more_joins(),
+            4..=5 => self.gen_table_subquery(),
             _ => unreachable!(),
         }
     }
@@ -161,18 +163,20 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     }
 
     /// Generates t1 JOIN t2 ON ...
-    fn gen_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
-        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
-        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
-
-        let join_constraint = self.gen_join_constraint(
+    fn gen_join_operator(
+        &mut self,
+        left_columns: Vec<Column>,
+        left_table: Vec<Table>,
+        right_columns: Vec<Column>,
+        right_table: Vec<Table>,
+    ) -> Option<JoinOperator> {
+        let Some(join_constraint) = self.gen_join_constraint(
             left_columns,
-            left_table.clone(),
+            left_table,
             right_columns,
-            right_table.clone(),
-        );
-        let Some(join_constraint) = join_constraint else {
-            return self.gen_simple_table();
+            right_table,
+        ) else {
+            return None;
         };
 
         // NOTE: INNER JOIN works fine, usually does not encounter `StreamNestedLoopJoin` much.
@@ -187,16 +191,57 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             // _ => JoinOperator::CrossJoin,
         };
 
+        Some(join_operator)
+    }
+
+    /// Generates t1 JOIN t2 ON ...
+    fn gen_simple_join_clause(&mut self) -> (TableWithJoins, Vec<Table>) {
+        let (left_factor, left_columns, mut left_table) = self.gen_table_factor();
+        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+        let Some(join_operator) =
+            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table) else {
+            return self.gen_simple_table();
+        };
+
+        left_table.append(&mut right_table);
         let right_factor_with_join = Join {
             relation: right_factor,
             join_operator,
         };
-        // TODO: Different structures of joins (bushy, left, right, cycles)
-        left_table.append(&mut right_table);
         (
             TableWithJoins {
                 relation: left_factor,
                 joins: vec![right_factor_with_join],
+            },
+            left_table,
+        )
+    }
+
+    fn gen_more_joins(&mut self) -> (TableWithJoins, Vec<Table>) {
+        // gen left
+        let (left_table_with_join, mut left_table) = self.gen_simple_join_clause();
+        let left_columns = left_table.get_qualified_columns();
+
+        // gen right
+        let (right_factor, right_columns, mut right_table) = self.gen_table_factor();
+
+        // gen join
+        let Some(join_operator) =
+            self.gen_join_operator(left_columns, left_table.clone(), right_columns, right_table) else {
+          return (left_table_with_join, left_table);
+        };
+
+        // build result
+        left_table.append(&mut right_table);
+        let right_join = Join {
+            relation: right_factor,
+            join_operator,
+        };
+
+        (
+            TableWithJoins {
+                relation: TableFactor::NestedJoin(Box::new(left_table_with_join)),
+                joins: vec![right_join],
             },
             left_table,
         )
