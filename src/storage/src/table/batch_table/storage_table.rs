@@ -29,9 +29,10 @@ use risingwave_common::catalog::{
     get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
 };
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, OwnedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -46,10 +47,10 @@ use crate::store::ReadOptions;
 use crate::table::{compute_vnode, Distribution, TableIter, DEFAULT_VNODE};
 use crate::StateStore;
 
-/// [`StorageTable`] is the interface accessing relational data in KV(`StateStore`) with
+/// [`StorageTableInner`] is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding format, and is used in batch mode.
 #[derive(Clone)]
-pub struct StorageTable<S: StateStore> {
+pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     /// Id for this table.
     table_id: TableId,
 
@@ -78,7 +79,7 @@ pub struct StorageTable<S: StateStore> {
     mapping: Arc<ColumnMapping>,
 
     /// Row deserializer to deserialize the whole value in storage to a row.
-    row_deserializer: Arc<RowDeserializer>,
+    row_serde: Arc<SD>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -107,15 +108,18 @@ pub struct StorageTable<S: StateStore> {
     read_prefix_len_hint: usize,
 }
 
-impl<S: StateStore> std::fmt::Debug for StorageTable<S> {
+/// `StorageTable` will use `BasicSerde` as default
+pub type StorageTable<S> = StorageTableInner<S, BasicSerde>;
+
+impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StorageTable").finish_non_exhaustive()
+        f.debug_struct("StorageTableInner").finish_non_exhaustive()
     }
 }
 
 // init
-impl<S: StateStore> StorageTable<S> {
-    /// Create a  [`StorageTable`] given a complete set of `columns` and a partial
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+    /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
     #[allow(clippy::too_many_arguments)]
@@ -173,7 +177,7 @@ impl<S: StateStore> StorageTable<S> {
     }
 }
 
-impl<S: StateStore> StorageTable<S> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
@@ -228,8 +232,12 @@ impl<S: StateStore> StorageTable<S> {
             .iter()
             .map(|idx| all_data_types[*idx].clone())
             .collect_vec();
+        let column_ids = value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].column_id)
+            .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-        let row_deserializer = RowDeserializer::new(data_types);
+        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let key_output_indices = match key_output_indices.is_empty() {
@@ -246,7 +254,7 @@ impl<S: StateStore> StorageTable<S> {
             value_output_indices,
             output_row_in_key_indices,
             mapping: Arc::new(mapping),
-            row_deserializer: Arc::new(row_deserializer),
+            row_serde: Arc::new(row_serde),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -266,7 +274,7 @@ impl<S: StateStore> StorageTable<S> {
 }
 
 /// Point get
-impl<S: StateStore> StorageTable<S> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     /// Get vnode value with given primary key.
     fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
         compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
@@ -309,10 +317,13 @@ impl<S: StateStore> StorageTable<S> {
             read_version_from_backup: read_backup,
         };
         if let Some(value) = self.store.get(&serialized_pk, epoch, read_options).await? {
-            // Refer to [`StorageTableIterInner::new`] for necessity of `validate_read_epoch`.
+            // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
             self.store.validate_read_epoch(wait_epoch)?;
-            let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            let full_row = self.row_serde.deserialize(&value)?;
+            let result_row_in_value = self
+                .mapping
+                .project(OwnedRow::new(full_row))
+                .into_owned_row();
             match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key =
@@ -351,8 +362,8 @@ impl<S: StateStore> StorageTable<S> {
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
 
 /// The row iterator of the storage table.
-/// The wrapper of [`StorageTableIter`] if pk is not persisted.
-pub type StorageTableIter<S: StateStore> = impl PkAndRowStream;
+/// The wrapper of [`StorageTableInnerIter`] if pk is not persisted.
+pub type StorageTableInnerIter<S: StateStore, SD: ValueRowSerde> = impl PkAndRowStream;
 
 #[async_trait::async_trait]
 impl<S: PkAndRowStream + Unpin> TableIter for S {
@@ -365,8 +376,8 @@ impl<S: PkAndRowStream + Unpin> TableIter for S {
 }
 
 /// Iterators
-impl<S: StateStore> StorageTable<S> {
-    /// Get multiple [`StorageTableIter`] based on the specified vnodes of this table with
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+    /// Get multiple [`StorageTableInnerIter`] based on the specified vnodes of this table with
     /// `vnode_hint`, and merge or concat them by given `ordered`.
     async fn iter_with_encoded_key_range<R, B>(
         &self,
@@ -375,7 +386,7 @@ impl<S: StateStore> StorageTable<S> {
         wait_epoch: HummockReadEpoch,
         vnode_hint: Option<VirtualNode>,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>>
+    ) -> StorageResult<StorageTableInnerIter<S, SD>>
     where
         R: RangeBounds<B> + Send + Clone,
         B: AsRef<[u8]> + Send,
@@ -427,7 +438,7 @@ impl<S: StateStore> StorageTable<S> {
                     true => None,
                     false => Some(Arc::new(self.pk_serializer.clone())),
                 };
-                let iter = StorageTableIterInner::<S>::new(
+                let iter = StorageTableInnerIterInner::<S, SD>::new(
                     &self.store,
                     self.mapping.clone(),
                     pk_serializer,
@@ -435,7 +446,7 @@ impl<S: StateStore> StorageTable<S> {
                     self.key_output_indices.clone(),
                     self.value_output_indices.clone(),
                     self.output_row_in_key_indices.clone(),
-                    self.row_deserializer.clone(),
+                    self.row_serde.clone(),
                     raw_key_range,
                     read_options,
                     wait_epoch,
@@ -468,7 +479,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         // TODO: directly use `prefixed_range`.
         fn serialize_pk_bound(
             pk_serializer: &OrderedRowSerde,
@@ -581,7 +592,7 @@ impl<S: StateStore> StorageTable<S> {
         .await
     }
 
-    /// Construct a [`StorageTableIter`] for batch executors.
+    /// Construct a [`StorageTableInnerIter`] for batch executors.
     /// Differs from the streaming one, this iterator will wait for the epoch before iteration
     pub async fn batch_iter_with_pk_bounds(
         &self,
@@ -589,7 +600,7 @@ impl<S: StateStore> StorageTable<S> {
         pk_prefix: impl Row,
         range_bounds: impl RangeBounds<OwnedRow>,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         self.iter_with_pk_bounds(epoch, pk_prefix, range_bounds, ordered)
             .await
     }
@@ -599,20 +610,20 @@ impl<S: StateStore> StorageTable<S> {
         &self,
         epoch: HummockReadEpoch,
         ordered: bool,
-    ) -> StorageResult<StorageTableIter<S>> {
+    ) -> StorageResult<StorageTableInnerIter<S, SD>> {
         self.batch_iter_with_pk_bounds(epoch, row::empty(), .., ordered)
             .await
     }
 }
 
-/// [`StorageTableIterInner`] iterates on the storage table.
-struct StorageTableIterInner<S: StateStore> {
+/// [`StorageTableInnerIterInner`] iterates on the storage table.
+struct StorageTableInnerIterInner<S: StateStore, SD: ValueRowSerde> {
     /// An iterator that returns raw bytes from storage.
     iter: S::IterStream,
 
     mapping: Arc<ColumnMapping>,
 
-    row_deserializer: Arc<RowDeserializer>,
+    row_deserializer: Arc<SD>,
 
     /// Used for serializing and deserializing the primary key.
     pk_serializer: Option<Arc<OrderedRowSerde>>,
@@ -629,7 +640,7 @@ struct StorageTableIterInner<S: StateStore> {
     output_row_in_key_indices: Vec<usize>,
 }
 
-impl<S: StateStore> StorageTableIterInner<S> {
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInnerIterInner<S, SD> {
     /// If `wait_epoch` is true, it will wait for the given epoch to be committed before iteration.
     #[allow(clippy::too_many_arguments)]
     async fn new<R, B>(
@@ -640,7 +651,7 @@ impl<S: StateStore> StorageTableIterInner<S> {
         key_output_indices: Option<Vec<usize>>,
         value_output_indices: Vec<usize>,
         output_row_in_key_indices: Vec<usize>,
-        row_deserializer: Arc<RowDeserializer>,
+        row_deserializer: Arc<SD>,
         raw_key_range: R,
         read_options: ReadOptions,
         epoch: HummockReadEpoch,
@@ -689,8 +700,11 @@ impl<S: StateStore> StorageTableIterInner<S> {
         {
             let (_, key) = parse_raw_key_to_vnode_and_key(&raw_key);
 
-            let full_row = self.row_deserializer.deserialize(value)?;
-            let result_row_in_value = self.mapping.project(full_row).into_owned_row();
+            let full_row = self.row_deserializer.deserialize(&value)?;
+            let result_row_in_value = self
+                .mapping
+                .project(OwnedRow::new(full_row))
+                .into_owned_row();
             match &self.key_output_indices {
                 Some(key_output_indices) => {
                     let result_row_in_key = match self.pk_serializer.clone() {
