@@ -57,7 +57,7 @@ pub trait ValueRowSerdeNew: Clone {
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
 pub trait ValueRowSerde:
-    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send
+    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
 {
 }
 

@@ -29,7 +29,6 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
@@ -574,6 +573,20 @@ where
             .map_err(Into::into)
     }
 
+    /// Get a compacted row from state table.
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        // TODO: Compacted row requires the row in value-encoding format. However, for a generic
+        // `SD`, we cannot ensure whether we can directly use the bytes from the storage. So we must
+        // first deserialize from the column-aware row encoding first, then serialize it back into
+        // value-encoding format. May optimize this after we have specification.
+        self.get_row(pk)
+            .await
+            .map(|row| row.map(CompactedRow::from))
+    }
+
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
     pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
@@ -592,39 +605,6 @@ where
         self.cur_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
-    }
-}
-
-impl<S> StateTableInner<S, BasicSerde>
-where
-    S: StateStore,
-{
-    /// Get a compacted row from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
-        // The returned bytes is a valid compacted row, only for the basic serde.
-        self.get_encoded_row(pk)
-            .await
-            .map(|bytes| bytes.map(CompactedRow::new))
-    }
-}
-
-impl<S> StateTableInner<S, ColumnAwareSerde>
-where
-    S: StateStore,
-{
-    /// Get a compacted row from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
-        // Compacted row requires the row in value-encoding format. We must first deserialize from
-        // the column-aware row encoding first, then serialize it back into value-encoding format.
-        self.get_row(pk)
-            .await
-            .map(|row| row.map(CompactedRow::from))
     }
 }
 
