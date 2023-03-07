@@ -506,7 +506,7 @@ where
         let req = request.into_inner();
         let new_group_id = self
             .hummock_manager
-            .split_compaction_group(req.group_id, &req.table_ids, None, false)
+            .split_compaction_group(req.group_id, &req.table_ids)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
     }

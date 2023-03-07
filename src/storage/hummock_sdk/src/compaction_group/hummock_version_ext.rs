@@ -333,6 +333,20 @@ impl HummockVersionUpdateExt for HummockVersion {
                     group_change.target_group_id,
                     &HashSet::from_iter(group_change.table_ids.clone()),
                 ));
+                let levels = self
+                    .levels
+                    .get_mut(compaction_group_id)
+                    .expect("compaction group should exist");
+                levels
+                    .member_table_ids
+                    .extend(group_change.table_ids.clone());
+                let levels = self
+                    .levels
+                    .get_mut(&group_change.origin_group_id)
+                    .expect("compaction group should exist");
+                levels
+                    .member_table_ids
+                    .drain_filter(|t| group_change.table_ids.contains(t));
             }
             let has_destroy = summary.group_destroy.is_some();
             let levels = self

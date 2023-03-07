@@ -418,8 +418,19 @@ impl<S: MetaStore> HummockManager<S> {
 
     /// Splits a compaction group into two. The new one will contain `table_ids`.
     /// Returns the newly created compaction group id.
-    #[named]
     pub async fn split_compaction_group(
+        &self,
+        parent_group_id: CompactionGroupId,
+        table_ids: &[StateTableId],
+    ) -> Result<CompactionGroupId> {
+        self.move_state_table_to_compaction_group(parent_group_id, table_ids, None, false)
+            .await
+    }
+
+    /// move some table to another compaction-group. Create a new compaction group if it does not
+    /// exist.
+    #[named]
+    pub async fn move_state_table_to_compaction_group(
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
