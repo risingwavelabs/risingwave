@@ -71,6 +71,8 @@ public class Demo {
                 }
             }
 
+            metaClient.unpinVersion(version);
+
             heartbeatFuture.cancel(false);
         }
 
