@@ -62,6 +62,10 @@ template = string.Template(template_str)
 output_str = template.substitute(
     **config,
     S3_ENDPOINT="https://" + config["S3_ENDPOINT"],
+    S3_ACCESS_KEY=config["S3_ACCESS_KEY"],
+    S3_SECRET_KEY=config["S3_SECRET_KEY"],
+    S3_BUCKET=config["S3_BUCKET"],
+    S3_REGION=config["S3_REGION"],
     COUNT=int(N*n),
     SUM_ID=int(((N - 1) * N / 2) * n),
     SUM_SEX=int(N*n / 2),

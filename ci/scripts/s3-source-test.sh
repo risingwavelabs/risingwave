@@ -41,8 +41,7 @@ echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
-host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
-
+echo "--- Run test"
 python3 -m pip install minio
 python3 e2e_test/s3/run.py
 
