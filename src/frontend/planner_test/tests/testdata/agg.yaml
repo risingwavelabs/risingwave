@@ -1006,6 +1006,49 @@
       └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+- name: min/max on index
+  sql: |
+    create table t (v1 varchar, v2 int);
+    create index idx on t(v2 desc);
+    select max(v2) from t;
+  logical_plan: |
+    LogicalProject { exprs: [max(t.v2)] }
+    └─LogicalAgg { aggs: [max(t.v2)] }
+      └─LogicalProject { exprs: [t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { aggs: [max(idx.v2)] }
+    └─LogicalLimit { limit: 1, offset: 0 }
+      └─LogicalFilter { predicate: IsNotNull(idx.v2) }
+        └─LogicalScan { table: idx, columns: [idx.v2] }
+- name: min/max on index with group by, shall NOT optimize
+  sql: |
+    create table t (v1 int, v2 int);
+    create index idx on t(v2 desc);
+    select max(v2) from t group by v1;
+  logical_plan: |
+    LogicalProject { exprs: [max(t.v2)] }
+    └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+      └─LogicalProject { exprs: [t.v1, t.v2] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+  optimized_logical_plan_for_batch: |
+    LogicalProject { exprs: [max(t.v2)] }
+    └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2] }
+- name: min/max on primary key
+  sql: |
+    create table t (v1 int primary key);
+    select min(v1) from t;
+  logical_plan: |
+    LogicalProject { exprs: [min(t.v1)] }
+    └─LogicalAgg { aggs: [min(t.v1)] }
+      └─LogicalProject { exprs: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1] }
+  optimized_logical_plan_for_batch: |
+    LogicalAgg { aggs: [min(t.v1)] }
+    └─LogicalLimit { limit: 1, offset: 0 }
+      └─LogicalFilter { predicate: IsNotNull(t.v1) }
+        └─LogicalScan { table: t, columns: [t.v1] }
 - name: stddev_samp
   sql: |
     create table t (v1 int);

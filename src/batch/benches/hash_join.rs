@@ -29,7 +29,7 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, GreaterThan, InputRef, Modulus,
 };
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 use utils::bench_join;
 
 enable_jemalloc_on_linux!();
@@ -50,7 +50,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let literal123 = ExprNode {
             expr_type: TConstValue as i32,
@@ -80,7 +80,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let literal456 = ExprNode {
             expr_type: TConstValue as i32,
@@ -133,7 +133,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let literal100 = ExprNode {
             expr_type: TConstValue as i32,

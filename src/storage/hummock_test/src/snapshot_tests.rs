@@ -29,9 +29,9 @@ macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
+        let bounds: (Bound<Bytes>, Bound<Bytes>) = (
+            range.start_bound().map(|x: &Bytes| x.clone()),
+            range.end_bound().map(|x: &Bytes| x.clone()),
         );
         let it = $storage
             .iter(

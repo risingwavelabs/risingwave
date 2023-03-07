@@ -734,9 +734,10 @@ impl ExprImpl {
         let ret_type = proto.get_return_type()?.into();
         let expr_type = proto.get_expr_type()?;
         Ok(match rex_node {
-            RexNode::InputRef(input_ref) => {
-                Self::InputRef(Box::new(InputRef::from_expr_proto(input_ref, ret_type)?))
-            }
+            RexNode::InputRef(column_index) => Self::InputRef(Box::new(InputRef::from_expr_proto(
+                *column_index as _,
+                ret_type,
+            )?)),
             RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
             RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
                 UserDefinedFunction::from_expr_proto(udf, ret_type)?,

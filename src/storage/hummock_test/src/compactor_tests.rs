@@ -294,7 +294,7 @@ pub(crate) mod tests {
 
         let get_val = storage
             .get(
-                &key,
+                key.clone(),
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -313,7 +313,7 @@ pub(crate) mod tests {
         assert_eq!(get_val, val);
         let ret = storage
             .get(
-                &key,
+                key.clone(),
                 (31 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -427,7 +427,7 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
         let get_val = storage
             .get(
-                &key,
+                key.clone(),
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -1149,8 +1149,8 @@ pub(crate) mod tests {
             key_prefix.to_vec(),
         ]
         .concat();
-        let start_bound_key = key_prefix.to_vec();
-        let end_bound_key = next_key(start_bound_key.as_slice());
+        let start_bound_key = Bytes::from(key_prefix.to_vec());
+        let end_bound_key = Bytes::from(next_key(start_bound_key.as_ref()));
         let scan_result = storage
             .scan(
                 (
