@@ -328,7 +328,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         definition,
         watermark_descs,
         append_only,
-        None, // TODO: enable schema change for table with connector
+        Some(col_id_gen.into_version()),
     )
 }
 

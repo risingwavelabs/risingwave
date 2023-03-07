@@ -134,8 +134,7 @@ impl BuildingFragment {
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = table_id;
-                dml_node.table_version_id =
-                    job.table_version_id().unwrap_or(INITIAL_TABLE_VERSION_ID);
+                dml_node.table_version_id = job.table_version_id().unwrap();
             }
             _ => {}
         });
