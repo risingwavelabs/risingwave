@@ -2,7 +2,7 @@
 import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
 import { Buffer } from "./common";
 import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
-import { AggCall, ColumnRef, ExprNode, ProjectSetSelectItem } from "./expr";
+import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
@@ -361,7 +361,7 @@ export interface Barrier {
 export interface Watermark {
   /** The reference to the watermark column in the stream's schema. */
   column:
-    | ColumnRef
+    | InputRef
     | undefined;
   /** The watermark value, there will be no record having a greater value in the watermark column. */
   val: Datum | undefined;
@@ -1645,14 +1645,14 @@ function createBaseWatermark(): Watermark {
 export const Watermark = {
   fromJSON(object: any): Watermark {
     return {
-      column: isSet(object.column) ? ColumnRef.fromJSON(object.column) : undefined,
+      column: isSet(object.column) ? InputRef.fromJSON(object.column) : undefined,
       val: isSet(object.val) ? Datum.fromJSON(object.val) : undefined,
     };
   },
 
   toJSON(message: Watermark): unknown {
     const obj: any = {};
-    message.column !== undefined && (obj.column = message.column ? ColumnRef.toJSON(message.column) : undefined);
+    message.column !== undefined && (obj.column = message.column ? InputRef.toJSON(message.column) : undefined);
     message.val !== undefined && (obj.val = message.val ? Datum.toJSON(message.val) : undefined);
     return obj;
   },
@@ -1660,7 +1660,7 @@ export const Watermark = {
   fromPartial<I extends Exact<DeepPartial<Watermark>, I>>(object: I): Watermark {
     const message = createBaseWatermark();
     message.column = (object.column !== undefined && object.column !== null)
-      ? ColumnRef.fromPartial(object.column)
+      ? InputRef.fromPartial(object.column)
       : undefined;
     message.val = (object.val !== undefined && object.val !== null) ? Datum.fromPartial(object.val) : undefined;
     return message;

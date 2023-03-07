@@ -687,8 +687,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
   }
 }
 
-/** Reference to a column, containing its index and data type. */
-export interface ColumnRef {
+/** Reference to an upstream column, containing its index and data type. */
+export interface InputRef {
   index: number;
   type: DataType | undefined;
 }
@@ -732,7 +732,7 @@ export interface FunctionCall {
 /** Aggregate Function Calls for Aggregation */
 export interface AggCall {
   type: AggCall_Type;
-  args: ColumnRef[];
+  args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
   orderByFields: AggCall_OrderByField[];
@@ -978,27 +978,27 @@ export const TableFunction = {
   },
 };
 
-function createBaseColumnRef(): ColumnRef {
+function createBaseInputRef(): InputRef {
   return { index: 0, type: undefined };
 }
 
-export const ColumnRef = {
-  fromJSON(object: any): ColumnRef {
+export const InputRef = {
+  fromJSON(object: any): InputRef {
     return {
       index: isSet(object.index) ? Number(object.index) : 0,
       type: isSet(object.type) ? DataType.fromJSON(object.type) : undefined,
     };
   },
 
-  toJSON(message: ColumnRef): unknown {
+  toJSON(message: InputRef): unknown {
     const obj: any = {};
     message.index !== undefined && (obj.index = Math.round(message.index));
     message.type !== undefined && (obj.type = message.type ? DataType.toJSON(message.type) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ColumnRef>, I>>(object: I): ColumnRef {
-    const message = createBaseColumnRef();
+  fromPartial<I extends Exact<DeepPartial<InputRef>, I>>(object: I): InputRef {
+    const message = createBaseInputRef();
     message.index = object.index ?? 0;
     message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
     return message;
@@ -1092,7 +1092,7 @@ export const AggCall = {
   fromJSON(object: any): AggCall {
     return {
       type: isSet(object.type) ? aggCall_TypeFromJSON(object.type) : AggCall_Type.UNSPECIFIED,
-      args: Array.isArray(object?.args) ? object.args.map((e: any) => ColumnRef.fromJSON(e)) : [],
+      args: Array.isArray(object?.args) ? object.args.map((e: any) => InputRef.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
       orderByFields: Array.isArray(object?.orderByFields)
@@ -1106,7 +1106,7 @@ export const AggCall = {
     const obj: any = {};
     message.type !== undefined && (obj.type = aggCall_TypeToJSON(message.type));
     if (message.args) {
-      obj.args = message.args.map((e) => e ? ColumnRef.toJSON(e) : undefined);
+      obj.args = message.args.map((e) => e ? InputRef.toJSON(e) : undefined);
     } else {
       obj.args = [];
     }
@@ -1125,7 +1125,7 @@ export const AggCall = {
   fromPartial<I extends Exact<DeepPartial<AggCall>, I>>(object: I): AggCall {
     const message = createBaseAggCall();
     message.type = object.type ?? AggCall_Type.UNSPECIFIED;
-    message.args = object.args?.map((e) => ColumnRef.fromPartial(e)) || [];
+    message.args = object.args?.map((e) => InputRef.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
