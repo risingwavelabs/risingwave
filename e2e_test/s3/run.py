@@ -60,7 +60,6 @@ with open("./e2e_test/s3/s3.slt.tlp", "r") as f:
 template = string.Template(template_str)
 
 output_str = template.substitute(
-    **config,
     S3_ENDPOINT="https://" + config["S3_ENDPOINT"],
     S3_ACCESS_KEY=config["S3_ACCESS_KEY"],
     S3_SECRET_KEY=config["S3_SECRET_KEY"],

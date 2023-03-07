@@ -41,6 +41,9 @@ echo "--- Prepare RiseDev dev cluster"
 cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
+echo "--- starting risingwave cluster with connector node"
+cargo make ci-start ci-1cn-1fe
+
 echo "--- Run test"
 python3 -m pip install minio
 python3 e2e_test/s3/run.py
