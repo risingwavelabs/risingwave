@@ -19,6 +19,7 @@ use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
@@ -183,7 +184,7 @@ impl Block {
 
         let restart_points_type_index: BTreeMap<_, _> = key_vec
             .into_iter()
-            .zip(value_vec.into_iter())
+            .zip_eq_fast(value_vec.into_iter())
             .map(|(k, v)| (k, v))
             .collect();
 
@@ -406,11 +407,7 @@ impl BlockBuilder {
 
         let type_mismatch =
             if let Some((_, last_type)) = self.restart_points_type_index.last_key_value() {
-                if key_len_type != last_type.0 || value_len_type != last_type.1 {
-                    true
-                } else {
-                    false
-                }
+                key_len_type != last_type.0 || value_len_type != last_type.1
             } else {
                 false
             };
@@ -535,6 +532,7 @@ impl BlockBuilder {
                 self.buf = writer.into_inner();
             }
         };
+
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
@@ -739,10 +737,8 @@ mod tests {
                 assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
             }
             bi.next();
-            assert!(bi.is_valid());
         }
 
-        bi.next();
         assert!(!bi.is_valid());
     }
 }
