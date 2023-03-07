@@ -122,8 +122,11 @@ pub struct TableCatalog {
     /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
     pub version: Option<TableVersion>,
 
-    /// the column indices which could receive watermarks.
+    /// The column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    /// The distribution key indices in pk
+    pub dist_key_in_pk: Vec<usize>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -367,6 +370,7 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
+            dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior_type,
         }
     }
@@ -426,6 +430,7 @@ impl From<ProstTable> for TableCatalog {
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
+            dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -524,6 +529,7 @@ mod tests {
             }),
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 0,
+            dist_key_in_pk: vec![],
         }
         .into();
 
@@ -586,6 +592,7 @@ mod tests {
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
+                dist_key_in_pk: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

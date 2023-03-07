@@ -466,6 +466,7 @@ mod tests {
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],
+            dist_key_in_pk: vec![],
         }
     }
 
