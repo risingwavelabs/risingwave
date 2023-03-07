@@ -25,12 +25,13 @@
 extern crate tracing;
 
 pub mod memory_management;
+pub mod observer;
 pub mod rpc;
 pub mod server;
 pub mod telemetry;
 
 use clap::Parser;
-use risingwave_common::config::{true_if_present, AsyncStackTraceOption, Flag};
+use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use risingwave_common_proc_macro::OverrideConfig;
@@ -63,7 +64,7 @@ pub struct ComputeNodeOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
@@ -114,12 +115,12 @@ struct OverrideConfigOpts {
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", parse(from_flag = true_if_present))]
+    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
     #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Flag,
+    pub enable_jaeger_tracing: Option<bool>,
 
-    /// Enable async stack tracing for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", arg_enum)]
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }

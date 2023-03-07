@@ -54,7 +54,7 @@ pub struct CompactorOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Of the form `hummock+{object_store}` where `object_store`

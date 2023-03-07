@@ -160,7 +160,7 @@ impl StateStoreRead for HummockStorage {
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -285,8 +285,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { self.new_local_inner(table_id).await }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        self.new_local_inner(option)
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {

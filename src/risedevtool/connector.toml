@@ -1,12 +1,15 @@
 extend = "common.toml"
 
 [env]
-RW_CONNECTOR_VERSION = "0.1.16"
+RW_CONNECTOR_VERSION = "0.1.17"
 RW_CONNECTOR_DOWNLOAD_PATH = "${PREFIX_TMP}/risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
 RW_CONNECTOR_RELEASE = "risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
 RW_CONNECTOR_BIN_PREFIX = "${PREFIX_BIN}/connector-node"
 
 RW_CONNECTOR_DOWNLOAD_URL = "https://github.com/risingwavelabs/risingwave-connector-release/raw/main/risingwave-connector-${RW_CONNECTOR_VERSION}.tar.gz"
+
+MAVEN_VERSION = "3.9.0"
+MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 
 [tasks.download-connector]
 category = "RiseDev - Components"
@@ -20,6 +23,11 @@ if [ -f "${RW_CONNECTOR_BIN_PREFIX}/start-service.sh" ]; then
     exit 0
 fi
 
+if [ -n "${ENABLE_BUILD_RW_CONNECTOR+x}" ]; then
+    echo "ENABLE_BUILD_RW_CONNECTOR is set, will build RisingWave Connector from source instead"
+    exit 0
+fi
+
 if [ -f "${RW_CONNECTOR_DOWNLOAD_PATH}" ]; then
     mkdir -p "${PREFIX_BIN}/connector-node"
     tar xf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_BIN}/connector-node"
@@ -30,5 +38,29 @@ else
     mkdir -p "${PREFIX_BIN}/connector-node"
     tar xf "${RW_CONNECTOR_DOWNLOAD_PATH}" -C "${PREFIX_BIN}/connector-node"
     rm "${RW_CONNECTOR_DOWNLOAD_PATH}"
+fi
+'''
+
+[tasks.download-maven]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR" ] }
+description = "Download Maven"
+script = '''
+#!/usr/bin/env bash
+
+if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ "11" ]]); then
+  echo "JDK 11 is not installed. Please install JDK 11 first."
+  exit 1
+fi
+
+if command -v mvn &> /dev/null; then
+    exit 0
+else
+    echo "Maven is not installed. Downloading now..."
+    curl -sSL "https://downloads.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -o "${MAVEN_DOWNLOAD_PATH}"
+    tar -xzf "${MAVEN_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
+    mv "${PREFIX_TMP}/apache-maven-${MAVEN_VERSION}" "${PREFIX_BIN}/maven"
+    echo "Maven has been installed to ${PREFIX_BIN}."
 fi
 '''

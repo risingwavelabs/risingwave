@@ -168,7 +168,17 @@ async fn test_merger_sum_aggr() {
                 filter: None,
                 distinct: false,
             },
+            AggCall {
+                kind: AggKind::Count, // as row count, index: 2
+                args: AggArgs::None,
+                return_type: DataType::Int64,
+                order_pairs: vec![],
+                append_only,
+                filter: None,
+                distinct: false,
+            },
         ],
+        2, // row_count_index
         vec![],
         2,
     )

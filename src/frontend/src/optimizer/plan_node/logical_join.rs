@@ -17,23 +17,22 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanNode;
 use super::{
-    generic, BatchProject, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch,
-    ToStream,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
-    BatchFilter, BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext,
-    EqJoinPredicate, LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
+    BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
+    LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
     StreamDynamicFilter, StreamFilter, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
@@ -92,6 +91,10 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
+pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
+}
+
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -105,6 +108,8 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
+        // We cannot deal with repeated output indices in join
+        debug_assert!(!has_repeated_element(&output_indices));
         let core = generic::Join {
             left,
             right,
@@ -701,18 +706,18 @@ impl PlanTreeNodeBinary for LogicalJoin {
 
         let old_o2i = self.o2i_col_mapping();
 
-        let old_i2l = old_o2i
+        let old_o2l = old_o2i
             .composite(&self.core.i2l_col_mapping())
             .composite(&left_col_change);
-        let old_i2r = old_o2i
+        let old_o2r = old_o2i
             .composite(&self.core.i2r_col_mapping())
             .composite(&right_col_change);
-        let new_l2i = join.core.l2i_col_mapping().composite(&new_i2o);
-        let new_r2i = join.core.r2i_col_mapping().composite(&new_i2o);
+        let new_l2o = join.core.l2i_col_mapping().composite(&new_i2o);
+        let new_r2o = join.core.r2i_col_mapping().composite(&new_i2o);
 
-        let out_col_change = old_i2l
-            .composite(&new_l2i)
-            .union(&old_i2r.composite(&new_r2i));
+        let out_col_change = old_o2l
+            .composite(&new_l2o)
+            .union(&old_o2r.composite(&new_r2o));
         (join, out_col_change)
     }
 }
@@ -1060,6 +1065,8 @@ impl LogicalJoin {
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it
+        // We do so as the filter operator can apply the non-equal condition batch-wise (vectorized)
+        // as opposed to the HashJoin, which applies the condition row-wise.
         let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
         if pull_filter {
             let default_indices = (0..self.internal_column_num()).collect::<Vec<_>>();
@@ -1189,33 +1196,7 @@ impl LogicalJoin {
         logical_join: LogicalJoin,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        // Convert to Hash Join for equal joins
-        // For inner joins, pull non-equal conditions to a filter operator on top of it
-        let pull_filter = self.join_type() == JoinType::Inner && predicate.has_non_eq();
-        if pull_filter {
-            let new_output_indices = logical_join.output_indices().clone();
-            let new_internal_column_num = logical_join.internal_column_num();
-            let default_indices = (0..new_internal_column_num).collect::<Vec<_>>();
-            let logical_join = logical_join.clone_with_output_indices(default_indices.clone());
-            let eq_cond = EqJoinPredicate::new(
-                Condition::true_cond(),
-                predicate.eq_keys().to_vec(),
-                self.left().schema().len(),
-            );
-            let logical_join = logical_join.clone_with_cond(eq_cond.eq_cond());
-            let hash_join = BatchHashJoin::new(logical_join, eq_cond).into();
-            let logical_filter = LogicalFilter::new(hash_join, predicate.non_eq_cond());
-            let plan = BatchFilter::new(logical_filter).into();
-            if self.output_indices() != &default_indices {
-                let logical_project =
-                    LogicalProject::with_out_col_idx(plan, new_output_indices.into_iter());
-                Ok(BatchProject::new(logical_project).into())
-            } else {
-                Ok(plan)
-            }
-        } else {
-            Ok(BatchHashJoin::new(logical_join, predicate).into())
-        }
+        Ok(BatchHashJoin::new(logical_join, predicate).into())
     }
 
     pub fn index_lookup_join_to_batch_lookup_join(&self) -> Result<PlanRef> {
@@ -1334,45 +1315,56 @@ impl ToStream for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let l2i = join.core.l2i_col_mapping().composite(&mapping);
-        let r2i = join.core.r2i_col_mapping().composite(&mapping);
+        let l2o = join.core.l2i_col_mapping().composite(&mapping);
+        let r2o = join.core.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = left
+        let mut left_to_add = left
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i).is_none());
+            .filter(|i| l2o.try_map(*i).is_none())
+            .collect_vec();
 
-        let right_to_add = right
+        let mut right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| r2i.try_map(*i).is_none())
-            .map(|i| i + left_len);
+            .filter(|i| r2o.try_map(*i).is_none())
+            .map(|i| i + left_len)
+            .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
-        let left_to_add = left_to_add
-            .chain(
-                eq_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .filter(|i| l2i.try_map(*i).is_none()),
-            )
-            .unique();
-        let right_to_add = right_to_add
-            .chain(
-                eq_predicate
-                    .right_eq_indexes()
-                    .into_iter()
-                    .filter(|i| r2i.try_map(*i).is_none())
-                    .map(|i| i + left_len),
-            )
-            .unique();
+        let either_or_both = self.core.add_which_join_key_to_pk();
+
+        for (lk, rk) in eq_predicate.eq_indexes() {
+            match either_or_both {
+                EitherOrBoth::Left(_) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                }
+                EitherOrBoth::Right(_) => {
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+                EitherOrBoth::Both(_, _) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+            };
+        }
+        let left_to_add = left_to_add.into_iter().unique();
+        let right_to_add = right_to_add.into_iter().unique();
         // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices().clone();
@@ -1401,7 +1393,7 @@ mod tests {
     use super::*;
     use crate::expr::{assert_eq_input_ref, FunctionCall, InputRef, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{LogicalValues, PlanTreeNodeUnary};
+    use crate::optimizer::plan_node::LogicalValues;
     use crate::optimizer::property::FunctionalDependency;
 
     /// Pruning
@@ -1693,18 +1685,20 @@ mod tests {
         // Perform `to_batch`
         let result = logical_join.to_batch().unwrap();
 
-        // Expected plan: Filter($2 == 42) --> HashJoin($1 = $3)
-        let batch_filter = result.as_batch_filter().unwrap();
-        assert_eq!(
-            ExprImpl::from(batch_filter.predicate().clone()),
-            non_eq_cond
-        );
-
-        let input = batch_filter.input();
-        let hash_join = input.as_batch_hash_join().unwrap();
+        // Expected plan:  HashJoin($1 = $3 AND $2 == 42)
+        let hash_join = result.as_batch_hash_join().unwrap();
         assert_eq!(
             ExprImpl::from(hash_join.eq_join_predicate().eq_cond()),
             eq_cond
+        );
+        assert_eq!(
+            *hash_join
+                .eq_join_predicate()
+                .non_eq_cond()
+                .conjunctions
+                .first()
+                .unwrap(),
+            non_eq_cond
         );
     }
 

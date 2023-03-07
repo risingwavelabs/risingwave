@@ -23,8 +23,8 @@ use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
 use crate::{BinaryOperator, Expr, Join, JoinConstraint, JoinOperator, Table};
 
 fn create_equi_expr(left: String, right: String) -> Expr {
-    let left = Box::new(Expr::Identifier(Ident::new(left)));
-    let right = Box::new(Expr::Identifier(Ident::new(right)));
+    let left = Box::new(Expr::Identifier(Ident::new_unchecked(left)));
+    let right = Box::new(Expr::Identifier(Ident::new_unchecked(right)));
     Expr::BinaryOp {
         left,
         op: BinaryOperator::Eq,
@@ -61,7 +61,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let alias = self.gen_table_name_with_prefix("t");
         let mut table = self.tables.choose(&mut self.rng).unwrap().clone();
         let table_factor = TableFactor::Table {
-            name: ObjectName(vec![Ident::new(&table.name)]),
+            name: ObjectName(vec![Ident::new_unchecked(&table.name)]),
             alias: Some(TableAlias {
                 name: alias.as_str().into(),
                 columns: vec![],
@@ -213,7 +213,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 lateral: false,
                 subquery: Box::new(subquery),
                 alias: Some(TableAlias {
-                    name: Ident::new(alias),
+                    name: Ident::new_unchecked(alias),
                     columns: vec![],
                 }),
             },

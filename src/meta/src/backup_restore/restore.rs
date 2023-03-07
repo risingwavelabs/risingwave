@@ -34,7 +34,7 @@ pub struct RestoreOpts {
     #[clap(long)]
     pub meta_snapshot_id: u64,
     /// Type of meta store to restore.
-    #[clap(long, arg_enum, default_value_t = MetaBackend::Etcd)]
+    #[clap(long, value_enum, default_value_t = MetaBackend::Etcd)]
     pub meta_store_type: MetaBackend,
     /// Etcd endpoints.
     #[clap(long, default_value_t = String::from(""))]

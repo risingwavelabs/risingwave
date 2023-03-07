@@ -31,6 +31,7 @@ use core::str::Chars;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
+use crate::ast::DollarQuotedString;
 use crate::keywords::{Keyword, ALL_KEYWORDS, ALL_KEYWORDS_INDEX};
 
 /// SQL Token enumeration
@@ -47,12 +48,16 @@ pub enum Token {
     Char(char),
     /// Single quoted string: i.e: 'string'
     SingleQuotedString(String),
+    /// Dollar quoted string: i.e: $$string$$ or $tag_name$string$tag_name$
+    DollarQuotedString(DollarQuotedString),
     /// Single quoted string with c-style escapes: i.e: E'string'
     CstyleEscapesString(String),
     /// "National" string literal: i.e: N'string'
     NationalStringLiteral(String),
     /// Hexadecimal string literal: i.e.: X'deadbeef'
     HexStringLiteral(String),
+    /// Parameter symbols: i.e:  $1, $2
+    Parameter(String),
     /// Comma
     Comma,
     /// Whitespace (space, tab, etc)
@@ -158,9 +163,11 @@ impl fmt::Display for Token {
             Token::Number(ref n) => write!(f, "{}", n),
             Token::Char(ref c) => write!(f, "{}", c),
             Token::SingleQuotedString(ref s) => write!(f, "'{}'", s),
+            Token::DollarQuotedString(ref s) => write!(f, "{}", s),
             Token::NationalStringLiteral(ref s) => write!(f, "N'{}'", s),
             Token::HexStringLiteral(ref s) => write!(f, "X'{}'", s),
             Token::CstyleEscapesString(ref s) => write!(f, "E'{}'", s),
+            Token::Parameter(ref s) => write!(f, "${}", s),
             Token::Comma => f.write_str(","),
             Token::Whitespace(ws) => write!(f, "{}", ws),
             Token::DoubleEq => f.write_str("=="),
@@ -359,7 +366,6 @@ impl<'a> Tokenizer<'a> {
 
     /// Get the next token or return None
     fn next_token(&self, chars: &mut Peekable<Chars<'_>>) -> Result<Option<Token>, TokenizerError> {
-        // println!("next_token: {:?}", chars.peek());
         match chars.peek() {
             Some(&ch) => match ch {
                 ' ' => self.consume_and_return(chars, Token::Whitespace(Whitespace::Space)),
@@ -611,6 +617,7 @@ impl<'a> Tokenizer<'a> {
                         _ => Ok(Some(Token::Colon)),
                     }
                 }
+                '$' => Ok(Some(self.tokenize_dollar_preceded_value(chars)?)),
                 ';' => self.consume_and_return(chars, Token::SemiColon),
                 '\\' => self.consume_and_return(chars, Token::Backslash),
                 '[' => self.consume_and_return(chars, Token::LBracket),
@@ -648,6 +655,92 @@ impl<'a> Tokenizer<'a> {
             },
             None => Ok(None),
         }
+    }
+
+    /// Tokenize dollar preceded value (i.e: a string/placeholder)
+    fn tokenize_dollar_preceded_value(
+        &self,
+        chars: &mut Peekable<Chars<'_>>,
+    ) -> Result<Token, TokenizerError> {
+        let mut s = String::new();
+        let mut value = String::new();
+
+        chars.next();
+
+        if let Some('$') = chars.peek() {
+            chars.next();
+
+            let mut is_terminated = false;
+            let mut prev: Option<char> = None;
+
+            while let Some(&ch) = chars.peek() {
+                if prev == Some('$') {
+                    if ch == '$' {
+                        chars.next();
+                        is_terminated = true;
+                        break;
+                    } else {
+                        s.push('$');
+                        s.push(ch);
+                    }
+                } else if ch != '$' {
+                    s.push(ch);
+                }
+
+                prev = Some(ch);
+                chars.next();
+            }
+
+            return if chars.peek().is_none() && !is_terminated {
+                self.tokenizer_error("Unterminated dollar-quoted string")
+            } else {
+                Ok(Token::DollarQuotedString(DollarQuotedString {
+                    value: s,
+                    tag: None,
+                }))
+            };
+        } else {
+            value.push_str(&peeking_take_while(chars, |ch| {
+                ch.is_alphanumeric() || ch == '_'
+            }));
+
+            if let Some('$') = chars.peek() {
+                chars.next();
+                s.push_str(&peeking_take_while(chars, |ch| ch != '$'));
+
+                match chars.peek() {
+                    Some('$') => {
+                        chars.next();
+                        for (_, c) in value.chars().enumerate() {
+                            let next_char = chars.next();
+                            if Some(c) != next_char {
+                                return self.tokenizer_error(format!(
+                                    "Unterminated dollar-quoted string at or near \"{}\"",
+                                    value
+                                ));
+                            }
+                        }
+
+                        if let Some('$') = chars.peek() {
+                            chars.next();
+                        } else {
+                            return self
+                                .tokenizer_error("Unterminated dollar-quoted string, expected $");
+                        }
+                    }
+                    _ => {
+                        return self.tokenizer_error("Unterminated dollar-quoted, expected $");
+                    }
+                }
+            } else {
+                return Ok(Token::Parameter(value));
+            }
+        }
+
+        Ok(Token::DollarQuotedString(DollarQuotedString {
+            value: s,
+            tag: if value.is_empty() { None } else { Some(value) },
+        }))
     }
 
     fn tokenizer_error<R>(&self, message: impl Into<String>) -> Result<R, TokenizerError> {

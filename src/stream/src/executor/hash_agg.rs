@@ -30,7 +30,10 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
-use super::aggregation::{agg_call_filter_res, iter_table_storage, AggStateStorage};
+use super::aggregation::{
+    agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
+    OnlyOutputIfHasInput,
+};
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
     StreamExecutorResult, Watermark,
@@ -44,7 +47,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-type BoxedAggGroup<S> = Box<AggGroup<S>>;
+type BoxedAggGroup<S> = Box<AggGroup<S, OnlyOutputIfHasInput>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
@@ -81,6 +84,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
 
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
+
     /// State storages for each aggregation calls.
     /// `None` means the agg call need not to maintain a state table by itself.
     storages: Vec<AggStateStorage<S>>,
@@ -94,7 +100,7 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// One table per distinct column (may be shared by multiple agg calls).
     distinct_dedup_tables: HashMap<usize, StateTable<S>>,
 
-    /// Lru manager. None if using local eviction.
+    /// Watermark epoch.
     watermark_epoch: AtomicU64Ref,
 
     /// The maximum size of the chunk produced by executor at a time.
@@ -106,6 +112,14 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     metrics: Arc<StreamingMetrics>,
 }
 
+impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
+    fn all_state_tables_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
+        iter_table_storage(&mut self.storages)
+            .chain(self.distinct_dedup_tables.values_mut())
+            .chain(std::iter::once(&mut self.result_table))
+    }
+}
+
 struct ExecutionVars<K: HashKey, S: StateStore> {
     stats: ExecutionStats,
 
@@ -114,6 +128,9 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
 
     /// Changed group keys in the current epoch (before next flush).
     group_change_set: HashSet<K>,
+
+    /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
+    distinct_dedup: DistinctDeduplicater<S>,
 
     /// Buffer watermarks on group keys received since last barrier.
     buffered_watermarks: Vec<Option<Watermark>>,
@@ -183,10 +200,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: extra_args.group_key_indices,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
-                watermark_epoch: extra_args.watermark_epoch,
+                watermark_epoch: args.watermark_epoch,
                 chunk_size: extra_args.chunk_size,
                 extreme_cache_size: args.extreme_cache_size,
                 metrics: extra_args.metrics,
@@ -244,6 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.storages,
                                 &this.result_table,
                                 &this.input_pk_indices,
+                                this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -334,15 +353,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 .map(|call_vis| call_vis.map_or_else(|| visibility.clone(), |v| v & &visibility))
                 .map(Some)
                 .collect();
-            agg_group
-                .apply_chunk(
-                    &mut this.storages,
+            let visibilities = vars
+                .distinct_dedup
+                .dedup_chunk(
                     &ops,
                     &columns,
                     visibilities,
                     &mut this.distinct_dedup_tables,
+                    agg_group.group_key(),
                 )
                 .await?;
+            agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
             // Mark the group as changed.
             vars.group_change_set.insert(key);
         }
@@ -405,9 +426,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .get_mut(key)
                         .expect("changed group must have corresponding AggGroup")
                         .as_mut();
-                    agg_group
-                        .flush_state_if_needed(&mut this.storages, &mut this.distinct_dedup_tables)
-                        .await?;
+                    agg_group.flush_state_if_needed(&mut this.storages).await?;
                 }
 
                 // Create array builders.
@@ -475,40 +494,29 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 yield chunk;
             }
 
+            // Flush distinct dedup state.
+            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+
             // Commit all state tables.
-            futures::future::try_join_all(
-                iter_table_storage(&mut this.storages)
-                    .chain(this.distinct_dedup_tables.values_mut())
-                    .map(|state_table| async {
-                        if let Some(watermark) = state_clean_watermark.as_ref() {
-                            state_table.update_watermark(watermark.clone())
-                        };
-                        state_table.commit(epoch).await
-                    }),
-            )
+            futures::future::try_join_all(this.all_state_tables_mut().map(|table| async {
+                if let Some(watermark) = state_clean_watermark.as_ref() {
+                    table.update_watermark(watermark.clone())
+                };
+                table.commit(epoch).await
+            }))
             .await?;
-            if let Some(watermark) = state_clean_watermark.as_ref() {
-                this.result_table.update_watermark(watermark.clone());
-            };
-            this.result_table.commit(epoch).await?;
 
             // Evict cache to target capacity.
             vars.agg_group_cache.evict();
         } else {
             // Nothing to flush.
             // Call commit on state table to increment the epoch.
-            iter_table_storage(&mut this.storages)
-                .chain(this.distinct_dedup_tables.values_mut())
-                .for_each(|state_table| {
-                    if let Some(watermark) = state_clean_watermark.as_ref() {
-                        state_table.update_watermark(watermark.clone())
-                    };
-                    state_table.commit_no_data_expected(epoch);
-                });
-            if let Some(watermark) = state_clean_watermark.as_ref() {
-                this.result_table.update_watermark(watermark.clone());
-            };
-            this.result_table.commit_no_data_expected(epoch);
+            this.all_state_tables_mut().for_each(|table| {
+                if let Some(watermark) = state_clean_watermark.as_ref() {
+                    table.update_watermark(watermark.clone())
+                };
+                table.commit_no_data_expected(epoch);
+            });
             return Ok(());
         }
     }
@@ -528,6 +536,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 PrecomputedBuildHasher,
             )),
             group_change_set: HashSet::new(),
+            distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
         };
 
@@ -542,13 +551,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         // First barrier
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
-        iter_table_storage(&mut this.storages)
-            .chain(this.distinct_dedup_tables.values_mut())
-            .for_each(|state_table| {
-                state_table.init_epoch(barrier.epoch);
-            });
-        this.result_table.init_epoch(barrier.epoch);
+        this.all_state_tables_mut().for_each(|table| {
+            table.init_epoch(barrier.epoch);
+        });
         vars.agg_group_cache.update_epoch(barrier.epoch.curr);
+        vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+            cache.update_epoch(barrier.epoch.curr);
+        });
 
         yield Message::Barrier(barrier);
 
@@ -581,20 +590,25 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(this.actor_ctx.id) {
-                        iter_table_storage(&mut this.storages).for_each(|state_table| {
-                            let _ = state_table.update_vnode_bitmap(vnode_bitmap.clone());
+                        let previous_vnode_bitmap = this.result_table.vnodes().clone();
+                        this.all_state_tables_mut().for_each(|table| {
+                            let _ = table.update_vnode_bitmap(vnode_bitmap.clone());
                         });
-                        let previous_vnode_bitmap =
-                            this.result_table.update_vnode_bitmap(vnode_bitmap.clone());
 
                         // Manipulate the cache if necessary.
                         if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
                             vars.agg_group_cache.clear();
+                            vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+                                cache.clear();
+                            });
                         }
                     }
 
                     // Update the current epoch.
                     vars.agg_group_cache.update_epoch(barrier.epoch.curr);
+                    vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
+                        cache.update_epoch(barrier.epoch.curr);
+                    });
 
                     yield Message::Barrier(barrier);
                 }
@@ -636,6 +650,7 @@ mod tests {
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
@@ -674,16 +689,17 @@ mod tests {
             extreme_cache_size,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
 
             extra: Some(AggExecutorArgsExtra {
                 group_key_indices,
 
                 metrics: Arc::new(StreamingMetrics::unused()),
                 chunk_size: 1024,
-                watermark_epoch: Arc::new(AtomicU64::new(0)),
             }),
         })
         .unwrap()
@@ -738,7 +754,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -770,6 +786,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![],
             1 << 10,
@@ -842,7 +859,7 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -875,6 +892,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             key_indices,
             vec![],
             1 << 10,
@@ -948,7 +966,7 @@ mod tests {
         let keys = vec![0];
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -971,6 +989,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,
@@ -1049,7 +1068,7 @@ mod tests {
         let append_only = true;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
                 order_pairs: vec![],
@@ -1072,6 +1091,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,

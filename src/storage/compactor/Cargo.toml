@@ -17,7 +17,7 @@ normal = ["workspace-hack"]
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 prometheus = { version = "0.13" }
 risingwave_common = { path = "../../common" }
 risingwave_common_proc_macro = { path = "../../common/proc_macro" }

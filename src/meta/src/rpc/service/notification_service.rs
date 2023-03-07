@@ -171,6 +171,10 @@ where
             ..Default::default()
         }
     }
+
+    fn compute_subscribe(&self) -> MetaSnapshot {
+        MetaSnapshot::default()
+    }
 }
 
 #[async_trait::async_trait]
@@ -211,12 +215,13 @@ where
                     .await?;
                 self.hummock_subscribe().await
             }
+            SubscribeType::Compute => self.compute_subscribe(),
             SubscribeType::Unspecified => unreachable!(),
         };
 
         self.env
             .notification_manager()
-            .notify_snapshot(worker_key, meta_snapshot);
+            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }

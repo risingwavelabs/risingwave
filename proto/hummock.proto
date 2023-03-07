@@ -21,6 +21,7 @@ message SstableInfo {
   uint64 divide_version = 8;
   uint64 min_epoch = 9;
   uint64 max_epoch = 10;
+  uint64 uncompressed_file_size = 11;
 }
 
 enum LevelType {
@@ -32,6 +33,7 @@ enum LevelType {
 message OverlappingLevel {
   repeated Level sub_levels = 1;
   uint64 total_file_size = 2;
+  uint64 uncompressed_file_size = 3;
 }
 
 message Level {
@@ -40,6 +42,7 @@ message Level {
   repeated SstableInfo table_infos = 3;
   uint64 total_file_size = 4;
   uint64 sub_level_id = 5;
+  uint64 uncompressed_file_size = 6;
 }
 
 message InputLevel {
@@ -540,6 +543,15 @@ message PinVersionResponse {
   HummockVersion pinned_version = 1;
 }
 
+message SplitCompactionGroupRequest {
+  uint64 group_id = 1;
+  repeated uint32 table_ids = 2;
+}
+
+message SplitCompactionGroupResponse {
+  uint64 new_group_id = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -568,6 +580,7 @@ service HummockManagerService {
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
+  rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
 }
 
 message CompactionConfig {

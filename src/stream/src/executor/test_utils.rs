@@ -207,6 +207,9 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod agg_executor {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -335,6 +338,7 @@ pub mod agg_executor {
         store: S,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -371,9 +375,11 @@ pub mod agg_executor {
             extreme_cache_size: 1024,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
 
             extra: None,
         })

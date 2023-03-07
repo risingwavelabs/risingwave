@@ -6,10 +6,10 @@ values ('{"a":[2, true, "", {}]}'::jsonb), ('1'), ('true'), ('null'), (null), ('
 ----
 1
 NULL
-[1,true]
+[1, true]
 null
 true
-{"a":[2,true,"",{}]}
+{"a": [2, true, "", {}]}
 
 statement ok
 create table t (v1 jsonb);
@@ -123,3 +123,29 @@ select jsonb_array_length('null');
 
 statement ok
 drop table t;
+
+query TIT
+with t(v1) as (
+	values (null::jsonb), ('null'), ('[true, 4, "foo"]')
+) select
+	v1 is null,
+	case when jsonb_typeof(v1) = 'array' then jsonb_array_length(v1) end,
+	coalesce(v1 -> 1, v1, '"?"')
+from t;
+----
+t NULL "?"
+f NULL null
+f 3 4
+
+# Tests moved from regress tests due to not matching exactly.
+
+# PostgreSQL sorts shorter key "two" before longer key "three"
+# https://www.postgresql.org/docs/current/datatype-json.html#JSON-INDEXING:~:text=shorter%20keys%20are%20stored%20before%20longer%20keys
+query T
+SELECT '{
+		"one": 1,
+		"two":"two",
+		"three":
+		true}'::jsonb; -- OK
+----
+{"one": 1, "three": true, "two": "two"}

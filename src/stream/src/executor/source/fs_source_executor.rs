@@ -21,7 +21,7 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::Schema;
 use risingwave_connector::source::{
-    BoxSourceWithStateStream, ConnectorState, SourceInfo, SplitId, SplitImpl, SplitMetaData,
+    BoxSourceWithStateStream, ConnectorState, SourceContext, SplitId, SplitImpl, SplitMetaData,
     StreamChunkWithState,
 };
 use risingwave_source::source_desc::{FsSourceDesc, SourceDescBuilder};
@@ -93,21 +93,19 @@ impl<S: StateStore> FsSourceExecutor<S> {
             .iter()
             .map(|column_desc| column_desc.column_id)
             .collect_vec();
-        let steam_reader = source_desc
+        let mut source_ctx = SourceContext::new(
+            self.ctx.id,
+            self.stream_source_core.source_id,
+            self.ctx.fragment_id,
+            source_desc.metrics.clone(),
+        );
+        source_ctx.add_suppressor(self.ctx.error_suppressor.clone());
+        let stream_reader = source_desc
             .source
-            .stream_reader(
-                state,
-                column_ids,
-                source_desc.metrics.clone(),
-                SourceInfo::new(
-                    self.ctx.id,
-                    self.stream_source_core.source_id,
-                    self.ctx.fragment_id,
-                ),
-            )
+            .stream_reader(state, column_ids, Arc::new(source_ctx))
             .await
             .map_err(StreamExecutorError::connector_error)?;
-        Ok(steam_reader.into_stream())
+        Ok(stream_reader.into_stream())
     }
 
     async fn apply_split_change<const BIASED: bool>(
@@ -252,7 +250,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("source_recv_first_barrier")
+            .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -329,7 +327,7 @@ impl<S: StateStore> FsSourceExecutor<S> {
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
-            .stack_trace("fs_source_start_reader")
+            .instrument_await("fs_source_start_reader")
             .await?;
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize

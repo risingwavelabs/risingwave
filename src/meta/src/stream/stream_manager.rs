@@ -60,7 +60,7 @@ pub struct CreateStreamingJobContext {
     pub existing_locations: Locations,
 
     /// The properties of the streaming job.
-    // TODO: directly store `StreamingJob here.
+    // TODO: directly store `StreamingJob` here.
     pub table_properties: HashMap<String, String>,
 
     /// DDL definition.
@@ -127,6 +127,9 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 ///
 /// Note: for better readability, keep this struct complete and immutable once created.
 pub struct ReplaceTableContext {
+    /// The old table fragments to be replaced.
+    pub old_table_fragments: TableFragments,
+
     /// The updates to be applied to the downstream chain actors. Used for schema change.
     pub merge_updates: Vec<MergeUpdate>,
 
@@ -307,19 +310,11 @@ where
         res
     }
 
-    async fn create_streaming_job_impl(
+    async fn build_actors(
         &self,
-        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
-        table_fragments: TableFragments,
-        CreateStreamingJobContext {
-            dispatchers,
-            upstream_mview_actors,
-            table_properties,
-            building_locations,
-            existing_locations,
-            definition,
-            ..
-        }: CreateStreamingJobContext,
+        table_fragments: &TableFragments,
+        building_locations: &Locations,
+        existing_locations: &Locations,
     ) -> MetaResult<()> {
         let actor_map = table_fragments.actor_map();
 
@@ -363,21 +358,6 @@ where
                 .await?;
         }
 
-        // Register to compaction group beforehand.
-        let hummock_manager_ref = self.hummock_manager.clone();
-        let registered_table_ids = hummock_manager_ref
-            .register_table_fragments(&table_fragments, &table_properties)
-            .await?;
-        debug_assert_eq!(
-            registered_table_ids.len(),
-            table_fragments.all_table_ids().count()
-        );
-        revert_funcs.push(Box::pin(async move {
-            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
-                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
-            }
-        }));
-
         // In the second stage, each [`WorkerNode`] builds local actors and connect them with
         // channels.
         for (worker_id, actors) in building_worker_actors {
@@ -393,6 +373,41 @@ where
                 })
                 .await?;
         }
+
+        Ok(())
+    }
+
+    async fn create_streaming_job_impl(
+        &self,
+        revert_funcs: &mut Vec<BoxFuture<'_, ()>>,
+        table_fragments: TableFragments,
+        CreateStreamingJobContext {
+            dispatchers,
+            upstream_mview_actors,
+            table_properties,
+            building_locations,
+            existing_locations,
+            definition,
+            ..
+        }: CreateStreamingJobContext,
+    ) -> MetaResult<()> {
+        // Register to compaction group beforehand.
+        let hummock_manager_ref = self.hummock_manager.clone();
+        let registered_table_ids = hummock_manager_ref
+            .register_table_fragments(&table_fragments, &table_properties)
+            .await?;
+        debug_assert_eq!(
+            registered_table_ids.len(),
+            table_fragments.all_table_ids().count()
+        );
+        revert_funcs.push(Box::pin(async move {
+            if let Err(e) = hummock_manager_ref.unregister_table_ids(&registered_table_ids).await {
+                tracing::warn!("Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}", registered_table_ids, e);
+            }
+        }));
+
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
 
         // Add table fragments to meta store with state: `State::Initial`.
         self.fragment_manager
@@ -416,6 +431,45 @@ where
         {
             self.fragment_manager
                 .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(table_id)))
+                .await?;
+            return Err(err);
+        }
+
+        Ok(())
+    }
+
+    pub async fn replace_table(
+        &self,
+        table_fragments: TableFragments,
+        ReplaceTableContext {
+            old_table_fragments,
+            merge_updates,
+            building_locations,
+            existing_locations,
+            table_properties: _,
+        }: ReplaceTableContext,
+    ) -> MetaResult<()> {
+        self.build_actors(&table_fragments, &building_locations, &existing_locations)
+            .await?;
+
+        // Add table fragments to meta store with state: `State::Initial`.
+        self.fragment_manager
+            .start_create_table_fragments(table_fragments.clone())
+            .await?;
+
+        let dummy_table_id = table_fragments.table_id();
+
+        if let Err(err) = self
+            .barrier_scheduler
+            .run_command_with_paused(Command::ReplaceTable {
+                old_table_fragments,
+                new_table_fragments: table_fragments,
+                merge_updates,
+            })
+            .await
+        {
+            self.fragment_manager
+                .drop_table_fragments_vec(&HashSet::from_iter(std::iter::once(dummy_table_id)))
                 .await?;
             return Err(err);
         }
@@ -639,6 +693,7 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
+            let system_params = env.system_params_manager().get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -669,8 +724,10 @@ mod tests {
             )
             .await?;
 
-            let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+            let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+                hummock_manager.clone(),
+                system_params.checkpoint_frequency() as usize,
+            );
 
             let source_manager = Arc::new(
                 SourceManager::new(

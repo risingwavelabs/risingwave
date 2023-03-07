@@ -15,7 +15,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use async_stack_trace::{SpanValue, StackTrace};
+use await_tree::InstrumentAwait;
 use futures::future::join_all;
 use futures::pin_mut;
 use hytra::TrAdder;
@@ -80,18 +80,23 @@ impl ActorContext {
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         tracing::error!("Compute error: {}, executor: {identity}", err);
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");
-        let err_str = err.to_string();
-        if !self.error_suppressor.lock().suppress_error(&err_str) {
-            self.streaming_metrics
-                .user_compute_error_count
-                .with_label_values(&[
-                    "ExprError",
-                    &err_str,
-                    executor_name,
-                    &self.fragment_id.to_string(),
-                ])
-                .inc();
+        let mut err_str = err.to_string();
+
+        if self.error_suppressor.lock().suppress_error(&err_str) {
+            err_str = format!(
+                "error msg suppressed (due to per-actor error limit: {})",
+                self.error_suppressor.lock().max()
+            );
         }
+        self.streaming_metrics
+            .user_compute_error_count
+            .with_label_values(&[
+                "ExprError",
+                &err_str,
+                executor_name,
+                &self.fragment_id.to_string(),
+            ])
+            .inc();
     }
 
     pub fn store_mem_usage(&self, val: usize) {
@@ -176,9 +181,9 @@ where
         while let Some(barrier) = stream
             .next()
             .in_span(span)
-            .stack_trace(last_epoch.map_or(SpanValue::Slice("Epoch <initial>"), |e| {
-                format!("Epoch {}", e.curr).into()
-            }))
+            .instrument_await(
+                last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
+            )
             .await
             .transpose()?
         {

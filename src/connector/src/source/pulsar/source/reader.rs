@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, ensure, Result};
@@ -27,12 +26,11 @@ use risingwave_common::try_match_expand;
 
 use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
-use crate::source::monitor::SourceMetrics;
 use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SourceMessage, SplitId, SplitImpl, SplitMetaData,
-    SplitReader, MAX_CHUNK_SIZE,
+    BoxSourceWithStateStream, Column, SourceContextRef, SourceMessage, SplitId, SplitImpl,
+    SplitMetaData, SplitReader, MAX_CHUNK_SIZE,
 };
 
 impl_common_split_reader_logic!(PulsarSplitReader, PulsarProperties);
@@ -44,8 +42,7 @@ pub struct PulsarSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 // {ledger_id}:{entry_id}:{partition}:{batch_index}
@@ -98,26 +95,19 @@ impl SplitReader for PulsarSplitReader {
         props: PulsarProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         ensure!(splits.len() == 1, "only support single split");
         let split = try_match_expand!(splits.into_iter().next().unwrap(), SplitImpl::Pulsar)?;
-
-        let service_url = &props.service_url;
+        let pulsar = props.build_pulsar_client().await?;
         let topic = split.topic.to_string();
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let pulsar: Pulsar<_> = Pulsar::builder(service_url, TokioExecutor)
-            .build()
-            .await
-            .map_err(|e| anyhow!(e))?;
-
         let builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
-            .with_topic(topic)
+            .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
             .with_subscription(format!(
                 "consumer-{}",
@@ -128,17 +118,35 @@ impl SplitReader for PulsarSplitReader {
             ));
 
         let builder = match split.start_offset.clone() {
-            PulsarEnumeratorOffset::Earliest => builder.with_options(
-                ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
-            ),
+            PulsarEnumeratorOffset::Earliest => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("Earliest offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Earliest),
+                    )
+                }
+            }
             PulsarEnumeratorOffset::Latest => builder.with_options(
                 ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
             ),
-            PulsarEnumeratorOffset::MessageId(m) => builder.with_options(pulsar::ConsumerOptions {
-                durable: Some(false),
-                start_message_id: parse_message_id(m.as_str()).ok(),
-                ..Default::default()
-            }),
+            PulsarEnumeratorOffset::MessageId(m) => {
+                if topic.starts_with("non-persistent://") {
+                    tracing::warn!("MessageId offset is not supported for non-persistent topic, use Latest instead");
+                    builder.with_options(
+                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
+                    )
+                } else {
+                    builder.with_options(pulsar::ConsumerOptions {
+                        durable: Some(false),
+                        start_message_id: parse_message_id(m.as_str()).ok(),
+                        ..Default::default()
+                    })
+                }
+            }
 
             PulsarEnumeratorOffset::Timestamp(_) => builder,
         };
@@ -157,8 +165,7 @@ impl SplitReader for PulsarSplitReader {
             split_id: split.id(),
             split,
             parser_config,
-            metrics,
-            source_info,
+            source_ctx,
         })
     }
 
@@ -174,7 +181,8 @@ impl PulsarSplitReader {
         for msgs in self.consumer.ready_chunks(MAX_CHUNK_SIZE) {
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                res.push(SourceMessage::from(msg?));
+                let msg = SourceMessage::from(msg?);
+                res.push(msg);
             }
             yield res;
         }

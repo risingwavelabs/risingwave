@@ -14,12 +14,21 @@ alter table t add column v1 int primary key;
 statement error is not a table or cannot be altered
 alter table mv add column v1 int;
 
+statement error not exist
+alter table t drop column v1;
+
 statement ok
-drop materialized view mv;
+alter table t drop column if exists v1;
+
+statement error not yet implemented
+alter table t drop column v cascade;
 
 # Add column
 statement ok
 alter table t add column r real;
+
+statement ok
+create materialized view mv2 as select * from t;
 
 query IR
 select v, r from t;
@@ -33,6 +42,9 @@ public.t CREATE TABLE t (v INT, r REAL)
 statement ok
 alter table t add column s varchar;
 
+statement ok
+create materialized view mv3 as select * from t;
+
 query IRT
 select v, r, s from t;
 ----
@@ -41,6 +53,74 @@ query TT
 show create table t;
 ----
 public.t CREATE TABLE t (v INT, r REAL, s CHARACTER VARYING)
+
+# Insert data
+# TODO(#7906): alter after insert.
+statement ok
+insert into t values (1, 1.1, 'a');
+
+statement ok
+flush;
+
+# All materialized views should keep the schema when it's created.
+query I
+select * from mv;
+----
+1
+
+query IR
+select * from mv2;
+----
+1 1.1
+
+query IRT
+select * from mv3;
+----
+1 1.1 a
+
+# Clean up
+statement ok
+drop materialized view mv;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+drop table t;
+
+# Drop column
+statement ok
+create table t (v int, r real);
+
+statement ok
+alter table t add column s varchar;
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, r REAL, s CHARACTER VARYING)
+
+statement ok
+alter table t drop column r;
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, s CHARACTER VARYING)
+
+# TODO(#4529): create mview on partial columns and test whether dropping the unrefereced column works.
+statement ok
+create materialized view mv as select * from t;
+
+statement error being referenced
+alter table t drop column s;
+
+# Clean up
+statement ok
+drop materialized view mv;
 
 statement ok
 drop table t;

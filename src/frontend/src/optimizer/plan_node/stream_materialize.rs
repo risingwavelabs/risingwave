@@ -17,13 +17,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, TableId};
+use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::derive_columns;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
@@ -63,6 +63,8 @@ impl StreamMaterialize {
         table_type: TableType,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
+        // the hidden column name might refer some expr id
+        let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let table = Self::derive_table_catalog(
@@ -71,7 +73,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            false,
+            ConflictBehavior::NoCheck,
             None,
             table_type,
             None,
@@ -93,7 +95,7 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         version: Option<TableVersion>,
     ) -> Result<Self> {
@@ -105,7 +107,7 @@ impl StreamMaterialize {
             user_order_by,
             columns,
             definition,
-            handle_pk_conflict,
+            conflict_behavior,
             row_id_index,
             TableType::Table,
             version,
@@ -153,7 +155,7 @@ impl StreamMaterialize {
         user_order_by: Order,
         columns: Vec<ColumnCatalog>,
         definition: String,
-        handle_pk_conflict: bool,
+        conflict_behavior: ConflictBehavior,
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
@@ -169,6 +171,11 @@ impl StreamMaterialize {
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
         let read_prefix_len_hint = stream_key.len();
 
+        let conflict_behavior_type = match conflict_behavior {
+            ConflictBehavior::NoCheck => 0,
+            ConflictBehavior::OverWrite => 1,
+            ConflictBehavior::IgnoreConflict => 2,
+        };
         Ok(TableCatalog {
             id: TableId::placeholder(),
             associated_source_id: None,
@@ -187,7 +194,7 @@ impl StreamMaterialize {
             row_id_index,
             value_indices,
             definition,
-            handle_pk_conflict,
+            conflict_behavior_type,
             read_prefix_len_hint,
             version,
             watermark_columns,
@@ -236,10 +243,14 @@ impl fmt::Display for StreamMaterialize {
             builder.field("order_descs", &format_args!("[{}]", order_descs));
         }
 
-        let pk_conflict_behavior = match self.table.handle_pk_conflict() {
-            true => "overwrite",
-            false => "no check",
-        };
+        let pk_conflict_behavior;
+        if self.table.conflict_behavior_type() == 0 {
+            pk_conflict_behavior = "no check";
+        } else if self.table.conflict_behavior_type() == 1 {
+            pk_conflict_behavior = "overwrite";
+        } else {
+            pk_conflict_behavior = "ignore conflict";
+        }
         builder.field("pk_conflict", &pk_conflict_behavior);
 
         builder.finish()
@@ -274,6 +285,7 @@ impl StreamNode for StreamMaterialize {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
+        let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
         ProstStreamNode::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
@@ -285,7 +297,7 @@ impl StreamNode for StreamMaterialize {
                 .map(FieldOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
-            handle_pk_conflict: self.table.handle_pk_conflict(),
+            handle_pk_conflict_behavior,
         })
     }
 }

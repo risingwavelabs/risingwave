@@ -288,7 +288,8 @@ pub struct ConfigMap {
     create_compaction_group_for_mv: CreateCompactionGroupForMv,
 
     /// A temporary config variable to force query running in either local or distributed mode.
-    /// It will be removed in the future.
+    /// The default value is auto which means let the system decide to run batch queries in local
+    /// or distributed mode automatically.
     query_mode: QueryMode,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
@@ -465,7 +466,7 @@ impl ConfigMap {
             VariableInfo{
                 name : QueryMode::entry_name().to_lowercase(),
                 setting : self.query_mode.to_string(),
-                description : String::from("A temporary config variable to force query running in either local or distributed mode.")
+                description : String::from("A temporary config variable to force query running in either local or distributed mode. If the value is auto, the system will decide for you automatically.")
             },
             VariableInfo{
                 name : ExtraFloatDigit::entry_name().to_lowercase(),
@@ -533,8 +534,8 @@ impl ConfigMap {
                 description: String::from("Enable two phase aggregation.")
             },
             VariableInfo{
-                name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
-                setting : self.enable_two_phase_agg.to_string(),
+                name : ForceTwoPhaseAgg::entry_name().to_lowercase(),
+                setting : self.force_two_phase_agg.to_string(),
                 description: String::from("Force two phase aggregation.")
             },
             VariableInfo{

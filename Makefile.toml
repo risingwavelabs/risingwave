@@ -369,6 +369,8 @@ category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
   "download-connector",
+  "download-maven",
+  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -581,6 +583,29 @@ cargo nextest run "$@"
 """
 description = "Run unit tests"
 
+[tasks.build-connector-node]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+description = "Build RisingWave Connector from source"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+ARTIFACT="risingwave-connector-1.0.0.tar.gz"
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+tar xf "assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
+'''
+
+
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
 description = "Build in simulation mode"
@@ -706,6 +731,44 @@ set -e
 cargo llvm-cov run -p risingwave_simulation --html "$@"
 """
 
+[tasks.check-connector-node]
+category = "RiseDev - Check"
+description = "Run mvn spotless:check in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" spotless:check
+"""
+
+[tasks.check-connector-node-fix]
+category = "RiseDev - Check"
+description = "Run mvn spotless:apply in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${CONNECTOR_NODE_DIR}"
+"${MAVEN_PATH}" spotless:apply
+"""
+
 [tasks.check-hakari]
 category = "RiseDev - Check"
 description = "Run cargo hakari check and attempt to fix"
@@ -753,6 +816,7 @@ script = """
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
+echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
 
 [tasks.check-clippy-fix]
@@ -769,6 +833,7 @@ if [ $# -gt 0 ]; then
   cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
 else
   echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
   cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
 fi
 """
@@ -812,10 +877,12 @@ dependencies = [
   "check-fmt",
   "check-clippy",
   "check-typos",
+  "check-connector-node",
 ]
 script = """
 #!/usr/bin/env bash
 
+echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
@@ -832,10 +899,12 @@ dependencies = [
   "check-fmt",
   "check-clippy-fix",
   "check-typos",
+  "check-connector-node-fix",
 ]
 script = """
 #!/usr/bin/env bash
 
+echo "Tip: use the alias $(tput setaf 4)./risedev cf$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"

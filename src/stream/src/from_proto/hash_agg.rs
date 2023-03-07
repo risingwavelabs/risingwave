@@ -105,16 +105,17 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
 
                 agg_calls,
+                row_count_index: node.get_row_count_index() as usize,
                 storages,
                 result_table,
                 distinct_dedup_tables,
+                watermark_epoch: stream.get_watermark_epoch(),
 
                 extra: Some(AggExecutorArgsExtra {
                     group_key_indices,
 
                     metrics: params.executor_stats,
                     chunk_size: params.env.config().developer.stream_chunk_size,
-                    watermark_epoch: stream.get_watermark_epoch(),
                 }),
             },
             group_key_types,

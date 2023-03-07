@@ -21,7 +21,6 @@ use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
-use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -37,7 +36,9 @@ use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -53,7 +54,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
-    SystemParamManager,
+    SystemParamsManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
@@ -109,6 +110,7 @@ pub async fn rpc_serve(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     match meta_store_backend {
         MetaStoreBackend::Etcd {
@@ -120,20 +122,22 @@ pub async fn rpc_serve(
             if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(
-                endpoints.clone(),
-                Some(options.clone()),
-                credentials.is_some(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            let auth_enabled = credentials.is_some();
+            let client =
+                EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
-            let election_client = Arc::new(EtcdElectionClient::new(
-                endpoints,
-                Some(options),
-                address_info.advertise_addr.clone(),
-            ));
+            let election_client = Arc::new(
+                EtcdElectionClient::new(
+                    endpoints,
+                    Some(options),
+                    auth_enabled,
+                    address_info.advertise_addr.clone(),
+                )
+                .await?,
+            );
 
             rpc_serve_with_store(
                 meta_store,
@@ -142,6 +146,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -154,6 +159,7 @@ pub async fn rpc_serve(
                 max_heartbeat_interval,
                 lease_interval_secs,
                 opts,
+                init_system_params,
             )
             .await
         }
@@ -167,6 +173,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
     max_heartbeat_interval: Duration,
     lease_interval_secs: u64,
     opts: MetaOpts,
+    init_system_params: SystemParams,
 ) -> MetaResult<(JoinHandle<()>, Option<JoinHandle<()>>, WatchSender<()>)> {
     let (svc_shutdown_tx, svc_shutdown_rx) = watch::channel(());
 
@@ -247,6 +254,7 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             address_info,
             max_heartbeat_interval,
             opts,
+            init_system_params,
             election_client,
             svc_shutdown_rx,
         )
@@ -307,21 +315,20 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     address_info: AddressInfo,
     max_heartbeat_interval: Duration,
     opts: MetaOpts,
+    init_system_params: SystemParams,
     election_client: Option<ElectionClientRef>,
     mut svc_shutdown_rx: WatchReceiver<()>,
 ) -> MetaResult<()> {
     tracing::info!("Defining leader services");
     let prometheus_endpoint = opts.prometheus_endpoint.clone();
-    let init_system_params = opts.init_system_params();
-    let env = MetaSrvEnv::<S>::new(opts, meta_store.clone()).await;
+    let env = MetaSrvEnv::<S>::new(opts, init_system_params, meta_store.clone()).await?;
     let fragment_manager = Arc::new(FragmentManager::new(env.clone()).await.unwrap());
     let meta_metrics = Arc::new(MetaMetrics::new());
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
-    let system_params_manager =
-        Arc::new(SystemParamManager::new(env.clone(), init_system_params).await?);
-    let system_params_reader: SystemParamsReader = system_params_manager.get_params().await.into();
+    let system_params_manager = env.system_params_manager_ref();
+    let system_params_reader = system_params_manager.get_params().await;
 
     let cluster_manager = Arc::new(
         ClusterManager::new(env.clone(), max_heartbeat_interval)
@@ -356,14 +363,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
-            meta_store: env.meta_store_ref(),
             prometheus_endpoint: prometheus_endpoint.clone(),
             prometheus_client: prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            cluster_manager: cluster_manager.clone(),
+            fragment_manager: fragment_manager.clone(),
+            compute_clients: ComputeClientPool::default(),
+            meta_store: env.meta_store_ref(),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -428,7 +436,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     // Initialize services.
     let backup_object_store = Arc::new(
         parse_remote_object_store(
-            &env.opts.backup_storage_url,
+            system_params_reader.backup_storage_url(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
         )
@@ -436,7 +444,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let backup_storage = Arc::new(
         ObjectStoreMetaSnapshotStorage::new(
-            &env.opts.backup_storage_directory,
+            system_params_reader.backup_storage_directory(),
             backup_object_store,
         )
         .await?,
@@ -527,7 +535,9 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
-    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager).await);
+    sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
+    sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
+    sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
 
     if cfg!(not(test)) {
         sub_tasks.push(

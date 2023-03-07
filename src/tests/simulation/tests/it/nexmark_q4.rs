@@ -46,7 +46,7 @@ const RESULT: &str = r#"
 
 async fn init() -> Result<NexmarkCluster> {
     let mut cluster =
-        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT)).await?;
+        NexmarkCluster::new(Configuration::for_scale(), 6, Some(20 * THROUGHPUT), false).await?;
     cluster.run(CREATE).await?;
     Ok(cluster)
 }
@@ -181,12 +181,12 @@ async fn nexmark_q4_materialize_agg_cache_invalidation() -> Result<()> {
 
     // Let parallel unit 0 handle all groups.
     cluster.reschedule(format!("{id}-[1,2,3,4,5]")).await?;
-    sleep(Duration::from_secs(10)).await;
+    sleep(Duration::from_secs(7)).await;
     let result_1 = cluster.run(SELECT).await?.assert_result_ne(RESULT);
 
     // Scale out.
     cluster.reschedule(format!("{id}+[1,2,3,4,5]")).await?;
-    sleep(Duration::from_secs(3)).await;
+    sleep(Duration::from_secs(7)).await;
     cluster
         .run(SELECT)
         .await?

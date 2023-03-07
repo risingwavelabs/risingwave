@@ -21,9 +21,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, WriteOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, WriteOptions};
 
-use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait};
+use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -99,8 +99,13 @@ async fn test_snapshot_inner(
     enable_sync: bool,
     enable_commit: bool,
 ) {
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+
     let epoch1: u64 = 1;
-    hummock_storage
+    local.init(epoch1);
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_put("test")),
@@ -114,6 +119,8 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    let epoch2 = epoch1 + 1;
+    local.seal_current_epoch(epoch2);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch1)
@@ -133,8 +140,7 @@ async fn test_snapshot_inner(
     }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    let epoch2 = epoch1 + 1;
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_delete()),
@@ -149,6 +155,8 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    let epoch3 = epoch2 + 1;
+    local.seal_current_epoch(epoch3);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch2)
@@ -169,8 +177,7 @@ async fn test_snapshot_inner(
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    let epoch3 = epoch2 + 1;
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("2"), StorageValue::new_delete()),
@@ -185,6 +192,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch3)
@@ -214,8 +222,12 @@ async fn test_snapshot_range_scan_inner(
     enable_commit: bool,
 ) {
     let epoch: u64 = 1;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+    local.init(epoch);
 
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_put("test")),
@@ -231,6 +243,7 @@ async fn test_snapshot_range_scan_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch)

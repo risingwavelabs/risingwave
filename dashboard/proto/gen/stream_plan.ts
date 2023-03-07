@@ -25,6 +25,47 @@ import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
 
+export const HandleConflictBehavior = {
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
+    case 1:
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
+    case 2:
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export const ChainType = {
   CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
   /** CHAIN - CHAIN is corresponding to the chain executor. */
@@ -426,8 +467,8 @@ export interface MaterializeNode {
   table:
     | Table
     | undefined;
-  /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  /** Used to handle pk conflict, open it when upstream executor is source executor. */
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 export interface AggCallState {
@@ -470,6 +511,7 @@ export interface SimpleAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface SimpleAggNode_DistinctDedupTablesEntry {
@@ -490,6 +532,7 @@ export interface HashAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface HashAggNode_DistinctDedupTablesEntry {
@@ -698,7 +741,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -2084,7 +2127,12 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
+  return {
+    tableId: 0,
+    columnOrders: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const MaterializeNode = {
@@ -2095,7 +2143,9 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -2108,7 +2158,8 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -2117,7 +2168,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
@@ -2287,6 +2338,7 @@ function createBaseSimpleAggNode(): SimpleAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2306,6 +2358,7 @@ export const SimpleAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2335,6 +2388,7 @@ export const SimpleAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2356,6 +2410,7 @@ export const SimpleAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };
@@ -2397,6 +2452,7 @@ function createBaseHashAggNode(): HashAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2416,6 +2472,7 @@ export const HashAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2445,6 +2502,7 @@ export const HashAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2466,6 +2524,7 @@ export const HashAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };
@@ -3079,7 +3138,12 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
+  return {
+    tableInfo: undefined,
+    distributionKey: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const ArrangeNode = {
@@ -3088,7 +3152,9 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -3102,7 +3168,8 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -3113,7 +3180,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
