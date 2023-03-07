@@ -1,14 +1,15 @@
 # examples in Get started
 
+
 statement ok
-CREATE TABLE taxi_trips(
+CREATE TABLE taxi_trips_1(
     id VARCHAR,
     distance DOUBLE PRECISION,
     duration DOUBLE PRECISION
 );
 
 statement ok
-INSERT INTO taxi_trips
+INSERT INTO taxi_trips_1
 VALUES
     ('1', 4, 10);
 
@@ -19,15 +20,13 @@ AS
     SUM(distance) as total_distance,
     SUM(duration) as total_duration,
     SUM(distance) / SUM(duration) as avg_speed
-    FROM taxi_trips;
-
-
+    FROM taxi_trips_1;
 
 statement ok
 SELECT * FROM mv_avg_speed;
 
 statement ok
-INSERT INTO taxi_trips
+INSERT INTO taxi_trips_1
 VALUES
     ('2', 6, 10);
 
@@ -38,28 +37,12 @@ statement ok
 drop materialized view mv_avg_speed;
 
 statement ok
-drop table taxi_trips;
-
-
-# Examples in “Time window functions"
+drop table taxi_trips_1;
 
 statement ok
-create table taxi_trips (trip_id int, taxi_id int, completed_at timestamp, distance double precision);
+FLUSH;
 
-statement ok 
-insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4), (2, 1002, '2022-07-01 22:01:00', 6), (3, 1003, '2022-07-01 22:02:00	', 3);
 
-statement ok
-SELECT trip_id,  taxi_id, completed_at, window_start, window_end
-FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES');
-
-statement ok
-SELECT trip_id, taxi_id, completed_at, window_start, window_end
-FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTE', INTERVAL '2 MINUTES')
-ORDER BY window_start;
-
-statement ok
-drop table taxi_trips;
 
 # Examples in "Array"
 
@@ -94,7 +77,20 @@ SELECT unnest(array[1,2,3,4]);
 statement ok
 drop table taxi;
 
+statement ok
+FLUSH;
+
 # Examples in "Struct"
+
+statement ok
+drop table if exists x;
+
+
+statement ok
+drop table if exists y;
+
+statement ok
+drop table if exists trip;
 
 statement ok
 CREATE TABLE x (a struct <b integer, c integer>, d integer);
@@ -153,7 +149,37 @@ statement ok
 SELECT ROW(1, ROW('1', 1)) = ROW('1', ROW(1, '1'));
 
 statement ok
-drop table x, y, trip;
+drop table x;
+
+statement ok
+drop table y;
+
+statement ok
+drop table trip;
+
+statement ok
+FLUSH;
 
 
+# Examples in “Time window functions"
 
+statement ok
+create table taxi_trips (trip_id int, taxi_id int, completed_at timestamp, distance double precision);
+
+statement ok 
+insert into taxi_trips values (1, 1001, '2022-07-01 22:00:00', 4), (2, 1002, '2022-07-01 22:01:00', 6), (3, 1003, '2022-07-01 22:02:00', 3);
+
+statement ok
+SELECT trip_id,  taxi_id, completed_at, window_start, window_end
+FROM TUMBLE (taxi_trips, completed_at, INTERVAL '2 MINUTES');
+
+statement ok
+SELECT trip_id, taxi_id, completed_at, window_start, window_end
+FROM HOP (taxi_trips, completed_at, INTERVAL '1 MINUTE', INTERVAL '2 MINUTES')
+ORDER BY window_start;
+
+statement ok
+drop table taxi_trips;
+
+statement ok
+FLUSH;
