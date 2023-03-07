@@ -14,13 +14,10 @@
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
-
-
 use risingwave_common::types::DataType::Boolean;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, TableAlias, TableFactor, TableWithJoins, Value,
 };
-
 
 use crate::sql_gen::types::BINARY_INEQUALITY_OP_TABLE;
 use crate::sql_gen::{Column, SqlGenerator, SqlGeneratorContext};
@@ -104,7 +101,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         &mut self,
         left_columns: Vec<Column>,
         right_columns: Vec<Column>,
-    ) -> Option<(Column, Column, Vec<(Column, Column)>)> {
+    ) -> Vec<(Column, Column)> {
         let mut available_join_on_columns = vec![];
         for left_column in &left_columns {
             for right_column in &right_columns {
@@ -113,13 +110,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 }
             }
         }
-        if available_join_on_columns.is_empty() {
-            return None;
-        }
-        available_join_on_columns.shuffle(&mut self.rng);
-        let remaining_columns = available_join_on_columns.split_off(1);
-        let (left_column, right_column) = available_join_on_columns.drain(..).next().unwrap();
-        Some((left_column, right_column, remaining_columns))
+        available_join_on_columns
     }
 
     fn gen_bool_with_tables(&mut self, tables: Vec<Table>) -> Expr {
@@ -135,11 +126,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         left_columns: Vec<Column>,
         right_columns: Vec<Column>,
     ) -> Option<(Expr, Vec<(Column, Column)>)> {
-        let Some((l, r, remaining)) = self.gen_equi_join_columns(left_columns, right_columns) else {
+        let mut available_join_on_columns = self.gen_equi_join_columns(left_columns, right_columns);
+        if available_join_on_columns.is_empty() {
             return None;
-        };
-        let join_on_expr = create_equi_expr(l.name, r.name);
-        Some((join_on_expr, remaining))
+        }
+        available_join_on_columns.shuffle(&mut self.rng);
+        let remaining_columns = available_join_on_columns.split_off(1);
+        let (left_column, right_column) = available_join_on_columns.drain(..).next().unwrap();
+        let join_on_expr = create_equi_expr(left_column.name, right_column.name);
+        Some((join_on_expr, remaining_columns))
     }
 
     fn gen_non_equi_expr(&mut self, available_join_on_columns: Vec<(Column, Column)>) -> Expr {
