@@ -34,7 +34,7 @@
         ├─StreamProject { exprs: [t1.ts, t1.additional_time_to_live, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal))), 'UTC':Varchar) + ((t1.additional_time_to_live * 1.5:Decimal) - DateTrunc('day':Varchar, (t1.additional_time_to_live * 1.5:Decimal)))) as $expr1, t1._row_id] }
         | └─StreamTableScan { table: t1, columns: [t1.ts, t1.additional_time_to_live, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: Broadcast }
-          └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:15:00':Interval) as $expr2], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:15:00':Interval)] }
+          └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:15:00':Interval) as $expr2], output_watermarks: [$expr2] }
             └─StreamNow { output: [now] }
 - name: Temporal filter fails without `now()` in lower bound
   sql: |-
@@ -51,8 +51,8 @@
       ├─StreamDynamicFilter { predicate: (t1.ts >= $expr1), output: [t1.ts, t1._row_id] }
       | ├─StreamTableScan { table: t1, columns: [t1.ts, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       | └─StreamExchange { dist: Broadcast }
-      |   └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval)] }
+      |   └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '02:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
       |     └─StreamNow { output: [now] }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval) as $expr2], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval)] }
+        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '01:00:00':Interval) as $expr2], output_watermarks: [$expr2] }
           └─StreamNow { output: [now] }

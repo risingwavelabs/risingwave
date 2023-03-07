@@ -16,12 +16,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
 use super::generic::GenericPlanRef;
 use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
+use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -40,18 +41,14 @@ impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamProject");
         let input = self.input();
-        let input_schema = input.schema();
         self.logical.fmt_fields_with_builder(&mut builder);
         if !self.watermark_derivations.is_empty() {
             builder.field(
-                "watermark_columns",
+                "output_watermarks",
                 &self
                     .watermark_derivations
                     .iter()
-                    .map(|(_, idx)| ExprDisplay {
-                        expr: &self.exprs()[*idx],
-                        input_schema,
-                    })
+                    .map(|(_, idx)| FieldDisplay(self.schema().fields.get(*idx).unwrap()))
                     .collect_vec(),
             );
         };
