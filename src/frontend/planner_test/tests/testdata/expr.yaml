@@ -442,7 +442,7 @@
     └─LogicalFilter { predicate: (t.v1 >= Now) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", output_watermarks: [t.v1] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
@@ -456,7 +456,7 @@
     └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", output_watermarks: [t.v1] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v1] }
     └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
@@ -467,7 +467,7 @@
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", output_watermarks: [t.v2] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v2] }
     └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id] }
       ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
@@ -485,7 +485,7 @@
     create table t (v1 timestamp with time zone, v2 int);
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |
-    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check", output_watermarks: [max(t.v1)] }
+    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check", watermark_columns: [max_time] }
     └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [max(t.v1), t.v2] }
       ├─StreamProject { exprs: [max(t.v1), t.v2] }
       | └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }

@@ -21,6 +21,7 @@ use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, FieldDisplay, 
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::Watermark;
 
 use super::derive::derive_columns;
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -256,12 +257,13 @@ impl fmt::Display for StreamMaterialize {
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
             let schema = self.schema();
+            let watermark_column_names = watermark_columns
+                .ones()
+                .map(|i| table.columns()[i].name_with_hidden())
+                .join(", ");
             builder.field(
-                "output_watermarks",
-                &watermark_columns
-                    .ones()
-                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-                    .collect_vec(),
+                "watermark_columns",
+                &format_args!("[{}]", watermark_column_names),
             );
         };
 
