@@ -4,7 +4,7 @@ ARCH = { source = "${CARGO_MAKE_RUST_TARGET_ARCH}", mapping = { x86_64 = "amd64"
 SYSTEM = "${OS}-${ARCH}"
 SYSTEM_AMD64 = "${OS}-amd64" # some components do not support darwin-arm64 for now, use amd64 for fallback
 PREFIX = "${PWD}/.risingwave"
-CONNECTOR_NODE_DIR = "${PWD}/connector_node"
+JAVA_DIR = "${PWD}/java"
 PREFIX_USR_BIN = "${PWD}/.bin"
 PREFIX_BIN = "${PREFIX}/bin"
 PREFIX_CONFIG = "${PREFIX}/config"

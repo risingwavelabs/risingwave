@@ -3,7 +3,7 @@ description = "Generate the java binding C header file"
 script = '''
 #!/usr/bin/env bash
 set -ex
-cd src/java_binding/java
+cd java
 javac -h . -cp java-binding/src/main/java/ java-binding/src/main/java/com/risingwave/java/binding/Binding.java
 '''
 
@@ -20,8 +20,8 @@ description = "Build the java binding java code"
 script = '''
 #!/usr/bin/env bash
 set -ex
-cd src/java_binding/java
-mvn clean install
+cd java
+mvn clean install --pl java-binding-integration-test --am -DskipTests=true
 '''
 
 [tasks.start-java-binding-demo-cluster]
@@ -55,7 +55,7 @@ script = '''
 set -ex
 
 export RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
-export JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
+export RUST_JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
 export TABLE_NAME=java_binding_demo
 export DB_NAME=dev
 # Below variables are determined by risedev.
@@ -64,7 +64,7 @@ export OBJECT_STORE=minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
 export META_ADDR=127.0.0.1:5690
 export DATA_DIR=hummock_001
 
-bash ${JAVA_BINDING_ROOT}/run_demo.sh
+bash ${RUST_JAVA_BINDING_ROOT}/run_demo.sh
 '''
 
 [tasks.run-java-binding-demo]
