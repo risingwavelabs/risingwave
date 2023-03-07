@@ -87,7 +87,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             .iter_with_pk_range(
                 &(start, end),
                 VirtualNode::ZERO,
-                PrefetchOptions::new_for_exhaust_iter(true),
+                PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
 

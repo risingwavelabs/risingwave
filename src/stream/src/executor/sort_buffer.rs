@@ -99,7 +99,7 @@ impl<S: StateStore> SortBuffer<S> {
                 state_table.iter_with_pk_range(
                     &pk_range,
                     vnode,
-                    PrefetchOptions::new_for_exhaust_iter(true),
+                    PrefetchOptions::new_for_exhaust_iter(),
                 )
             })
             .buffer_unordered(10)

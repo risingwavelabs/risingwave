@@ -269,7 +269,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                     ),
                     owned_vnode,
-                    PrefetchOptions::new_for_exhaust_iter(true),
+                    PrefetchOptions::new_for_exhaust_iter(),
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);

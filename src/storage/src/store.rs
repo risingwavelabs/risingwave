@@ -322,8 +322,8 @@ pub struct PrefetchOptions {
 }
 
 impl PrefetchOptions {
-    pub fn new_for_exhaust_iter(exhaust_iter: bool) -> Self {
-        Self { exhaust_iter }
+    pub fn new_for_exhaust_iter() -> Self {
+        Self { exhaust_iter: true }
     }
 }
 

@@ -959,7 +959,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -983,7 +983,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -1005,7 +1005,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: Some(1),
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -1047,7 +1047,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -1071,7 +1071,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: None,
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -1095,7 +1095,7 @@ async fn test_iter_with_min_epoch() {
                         retention_seconds: Some(1),
                         prefix_hint: None,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -1218,7 +1218,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1248,7 +1248,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1278,7 +1278,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: Some(1),
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1350,7 +1350,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1389,7 +1389,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1428,7 +1428,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: Some(1),
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1467,7 +1467,7 @@ async fn test_hummock_version_reader() {
                             retention_seconds: None,
                             prefix_hint: None,
                             read_version_from_backup: false,
-                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                            prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                         },
                         read_snapshot,
                     )
@@ -1512,7 +1512,7 @@ async fn test_hummock_version_reader() {
                                 retention_seconds: None,
                                 prefix_hint: None,
                                 read_version_from_backup: false,
-                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             },
                             read_snapshot,
                         )
@@ -1551,7 +1551,7 @@ async fn test_hummock_version_reader() {
                                 retention_seconds: None,
                                 prefix_hint: None,
                                 read_version_from_backup: false,
-                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                             },
                             read_snapshot,
                         )

@@ -398,7 +398,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             let table_iter = self
                 .state
                 .table
-                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter(true))
+                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
                 .await?;
 
             #[for_await]

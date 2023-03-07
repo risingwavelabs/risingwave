@@ -37,7 +37,7 @@ pub async fn list_kv(context: &CtlContext, epoch: u64, table_id: u32) -> anyhow:
                     table_id: TableId { table_id },
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await?

@@ -418,7 +418,7 @@ impl NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -450,7 +450,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
-                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await

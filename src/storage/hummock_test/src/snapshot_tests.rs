@@ -45,7 +45,7 @@ macro_rules! assert_count_range_scan {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await

@@ -804,7 +804,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await
@@ -986,7 +986,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await
@@ -1170,7 +1170,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
-                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(true),
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await

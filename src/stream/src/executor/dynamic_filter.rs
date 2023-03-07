@@ -393,7 +393,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                                 .iter_with_pk_range(
                                     &range,
                                     vnode,
-                                    PrefetchOptions::new_for_exhaust_iter(true),
+                                    PrefetchOptions::new_for_exhaust_iter(),
                                 )
                                 .await?;
                             pin_mut!(row_stream);

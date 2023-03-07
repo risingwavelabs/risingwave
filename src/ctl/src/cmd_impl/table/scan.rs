@@ -118,7 +118,7 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
         .batch_iter(
             HummockReadEpoch::Committed(read_epoch),
             true,
-            PrefetchOptions::new_for_exhaust_iter(true),
+            PrefetchOptions::new_for_exhaust_iter(),
         )
         .await?;
     pin_mut!(stream);

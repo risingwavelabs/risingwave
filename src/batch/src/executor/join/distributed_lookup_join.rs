@@ -400,7 +400,7 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
                     &pk_prefix,
                     ..,
                     false,
-                    PrefetchOptions::new_for_exhaust_iter(true),
+                    PrefetchOptions::new_for_exhaust_iter(),
                 )
                 .await?;
 

@@ -1000,7 +1000,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter(true))
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1117,7 +1117,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter(true))
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1229,7 +1229,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter(PrefetchOptions::new_for_exhaust_iter(true))
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
