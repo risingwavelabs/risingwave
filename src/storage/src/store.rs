@@ -132,8 +132,11 @@ impl<S: StateStoreRead> StateStoreReadExt for S {
         key_range: IterKeyRange,
         epoch: u64,
         limit: Option<usize>,
-        read_options: ReadOptions,
+        mut read_options: ReadOptions,
     ) -> Self::ScanFuture<'_> {
+        if limit.is_some() {
+            read_options.prefetch_options.exhaust_iter = false;
+        }
         let limit = limit.unwrap_or(usize::MAX);
         async move {
             self.iter(key_range, epoch, read_options)
@@ -309,6 +312,21 @@ pub trait LocalStateStore: StaticSendSync {
     ) -> Self::MayExistFuture<'_>;
 }
 
+/// If `exhaust_iter` is true, prefetch will be enabled. Prefetching may increase the memory
+/// footprint of the CN process because the prefetched blocks cannot be evicted.
+#[derive(Default, Clone, Copy)]
+pub struct PrefetchOptions {
+    /// `exhaust_iter` is set `true` only if the return value of `iter()` will definitely be
+    /// exhausted, i.e., will iterate until end.
+    pub exhaust_iter: bool,
+}
+
+impl PrefetchOptions {
+    pub fn new_for_exhaust_iter() -> Self {
+        Self { exhaust_iter: true }
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct ReadOptions {
     /// A hint for prefix key to check bloom filter.
@@ -316,6 +334,7 @@ pub struct ReadOptions {
     /// `key` or `key_range` in the read API.
     pub prefix_hint: Option<Bytes>,
     pub ignore_range_tombstone: bool,
+    pub prefetch_options: PrefetchOptions,
 
     pub retention_seconds: Option<u32>,
     pub table_id: TableId,

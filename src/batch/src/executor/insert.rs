@@ -353,6 +353,7 @@ mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;

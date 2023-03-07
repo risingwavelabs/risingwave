@@ -46,6 +46,7 @@ async fn test_empty_read_v2() {
                 retention_seconds: None,
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -61,6 +62,7 @@ async fn test_empty_read_v2() {
                 retention_seconds: None,
                 table_id: TableId { table_id: 2333 },
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -158,6 +160,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -175,6 +178,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -194,6 +198,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -228,6 +233,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -263,6 +269,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -281,6 +288,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -299,6 +307,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
@@ -318,6 +327,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -337,6 +347,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -355,6 +366,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
@@ -374,6 +386,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
@@ -401,6 +414,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -418,6 +432,7 @@ async fn test_basic_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -599,6 +614,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -618,6 +634,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -651,6 +668,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -670,6 +688,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
@@ -689,6 +708,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -708,6 +728,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -726,6 +747,7 @@ async fn test_reload_storage() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
@@ -765,6 +787,7 @@ async fn test_write_anytime_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -784,6 +807,7 @@ async fn test_write_anytime_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -803,6 +827,7 @@ async fn test_write_anytime_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -824,6 +849,7 @@ async fn test_write_anytime_inner(
                         table_id: Default::default(),
                         retention_seconds: None,
                         read_version_from_backup: false,
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -893,6 +919,7 @@ async fn test_write_anytime_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -911,6 +938,7 @@ async fn test_write_anytime_inner(
                         table_id: Default::default(),
                         retention_seconds: None,
                         read_version_from_backup: false,
+                        prefetch_options: Default::default(),
                     }
                 )
                 .await
@@ -929,6 +957,7 @@ async fn test_write_anytime_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -949,6 +978,7 @@ async fn test_write_anytime_inner(
                         table_id: Default::default(),
                         retention_seconds: None,
                         read_version_from_backup: false,
+                        prefetch_options: Default::default(),
                     },
                 )
                 .await
@@ -1105,6 +1135,7 @@ async fn test_delete_get_inner(
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             }
         )
         .await
@@ -1191,6 +1222,7 @@ async fn test_multiple_epoch_sync_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
@@ -1209,6 +1241,7 @@ async fn test_multiple_epoch_sync_inner(
                         table_id: Default::default(),
                         retention_seconds: None,
                         read_version_from_backup: false,
+                        prefetch_options: Default::default(),
                     }
                 )
                 .await
@@ -1226,6 +1259,7 @@ async fn test_multiple_epoch_sync_inner(
                             table_id: Default::default(),
                             retention_seconds: None,
                             read_version_from_backup: false,
+                            prefetch_options: Default::default(),
                         }
                     )
                     .await
