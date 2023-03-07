@@ -19,7 +19,8 @@ use std::time::Duration;
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
-use risingwave_common::telemetry::report::start_telemetry_reporting;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -112,8 +113,10 @@ pub async fn compactor_serve(
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
-    let compactor_observer_node =
-        CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_params_manager);
+    let compactor_observer_node = CompactorObserverNode::new(
+        filter_key_extractor_manager.clone(),
+        system_params_manager.clone(),
+    );
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
@@ -164,11 +167,16 @@ pub async fn compactor_serve(
         ),
     ];
 
-    if config.server.telemetry_enabled {
-        sub_tasks.push(start_telemetry_reporting(
-            meta_client.clone(),
-            CompactorTelemetryCreator::new(),
-        ))
+    let telemetry_manager = TelemetryManager::new(
+        system_params_manager.watch_params(),
+        Arc::new(meta_client.clone()),
+        Arc::new(CompactorTelemetryCreator::new()),
+    );
+    // if the toml config file or env variable disables telemetry, do not watch system params change
+    // because if any of configs disable telemetry, we should never start it
+    if config.server.telemetry_enabled && !telemetry_env_enabled() {
+        telemetry_manager.start_telemetry_reporting();
+        sub_tasks.push(telemetry_manager.watch_params_change());
     } else {
         tracing::info!("Telemetry didn't start due to config");
     }

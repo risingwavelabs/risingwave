@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use anyhow::Result;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -40,18 +42,16 @@ pub trait TelemetryReportCreator {
 }
 
 pub fn start_telemetry_reporting<F, I>(
-    info_fetcher: I,
-    report_creator: F,
+    info_fetcher: Arc<I>,
+    report_creator: Arc<F>,
 ) -> (JoinHandle<()>, Sender<()>)
 where
-    F: TelemetryReportCreator,
-    I: TelemetryInfoFetcher,
-    F: Send + Copy + 'static,
-    I: Send + Sync + 'static,
+    F: TelemetryReportCreator + Send + Sync + 'static,
+    I: TelemetryInfoFetcher + Send + Sync + 'static,
 {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+
     let join_handle = tokio::spawn(async move {
-        let fetcher = info_fetcher;
         let begin_time = std::time::Instant::now();
         let session_id = Uuid::new_v4().to_string();
         let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
@@ -66,7 +66,7 @@ where
                 }
             }
             // fetch telemetry tracking_id and configs from the meta node
-            let (telemetry_enabled, tracking_id) = match fetcher.fetch_telemetry_info().await {
+            let (telemetry_enabled, tracking_id) = match info_fetcher.fetch_telemetry_info().await {
                 Ok(resp) => resp,
                 Err(err) => {
                     tracing::error!("Telemetry failed to get tracking_id, err {}", err);

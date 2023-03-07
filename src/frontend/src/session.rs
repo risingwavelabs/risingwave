@@ -35,7 +35,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
-use risingwave_common::telemetry::report::start_telemetry_reporting;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
@@ -243,7 +244,7 @@ impl FrontendEnv {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
-            system_params_manager,
+            system_params_manager.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -265,10 +266,19 @@ impl FrontendEnv {
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
 
-        // start a telemetry reporting thread
-        if config.server.telemetry_enabled {
+        let telemetry_manager = TelemetryManager::new(
+            system_params_manager.watch_params(),
+            Arc::new(meta_client.clone()),
+            Arc::new(FrontendTelemetryCreator::new()),
+        );
+
+        // if the toml config file or env variable disables telemetry, do not watch system params
+        // change because if any of configs disable telemetry, we should never start it
+        if config.server.telemetry_enabled && !telemetry_env_enabled() {
+            telemetry_manager.start_telemetry_reporting();
             let (telemetry_join_handle, telemetry_shutdown_sender) =
-                start_telemetry_reporting(meta_client, FrontendTelemetryCreator::new());
+                telemetry_manager.watch_params_change();
+
             join_handles.push(telemetry_join_handle);
             shutdown_senders.push(telemetry_shutdown_sender);
         } else {
