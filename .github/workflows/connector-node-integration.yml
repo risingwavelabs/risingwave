@@ -3,10 +3,10 @@ name: Connector Node Integration tests
 on:
   push:
     branches: [main]
-    path: [connector_node/**, proto/**]
+    path: [java/**, proto/**]
   pull_request:
     branches: [main]
-    paths: [connector_node/**, proto/**]
+    paths: [java/**, proto/**]
 
 jobs:
   build:
@@ -22,8 +22,15 @@ jobs:
           cache: 'maven'
       - name: run integration tests
         run: |
-          cd connector_node
+          set -ex
+          
+          RISINGWAVE_ROOT=${PWD}
+          
+          echo "--- build connector node"
+          cd ${RISINGWAVE_ROOT}/java
           mvn --batch-mode --update-snapshots clean package  -DskipTests=true
+          
+          echo "--- install postgresql client"
           sudo apt install postgresql postgresql-contrib libpq-dev
           sudo systemctl start postgresql || sudo pg_ctlcluster 12 main start
           # disable password encryption
@@ -31,6 +38,7 @@ jobs:
           sudo -u postgres createdb test
           sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
           
+          echo "--- starting minio"
           echo "setting up minio"
           wget https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
           chmod +x minio
@@ -39,20 +47,23 @@ jobs:
           sleep 3
           wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
           chmod +x mc
-          ./mc config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+          MC_PATH=${PWD}/mc
+          ${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
 
-          echo "starting connector-node service"
-          cd assembly/target/
+          echo "--- starting connector-node service"
+          cd ${RISINGWAVE_ROOT}/java/connector-node/assembly/target/
           tar xvf risingwave-connector-1.0.0.tar.gz > /dev/null
           sh ./start-service.sh &
           sleep 3
           cd ../../
 
-          echo "running jdbc integration tests"
-          bash python-client/build-venv.sh
+        
+          echo "--- prepare integration tests"
+          cd ${RISINGWAVE_ROOT}/java/connector-node
+          pip3 install grpcio grpcio-tools psycopg2 psycopg2-binary pyspark
           cd python-client && bash gen-stub.sh
-          pip install pyspark
 
+          echo "--- running jdbc integration tests"
           if python3 integration_tests.py --file_sink; then
             echo "File sink test passed"
           else
@@ -77,7 +88,7 @@ jobs:
           echo "all jdbc tests passed"
           
           echo "running iceberg integration tests"
-          ./mc mb minio/bucket
+          ${MC_PATH} mb minio/bucket
           
           # test append-only mode
           cd python-client
@@ -104,12 +115,12 @@ jobs:
 
           # clean up minio
           cd ..
-          ./mc rm -r -force minio/bucket
-          ./mc rb minio/bucket
+          ${MC_PATH} rm -r -force minio/bucket
+          ${MC_PATH} rb minio/bucket
           echo "all iceberg tests passed"
           
           echo "running deltalake integration tests"
-          ./mc mb minio/bucket
+          ${MC_PATH} mb minio/bucket
           
           cd python-client
           # test append-only mode
@@ -124,7 +135,7 @@ jobs:
 
           # clean up minio
           cd ..
-          ./mc rm -r -force minio/bucket
-          ./mc rb minio/bucket
+          ${MC_PATH} rm -r -force minio/bucket
+          ${MC_PATH} rb minio/bucket
           echo "all deltalake tests passed"
           

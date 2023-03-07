@@ -49,6 +49,7 @@ use super::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
@@ -112,6 +113,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         ArrayToString => ArrayToStringExpression::try_from(prost).map(Expression::boxed),
+        ArrayDistinct => ArrayDistinctExpression::try_from(prost).map(Expression::boxed),
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         Now => build_now_expr(prost),
         Udf => UdfExpression::try_from(prost).map(Expression::boxed),

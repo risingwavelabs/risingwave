@@ -1177,3 +1177,21 @@ fn parse_incorrect_dollar_quoted_string() {
     let sql = "SELECT $$$";
     assert!(parse_sql_statements(sql).is_err());
 }
+
+#[test]
+fn parse_incorrect_single_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t 't1'";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT x 'x1‘ FROM t";
+    assert!(parse_sql_statements(sql).is_err());
+}
+
+#[test]
+fn parse_double_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t \"t1\"";
+    assert!(parse_sql_statements(sql).is_ok());
+
+    let sql = "SELECT x \"x1\" FROM t";
+    assert!(parse_sql_statements(sql).is_ok());
+}
