@@ -183,7 +183,7 @@ mod tests {
     fn get_test2_columns() -> Vec<SourceColumnDesc> {
         let descs = vec![
             SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
-            SourceColumnDesc::simple("O_BOOL", DataType::Int16, ColumnId::from(1)),
+            SourceColumnDesc::simple("O_BOOL", DataType::Boolean, ColumnId::from(1)),
             SourceColumnDesc::simple("O_TINY", DataType::Int16, ColumnId::from(2)),
             SourceColumnDesc::simple("O_INT", DataType::Int32, ColumnId::from(3)),
             SourceColumnDesc::simple("O_REAL", DataType::Float32, ColumnId::from(4)),
@@ -201,17 +201,15 @@ mod tests {
     }
 
     fn assert_json_eq(parse_result: &Option<ScalarImpl>, json_str: &str) {
-        if let Some(scalar_val) = parse_result {
-            if let ScalarImpl::Jsonb(json_val) = &scalar_val {
-                let mut json_string = String::new();
-                json_val
-                    .as_scalar_ref()
-                    .force_str(&mut json_string)
-                    .unwrap();
-                let val1: Value = serde_json::from_str(json_string.as_str()).unwrap();
-                let val2: Value = serde_json::from_str(json_str).unwrap();
-                assert_eq!(val1, val2);
-            }
+        if let Some(ScalarImpl::Jsonb(json_val)) = parse_result {
+            let mut json_string = String::new();
+            json_val
+                .as_scalar_ref()
+                .force_str(&mut json_string)
+                .unwrap();
+            let val1: Value = serde_json::from_str(json_string.as_str()).unwrap();
+            let val2: Value = serde_json::from_str(json_str).unwrap();
+            assert_eq!(val1, val2);
         }
     }
 
@@ -243,7 +241,7 @@ mod tests {
         let [(_op, row)]: [_; 1] = parse_one(parser, columns, data).await.try_into().unwrap();
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
-        assert!(row[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row[1].eq(&Some(ScalarImpl::Bool(true))));
         assert!(row[2].eq(&Some(ScalarImpl::Int16(-1))));
         assert!(row[3].eq(&Some(ScalarImpl::Int32(-1111))));
         assert!(row[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
@@ -251,7 +249,7 @@ mod tests {
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-            NaiveDate::from_ymd_opt(1000, 01, 01).unwrap()
+            NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
         assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
@@ -279,7 +277,7 @@ mod tests {
         assert_eq!(op, Op::Insert);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
-        assert!(row[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row[1].eq(&Some(ScalarImpl::Bool(true))));
         assert!(row[2].eq(&Some(ScalarImpl::Int16(-1))));
         assert!(row[3].eq(&Some(ScalarImpl::Int32(-1111))));
         assert!(row[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
@@ -287,7 +285,7 @@ mod tests {
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
         assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-            NaiveDate::from_ymd_opt(1000, 01, 01).unwrap()
+            NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
         assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
@@ -316,7 +314,7 @@ mod tests {
         assert_eq!(op, Op::Delete);
 
         assert!(row[0].eq(&Some(ScalarImpl::Int64(111))));
-        assert!(row[1].eq(&Some(ScalarImpl::Int16(0))));
+        assert!(row[1].eq(&Some(ScalarImpl::Bool(false))));
         assert!(row[2].eq(&Some(ScalarImpl::Int16(3))));
         assert!(row[3].eq(&Some(ScalarImpl::Int32(3333))));
         assert!(row[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
@@ -356,7 +354,7 @@ mod tests {
         assert_eq!(op2, Op::UpdateInsert);
 
         assert!(row1[0].eq(&Some(ScalarImpl::Int64(111))));
-        assert!(row1[1].eq(&Some(ScalarImpl::Int16(1))));
+        assert!(row1[1].eq(&Some(ScalarImpl::Bool(true))));
         assert!(row1[2].eq(&Some(ScalarImpl::Int16(-1))));
         assert!(row1[3].eq(&Some(ScalarImpl::Int32(-1111))));
         assert!(row1[4].eq(&Some(ScalarImpl::Float32((-11.11).into()))));
@@ -365,7 +363,7 @@ mod tests {
         assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
         assert!(
             row1[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
-                NaiveDate::from_ymd_opt(1000, 01, 01).unwrap()
+                NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
             ))))
         );
         assert!(
@@ -386,7 +384,7 @@ mod tests {
         assert_json_eq(&row1[12], "{\"k1\": \"v1\", \"k2\": 11}");
 
         assert!(row2[0].eq(&Some(ScalarImpl::Int64(111))));
-        assert!(row2[1].eq(&Some(ScalarImpl::Int16(0))));
+        assert!(row2[1].eq(&Some(ScalarImpl::Bool(false))));
         assert!(row2[2].eq(&Some(ScalarImpl::Int16(3))));
         assert!(row2[3].eq(&Some(ScalarImpl::Int32(3333))));
         assert!(row2[4].eq(&Some(ScalarImpl::Float32((33.33).into()))));
@@ -414,6 +412,76 @@ mod tests {
             ))))
         );
         assert_json_eq(&row2[12], "{\"k1\": \"v1_updated\", \"k2\": 33}");
+    }
+
+    #[tokio::test]
+    async fn test2_debezium_json_parser_overflow() {
+        let columns = vec![
+            SourceColumnDesc::simple("O_KEY", DataType::Int64, ColumnId::from(0)),
+            SourceColumnDesc::simple("O_BOOL", DataType::Boolean, ColumnId::from(1)),
+            SourceColumnDesc::simple("O_TINY", DataType::Int16, ColumnId::from(2)),
+            SourceColumnDesc::simple("O_INT", DataType::Int32, ColumnId::from(3)),
+            SourceColumnDesc::simple("O_REAL", DataType::Float32, ColumnId::from(4)),
+            SourceColumnDesc::simple("O_DOUBLE", DataType::Float64, ColumnId::from(5)),
+        ];
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
+        // i64 overflow
+        let data0 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":9223372036854775808,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data0, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected fail");
+        }
+        // bool incorrect value
+        let data1 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":2,"O_TINY":33,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data1, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected failed");
+        }
+        // i16 overflow
+        let data2 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":32768,"O_INT":444,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data2, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected to fail");
+        }
+        // i32 overflow
+        let data3 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":2147483648,"O_REAL":555.0,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data3, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected to fail");
+        }
+        // float32 overflow
+        let data4 = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_KEY"},{"type":"int16","optional":true,"field":"O_BOOL"},{"type":"int16","optional":true,"field":"O_TINY"},{"type":"int32","optional":true,"field":"O_INT"},{"type":"double","optional":true,"field":"O_REAL"},{"type":"double","optional":true,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_KEY":111,"O_BOOL":1,"O_TINY":33,"O_INT":444,"O_REAL":3.80282347E38,"O_DOUBLE":666.0},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678158055000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":637,"row":0,"thread":4,"query":null},"op":"c","ts_ms":1678158055464,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data4, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected to fail");
+        }
+        // float64 will cause debezium simd_json_parser to panic, therefore included in the next
+        // test case below
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn test2_debezium_json_parser_overflow_f64() {
+        let columns = vec![SourceColumnDesc::simple(
+            "O_DOUBLE",
+            DataType::Float64,
+            ColumnId::from(0),
+        )];
+        let parser = DebeziumJsonParser::new(columns.clone(), Default::default()).unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
+        let data = br#"{"schema":{"type":"struct","fields":[{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"before"},{"type":"struct","fields":[{"type":"int64","optional":false,"field":"O_DOUBLE"}],"optional":true,"name":"RW_CDC_test.orders.test.orders.Value","field":"after"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"version"},{"type":"string","optional":false,"field":"connector"},{"type":"string","optional":false,"field":"name"},{"type":"int64","optional":false,"field":"ts_ms"},{"type":"string","optional":true,"name":"io.debezium.data.Enum","version":1,"parameters":{"allowed":"true,last,false,incremental"},"default":"false","field":"snapshot"},{"type":"string","optional":false,"field":"db"},{"type":"string","optional":true,"field":"sequence"},{"type":"string","optional":true,"field":"table"},{"type":"int64","optional":false,"field":"server_id"},{"type":"string","optional":true,"field":"gtid"},{"type":"string","optional":false,"field":"file"},{"type":"int64","optional":false,"field":"pos"},{"type":"int32","optional":false,"field":"row"},{"type":"int64","optional":true,"field":"thread"},{"type":"string","optional":true,"field":"query"}],"optional":false,"name":"io.debezium.connector.mysql.Source","field":"source"},{"type":"string","optional":false,"field":"op"},{"type":"int64","optional":true,"field":"ts_ms"},{"type":"struct","fields":[{"type":"string","optional":false,"field":"id"},{"type":"int64","optional":false,"field":"total_order"},{"type":"int64","optional":false,"field":"data_collection_order"}],"optional":true,"field":"transaction"}],"optional":false,"name":"RW_CDC_test.orders.test.orders.Envelope"},"payload":{"before":null,"after":{"O_DOUBLE":1.797695E308},"source":{"version":"1.9.7.Final","connector":"mysql","name":"RW_CDC_test.orders","ts_ms":1678174483000,"snapshot":"false","db":"test","sequence":null,"table":"orders","server_id":223344,"gtid":null,"file":"mysql-bin.000003","pos":563,"row":0,"thread":3,"query":null},"op":"c","ts_ms":1678174483866,"transaction":null}}"#;
+        if let Err(e) = parser.parse_inner(data, builder.row_writer()).await {
+            println!("{:?}", e.to_string());
+        } else {
+            panic!("the test case is expected to fail");
+        }
     }
 
     #[tokio::test]

@@ -24,13 +24,21 @@ use risingwave_expr::vector_op::cast::{
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
-use crate::{ensure_i32, ensure_int, ensure_str};
+use crate::{ensure_i32, ensure_int, ensure_str, simd_json_ensure_float};
 
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
-    use crate::simd_json_ensure_float;
-
     let v = match dtype {
-        DataType::Boolean => v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into(),
+        DataType::Boolean => match v {
+            BorrowedValue::Static(StaticNode::Bool(_)) => {
+                v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into()
+            }
+            BorrowedValue::Static(StaticNode::I64(i)) => match i {
+                0i64 => ScalarImpl::Bool(false),
+                1i64 => ScalarImpl::Bool(true),
+                _ => anyhow::bail!("expect bool, but found {v}"),
+            },
+            _ => anyhow::bail!("expect bool, but found {v}"),
+        },
         DataType::Int16 => ScalarImpl::Int16(
             ensure_int!(v, i16)
                 .try_into()
@@ -42,8 +50,24 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
                 .map_err(|e| anyhow!("expect i32: {}", e))?,
         ),
         DataType::Int64 => ensure_int!(v, i64).into(),
-        DataType::Float32 => ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into()),
-        DataType::Float64 => ScalarImpl::Float64((simd_json_ensure_float!(v, f64)).into()),
+        DataType::Float32 => {
+            let scalar_val = ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into());
+            if let ScalarImpl::Float32(f) = scalar_val {
+                if f.is_infinite() {
+                    anyhow::bail!("{v} is out of range for type f32");
+                }
+            }
+            scalar_val
+        }
+        DataType::Float64 => {
+            let scalar_val = ScalarImpl::Float64((simd_json_ensure_float!(v, f64)).into());
+            if let ScalarImpl::Float64(f) = scalar_val {
+                if f.is_infinite() {
+                    anyhow::bail!("{v} is out of range for type f64");
+                }
+            }
+            scalar_val
+        }
         // FIXME: decimal should have more precision than f64
         DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
