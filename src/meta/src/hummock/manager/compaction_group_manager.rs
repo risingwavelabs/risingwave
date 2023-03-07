@@ -26,10 +26,11 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::group_delta::DeltaType;
+use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
     CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
-    GroupMetaChange,
+    GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
 
@@ -422,6 +423,8 @@ impl<S: MetaStore> HummockManager<S> {
         &self,
         parent_group_id: CompactionGroupId,
         table_ids: &[StateTableId],
+        target_group_id: Option<CompactionGroupId>,
+        allow_split_by_table: bool,
     ) -> Result<CompactionGroupId> {
         if table_ids.is_empty() {
             return Ok(parent_group_id);
@@ -455,47 +458,84 @@ impl<S: MetaStore> HummockManager<S> {
             current_version.id + 1,
             build_version_delta_after_version(current_version),
         );
+        let target_compaction_group_id = match target_group_id {
+            Some(compaction_group_id) => {
+                match current_version.levels.get(&compaction_group_id) {
+                    Some(group) => {
+                        for table_id in &table_ids {
+                            if group.member_table_ids.contains(table_id) {
+                                return Err(Error::CompactionGroup(format!(
+                                    "table {} already exist in group {}",
+                                    *table_id, compaction_group_id,
+                                )));
+                            }
+                        }
+                    }
+                    None => {
+                        return Err(Error::CompactionGroup(format!(
+                            "target group {} does not exist",
+                            compaction_group_id,
+                        )));
+                    }
+                }
+                let group_deltas = &mut new_version_delta
+                    .group_deltas
+                    .entry(compaction_group_id)
+                    .or_default()
+                    .group_deltas;
+                group_deltas.push(GroupDelta {
+                    delta_type: Some(DeltaType::GroupTableChange(GroupTableChange {
+                        table_ids: table_ids.to_vec(),
+                        origin_group_id: parent_group_id,
+                        target_group_id: compaction_group_id,
+                        ..Default::default()
+                    })),
+                });
+                compaction_group_id
+            }
+            None => {
+                // All NewCompactionGroup pairs are mapped to one new compaction group.
+                let new_compaction_group_id = self
+                    .env
+                    .id_gen_manager()
+                    .generate::<{ IdCategory::CompactionGroup }>()
+                    .await?;
+                let mut config = self
+                    .compaction_group_manager
+                    .read()
+                    .await
+                    .get_default_compaction_group_config();
+                config.split_by_state_table = allow_split_by_table;
 
-        // Remove tables from parent group.
-        for table_id in &table_ids {
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(parent_group_id)
-                .or_default()
-                .group_deltas;
-            group_deltas.push(GroupDelta {
-                delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                    table_ids_remove: vec![*table_id],
-                    ..Default::default()
-                })),
-            });
-        }
+                new_version_delta.group_deltas.insert(
+                    new_compaction_group_id,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
+                                group_config: Some(config),
+                                group_id: new_compaction_group_id,
+                                parent_group_id,
+                                table_ids: table_ids.to_vec(),
+                                ..Default::default()
+                            })),
+                        }],
+                    },
+                );
 
-        // Add tables to new group.
-        let new_group_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::CompactionGroup }>()
-            .await?;
-        let group_deltas = &mut new_version_delta
-            .group_deltas
-            .entry(new_group_id)
-            .or_default()
-            .group_deltas;
-        let config = self
-            .get_compaction_group_config(new_group_id)
-            .await
-            .compaction_config
-            .as_ref()
-            .clone();
-        group_deltas.push(GroupDelta {
-            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                group_config: Some(config),
-                group_id: new_group_id,
-                parent_group_id,
-                table_ids,
-            })),
-        });
+                new_version_delta.group_deltas.insert(
+                    parent_group_id,
+                    GroupDeltas {
+                        group_deltas: vec![GroupDelta {
+                            delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
+                                table_ids_remove: table_ids.to_vec(),
+                                ..Default::default()
+                            })),
+                        }],
+                    },
+                );
+                new_compaction_group_id
+            }
+        };
 
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
@@ -515,15 +555,20 @@ impl<S: MetaStore> HummockManager<S> {
                         assert_eq!(*p + 1, divide_ver);
                         *p = divide_ver;
                     }
-                    entry.insert(new_group_id, divide_ver);
+                    entry.insert(target_compaction_group_id, divide_ver);
                 }
                 None => {
                     let to_insert: HashMap<CompactionGroupId, u64> = if is_trivial_adjust {
-                        [(new_group_id, divide_ver)].into_iter().collect()
-                    } else {
-                        [(parent_group_id, divide_ver), (new_group_id, divide_ver)]
+                        [(target_compaction_group_id, divide_ver)]
                             .into_iter()
                             .collect()
+                    } else {
+                        [
+                            (parent_group_id, divide_ver),
+                            (target_compaction_group_id, divide_ver),
+                        ]
+                        .into_iter()
+                        .collect()
                     };
                     branched_ssts.insert(id, to_insert);
                 }
@@ -532,8 +577,7 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
         self.notify_last_version_delta(versioning);
-
-        Ok(new_group_id)
+        Ok(target_compaction_group_id)
     }
 }
 
@@ -567,6 +611,10 @@ impl CompactionGroupManager {
             .unwrap_or_else(|| {
                 CompactionGroup::new(compaction_group_id, self.default_config.clone())
             })
+    }
+
+    fn get_default_compaction_group_config(&self) -> CompactionConfig {
+        self.default_config.clone()
     }
 
     async fn update_compaction_config<S: MetaStore>(

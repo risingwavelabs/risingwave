@@ -20,8 +20,8 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::{
-    CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, HummockVersion,
-    HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
+    CompactionConfig, GroupConstruct, GroupDestroy, GroupMetaChange, GroupTableChange,
+    HummockVersion, HummockVersionDelta, Level, LevelType, OverlappingLevel, SstableInfo,
 };
 
 use super::StateTableId;
@@ -38,6 +38,7 @@ pub struct GroupDeltasSummary {
     pub group_construct: Option<GroupConstruct>,
     pub group_destroy: Option<GroupDestroy>,
     pub group_meta_changes: Vec<GroupMetaChange>,
+    pub group_table_change: Option<GroupTableChange>,
 }
 
 pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary {
@@ -49,6 +50,8 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
     let mut group_construct = None;
     let mut group_destroy = None;
     let mut group_meta_changes = vec![];
+    let mut group_table_change = None;
+
     for group_delta in &group_deltas.group_deltas {
         match group_delta.get_delta_type().unwrap() {
             DeltaType::IntraLevel(intra_level) => {
@@ -73,6 +76,9 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
             DeltaType::GroupMetaChange(meta_delta) => {
                 group_meta_changes.push(meta_delta.clone());
             }
+            DeltaType::GroupTableChange(meta_delta) => {
+                group_table_change = Some(meta_delta.clone());
+            }
         }
     }
 
@@ -85,6 +91,7 @@ pub fn summarize_group_deltas(group_deltas: &GroupDeltas) -> GroupDeltasSummary 
         group_construct,
         group_destroy,
         group_meta_changes,
+        group_table_change,
     }
 }
 
@@ -318,7 +325,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                 sst_split_info.extend(self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
-                    &HashSet::from_iter(group_construct.get_table_ids().iter().cloned()),
+                    &HashSet::from_iter(group_construct.table_ids.clone()),
+                ));
+            } else if let Some(group_change) = &summary.group_table_change {
+                sst_split_info.extend(self.init_with_parent_group(
+                    group_change.origin_group_id,
+                    group_change.target_group_id,
+                    &HashSet::from_iter(group_change.table_ids.clone()),
                 ));
             }
             let has_destroy = summary.group_destroy.is_some();
