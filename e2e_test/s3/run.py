@@ -34,14 +34,15 @@ def do_test(config, N, n):
     ) ROW FORMAT json;''')
 
     total_row = int(N * n)
+    sleep(120)
     while True:
-        sleep(10)
+        sleep(60)
         cur.execute('select count(*) from s3_test')
         result = cur.fetchone()
         if result[0] == total_row:
             break
         print(
-            f"Now got {result[0]} rows in table, {total_row} expected, wait 10s")
+            f"Now got {result[0]} rows in table, {total_row} expected, wait 60s")
 
     cur.execute('select count(*), sum(id), sum(sex), sum(mark) from s3_test')
     result = cur.fetchone()
