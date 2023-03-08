@@ -344,7 +344,7 @@
         └─StreamHashJoin { type: Inner, predicate: window_start = window_start, output: all }
           ├─StreamExchange { dist: HashShard(window_start) }
           | └─StreamProject { exprs: [auction, count, window_start] }
-          |   └─StreamShare { id = 1064 }
+          |   └─StreamShare { id = 1068 }
           |     └─StreamProject { exprs: [auction, window_start, count] }
           |       └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
           |         └─StreamExchange { dist: HashShard(auction, window_start) }
@@ -357,7 +357,7 @@
             └─StreamHashAgg { group_key: [window_start], aggs: [count, max(count)] }
               └─StreamExchange { dist: HashShard(window_start) }
                 └─StreamProject { exprs: [auction, window_start, count] }
-                  └─StreamShare { id = 1064 }
+                  └─StreamShare { id = 1068 }
                     └─StreamProject { exprs: [auction, window_start, count] }
                       └─StreamAppendOnlyHashAgg { group_key: [auction, window_start], aggs: [count, count] }
                         └─StreamExchange { dist: HashShard(auction, window_start) }
