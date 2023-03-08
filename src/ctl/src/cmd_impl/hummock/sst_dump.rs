@@ -144,7 +144,7 @@ pub async fn sst_dump_via_sstable_store(
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
 
-    println!("Blocks:");
+    println!("SST Block Count: {}", sstable.block_count());
     for i in 0..sstable.block_count() {
         if let Some(block_id) = &args.block_id {
             if *block_id == i as u64 {
