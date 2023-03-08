@@ -138,11 +138,11 @@ impl LogicalHopWindow {
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
-    fn window_start_col_idx(&self) -> usize {
+    pub fn window_start_col_idx(&self) -> usize {
         self.input().schema().len()
     }
 
-    fn window_end_col_idx(&self) -> usize {
+    pub fn window_end_col_idx(&self) -> usize {
         self.window_start_col_idx() + 1
     }
 
@@ -156,7 +156,7 @@ impl LogicalHopWindow {
             .composite(&self.internal2output_col_mapping())
     }
 
-    fn internal_column_num(&self) -> usize {
+    pub fn internal_column_num(&self) -> usize {
         self.window_start_col_idx() + 2
     }
 
@@ -193,6 +193,10 @@ impl LogicalHopWindow {
         self.core.fmt_with_name(f, name)
     }
 
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
+    }
+
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
@@ -200,7 +204,7 @@ impl LogicalHopWindow {
     }
 
     /// Get output indices
-    fn output_indices(&self) -> &Vec<usize> {
+    pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
     }
 
