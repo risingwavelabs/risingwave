@@ -34,5 +34,8 @@ public class SinkValidationHandler {
                             .build());
             responseObserver.onCompleted();
         }
+        
+        responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+        responseObserver.onCompleted();
     }
 }

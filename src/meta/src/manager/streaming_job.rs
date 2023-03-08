@@ -155,4 +155,14 @@ impl StreamingJob {
             Self::Index(_, _) => None,
         }
     }
+
+    /// Returns the [`Sink`] if this is a `Sink` streaming job.
+    pub fn sink(&self) -> Option<&Sink> {
+        match self {
+            Self::MaterializedView(_) => None,
+            Self::Sink(sink) => Some(sink),
+            Self::Table(_, _) => None,
+            Self::Index(_, _) => None,
+        }
+    }
 }

@@ -27,7 +27,7 @@ use crate::manager::{
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
     StreamFragmentGraph,
 };
@@ -238,7 +238,11 @@ where
             internal_tables = ctx.internal_tables();
 
             if let Some(source) = stream_job.source() {
+                // Register the source on the connector node.
                 self.source_manager.register_source(source).await?;
+            } else if let Some(sink) = stream_job.sink() {
+                // Validate the sink on the connector node.
+                validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
             }
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
