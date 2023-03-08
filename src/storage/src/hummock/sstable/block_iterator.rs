@@ -12,11 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::{cmp::Ordering, ops::Deref};
 use std::ops::Range;
 
-use bytes::BytesMut;
-use risingwave_hummock_sdk::key::FullKey;
+use bytes::{BytesMut, Buf, BufMut};
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::key::{FullKey, UserKey, EPOCH_LEN, TableKey};
 use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
@@ -72,7 +73,13 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        FullKey::decode(&self.key)
+        let table_id = TableId::new(self.block.deref().table_id());
+        let epoch_pos = &self.key[..].len() - EPOCH_LEN;
+        let epoch = (&self.key[epoch_pos..]).get_u64();
+        let user_key = UserKey::new(table_id, TableKey(&self.key[..epoch_pos]));
+        let full_key = FullKey::from_user_key(user_key, epoch);
+
+        full_key
     }
 
     pub fn value(&self) -> &[u8] {
@@ -94,7 +101,8 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
+        let mut full_key_encoded: BufMut::default() ;
+        key.encode_into_without_table_id(&mut full_key_encoded);
         self.seek_restart_point_by_key(&full_key_encoded);
         self.next_until_key(&full_key_encoded);
     }

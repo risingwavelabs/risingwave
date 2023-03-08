@@ -37,6 +37,8 @@ pub struct Block {
     data_len: usize,
     /// Restart points.
     restart_points: Vec<u32>,
+
+    table_id: u32,
 }
 
 impl Block {
@@ -76,6 +78,7 @@ impl Block {
     }
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
+        let table_id = (&buf[..4]).get_u32_le();
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -89,6 +92,7 @@ impl Block {
             data: buf,
             data_len,
             restart_points,
+            table_id,
         }
     }
 
@@ -103,6 +107,10 @@ impl Block {
         self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>()
     }
 
+
+    pub fn table_id(&self) -> u32 {
+        self.table_id
+    }
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
         self.restart_points[index]
@@ -238,6 +246,8 @@ pub struct BlockBuilder {
     entry_count: usize,
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
+
+    table_id: Option<u32>,
 }
 
 impl BlockBuilder {
@@ -252,6 +262,7 @@ impl BlockBuilder {
             last_key: vec![],
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
+            table_id: None,
         }
     }
 
@@ -272,8 +283,11 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        if self.table_id.is_none(){
+            self.table_id = Some(full_key.user_key.table_id.table_id());
+        }
         let mut key: BytesMut = Default::default();
-        full_key.encode_into(&mut key);
+        full_key.encode_into_without_table_id(&mut key);
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
@@ -339,6 +353,7 @@ impl BlockBuilder {
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
+        self.buf.put_u32_le(self.table_id.unwrap());
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
