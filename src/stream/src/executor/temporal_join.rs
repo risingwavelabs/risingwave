@@ -19,8 +19,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::util::epoch::EpochPair;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
@@ -48,7 +47,7 @@ impl<S: StateStore> TemporalSide<S> {
     async fn lookup(
         &mut self,
         key: impl Row,
-        epoch: EpochPair,
+        epoch: HummockEpoch,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
         let key = key.into_owned_row();
         Ok(match self.cache.get(&key) {
@@ -56,7 +55,7 @@ impl<S: StateStore> TemporalSide<S> {
             None => {
                 let res = self
                     .source
-                    .get_row(key.clone(), HummockReadEpoch::NoWait(epoch.curr))
+                    .get_row(key.clone(), HummockReadEpoch::NoWait(epoch))
                     .await?;
                 self.cache.put(key, res.clone());
                 res
@@ -78,8 +77,8 @@ impl<S: StateStore> TemporalSide<S> {
 }
 
 enum InternalMessage {
-    Barrier(Vec<StreamChunk>, Barrier),
     Chunk(StreamChunk),
+    Barrier(Vec<StreamChunk>, Barrier),
 }
 
 #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
@@ -124,22 +123,22 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
                 Some(Either::Left(Ok(Message::Chunk(c)))) => left_chunks.push(c),
                 Some(Either::Right(Ok(Message::Chunk(c)))) => right_chunks.push(c),
                 Some(Either::Left(Ok(Message::Barrier(b)))) => {
+                    for chunk in left_chunks {
+                        yield InternalMessage::Chunk(chunk);
+                    }
                     let mut remain = chunks_until_barrier(right.by_ref(), b.clone())
                         .try_collect()
                         .await?;
                     right_chunks.append(&mut remain);
                     yield InternalMessage::Barrier(right_chunks, b);
-                    for chunk in left_chunks {
-                        yield InternalMessage::Chunk(chunk);
-                    }
                     break 'inner;
                 }
                 Some(Either::Right(Ok(Message::Barrier(b)))) => {
-                    yield InternalMessage::Barrier(right_chunks, b.clone());
                     #[for_await]
-                    for chunk in chunks_until_barrier(left.by_ref(), b) {
+                    for chunk in chunks_until_barrier(left.by_ref(), b.clone()) {
                         yield InternalMessage::Chunk(chunk?);
                     }
+                    yield InternalMessage::Barrier(right_chunks, b);
                     break 'inner;
                 }
                 Some(Either::Left(Err(e)) | Either::Right(Err(e))) => return Err(e),
@@ -161,15 +160,10 @@ impl<S: StateStore> TemporalJoinExecutor<S> {
             self.left.schema().len(),
             self.right_stream.schema().len(),
         );
-        let mut current_epoch = None;
+        let mut prev_epoch = None;
         #[for_await]
         for msg in align_input(self.left, self.right_stream) {
             match msg? {
-                InternalMessage::Barrier(updates, barrier) => {
-                    current_epoch = Some(barrier.epoch);
-                    self.right.update(updates, &self.right_join_keys);
-                    yield Message::Barrier(barrier)
-                }
                 InternalMessage::Chunk(chunk) => {
                     let mut builder = StreamChunkBuilder::new(
                         self.chunk_size,
@@ -177,7 +171,7 @@ impl<S: StateStore> TemporalJoinExecutor<S> {
                         left_map.clone(),
                         right_map.clone(),
                     );
-                    let epoch = current_epoch.expect("Stream data should come after some barrier.");
+                    let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
                     for (op, row) in chunk.rows() {
                         let key = row.project(&self.left_join_keys);
                         if let Some(right_row) = self.right.lookup(key, epoch).await? {
@@ -189,6 +183,11 @@ impl<S: StateStore> TemporalJoinExecutor<S> {
                     if let Some(chunk) = builder.take() {
                         yield Message::Chunk(chunk);
                     }
+                }
+                InternalMessage::Barrier(updates, barrier) => {
+                    prev_epoch = Some(barrier.epoch.curr);
+                    self.right.update(updates, &self.right_join_keys);
+                    yield Message::Barrier(barrier)
                 }
             }
         }
