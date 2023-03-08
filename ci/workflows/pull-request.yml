@@ -324,5 +324,5 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 5
+    timeout_in_minutes: 10
     retry: *auto-retry  
