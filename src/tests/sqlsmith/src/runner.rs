@@ -155,14 +155,15 @@ pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64
     tracing::info!("Set session variables");
 
     let base_tables = create_base_tables(testdata, client).await.unwrap();
-    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
-        .await
-        .unwrap();
-    tracing::info!("Created tables");
 
     let rows_per_table = 10;
     populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
+
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+    tracing::info!("Created tables");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
     test_sqlsmith(
