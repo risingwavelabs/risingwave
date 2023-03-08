@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { PbColumnOrder } from "./common";
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 import { ExprNode } from "./expr";
 import { ColumnCatalog, Field, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
@@ -165,7 +165,7 @@ export interface Sink {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  pk: PbColumnOrder[];
+  pk: ColumnOrder[];
   dependentRelations: number[];
   distributionKey: number[];
   /** pk_indices of the corresponding materialize operator's output. */
@@ -217,7 +217,7 @@ export interface Table {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  pk: PbColumnOrder[];
+  pk: ColumnOrder[];
   dependentRelations: number[];
   optionalAssociatedSourceId?: { $case: "associatedSourceId"; associatedSourceId: number };
   tableType: Table_TableType;
@@ -620,7 +620,7 @@ export const Sink = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
@@ -652,7 +652,7 @@ export const Sink = {
       obj.columns = [];
     }
     if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.pk = [];
     }
@@ -690,7 +690,7 @@ export const Sink = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
@@ -910,7 +910,7 @@ export const Table = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
@@ -961,7 +961,7 @@ export const Table = {
       obj.columns = [];
     }
     if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.pk = [];
     }
@@ -1025,7 +1025,7 @@ export const Table = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     if (
       object.optionalAssociatedSourceId?.$case === "associatedSourceId" &&

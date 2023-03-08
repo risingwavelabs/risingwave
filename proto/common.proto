@@ -76,27 +76,27 @@ message BatchQueryEpoch {
   }
 }
 
-enum PbDirection {
-  PB_DIRECTION_UNSPECIFIED = 0;
-  PB_DIRECTION_ASCENDING = 1;
-  PB_DIRECTION_DESCENDING = 2;
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_ASCENDING = 1;
+  DIRECTION_DESCENDING = 2;
 }
 
 // TODO(rc): enable `NULLS FIRST | LAST`
-// enum PbNullsAre {
-//   PB_NULLS_ARE_UNSPECIFIED = 0;
-//   PB_NULLS_ARE_SMALLEST = 1;
-//   PB_NULLS_ARE_LARGEST = 2;
+// enum NullsAre {
+//   NULLS_ARE_UNSPECIFIED = 0;
+//   NULLS_ARE_SMALLEST = 1;
+//   NULLS_ARE_LARGEST = 2;
 // }
 
-message PbOrderType {
-  PbDirection direction = 1;
+message OrderType {
+  Direction direction = 1;
   // TODO(rc): enable `NULLS FIRST | LAST`
-  // PbNullsAre nulls_are = 2;
+  // NullsAre nulls_are = 2;
 }
 
-// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated PbColumnOrder`).
-message PbColumnOrder {
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
+message ColumnOrder {
   uint32 column_index = 1;
-  PbOrderType order_type = 2;
+  OrderType order_type = 2;
 }

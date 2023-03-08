@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { PbColumnOrder } from "./common";
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 
 export const protobufPackage = "plan_common";
@@ -213,7 +213,7 @@ export interface StorageTableDesc {
   tableId: number;
   columns: ColumnDesc[];
   /** TODO: may refactor primary key representations */
-  pk: PbColumnOrder[];
+  pk: ColumnOrder[];
   distKeyIndices: number[];
   retentionSeconds: number;
   valueIndices: number[];
@@ -339,7 +339,7 @@ export const StorageTableDesc = {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnDesc.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
       valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
@@ -356,7 +356,7 @@ export const StorageTableDesc = {
       obj.columns = [];
     }
     if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.pk = [];
     }
@@ -379,7 +379,7 @@ export const StorageTableDesc = {
     const message = createBaseStorageTableDesc();
     message.tableId = object.tableId ?? 0;
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];

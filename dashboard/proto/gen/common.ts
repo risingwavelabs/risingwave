@@ -61,42 +61,42 @@ export function workerTypeToJSON(object: WorkerType): string {
   }
 }
 
-export const PbDirection = {
-  PB_DIRECTION_UNSPECIFIED: "PB_DIRECTION_UNSPECIFIED",
-  PB_DIRECTION_ASCENDING: "PB_DIRECTION_ASCENDING",
-  PB_DIRECTION_DESCENDING: "PB_DIRECTION_DESCENDING",
+export const Direction = {
+  DIRECTION_UNSPECIFIED: "DIRECTION_UNSPECIFIED",
+  DIRECTION_ASCENDING: "DIRECTION_ASCENDING",
+  DIRECTION_DESCENDING: "DIRECTION_DESCENDING",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
-export type PbDirection = typeof PbDirection[keyof typeof PbDirection];
+export type Direction = typeof Direction[keyof typeof Direction];
 
-export function pbDirectionFromJSON(object: any): PbDirection {
+export function directionFromJSON(object: any): Direction {
   switch (object) {
     case 0:
-    case "PB_DIRECTION_UNSPECIFIED":
-      return PbDirection.PB_DIRECTION_UNSPECIFIED;
+    case "DIRECTION_UNSPECIFIED":
+      return Direction.DIRECTION_UNSPECIFIED;
     case 1:
-    case "PB_DIRECTION_ASCENDING":
-      return PbDirection.PB_DIRECTION_ASCENDING;
+    case "DIRECTION_ASCENDING":
+      return Direction.DIRECTION_ASCENDING;
     case 2:
-    case "PB_DIRECTION_DESCENDING":
-      return PbDirection.PB_DIRECTION_DESCENDING;
+    case "DIRECTION_DESCENDING":
+      return Direction.DIRECTION_DESCENDING;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return PbDirection.UNRECOGNIZED;
+      return Direction.UNRECOGNIZED;
   }
 }
 
-export function pbDirectionToJSON(object: PbDirection): string {
+export function directionToJSON(object: Direction): string {
   switch (object) {
-    case PbDirection.PB_DIRECTION_UNSPECIFIED:
-      return "PB_DIRECTION_UNSPECIFIED";
-    case PbDirection.PB_DIRECTION_ASCENDING:
-      return "PB_DIRECTION_ASCENDING";
-    case PbDirection.PB_DIRECTION_DESCENDING:
-      return "PB_DIRECTION_DESCENDING";
-    case PbDirection.UNRECOGNIZED:
+    case Direction.DIRECTION_UNSPECIFIED:
+      return "DIRECTION_UNSPECIFIED";
+    case Direction.DIRECTION_ASCENDING:
+      return "DIRECTION_ASCENDING";
+    case Direction.DIRECTION_DESCENDING:
+      return "DIRECTION_DESCENDING";
+    case Direction.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -266,18 +266,18 @@ export interface BatchQueryEpoch {
   };
 }
 
-export interface PbOrderType {
+export interface OrderType {
   /**
    * TODO(rc): enable `NULLS FIRST | LAST`
-   * PbNullsAre nulls_are = 2;
+   * NullsAre nulls_are = 2;
    */
-  direction: PbDirection;
+  direction: Direction;
 }
 
-/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated PbColumnOrder`). */
-export interface PbColumnOrder {
+/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
+export interface ColumnOrder {
   columnIndex: number;
-  orderType: PbOrderType | undefined;
+  orderType: OrderType | undefined;
 }
 
 function createBaseStatus(): Status {
@@ -544,55 +544,55 @@ export const BatchQueryEpoch = {
   },
 };
 
-function createBasePbOrderType(): PbOrderType {
-  return { direction: PbDirection.PB_DIRECTION_UNSPECIFIED };
+function createBaseOrderType(): OrderType {
+  return { direction: Direction.DIRECTION_UNSPECIFIED };
 }
 
-export const PbOrderType = {
-  fromJSON(object: any): PbOrderType {
+export const OrderType = {
+  fromJSON(object: any): OrderType {
     return {
-      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PB_DIRECTION_UNSPECIFIED,
+      direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
     };
   },
 
-  toJSON(message: PbOrderType): unknown {
+  toJSON(message: OrderType): unknown {
     const obj: any = {};
-    message.direction !== undefined && (obj.direction = pbDirectionToJSON(message.direction));
+    message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<PbOrderType>, I>>(object: I): PbOrderType {
-    const message = createBasePbOrderType();
-    message.direction = object.direction ?? PbDirection.PB_DIRECTION_UNSPECIFIED;
+  fromPartial<I extends Exact<DeepPartial<OrderType>, I>>(object: I): OrderType {
+    const message = createBaseOrderType();
+    message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
     return message;
   },
 };
 
-function createBasePbColumnOrder(): PbColumnOrder {
+function createBaseColumnOrder(): ColumnOrder {
   return { columnIndex: 0, orderType: undefined };
 }
 
-export const PbColumnOrder = {
-  fromJSON(object: any): PbColumnOrder {
+export const ColumnOrder = {
+  fromJSON(object: any): ColumnOrder {
     return {
       columnIndex: isSet(object.columnIndex) ? Number(object.columnIndex) : 0,
-      orderType: isSet(object.orderType) ? PbOrderType.fromJSON(object.orderType) : undefined,
+      orderType: isSet(object.orderType) ? OrderType.fromJSON(object.orderType) : undefined,
     };
   },
 
-  toJSON(message: PbColumnOrder): unknown {
+  toJSON(message: ColumnOrder): unknown {
     const obj: any = {};
     message.columnIndex !== undefined && (obj.columnIndex = Math.round(message.columnIndex));
     message.orderType !== undefined &&
-      (obj.orderType = message.orderType ? PbOrderType.toJSON(message.orderType) : undefined);
+      (obj.orderType = message.orderType ? OrderType.toJSON(message.orderType) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<PbColumnOrder>, I>>(object: I): PbColumnOrder {
-    const message = createBasePbColumnOrder();
+  fromPartial<I extends Exact<DeepPartial<ColumnOrder>, I>>(object: I): ColumnOrder {
+    const message = createBaseColumnOrder();
     message.columnIndex = object.columnIndex ?? 0;
     message.orderType = (object.orderType !== undefined && object.orderType !== null)
-      ? PbOrderType.fromPartial(object.orderType)
+      ? OrderType.fromPartial(object.orderType)
       : undefined;
     return message;
   },

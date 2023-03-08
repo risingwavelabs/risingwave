@@ -228,7 +228,7 @@ message AggCall {
   repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  repeated common.PbColumnOrder order_by = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
 }
 

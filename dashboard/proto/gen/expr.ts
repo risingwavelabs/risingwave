@@ -1,5 +1,5 @@
 /* eslint-disable */
-import { PbColumnOrder } from "./common";
+import { ColumnOrder } from "./common";
 import { DataType, Datum } from "./data";
 
 export const protobufPackage = "expr";
@@ -741,7 +741,7 @@ export interface AggCall {
   args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
-  orderBy: PbColumnOrder[];
+  orderBy: ColumnOrder[];
   filter: ExprNode | undefined;
 }
 
@@ -1095,7 +1095,7 @@ export const AggCall = {
       args: Array.isArray(object?.args) ? object.args.map((e: any) => InputRef.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
-      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       filter: isSet(object.filter) ? ExprNode.fromJSON(object.filter) : undefined,
     };
   },
@@ -1112,7 +1112,7 @@ export const AggCall = {
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.distinct !== undefined && (obj.distinct = message.distinct);
     if (message.orderBy) {
-      obj.orderBy = message.orderBy.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.orderBy = [];
     }
@@ -1128,7 +1128,7 @@ export const AggCall = {
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.distinct = object.distinct ?? false;
-    message.orderBy = object.orderBy?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.filter = (object.filter !== undefined && object.filter !== null)
       ? ExprNode.fromPartial(object.filter)
       : undefined;

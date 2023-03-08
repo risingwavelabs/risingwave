@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
-import { Buffer, PbColumnOrder } from "./common";
+import { Buffer, ColumnOrder } from "./common";
 import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
 import {
@@ -408,7 +408,7 @@ export interface SinkDesc {
   name: string;
   definition: string;
   columns: ColumnDesc[];
-  pk: PbColumnOrder[];
+  pk: ColumnOrder[];
   streamKey: number[];
   distributionKey: number[];
   properties: { [key: string]: string };
@@ -451,7 +451,7 @@ export interface FilterNode {
 export interface MaterializeNode {
   tableId: number;
   /** Column indexes and orders of primary key. */
-  columnOrders: PbColumnOrder[];
+  columnOrders: ColumnOrder[];
   /** Used for internal table states. */
   table:
     | Table
@@ -534,7 +534,7 @@ export interface TopNNode {
   limit: number;
   offset: number;
   table: Table | undefined;
-  orderBy: PbColumnOrder[];
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -544,7 +544,7 @@ export interface GroupTopNNode {
   offset: number;
   groupKey: number[];
   table: Table | undefined;
-  orderBy: PbColumnOrder[];
+  orderBy: ColumnOrder[];
   withTies: boolean;
 }
 
@@ -707,7 +707,7 @@ export interface ArrangementInfo {
    * Order key of the arrangement, including order by columns and pk from the materialize
    * executor.
    */
-  arrangeKeyOrders: PbColumnOrder[];
+  arrangeKeyOrders: ColumnOrder[];
   /** Column descs of the arrangement */
   columnDescs: ColumnDesc[];
   /** Used to build storage table by stream lookup join of delta join. */
@@ -1919,7 +1919,7 @@ export const SinkDesc = {
       columns: Array.isArray(object?.columns)
         ? object.columns.map((e: any) => ColumnDesc.fromJSON(e))
         : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -1943,7 +1943,7 @@ export const SinkDesc = {
       obj.columns = [];
     }
     if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.pk = [];
     }
@@ -1973,7 +1973,7 @@ export const SinkDesc = {
     message.name = object.name ?? "";
     message.definition = object.definition ?? "";
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -2123,7 +2123,7 @@ export const MaterializeNode = {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => PbColumnOrder.fromJSON(e))
+        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
       handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
@@ -2136,7 +2136,7 @@ export const MaterializeNode = {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.columnOrders = [];
     }
@@ -2149,7 +2149,7 @@ export const MaterializeNode = {
   fromPartial<I extends Exact<DeepPartial<MaterializeNode>, I>>(object: I): MaterializeNode {
     const message = createBaseMaterializeNode();
     message.tableId = object.tableId ?? 0;
-    message.columnOrders = object.columnOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
@@ -2551,7 +2551,7 @@ export const TopNNode = {
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2562,7 +2562,7 @@ export const TopNNode = {
     message.offset !== undefined && (obj.offset = Math.round(message.offset));
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     if (message.orderBy) {
-      obj.orderBy = message.orderBy.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.orderBy = [];
     }
@@ -2575,7 +2575,7 @@ export const TopNNode = {
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderBy = object.orderBy?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
@@ -2592,7 +2592,7 @@ export const GroupTopNNode = {
       offset: isSet(object.offset) ? Number(object.offset) : 0,
       groupKey: Array.isArray(object?.groupKey) ? object.groupKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       withTies: isSet(object.withTies) ? Boolean(object.withTies) : false,
     };
   },
@@ -2608,7 +2608,7 @@ export const GroupTopNNode = {
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
     if (message.orderBy) {
-      obj.orderBy = message.orderBy.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.orderBy = [];
     }
@@ -2622,7 +2622,7 @@ export const GroupTopNNode = {
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.orderBy = object.orderBy?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.withTies = object.withTies ?? false;
     return message;
   },
@@ -3081,7 +3081,7 @@ export const ArrangementInfo = {
   fromJSON(object: any): ArrangementInfo {
     return {
       arrangeKeyOrders: Array.isArray(object?.arrangeKeyOrders)
-        ? object.arrangeKeyOrders.map((e: any) => PbColumnOrder.fromJSON(e))
+        ? object.arrangeKeyOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       columnDescs: Array.isArray(object?.columnDescs)
         ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e))
@@ -3093,7 +3093,7 @@ export const ArrangementInfo = {
   toJSON(message: ArrangementInfo): unknown {
     const obj: any = {};
     if (message.arrangeKeyOrders) {
-      obj.arrangeKeyOrders = message.arrangeKeyOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+      obj.arrangeKeyOrders = message.arrangeKeyOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
       obj.arrangeKeyOrders = [];
     }
@@ -3109,7 +3109,7 @@ export const ArrangementInfo = {
 
   fromPartial<I extends Exact<DeepPartial<ArrangementInfo>, I>>(object: I): ArrangementInfo {
     const message = createBaseArrangementInfo();
-    message.arrangeKeyOrders = object.arrangeKeyOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.arrangeKeyOrders = object.arrangeKeyOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)
