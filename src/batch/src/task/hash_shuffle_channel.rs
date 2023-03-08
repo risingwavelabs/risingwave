@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 use std::ops::BitAnd;
 use std::option::Option;
 
@@ -105,14 +104,10 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for HashShuffleSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
-
-    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
-        async move {
-            match chunk {
-                Some(c) => self.send_chunk(c).await,
-                None => self.send_done().await,
-            }
+    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
+        match chunk {
+            Some(c) => self.send_chunk(c).await,
+            None => self.send_done().await,
         }
     }
 }
@@ -150,15 +145,11 @@ impl HashShuffleSender {
 }
 
 impl ChanReceiver for HashShuffleReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
-
-    fn recv(&mut self) -> Self::RecvFuture<'_> {
-        async move {
-            match self.receiver.recv().await {
-                Some(data_chunk) => Ok(data_chunk),
-                // Early close should be treated as error.
-                None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
-            }
+    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
+        match self.receiver.recv().await {
+            Some(data_chunk) => Ok(data_chunk),
+            // Early close should be treated as error.
+            None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
         }
     }
 }
