@@ -75,10 +75,7 @@ export interface TelemetryInfoRequest {
 }
 
 export interface TelemetryInfoResponse {
-  trackingId: string;
-  telemetryEnabled: boolean;
-  /** set true if all nodes should kill its telemetry reporting */
-  shouldKillTelemetry: boolean;
+  trackingId?: string | undefined;
 }
 
 export interface HeartbeatRequest {
@@ -160,8 +157,8 @@ export function tableFragments_StateToJSON(object: TableFragments_State): string
 export interface TableFragments_ActorStatus {
   /** Current on which parallel unit */
   parallelUnit:
-  | ParallelUnit
-  | undefined;
+    | ParallelUnit
+    | undefined;
   /** Current state */
   state: TableFragments_ActorStatus_ActorState;
 }
@@ -241,7 +238,7 @@ export const TableFragments_Fragment_FragmentDistributionType = {
 
 export type TableFragments_Fragment_FragmentDistributionType =
   typeof TableFragments_Fragment_FragmentDistributionType[
-  keyof typeof TableFragments_Fragment_FragmentDistributionType
+    keyof typeof TableFragments_Fragment_FragmentDistributionType
   ];
 
 export function tableFragments_Fragment_FragmentDistributionTypeFromJSON(
@@ -433,22 +430,22 @@ export interface SubscribeResponse {
   operation: SubscribeResponse_Operation;
   version: number;
   info?:
-  | { $case: "database"; database: Database }
-  | { $case: "schema"; schema: Schema }
-  | { $case: "table"; table: Table }
-  | { $case: "source"; source: Source }
-  | { $case: "sink"; sink: Sink }
-  | { $case: "index"; index: Index }
-  | { $case: "view"; view: View }
-  | { $case: "function"; function: Function }
-  | { $case: "user"; user: UserInfo }
-  | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
-  | { $case: "node"; node: WorkerNode }
-  | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
-  | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
-  | { $case: "snapshot"; snapshot: MetaSnapshot }
-  | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId }
-  | { $case: "systemParams"; systemParams: SystemParams };
+    | { $case: "database"; database: Database }
+    | { $case: "schema"; schema: Schema }
+    | { $case: "table"; table: Table }
+    | { $case: "source"; source: Source }
+    | { $case: "sink"; sink: Sink }
+    | { $case: "index"; index: Index }
+    | { $case: "view"; view: View }
+    | { $case: "function"; function: Function }
+    | { $case: "user"; user: UserInfo }
+    | { $case: "parallelUnitMapping"; parallelUnitMapping: FragmentParallelUnitMapping }
+    | { $case: "node"; node: WorkerNode }
+    | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
+    | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
+    | { $case: "snapshot"; snapshot: MetaSnapshot }
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId }
+    | { $case: "systemParams"; systemParams: SystemParams };
 }
 
 export const SubscribeResponse_Operation = {
@@ -584,6 +581,7 @@ export interface SystemParams {
   dataDirectory?: string | undefined;
   backupStorageUrl?: string | undefined;
   backupStorageDirectory?: string | undefined;
+  telemetryEnabled?: boolean | undefined;
 }
 
 export interface GetSystemParamsRequest {
@@ -591,6 +589,15 @@ export interface GetSystemParamsRequest {
 
 export interface GetSystemParamsResponse {
   params: SystemParams | undefined;
+}
+
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
 }
 
 function createBaseTelemetryInfoRequest(): TelemetryInfoRequest {
@@ -614,43 +621,26 @@ export const TelemetryInfoRequest = {
 };
 
 function createBaseTelemetryInfoResponse(): TelemetryInfoResponse {
-  return { trackingId: "", telemetryEnabled: false, shouldKillTelemetry: false };
+  return { trackingId: undefined };
 }
 
 export const TelemetryInfoResponse = {
   fromJSON(object: any): TelemetryInfoResponse {
-    return {
-      trackingId: isSet(object.trackingId) ? String(object.trackingId) : "",
-      telemetryEnabled: isSet(object.telemetryEnabled) ? Boolean(object.telemetryEnabled) : false,
-      shouldKillTelemetry: isSet(object.shouldKillTelemetry) ? Boolean(object.shouldKillTelemetry) : false,
-    };
+    return { trackingId: isSet(object.trackingId) ? String(object.trackingId) : undefined };
   },
 
   toJSON(message: TelemetryInfoResponse): unknown {
     const obj: any = {};
     message.trackingId !== undefined && (obj.trackingId = message.trackingId);
-    message.telemetryEnabled !== undefined && (obj.telemetryEnabled = message.telemetryEnabled);
-    message.shouldKillTelemetry !== undefined && (obj.shouldKillTelemetry = message.shouldKillTelemetry);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<TelemetryInfoResponse>, I>>(object: I): TelemetryInfoResponse {
     const message = createBaseTelemetryInfoResponse();
-    message.trackingId = object.trackingId ?? "";
-    message.telemetryEnabled = object.telemetryEnabled ?? false;
-    message.shouldKillTelemetry = object.shouldKillTelemetry ?? false;
+    message.trackingId = object.trackingId ?? undefined;
     return message;
   },
 };
-
-export interface SetSystemParamRequest {
-  param: string;
-  /** None means set to default value. */
-  value?: string | undefined;
-}
-
-export interface SetSystemParamResponse {
-}
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
@@ -1900,45 +1890,45 @@ export const SubscribeResponse = {
       info: isSet(object.database)
         ? { $case: "database", database: Database.fromJSON(object.database) }
         : isSet(object.schema)
-          ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
-          : isSet(object.table)
-            ? { $case: "table", table: Table.fromJSON(object.table) }
-            : isSet(object.source)
-              ? { $case: "source", source: Source.fromJSON(object.source) }
-              : isSet(object.sink)
-                ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
-                : isSet(object.index)
-                  ? { $case: "index", index: Index.fromJSON(object.index) }
-                  : isSet(object.view)
-                    ? { $case: "view", view: View.fromJSON(object.view) }
-                    : isSet(object.function)
-                      ? { $case: "function", function: Function.fromJSON(object.function) }
-                      : isSet(object.user)
-                        ? { $case: "user", user: UserInfo.fromJSON(object.user) }
-                        : isSet(object.parallelUnitMapping)
-                          ? {
-                            $case: "parallelUnitMapping",
-                            parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
-                          }
-                          : isSet(object.node)
-                            ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
-                            : isSet(object.hummockSnapshot)
-                              ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
-                              : isSet(object.hummockVersionDeltas)
-                                ? {
-                                  $case: "hummockVersionDeltas",
-                                  hummockVersionDeltas: HummockVersionDeltas.fromJSON(object.hummockVersionDeltas),
-                                }
-                                : isSet(object.snapshot)
-                                  ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
-                                  : isSet(object.metaBackupManifestId)
-                                    ? {
-                                      $case: "metaBackupManifestId",
-                                      metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
-                                    }
-                                    : isSet(object.systemParams)
-                                      ? { $case: "systemParams", systemParams: SystemParams.fromJSON(object.systemParams) }
-                                      : undefined,
+        ? { $case: "schema", schema: Schema.fromJSON(object.schema) }
+        : isSet(object.table)
+        ? { $case: "table", table: Table.fromJSON(object.table) }
+        : isSet(object.source)
+        ? { $case: "source", source: Source.fromJSON(object.source) }
+        : isSet(object.sink)
+        ? { $case: "sink", sink: Sink.fromJSON(object.sink) }
+        : isSet(object.index)
+        ? { $case: "index", index: Index.fromJSON(object.index) }
+        : isSet(object.view)
+        ? { $case: "view", view: View.fromJSON(object.view) }
+        : isSet(object.function)
+        ? { $case: "function", function: Function.fromJSON(object.function) }
+        : isSet(object.user)
+        ? { $case: "user", user: UserInfo.fromJSON(object.user) }
+        : isSet(object.parallelUnitMapping)
+        ? {
+          $case: "parallelUnitMapping",
+          parallelUnitMapping: FragmentParallelUnitMapping.fromJSON(object.parallelUnitMapping),
+        }
+        : isSet(object.node)
+        ? { $case: "node", node: WorkerNode.fromJSON(object.node) }
+        : isSet(object.hummockSnapshot)
+        ? { $case: "hummockSnapshot", hummockSnapshot: HummockSnapshot.fromJSON(object.hummockSnapshot) }
+        : isSet(object.hummockVersionDeltas)
+        ? {
+          $case: "hummockVersionDeltas",
+          hummockVersionDeltas: HummockVersionDeltas.fromJSON(object.hummockVersionDeltas),
+        }
+        : isSet(object.snapshot)
+        ? { $case: "snapshot", snapshot: MetaSnapshot.fromJSON(object.snapshot) }
+        : isSet(object.metaBackupManifestId)
+        ? {
+          $case: "metaBackupManifestId",
+          metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
+        }
+        : isSet(object.systemParams)
+        ? { $case: "systemParams", systemParams: SystemParams.fromJSON(object.systemParams) }
+        : undefined,
     };
   },
 
@@ -2538,6 +2528,7 @@ function createBaseSystemParams(): SystemParams {
     dataDirectory: undefined,
     backupStorageUrl: undefined,
     backupStorageDirectory: undefined,
+    telemetryEnabled: undefined,
   };
 }
 
@@ -2553,6 +2544,7 @@ export const SystemParams = {
       dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
       backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
       backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+      telemetryEnabled: isSet(object.telemetryEnabled) ? Boolean(object.telemetryEnabled) : undefined,
     };
   },
 
@@ -2567,6 +2559,7 @@ export const SystemParams = {
     message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
     message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
     message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    message.telemetryEnabled !== undefined && (obj.telemetryEnabled = message.telemetryEnabled);
     return obj;
   },
 
@@ -2581,6 +2574,7 @@ export const SystemParams = {
     message.dataDirectory = object.dataDirectory ?? undefined;
     message.backupStorageUrl = object.backupStorageUrl ?? undefined;
     message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    message.telemetryEnabled = object.telemetryEnabled ?? undefined;
     return message;
   },
 };
