@@ -471,7 +471,9 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
-        Ok(StreamHopWindow::new(new_logical).into())
+        let (window_start_exprs, window_end_exprs) =
+            derive_window_start_and_end_exprs(&new_logical)?;
+        Ok(StreamHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 
     fn logical_rewrite_for_stream(

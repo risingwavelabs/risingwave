@@ -18,6 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -26,10 +27,16 @@ use crate::utils::ColIndexMappingRewriteExt;
 pub struct StreamHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
+    window_start_exprs: Vec<ExprImpl>,
+    window_end_exprs: Vec<ExprImpl>,
 }
 
 impl StreamHopWindow {
-    pub fn new(logical: LogicalHopWindow) -> Self {
+    pub fn new(
+        logical: LogicalHopWindow,
+        window_start_exprs: Vec<ExprImpl>,
+        window_end_exprs: Vec<ExprImpl>,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let input = logical.input();
@@ -54,7 +61,12 @@ impl StreamHopWindow {
             logical.input().append_only(),
             watermark_columns,
         );
-        Self { base, logical }
+        Self {
+            base,
+            logical,
+            window_start_exprs,
+            window_end_exprs,
+        }
     }
 }
 
@@ -70,7 +82,11 @@ impl PlanTreeNodeUnary for StreamHopWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(
+            self.logical.clone_with_input(input),
+            self.window_start_exprs.clone(),
+            self.window_end_exprs.clone(),
+        )
     }
 }
 
@@ -89,8 +105,41 @@ impl StreamNode for StreamHopWindow {
                 .iter()
                 .map(|&x| x as u32)
                 .collect(),
+            window_start_exprs: self
+                .window_start_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect(),
+            window_end_exprs: self
+                .window_end_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect(),
         })
     }
 }
 
-impl ExprRewritable for StreamHopWindow {}
+impl ExprRewritable for StreamHopWindow {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical.clone(),
+            self.window_start_exprs
+                .clone()
+                .into_iter()
+                .map(|e| r.rewrite_expr(e))
+                .collect(),
+            self.window_end_exprs
+                .clone()
+                .into_iter()
+                .map(|e| r.rewrite_expr(e))
+                .collect(),
+        )
+        .into()
+    }
+}
