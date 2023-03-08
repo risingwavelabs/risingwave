@@ -303,8 +303,9 @@ mod tests {
     use crate::hummock::iterator::test_utils::{
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
-        iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch, iterator_test_user_key_of,
-        iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_bytes_key_of, iterator_test_bytes_key_of_epoch,
+        iterator_test_bytes_user_key_of, iterator_test_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
     use crate::hummock::iterator::UnorderedMergeIteratorInner;
     use crate::hummock::sstable::Sstable;
@@ -518,8 +519,8 @@ mod tests {
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
@@ -597,8 +598,8 @@ mod tests {
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
 
-        let begin_key = Excluded(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Excluded(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, end_key));
 
@@ -678,7 +679,7 @@ mod tests {
             sstable_store,
         )];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let end_key = Included(iterator_test_user_key_of(7));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (Unbounded, end_key));
 
@@ -757,7 +758,7 @@ mod tests {
 
         let backward_iters = vec![BackwardSstableIterator::new(handle, sstable_store)];
         let bmi = UnorderedMergeIteratorInner::new(backward_iters);
-        let begin_key = Included(iterator_test_user_key_of(2));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut bui = BackwardUserIterator::for_test(bmi, (begin_key, Unbounded));
 
@@ -833,20 +834,20 @@ mod tests {
     #[allow(clippy::mutable_key_type)]
     async fn chaos_test_case(
         sstable: Sstable,
-        start_bound: Bound<UserKey<Vec<u8>>>,
-        end_bound: Bound<UserKey<Vec<u8>>>,
+        start_bound: Bound<UserKey<Bytes>>,
+        end_bound: Bound<UserKey<Bytes>>,
         truth: &ChaosTestTruth,
         sstable_store: SstableStoreRef,
     ) {
         let start_key = match &start_bound {
             Bound::Included(b) => {
-                UserKey::for_test(b.table_id, prev_key(&b.table_key.clone())).into_bytes()
+                UserKey::for_test(b.table_id, Bytes::from(prev_key(&b.table_key.clone())))
             }
-            Bound::Excluded(b) => b.clone().into_bytes(),
+            Bound::Excluded(b) => b.clone(),
             Unbounded => key_from_num(0).into_bytes(),
         };
         let end_key = match &end_bound {
-            Bound::Included(b) => b.clone().into_bytes(),
+            Bound::Included(b) => b.clone(),
             Unbounded => key_from_num(999999999999).into_bytes(),
             _ => unimplemented!(),
         };
@@ -980,7 +981,7 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
             let begin_key_bytes = key_from_num(begin_key);
             chaos_test_case(
@@ -1003,7 +1004,7 @@ mod tests {
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
                 Included(begin_key_bytes.clone()),
@@ -1024,7 +1025,7 @@ mod tests {
             let end_key: usize = rng.gen_range(2..=prev_key_number);
             let end_key_bytes = key_from_num(end_key);
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
                 Excluded(begin_key_bytes.clone()),
@@ -1043,9 +1044,9 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
                 Included(begin_key_bytes.clone()),
@@ -1064,9 +1065,9 @@ mod tests {
         for _ in 0..repeat {
             let mut rng = thread_rng();
             let end_key: usize = rng.gen_range(2..=prev_key_number);
-            let end_key_bytes = key_from_num(end_key);
+            let end_key_bytes = key_from_num(end_key).into_bytes();
             let begin_key: usize = rng.gen_range(1..=end_key);
-            let begin_key_bytes = key_from_num(begin_key);
+            let begin_key_bytes = key_from_num(begin_key).into_bytes();
             chaos_test_case(
                 sst.clone(),
                 Excluded(begin_key_bytes),

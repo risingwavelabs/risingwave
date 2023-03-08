@@ -38,12 +38,7 @@ impl StateStoreRead for PanicStateStore {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        _key: &'a [u8],
-        _epoch: u64,
-        _read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, _key: Bytes, _epoch: u64, _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             panic!("should not read from the state store!");
         }
@@ -95,7 +90,7 @@ impl LocalStateStore for PanicStateStore {
         }
     }
 
-    fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, _key: Bytes, _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             panic!("should not operate on the panic state store!");
         }
