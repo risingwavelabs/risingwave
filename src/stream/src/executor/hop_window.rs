@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
 use risingwave_common::types::IntervalUnit;
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;

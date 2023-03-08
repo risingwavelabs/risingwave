@@ -135,25 +135,34 @@ insert into t1 values
     (11, 2, 2, '2022-01-04 10:14:00'),
     (12, 1, 1, '2022-01-05 10:22:00');
 
+statement ok
+flush;
+
+statement ok
+create materialized view mv_hop_agg_3 as
+select uid, sum(v) as sum_v, window_start
+from hop(t1, created_at, interval '1' day, interval '2' day)
+group by window_start, uid;
+
+
 # Test for interval day
 query IIT
-select * from mv_hop_agg_2 order by window_start, uid;
+select * from mv_hop_agg_3 order by window_start, uid;
 ----
-1 4 2022-01-01 09:45:00
-2 2 2022-01-01 09:45:00
-3 3 2022-01-01 09:45:00
-1 5 2022-01-01 10:00:00
-2 2 2022-01-01 10:00:00
-3 3 2022-01-01 10:00:00
-1 1 2022-01-01 10:15:00
-2 7 2022-01-01 10:15:00
-3 5 2022-01-01 10:15:00
-1 6 2022-01-01 10:30:00
-2 7 2022-01-01 10:30:00
-3 5 2022-01-01 10:30:00
-1 6 2022-01-01 10:45:00
-3 8 2022-01-01 10:45:00
-3 8 2022-01-01 11:00:00
+1 11 2021-12-31 00:00:00
+2 9 2021-12-31 00:00:00
+3 16 2021-12-31 00:00:00
+1 15 2022-01-01 00:00:00
+2 9 2022-01-01 00:00:00
+3 16 2022-01-01 00:00:00
+1 4 2022-01-02 00:00:00
+3 3 2022-01-02 00:00:00
+2 2 2022-01-03 00:00:00
+3 3 2022-01-03 00:00:00
+1 1 2022-01-04 00:00:00
+2 2 2022-01-04 00:00:00
+1 1 2022-01-05 00:00:00
+
 
 statement ok
 drop materialized view mv_tumble;
@@ -172,6 +181,9 @@ drop materialized view mv_hop_agg_1;
 
 statement ok
 drop materialized view mv_hop_agg_2;
+
+statement ok
+drop materialized view mv_hop_agg_3;
 
 statement error
 create materialized view invalid_hop as
