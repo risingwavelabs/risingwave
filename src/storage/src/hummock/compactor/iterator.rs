@@ -81,7 +81,7 @@ impl SstableStreamIterator {
     /// key >= `seek_key`. If that block does not contain such a KV-pair, the iterator continues to
     /// the first KV-pair of the next block. If `seek_key` is not given, the iterator will move to
     /// the very first KV-pair of the stream's first block.
-    pub async fn seek(&mut self, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    pub async fn seek(&mut self, seek_key: Option<FullKey<&[u8]>>) -> HummockResult<()> {
         // Load first block.
         self.next_block().await?;
 
@@ -156,7 +156,7 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    fn key(&self) -> &[u8] {
+    fn key(&self) -> FullKey<&[u8]> {
         self.block_iter
             .as_ref()
             .unwrap_or_else(|| panic!("no block iter sstinfo={}", self.sst_debug_info()))
@@ -225,18 +225,25 @@ impl ConcatSstableIterator {
     }
 
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: usize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         self.sstable_iter.take();
-        let seek_key: Option<&[u8]> = match (seek_key, self.key_range.left.is_empty()) {
+        let seek_key: Option<FullKey<&[u8]>> = match (seek_key, self.key_range.left.is_empty()) {
             (Some(seek_key), false) => {
-                match KeyComparator::compare_encoded_full_key(seek_key, &self.key_range.left) {
-                    Ordering::Less | Ordering::Equal => Some(&self.key_range.left),
+                match KeyComparator::compare_encoded_full_key(
+                    &seek_key.encode(),
+                    &self.key_range.left,
+                ) {
+                    Ordering::Less | Ordering::Equal => Some(FullKey::decode(&self.key_range.left)),
                     Ordering::Greater => Some(seek_key),
                 }
             }
             (Some(seek_key), true) => Some(seek_key),
             (None, true) => None,
-            (None, false) => Some(&self.key_range.left),
+            (None, false) => Some(FullKey::decode(&self.key_range.left)),
         };
 
         if idx < self.tables.len() {
@@ -252,8 +259,10 @@ impl ConcatSstableIterator {
                     // start_index points to the greatest block whose smallest_key <= seek_key.
                     block_metas
                         .partition_point(|block| {
-                            KeyComparator::compare_encoded_full_key(&block.smallest_key, seek_key)
-                                != Ordering::Greater
+                            KeyComparator::compare_encoded_full_key(
+                                &block.smallest_key,
+                                &seek_key.encode(),
+                            ) != Ordering::Greater
                         })
                         .saturating_sub(1)
                 }
@@ -323,7 +332,7 @@ impl HummockIterator for ConcatSstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.sstable_iter.as_ref().expect("no table iter").key())
+        self.sstable_iter.as_ref().expect("no table iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -362,7 +371,7 @@ impl HummockIterator for ConcatSstableIterator {
                 KeyComparator::compare_encoded_full_key(max_sst_key, seek_key) == Ordering::Less
             });
 
-            self.seek_idx(table_idx, Some(key_slice)).await
+            self.seek_idx(table_idx, Some(key)).await
         }
     }
 
@@ -521,20 +530,22 @@ mod tests {
         let block_2_smallest_key = block_metas[2].smallest_key.clone();
         // Use block_1_smallest_key as seek key and result in the first KV of block 1.
         let seek_key = block_1_smallest_key.clone();
-        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
+            .await
+            .unwrap();
         assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         // Use prev_full_key(block_1_smallest_key) as seek key and result in the first KV of block
         // 1.
         let seek_key = prev_full_key(block_1_smallest_key.as_slice());
-        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
+            .await
+            .unwrap();
         assert!(iter.is_valid() && iter.key() == FullKey::decode(block_1_smallest_key.as_slice()));
         iter.next().await.unwrap();
         let block_1_second_key = iter.key().to_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
-        iter.seek_idx(0, Some(seek_key.encode().as_slice()))
-            .await
-            .unwrap();
+        iter.seek_idx(0, Some(seek_key.to_ref())).await.unwrap();
         assert!(!iter.is_valid());
 
         // Test seek_idx. Result is dominated by key range rather than given seek key.
@@ -547,11 +558,15 @@ mod tests {
         // Use block_2_smallest_key as seek key and result in invalid iterator.
         let seek_key = block_2_smallest_key.clone();
         assert!(KeyComparator::compare_encoded_full_key(&seek_key, &kr.right) == Ordering::Greater);
-        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
+            .await
+            .unwrap();
         assert!(!iter.is_valid());
         // Use a small enough seek key and result in the second KV of block 1.
         let seek_key = test_key_of(0).encode();
-        iter.seek_idx(0, Some(seek_key.as_slice())).await.unwrap();
+        iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
+            .await
+            .unwrap();
         assert!(iter.is_valid());
         assert_eq!(iter.key(), block_1_second_key.to_ref());
         // Use None seek key and result in the second KV of block 1.

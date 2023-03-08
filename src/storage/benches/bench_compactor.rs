@@ -102,7 +102,11 @@ async fn build_table(
         let end = start + 8;
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
-            .add(&full_key, HummockValue::put(&value[start..end]), true)
+            .add(
+                full_key.to_ref(),
+                HummockValue::put(&value[start..end]),
+                true,
+            )
             .await
             .unwrap();
     }

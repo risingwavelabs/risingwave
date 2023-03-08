@@ -149,7 +149,7 @@ fn print_kv_pairs(
 
     while block_iter.is_valid() {
         let raw_full_key = block_iter.key();
-        let full_key = FullKey::decode(block_iter.key());
+        let full_key = block_iter.key();
         let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();

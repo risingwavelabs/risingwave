@@ -189,7 +189,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// Add kv pair to sstable.
     pub async fn add(
         &mut self,
-        full_key: &FullKey<impl AsRef<[u8]>>,
+        full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
@@ -252,8 +252,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             })
         }
 
-        self.block_builder
-            .add(self.raw_key.as_ref(), self.raw_value.as_ref());
+        self.block_builder.add(full_key, self.raw_value.as_ref());
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
 
@@ -526,9 +525,13 @@ pub(super) mod tests {
         let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opt), opt);
 
         for i in 0..TEST_KEYS_COUNT {
-            b.add(&test_key_of(i), HummockValue::put(&test_value_of(i)), true)
-                .await
-                .unwrap();
+            b.add(
+                test_key_of(i).to_ref(),
+                HummockValue::put(&test_value_of(i)),
+                true,
+            )
+            .await
+            .unwrap();
         }
 
         let output = b.finish().await.unwrap();

@@ -154,7 +154,7 @@ where
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value, is_new_user_key).await
+        builder.add(*full_key, value, is_new_user_key).await
     }
 
     /// Marks the current builder as sealed. Next call of `add` will always create a new table.
