@@ -108,7 +108,7 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.s
 # start cluster w/o clean-data
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for recovery finish"
-sleep 10
+sleep 20
 echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'

@@ -1,8 +1,8 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo } from "./catalog";
+import { StreamSourceInfo } from "./catalog";
 import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
-import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
+import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
@@ -108,7 +108,7 @@ export interface InsertNode {
    * The `BatchInsertExecutor` should add a column with NULL value which will
    * be filled in streaming.
    */
-  rowIdIndex: ColumnIndex | undefined;
+  rowIdIndex?: number | undefined;
   returning: boolean;
 }
 
@@ -212,7 +212,7 @@ export interface SortMergeJoinNode {
 }
 
 export interface HopWindowNode {
-  timeCol: InputRefExpr | undefined;
+  timeCol: number;
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
@@ -757,7 +757,7 @@ export const InsertNode = {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
@@ -771,8 +771,7 @@ export const InsertNode = {
     } else {
       obj.columnIndices = [];
     }
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
@@ -782,9 +781,7 @@ export const InsertNode = {
     message.tableId = object.tableId ?? 0;
     message.tableVersionId = object.tableVersionId ?? 0;
     message.columnIndices = object.columnIndices?.map((e) => e) || [];
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.returning = object.returning ?? false;
     return message;
   },
@@ -1376,13 +1373,13 @@ export const SortMergeJoinNode = {
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: undefined, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return { timeCol: 0, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
 }
 
 export const HopWindowNode = {
   fromJSON(object: any): HopWindowNode {
     return {
-      timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
+      timeCol: isSet(object.timeCol) ? Number(object.timeCol) : 0,
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
@@ -1391,7 +1388,7 @@ export const HopWindowNode = {
 
   toJSON(message: HopWindowNode): unknown {
     const obj: any = {};
-    message.timeCol !== undefined && (obj.timeCol = message.timeCol ? InputRefExpr.toJSON(message.timeCol) : undefined);
+    message.timeCol !== undefined && (obj.timeCol = Math.round(message.timeCol));
     message.windowSlide !== undefined &&
       (obj.windowSlide = message.windowSlide ? IntervalUnit.toJSON(message.windowSlide) : undefined);
     message.windowSize !== undefined &&
@@ -1406,9 +1403,7 @@ export const HopWindowNode = {
 
   fromPartial<I extends Exact<DeepPartial<HopWindowNode>, I>>(object: I): HopWindowNode {
     const message = createBaseHopWindowNode();
-    message.timeCol = (object.timeCol !== undefined && object.timeCol !== null)
-      ? InputRefExpr.fromPartial(object.timeCol)
-      : undefined;
+    message.timeCol = object.timeCol ?? 0;
     message.windowSlide = (object.windowSlide !== undefined && object.windowSlide !== null)
       ? IntervalUnit.fromPartial(object.windowSlide)
       : undefined;

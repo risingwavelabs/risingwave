@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::RwError;
@@ -38,6 +39,10 @@ pub struct StreamWatermarkFilter {
 
 impl StreamWatermarkFilter {
     pub fn new(input: PlanRef, watermark_descs: Vec<WatermarkDesc>) -> Self {
+        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
+        for i in &watermark_descs {
+            watermark_columns.insert(i.get_watermark_idx() as usize)
+        }
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
@@ -45,8 +50,7 @@ impl StreamWatermarkFilter {
             input.functional_dependency().clone(),
             input.distribution().clone(),
             input.append_only(),
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7205
-            input.watermark_columns().clone(),
+            watermark_columns,
         );
         Self::with_base(base, input, watermark_descs)
     }

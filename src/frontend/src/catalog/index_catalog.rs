@@ -58,8 +58,8 @@ impl IndexCatalog {
             .index_item
             .iter()
             .map(|x| match x.rex_node.as_ref().unwrap() {
-                RexNode::InputRef(input_ref_expr) => InputRef {
-                    index: input_ref_expr.column_idx as usize,
+                RexNode::InputRef(input_col_idx) => InputRef {
+                    index: *input_col_idx as usize,
                     data_type: DataType::from(x.return_type.as_ref().unwrap()),
                 },
                 RexNode::FuncCall(_) => unimplemented!(),

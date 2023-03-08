@@ -30,6 +30,7 @@ mod jsonb_array;
 pub mod list_array;
 mod macros;
 mod primitive_array;
+pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod struct_array;
@@ -64,6 +65,7 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+use crate::array::serial_array::{Serial, SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -346,6 +348,7 @@ macro_rules! for_all_variants {
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
+            { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -666,6 +669,9 @@ impl ArrayImpl {
             ProstArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
             ProstArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
             ProstArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
+            ProstArrayType::Serial => {
+                read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
+            }
             ProstArrayType::Float32 => {
                 read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
             }

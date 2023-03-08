@@ -551,8 +551,14 @@ impl TestCase {
                 || self.batch_plan_proto.is_some()
                 || self.batch_error.is_some()
             {
-                let batch_plan = match logical_plan.gen_batch_distributed_plan() {
-                    Ok(batch_plan) => batch_plan,
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_distributed_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_string());
+                            break 'batch;
+                        }
+                    },
                     Err(err) => {
                         ret.batch_error = Some(err.to_string());
                         break 'batch;
@@ -575,10 +581,16 @@ impl TestCase {
 
         'local_batch: {
             if self.batch_local_plan.is_some() || self.batch_local_error.is_some() {
-                let batch_plan = match logical_plan.gen_batch_local_plan() {
-                    Ok(batch_plan) => batch_plan,
+                let batch_plan = match logical_plan.gen_batch_plan() {
+                    Ok(batch_plan) => match logical_plan.gen_batch_local_plan(batch_plan) {
+                        Ok(batch_plan) => batch_plan,
+                        Err(err) => {
+                            ret.batch_error = Some(err.to_string());
+                            break 'local_batch;
+                        }
+                    },
                     Err(err) => {
-                        ret.batch_local_error = Some(err.to_string());
+                        ret.batch_error = Some(err.to_string());
                         break 'local_batch;
                     }
                 };

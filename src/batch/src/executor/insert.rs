@@ -198,10 +198,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
-            insert_node
-                .row_id_index
-                .as_ref()
-                .map(|index| index.index as _),
+            insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
     }
@@ -344,7 +341,7 @@ mod tests {
         assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         let epoch = u64::MAX;
-        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
+        let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
             .scan(
                 full_range,
@@ -356,6 +353,7 @@ mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;

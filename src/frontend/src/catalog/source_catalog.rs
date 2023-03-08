@@ -50,10 +50,7 @@ impl From<&ProstSource> for SourceCatalog {
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
-        let row_id_index = prost
-            .row_id_index
-            .clone()
-            .map(|row_id_index| row_id_index.index as _);
+        let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
         let append_only = row_id_index.is_some();
         let owner = prost.owner;

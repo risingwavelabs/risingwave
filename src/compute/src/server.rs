@@ -25,9 +25,11 @@ use risingwave_common::config::{
     STREAM_WINDOW_SIZE,
 };
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
+use risingwave_common_service::observer_manager::ObserverManager;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
@@ -59,6 +61,7 @@ use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
 use crate::memory_management::policy::StreamingOnlyPolicy;
+use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
 use crate::rpc::service::exchange_service::ExchangeServiceImpl;
@@ -110,8 +113,8 @@ pub async fn compute_node_serve(
         embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
     let storage_memory_bytes =
         total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
-
-    validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
+    let compute_memory_bytes =
+        validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -232,21 +235,26 @@ pub async fn compute_node_serve(
     // Spawn LRU Manager that have access to collect memory from batch mgr and stream mgr.
     let batch_mgr_clone = batch_mgr.clone();
     let stream_mgr_clone = stream_mgr.clone();
-    let compute_memory_bytes =
-        opts.total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20);
-    let mgr = GlobalMemoryManager::new(
+    let memory_mgr = GlobalMemoryManager::new(
         compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
         Box::new(StreamingOnlyPolicy {}),
     );
     // Run a background memory monitor
-    tokio::spawn(mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
+    tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
 
-    let watermark_epoch = mgr.get_watermark_epoch();
+    let watermark_epoch = memory_mgr.get_watermark_epoch();
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
+
+    // Initialize observer manager.
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
+    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
+    observer_manager.start().await;
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
@@ -347,23 +355,31 @@ pub async fn compute_node_serve(
 }
 
 /// Check whether the compute node has enough memory to perform computing tasks. Apart from storage,
-/// it must reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and `SYSTEM_RESERVED_MEMORY_MB`
-/// for other system usage. Otherwise, it is not allowed to start.
-fn validate_compute_node_memory_config(cn_total_memory_bytes: usize, storage_memory_bytes: usize) {
+/// it is recommended to reserve at least `MIN_COMPUTE_MEMORY_MB` for computing and
+/// `SYSTEM_RESERVED_MEMORY_MB` for other system usage. If the requirement is not met, we will print
+/// out a warning and enforce the memory used for computing tasks as `MIN_COMPUTE_MEMORY_MB`.
+fn validate_compute_node_memory_config(
+    cn_total_memory_bytes: usize,
+    storage_memory_bytes: usize,
+) -> usize {
     if storage_memory_bytes > cn_total_memory_bytes {
-        panic!(
-            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GiB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+        tracing::warn!(
+            "The storage memory exceeds the total compute node memory:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
             convert(cn_total_memory_bytes as _),
             convert(storage_memory_bytes as _)
         );
+        MIN_COMPUTE_MEMORY_MB << 20
     } else if storage_memory_bytes + ((MIN_COMPUTE_MEMORY_MB + SYSTEM_RESERVED_MEMORY_MB) << 20)
         >= cn_total_memory_bytes
     {
-        panic!(
-            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nAt least 1 GiB memory should be reserved apart from the storage memory. Please increase the total compute node memory or decrease the storage memory in configurations and restart the compute node.",
+        tracing::warn!(
+            "No enough memory for computing and other system usage:\nTotal compute node memory: {}\nStorage memory: {}\nWe recommend that at least 4 GiB memory should be reserved for RisingWave. Please increase the total compute node memory or decrease the storage memory in configurations.",
             convert(cn_total_memory_bytes as _),
             convert(storage_memory_bytes as _)
         );
+        MIN_COMPUTE_MEMORY_MB << 20
+    } else {
+        cn_total_memory_bytes - storage_memory_bytes - (SYSTEM_RESERVED_MEMORY_MB << 20)
     }
 }
 

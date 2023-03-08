@@ -109,7 +109,7 @@ if [[ "$RUN_DELETE_RANGE" -eq "1" ]]; then
     chmod +x ./target/debug/delete-range-test
 
     config_path=".risingwave/config/risingwave.toml"
-    ./target/debug/delete-range-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+    ./target/debug/delete-range-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cargo make ci-kill
@@ -148,7 +148,7 @@ if [[ "$RUN_COMPACTION" -eq "1" ]]; then
     # Use the config of ci-compaction-test for replay.
     config_path=".risingwave/config/risingwave.toml"
     RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-    ./target/debug/compaction-test --ci-mode true --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
+    ./target/debug/compaction-test --ci-mode --state-store hummock+minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 --config-path "${config_path}"
 
     echo "--- Kill cluster"
     cargo make ci-kill

@@ -25,14 +25,13 @@ use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::GetDataResponse;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
 use crate::executor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
-use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::{
     BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
 };
@@ -200,7 +199,7 @@ impl BatchManager {
     pub fn get_task_receiver(
         &self,
         task_id: &TaskId,
-    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
+    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
         self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 

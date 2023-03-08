@@ -13,12 +13,14 @@ export interface TaskId {
   taskId: number;
 }
 
-export interface TaskInfo {
+export interface TaskInfoResponse {
   taskId: TaskId1 | undefined;
-  taskStatus: TaskInfo_TaskStatus;
+  taskStatus: TaskInfoResponse_TaskStatus;
+  /** Optional error message for failed task. */
+  errorMessage: string;
 }
 
-export const TaskInfo_TaskStatus = {
+export const TaskInfoResponse_TaskStatus = {
   /** UNSPECIFIED - Note: Requirement of proto3: first enum must be 0. */
   UNSPECIFIED: "UNSPECIFIED",
   PENDING: "PENDING",
@@ -29,50 +31,50 @@ export const TaskInfo_TaskStatus = {
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
-export type TaskInfo_TaskStatus = typeof TaskInfo_TaskStatus[keyof typeof TaskInfo_TaskStatus];
+export type TaskInfoResponse_TaskStatus = typeof TaskInfoResponse_TaskStatus[keyof typeof TaskInfoResponse_TaskStatus];
 
-export function taskInfo_TaskStatusFromJSON(object: any): TaskInfo_TaskStatus {
+export function taskInfoResponse_TaskStatusFromJSON(object: any): TaskInfoResponse_TaskStatus {
   switch (object) {
     case 0:
     case "UNSPECIFIED":
-      return TaskInfo_TaskStatus.UNSPECIFIED;
+      return TaskInfoResponse_TaskStatus.UNSPECIFIED;
     case 2:
     case "PENDING":
-      return TaskInfo_TaskStatus.PENDING;
+      return TaskInfoResponse_TaskStatus.PENDING;
     case 3:
     case "RUNNING":
-      return TaskInfo_TaskStatus.RUNNING;
+      return TaskInfoResponse_TaskStatus.RUNNING;
     case 6:
     case "FINISHED":
-      return TaskInfo_TaskStatus.FINISHED;
+      return TaskInfoResponse_TaskStatus.FINISHED;
     case 7:
     case "FAILED":
-      return TaskInfo_TaskStatus.FAILED;
+      return TaskInfoResponse_TaskStatus.FAILED;
     case 8:
     case "ABORTED":
-      return TaskInfo_TaskStatus.ABORTED;
+      return TaskInfoResponse_TaskStatus.ABORTED;
     case -1:
     case "UNRECOGNIZED":
     default:
-      return TaskInfo_TaskStatus.UNRECOGNIZED;
+      return TaskInfoResponse_TaskStatus.UNRECOGNIZED;
   }
 }
 
-export function taskInfo_TaskStatusToJSON(object: TaskInfo_TaskStatus): string {
+export function taskInfoResponse_TaskStatusToJSON(object: TaskInfoResponse_TaskStatus): string {
   switch (object) {
-    case TaskInfo_TaskStatus.UNSPECIFIED:
+    case TaskInfoResponse_TaskStatus.UNSPECIFIED:
       return "UNSPECIFIED";
-    case TaskInfo_TaskStatus.PENDING:
+    case TaskInfoResponse_TaskStatus.PENDING:
       return "PENDING";
-    case TaskInfo_TaskStatus.RUNNING:
+    case TaskInfoResponse_TaskStatus.RUNNING:
       return "RUNNING";
-    case TaskInfo_TaskStatus.FINISHED:
+    case TaskInfoResponse_TaskStatus.FINISHED:
       return "FINISHED";
-    case TaskInfo_TaskStatus.FAILED:
+    case TaskInfoResponse_TaskStatus.FAILED:
       return "FAILED";
-    case TaskInfo_TaskStatus.ABORTED:
+    case TaskInfoResponse_TaskStatus.ABORTED:
       return "ABORTED";
-    case TaskInfo_TaskStatus.UNRECOGNIZED:
+    case TaskInfoResponse_TaskStatus.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -96,13 +98,7 @@ export interface GetTaskInfoRequest {
   taskId: TaskId1 | undefined;
 }
 
-export interface TaskInfoResponse {
-  status: Status | undefined;
-  taskInfo: TaskInfo | undefined;
-}
-
 export interface GetDataResponse {
-  status: Status | undefined;
   recordBatch: DataChunk | undefined;
 }
 
@@ -174,33 +170,36 @@ export const TaskId = {
   },
 };
 
-function createBaseTaskInfo(): TaskInfo {
-  return { taskId: undefined, taskStatus: TaskInfo_TaskStatus.UNSPECIFIED };
+function createBaseTaskInfoResponse(): TaskInfoResponse {
+  return { taskId: undefined, taskStatus: TaskInfoResponse_TaskStatus.UNSPECIFIED, errorMessage: "" };
 }
 
-export const TaskInfo = {
-  fromJSON(object: any): TaskInfo {
+export const TaskInfoResponse = {
+  fromJSON(object: any): TaskInfoResponse {
     return {
       taskId: isSet(object.taskId) ? TaskId1.fromJSON(object.taskId) : undefined,
       taskStatus: isSet(object.taskStatus)
-        ? taskInfo_TaskStatusFromJSON(object.taskStatus)
-        : TaskInfo_TaskStatus.UNSPECIFIED,
+        ? taskInfoResponse_TaskStatusFromJSON(object.taskStatus)
+        : TaskInfoResponse_TaskStatus.UNSPECIFIED,
+      errorMessage: isSet(object.errorMessage) ? String(object.errorMessage) : "",
     };
   },
 
-  toJSON(message: TaskInfo): unknown {
+  toJSON(message: TaskInfoResponse): unknown {
     const obj: any = {};
     message.taskId !== undefined && (obj.taskId = message.taskId ? TaskId1.toJSON(message.taskId) : undefined);
-    message.taskStatus !== undefined && (obj.taskStatus = taskInfo_TaskStatusToJSON(message.taskStatus));
+    message.taskStatus !== undefined && (obj.taskStatus = taskInfoResponse_TaskStatusToJSON(message.taskStatus));
+    message.errorMessage !== undefined && (obj.errorMessage = message.errorMessage);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<TaskInfo>, I>>(object: I): TaskInfo {
-    const message = createBaseTaskInfo();
+  fromPartial<I extends Exact<DeepPartial<TaskInfoResponse>, I>>(object: I): TaskInfoResponse {
+    const message = createBaseTaskInfoResponse();
     message.taskId = (object.taskId !== undefined && object.taskId !== null)
       ? TaskId1.fromPartial(object.taskId)
       : undefined;
-    message.taskStatus = object.taskStatus ?? TaskInfo_TaskStatus.UNSPECIFIED;
+    message.taskStatus = object.taskStatus ?? TaskInfoResponse_TaskStatus.UNSPECIFIED;
+    message.errorMessage = object.errorMessage ?? "";
     return message;
   },
 };
@@ -313,52 +312,17 @@ export const GetTaskInfoRequest = {
   },
 };
 
-function createBaseTaskInfoResponse(): TaskInfoResponse {
-  return { status: undefined, taskInfo: undefined };
-}
-
-export const TaskInfoResponse = {
-  fromJSON(object: any): TaskInfoResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      taskInfo: isSet(object.taskInfo) ? TaskInfo.fromJSON(object.taskInfo) : undefined,
-    };
-  },
-
-  toJSON(message: TaskInfoResponse): unknown {
-    const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    message.taskInfo !== undefined && (obj.taskInfo = message.taskInfo ? TaskInfo.toJSON(message.taskInfo) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<TaskInfoResponse>, I>>(object: I): TaskInfoResponse {
-    const message = createBaseTaskInfoResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
-    message.taskInfo = (object.taskInfo !== undefined && object.taskInfo !== null)
-      ? TaskInfo.fromPartial(object.taskInfo)
-      : undefined;
-    return message;
-  },
-};
-
 function createBaseGetDataResponse(): GetDataResponse {
-  return { status: undefined, recordBatch: undefined };
+  return { recordBatch: undefined };
 }
 
 export const GetDataResponse = {
   fromJSON(object: any): GetDataResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      recordBatch: isSet(object.recordBatch) ? DataChunk.fromJSON(object.recordBatch) : undefined,
-    };
+    return { recordBatch: isSet(object.recordBatch) ? DataChunk.fromJSON(object.recordBatch) : undefined };
   },
 
   toJSON(message: GetDataResponse): unknown {
     const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.recordBatch !== undefined &&
       (obj.recordBatch = message.recordBatch ? DataChunk.toJSON(message.recordBatch) : undefined);
     return obj;
@@ -366,9 +330,6 @@ export const GetDataResponse = {
 
   fromPartial<I extends Exact<DeepPartial<GetDataResponse>, I>>(object: I): GetDataResponse {
     const message = createBaseGetDataResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
     message.recordBatch = (object.recordBatch !== undefined && object.recordBatch !== null)
       ? DataChunk.fromPartial(object.recordBatch)
       : undefined;
