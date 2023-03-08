@@ -42,8 +42,13 @@ message SinkStreamRequest {
       repeated RowOp row_ops = 1;
     }
 
+    message StreamChunkPayload {
+      bytes binary_data = 1;
+    }
+
     oneof payload {
       JsonPayload json_payload = 1;
+      StreamChunkPayload stream_chunk_payload = 2;
     }
 
     uint64 batch_id = 3;
