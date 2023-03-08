@@ -29,7 +29,6 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
@@ -187,12 +186,14 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(&order.get_order_type().unwrap().direction()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices

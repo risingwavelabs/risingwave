@@ -92,7 +92,7 @@ export const primaryKeyColumn: Column<RwTable> = {
   width: 1,
   content: (r) =>
     r.pk
-      .map((order) => order.index)
+      .map((order) => order.columnIndex)
       .map((i) => r.columns[i])
       .map((col) => extractColumnInfo(col))
       .join(", "),

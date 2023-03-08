@@ -87,7 +87,7 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             .table_desc
             .pk
             .iter()
-            .map(|col| col.index as _)
+            .map(|col| col.column_index as usize)
             .collect_vec();
 
         let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);

@@ -20,7 +20,6 @@ use risingwave_common::bail;
 use risingwave_common::types::*;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_pb::expr::AggCall;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use crate::expr::{build_from_prost, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
@@ -72,12 +71,12 @@ impl AggStateFactory {
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
         let order_pairs = prost
-            .get_order_by_fields()
+            .get_order_by()
             .iter()
-            .map(|field| {
-                let col_idx = field.get_input() as usize;
+            .map(|col_order| {
+                let col_idx = col_order.get_column_index() as usize;
                 let order_type =
-                    OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+                    OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction());
                 // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
                 // see also `risingwave_common::util::sort_util::compare_values`
                 OrderPair::new(col_idx, order_type)

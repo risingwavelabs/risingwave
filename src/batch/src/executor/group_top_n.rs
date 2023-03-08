@@ -101,7 +101,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
         let order_pairs = top_n_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
 
         let group_key = top_n_node
@@ -295,7 +295,7 @@ mod tests {
                     i i i
                     4 2 1
                     3 3 1
-                    2 4 1 
+                    2 4 1
                     4 3 2
                     3 4 2
                     2 5 2

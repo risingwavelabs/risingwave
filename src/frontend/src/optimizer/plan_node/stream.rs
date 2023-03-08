@@ -497,7 +497,7 @@ pub fn to_stream_prost_body(
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
-                    arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                     column_descs: left_table
                         .core
                         .column_descs()
@@ -507,7 +507,7 @@ pub fn to_stream_prost_body(
                     table_desc: Some(left_table_desc.to_protobuf()),
                 }),
                 right_info: Some(ArrangementInfo {
-                    arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                     column_descs: right_table
                         .core
                         .column_descs()
