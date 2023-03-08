@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::fmt;
-use std::ops::BitAnd;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -64,15 +64,20 @@ impl StreamHashJoin {
             logical.right().distribution(),
             &logical,
         );
-        let watermark_columns = {
-            let from_left = logical
-                .l2i_col_mapping()
-                .rewrite_bitset(logical.left().watermark_columns());
 
-            let from_right = logical
-                .r2i_col_mapping()
-                .rewrite_bitset(logical.right().watermark_columns());
-            let watermark_columns = from_left.bitand(&from_right);
+        let watermark_columns = {
+            let l2i = logical.l2i_col_mapping();
+            let r2i = logical.r2i_col_mapping();
+
+            let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
+            for (left_key, right_key) in eq_join_predicate.eq_indexes() {
+                if logical.left().watermark_columns().contains(left_key)
+                    && logical.right().watermark_columns().contains(right_key)
+                {
+                    watermark_columns.insert(l2i.map(left_key));
+                    watermark_columns.insert(r2i.map(right_key));
+                }
+            }
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
 
@@ -190,6 +195,18 @@ impl fmt::Display for StreamHashJoin {
                 input_schema: &concat_schema,
             },
         );
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
 
         if verbose {
             if self
