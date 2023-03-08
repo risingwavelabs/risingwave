@@ -31,7 +31,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_system;
-mod alter_table;
+mod alter_table_column;
 pub mod alter_user;
 mod create_database;
 pub mod create_function;
@@ -378,8 +378,10 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::AddColumn { column_def },
-        } => alter_table::handle_add_column(handler_args, name, column_def).await,
+            operation:
+                operation @ (AlterTableOperation::AddColumn { .. }
+                | AlterTableOperation::DropColumn { .. }),
+        } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

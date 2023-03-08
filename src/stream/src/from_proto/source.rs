@@ -58,7 +58,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.columns.clone(),
                 params.env.source_metrics(),
                 source.pk_column_ids.clone(),
-                source.row_id_index.clone(),
+                source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
                 source.get_info()?.clone(),
                 params.env.connector_params(),

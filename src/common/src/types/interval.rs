@@ -474,6 +474,23 @@ impl IntervalUnit {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct IntervalUnitDisplay<'a> {
+    pub core: &'a IntervalUnit,
+}
+
+impl std::fmt::Display for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
+    }
+}
+
+impl std::fmt::Debug for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.core)
+    }
+}
+
 impl Serialize for IntervalUnit {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where

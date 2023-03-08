@@ -523,6 +523,25 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayDistinct => {
+            ensure_arity!("array_distinct", | inputs | == 1);
+            let ret_type = inputs[0].return_type();
+            if inputs[0].is_unknown() {
+                return Err(ErrorCode::BindError(
+                    "could not determine polymorphic type because input has type unknown"
+                        .to_string(),
+                )
+                .into());
+            }
+            match ret_type {
+                DataType::List {
+                    datatype: list_elem_type,
+                } => Ok(Some(DataType::List {
+                    datatype: list_elem_type,
+                })),
+                _ => Ok(None),
+            }
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))

@@ -19,7 +19,8 @@ use byteorder::{BigEndian, ReadBytesExt};
 
 use super::ArrayResult;
 use crate::array::{
-    ArrayBuilder, BytesArrayBuilder, JsonbArrayBuilder, PrimitiveArrayItemType, Utf8ArrayBuilder,
+    ArrayBuilder, BytesArrayBuilder, JsonbArrayBuilder, PrimitiveArrayItemType, Serial,
+    Utf8ArrayBuilder,
 };
 use crate::types::{Decimal, OrderedF32, OrderedF64};
 
@@ -31,6 +32,7 @@ pub trait PrimitiveValueReader<T: PrimitiveArrayItemType> {
 pub struct I16ValueReader;
 pub struct I32ValueReader;
 pub struct I64ValueReader;
+pub struct SerialValueReader;
 pub struct F32ValueReader;
 pub struct F64ValueReader;
 
@@ -50,6 +52,7 @@ macro_rules! impl_numeric_value_reader {
 impl_numeric_value_reader!(i16, I16ValueReader, read_i16);
 impl_numeric_value_reader!(i32, I32ValueReader, read_i32);
 impl_numeric_value_reader!(i64, I64ValueReader, read_i64);
+impl_numeric_value_reader!(Serial, SerialValueReader, read_i64);
 impl_numeric_value_reader!(OrderedF32, F32ValueReader, read_f32);
 impl_numeric_value_reader!(OrderedF64, F64ValueReader, read_f64);
 

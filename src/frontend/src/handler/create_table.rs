@@ -24,8 +24,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
-    WatermarkDesc,
+    Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -420,7 +419,7 @@ fn gen_table_plan_inner(
         schema_id,
         database_id,
         name: name.clone(),
-        row_id_index: row_id_index.map(|i| ProstColumnIndex { index: i as _ }),
+        row_id_index: row_id_index.map(|i| i as _),
         columns: columns
             .iter()
             .map(|column| column.to_protobuf())

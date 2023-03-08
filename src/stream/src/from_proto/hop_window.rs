@@ -47,7 +47,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             .map(|&x| x as usize)
             .collect_vec();
 
-        let time_col = node.get_time_col()?.column_idx as usize;
+        let time_col = node.get_time_col() as usize;
         let time_col_data_type = input.schema().fields()[time_col].data_type();
         let output_type = DataType::window_of(&time_col_data_type).unwrap();
         let original_schema: Schema = input

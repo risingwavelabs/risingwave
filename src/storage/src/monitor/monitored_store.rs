@@ -143,12 +143,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
@@ -195,7 +190,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         }
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
         let table_id = read_options.table_id;
         let key_len = key.len();
         // TODO: may collect the metrics as local
@@ -346,16 +341,18 @@ struct MonitoredStateStoreIterStats {
 
 impl<S: StateStoreIterItemStream> MonitoredStateStoreIter<S> {
     #[try_stream(ok = StateStoreIterItem, error = StorageError)]
-    async fn into_stream_inner(mut self) {
+    async fn into_stream_inner(self) {
         let inner = self.inner;
+
+        let mut stats = self.stats;
         futures::pin_mut!(inner);
         while let Some((key, value)) = inner
             .try_next()
             .await
             .inspect_err(|e| error!("Failed in next: {:?}", e))?
         {
-            self.stats.total_items += 1;
-            self.stats.total_size += key.encoded_len() + value.len();
+            stats.total_items += 1;
+            stats.total_size += key.encoded_len() + value.len();
             yield (key, value);
         }
     }

@@ -434,11 +434,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder);
+        builder.finish()
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key_display());
         }
         builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
     }
 
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {
@@ -519,8 +523,7 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
 impl PlanAggOrderByField {
     fn to_protobuf(&self) -> ProstAggOrderByField {
         ProstAggOrderByField {
-            input: Some(self.input.to_proto()),
-            r#type: Some(self.input.data_type.to_protobuf()),
+            input: self.input.index() as _,
             direction: self.direction.to_protobuf() as i32,
             nulls_first: self.nulls_first,
         }
@@ -612,7 +615,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
+            args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
             order_by_fields: self
                 .order_by_fields

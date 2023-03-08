@@ -22,10 +22,10 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{ParallelUnit, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::expr::agg_call::{Arg, Type};
+use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
-use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRef as ProstInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -42,22 +42,22 @@ use crate::stream::{
 };
 use crate::MetaResult;
 
-fn make_inputref(idx: i32) -> ExprNode {
+fn make_inputref(idx: u32) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
         return_type: Some(DataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+        rex_node: Some(RexNode::InputRef(idx)),
     }
 }
 
-fn make_sum_aggcall(idx: i32) -> AggCall {
+fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
         r#type: Type::Sum as i32,
-        args: vec![Arg {
-            input: Some(InputRefExpr { column_idx: idx }),
+        args: vec![ProstInputRef {
+            index: idx,
             r#type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()

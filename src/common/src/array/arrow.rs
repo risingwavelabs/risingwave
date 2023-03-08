@@ -444,6 +444,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
             ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
+            ArrayImpl::Serial(_) => todo!("list of serial"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(

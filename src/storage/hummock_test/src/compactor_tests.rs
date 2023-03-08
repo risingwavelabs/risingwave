@@ -294,7 +294,7 @@ pub(crate) mod tests {
 
         let get_val = storage
             .get(
-                &key,
+                key.clone(),
                 (32 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -303,6 +303,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -313,7 +314,7 @@ pub(crate) mod tests {
         assert_eq!(get_val, val);
         let ret = storage
             .get(
-                &key,
+                key.clone(),
                 (31 * 1000) << 16,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -321,6 +322,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await;
@@ -427,7 +429,7 @@ pub(crate) mod tests {
         storage.wait_version(version).await;
         let get_val = storage
             .get(
-                &key,
+                key.clone(),
                 129,
                 ReadOptions {
                     ignore_range_tombstone: false,
@@ -436,6 +438,7 @@ pub(crate) mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -801,6 +804,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_ids),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await
@@ -982,6 +986,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await
@@ -1149,8 +1154,8 @@ pub(crate) mod tests {
             key_prefix.to_vec(),
         ]
         .concat();
-        let start_bound_key = key_prefix.to_vec();
-        let end_bound_key = next_key(start_bound_key.as_slice());
+        let start_bound_key = Bytes::from(key_prefix.to_vec());
+        let end_bound_key = Bytes::from(next_key(start_bound_key.as_ref()));
         let scan_result = storage
             .scan(
                 (
@@ -1165,6 +1170,7 @@ pub(crate) mod tests {
                     table_id: TableId::from(existing_table_id),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await

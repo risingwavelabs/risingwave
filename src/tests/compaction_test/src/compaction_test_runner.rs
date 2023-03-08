@@ -21,7 +21,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
@@ -603,11 +603,12 @@ async fn open_hummock_iters(
     // the `ReadOptions` will not be used to filter kv pairs
     let mut buf = BytesMut::with_capacity(5);
     buf.put_u32(table_id);
+    let b = buf.freeze();
     let range = (
-        Bound::Included(buf.to_vec()),
-        Bound::Excluded(risingwave_hummock_sdk::key::next_key(
-            buf.to_vec().as_slice(),
-        )),
+        Bound::Included(b.clone()),
+        Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
+            b.as_ref(),
+        ))),
     );
 
     for &epoch in snapshots.iter() {
@@ -621,6 +622,7 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;
