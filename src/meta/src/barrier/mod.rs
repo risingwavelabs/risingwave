@@ -529,7 +529,7 @@ where
     async fn run(&self, mut shutdown_rx: Receiver<()>) {
         let interval = Duration::from_millis(
             self.env
-                .system_param_manager()
+                .system_params_manager()
                 .get_params()
                 .await
                 .barrier_interval_ms() as u64,

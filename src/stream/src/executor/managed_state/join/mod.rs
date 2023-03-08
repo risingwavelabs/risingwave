@@ -33,6 +33,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
@@ -364,8 +365,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self.state.table.iter_key_and_val(&key);
-            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
+            let table_iter_fut = self.state.table.iter_key_and_val(&key, Default::default());
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_key_and_val(&key, Default::default());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -391,7 +395,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 );
             }
         } else {
-            let table_iter = self.state.table.iter_with_pk_prefix(&key).await?;
+            let table_iter = self
+                .state
+                .table
+                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .await?;
 
             #[for_await]
             for row in table_iter {

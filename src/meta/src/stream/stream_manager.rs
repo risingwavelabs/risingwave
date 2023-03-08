@@ -693,7 +693,7 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
-            let system_params = env.system_param_manager().get_params().await;
+            let system_params = env.system_params_manager().get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);

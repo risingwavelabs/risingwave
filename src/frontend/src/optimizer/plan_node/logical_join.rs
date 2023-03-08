@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
@@ -1315,45 +1315,56 @@ impl ToStream for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let l2i = join.core.l2i_col_mapping().composite(&mapping);
-        let r2i = join.core.r2i_col_mapping().composite(&mapping);
+        let l2o = join.core.l2i_col_mapping().composite(&mapping);
+        let r2o = join.core.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = left
+        let mut left_to_add = left
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i).is_none());
+            .filter(|i| l2o.try_map(*i).is_none())
+            .collect_vec();
 
-        let right_to_add = right
+        let mut right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| r2i.try_map(*i).is_none())
-            .map(|i| i + left_len);
+            .filter(|i| r2o.try_map(*i).is_none())
+            .map(|i| i + left_len)
+            .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
-        let left_to_add = left_to_add
-            .chain(
-                eq_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .filter(|i| l2i.try_map(*i).is_none()),
-            )
-            .unique();
-        let right_to_add = right_to_add
-            .chain(
-                eq_predicate
-                    .right_eq_indexes()
-                    .into_iter()
-                    .filter(|i| r2i.try_map(*i).is_none())
-                    .map(|i| i + left_len),
-            )
-            .unique();
+        let either_or_both = self.core.add_which_join_key_to_pk();
+
+        for (lk, rk) in eq_predicate.eq_indexes() {
+            match either_or_both {
+                EitherOrBoth::Left(_) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                }
+                EitherOrBoth::Right(_) => {
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+                EitherOrBoth::Both(_, _) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+            };
+        }
+        let left_to_add = left_to_add.into_iter().unique();
+        let right_to_add = right_to_add.into_iter().unique();
         // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices().clone();

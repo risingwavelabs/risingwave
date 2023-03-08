@@ -16,6 +16,7 @@ use std::fmt::Formatter;
 use std::pin::Pin;
 
 use futures::{Future, FutureExt, Stream, StreamExt};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::error::PsqlError;
 use crate::pg_field_descriptor::PgFieldDescriptor;
@@ -50,7 +51,7 @@ pub enum StatementType {
     CREATE_USER,
     CREATE_INDEX,
     CREATE_FUNCTION,
-    DESCRIBE_TABLE,
+    DESCRIBE,
     GRANT_PRIVILEGE,
     DROP_TABLE,
     DROP_MATERIALIZED_VIEW,
@@ -68,8 +69,8 @@ pub enum StatementType {
     // Introduce ORDER_BY statement type cuz Calcite unvalidated AST has SqlKind.ORDER_BY. Note
     // that Statement Type is not designed to be one to one mapping with SqlKind.
     ORDER_BY,
-    SET_OPTION,
-    SHOW_PARAMETERS,
+    SET_VARIABLE,
+    SHOW_VARIABLE,
     SHOW_COMMAND,
     START_TRANSACTION,
     UPDATE_USER,
@@ -118,6 +119,81 @@ where
 }
 
 impl StatementType {
+    pub fn infer_from_statement(stmt: &Statement) -> Result<Self, String> {
+        match stmt {
+            Statement::Query(_) => Ok(StatementType::SELECT),
+            Statement::Insert { returning, .. } => {
+                if returning.is_empty() {
+                    Ok(StatementType::INSERT)
+                } else {
+                    Ok(StatementType::INSERT_RETURNING)
+                }
+            }
+            Statement::Delete { returning, .. } => {
+                if returning.is_empty() {
+                    Ok(StatementType::DELETE)
+                } else {
+                    Ok(StatementType::DELETE_RETURNING)
+                }
+            }
+            Statement::Update { returning, .. } => {
+                if returning.is_empty() {
+                    Ok(StatementType::UPDATE)
+                } else {
+                    Ok(StatementType::UPDATE_RETURNING)
+                }
+            }
+            Statement::Copy { .. } => Ok(StatementType::COPY),
+            Statement::CreateTable { .. } => Ok(StatementType::CREATE_TABLE),
+            Statement::CreateIndex { .. } => Ok(StatementType::CREATE_INDEX),
+            Statement::CreateSchema { .. } => Ok(StatementType::CREATE_SCHEMA),
+            Statement::CreateSource { .. } => Ok(StatementType::CREATE_SOURCE),
+            Statement::CreateSink { .. } => Ok(StatementType::CREATE_SINK),
+            Statement::CreateFunction { .. } => Ok(StatementType::CREATE_FUNCTION),
+            Statement::CreateDatabase { .. } => Ok(StatementType::CREATE_DATABASE),
+            Statement::CreateUser { .. } => Ok(StatementType::CREATE_USER),
+            Statement::CreateView { materialized, .. } => {
+                if *materialized {
+                    Ok(StatementType::CREATE_MATERIALIZED_VIEW)
+                } else {
+                    Ok(StatementType::CREATE_VIEW)
+                }
+            }
+            Statement::AlterTable { .. } => Ok(StatementType::ALTER_TABLE),
+            Statement::AlterSystem { .. } => Ok(StatementType::ALTER_SYSTEM),
+            Statement::DropFunction { .. } => Ok(StatementType::DROP_FUNCTION),
+            Statement::SetVariable { .. } => Ok(StatementType::SET_VARIABLE),
+            Statement::ShowVariable { .. } => Ok(StatementType::SHOW_VARIABLE),
+            Statement::StartTransaction { .. } => Ok(StatementType::START_TRANSACTION),
+            Statement::BEGIN { .. } => Ok(StatementType::BEGIN),
+            Statement::Abort => Ok(StatementType::ABORT),
+            Statement::Commit { .. } => Ok(StatementType::COMMIT),
+            Statement::Rollback { .. } => Ok(StatementType::ROLLBACK),
+            Statement::Grant { .. } => Ok(StatementType::GRANT_PRIVILEGE),
+            Statement::Revoke { .. } => Ok(StatementType::REVOKE_PRIVILEGE),
+            Statement::Describe { .. } => Ok(StatementType::DESCRIBE),
+            Statement::ShowCreateObject { .. } | Statement::ShowObjects(_) => {
+                Ok(StatementType::SHOW_COMMAND)
+            }
+            Statement::Drop(stmt) => match stmt.object_type {
+                risingwave_sqlparser::ast::ObjectType::Table => Ok(StatementType::DROP_TABLE),
+                risingwave_sqlparser::ast::ObjectType::View => Ok(StatementType::DROP_VIEW),
+                risingwave_sqlparser::ast::ObjectType::MaterializedView => {
+                    Ok(StatementType::DROP_MATERIALIZED_VIEW)
+                }
+                risingwave_sqlparser::ast::ObjectType::Index => Ok(StatementType::DROP_INDEX),
+                risingwave_sqlparser::ast::ObjectType::Schema => Ok(StatementType::DROP_SCHEMA),
+                risingwave_sqlparser::ast::ObjectType::Source => Ok(StatementType::DROP_SOURCE),
+                risingwave_sqlparser::ast::ObjectType::Sink => Ok(StatementType::DROP_SINK),
+                risingwave_sqlparser::ast::ObjectType::Database => Ok(StatementType::DROP_DATABASE),
+                risingwave_sqlparser::ast::ObjectType::User => Ok(StatementType::DROP_USER),
+            },
+            Statement::Explain { .. } => Ok(StatementType::EXPLAIN),
+            Statement::Flush => Ok(StatementType::FLUSH),
+            _ => Err("unsupported statement type".to_string()),
+        }
+    }
+
     pub fn is_command(&self) -> bool {
         matches!(
             self,
@@ -152,7 +228,8 @@ impl StatementType {
             StatementType::SELECT
                 | StatementType::EXPLAIN
                 | StatementType::SHOW_COMMAND
-                | StatementType::DESCRIBE_TABLE
+                | StatementType::SHOW_VARIABLE
+                | StatementType::DESCRIBE
                 | StatementType::INSERT_RETURNING
                 | StatementType::DELETE_RETURNING
                 | StatementType::UPDATE_RETURNING

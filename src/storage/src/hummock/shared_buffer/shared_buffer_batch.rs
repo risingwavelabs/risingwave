@@ -340,11 +340,19 @@ impl SharedBufferBatch {
         R: RangeBounds<TableKey<B>>,
         B: AsRef<[u8]>,
     {
+        let left = table_key_range
+            .start_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
+        let right = table_key_range
+            .end_bound()
+            .as_ref()
+            .map(|key| TableKey(key.0.as_ref()));
         self.table_id == table_id
             && range_overlap(
-                table_key_range,
-                *self.start_table_key(),
-                *self.end_table_key(),
+                &(left, right),
+                &self.start_table_key(),
+                &self.end_table_key(),
             )
     }
 
@@ -536,7 +544,7 @@ impl SharedBufferBatch {
         table_id: TableId,
         shard_id: ImmId,
         imms: Vec<ImmutableMemtable>,
-        memory_limiter: Arc<MemoryLimiter>,
+        memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> Self {
         // use a binary heap to merge imms
         let mut heap = BinaryHeap::new();
@@ -606,7 +614,8 @@ impl SharedBufferBatch {
             merged_payload.push((pivot, versions));
         }
 
-        let tracker = memory_limiter.try_require_memory(merged_size as u64);
+        let tracker =
+            memory_limiter.and_then(|limiter| limiter.try_require_memory(merged_size as u64));
         SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
                 min_epoch,
@@ -1411,32 +1420,32 @@ mod tests {
             Default::default(),
         );
 
-        let range = (Included(Vec::from("a")), Excluded(Vec::from("b")));
+        let range = (Included(Bytes::from("a")), Excluded(Bytes::from("b")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a_")), Excluded(Vec::from("b_")));
+        let range = (Included(Bytes::from("a_")), Excluded(Bytes::from("b_")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a_1")), Included(Vec::from("a_1")));
+        let range = (Included(Bytes::from("a_1")), Included(Bytes::from("a_1")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a_1")), Included(Vec::from("a_2")));
+        let range = (Included(Bytes::from("a_1")), Included(Bytes::from("a_2")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a_0x")), Included(Vec::from("a_2x")));
+        let range = (Included(Bytes::from("a_0x")), Included(Bytes::from("a_2x")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a_")), Excluded(Vec::from("c_")));
+        let range = (Included(Bytes::from("a_")), Excluded(Bytes::from("c_")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("b_0x")), Included(Vec::from("b_2x")));
+        let range = (Included(Bytes::from("b_0x")), Included(Bytes::from("b_2x")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("b_2")), Excluded(Vec::from("c_1x")));
+        let range = (Included(Bytes::from("b_2")), Excluded(Bytes::from("c_1x")));
         assert!(shared_buffer_batch.range_exists(&map_table_key_range(range)));
 
-        let range = (Included(Vec::from("a_0")), Excluded(Vec::from("a_1")));
+        let range = (Included(Bytes::from("a_0")), Excluded(Bytes::from("a_1")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("a__0")), Excluded(Vec::from("a__5")));
+        let range = (Included(Bytes::from("a__0")), Excluded(Bytes::from("a__5")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("b_1")), Excluded(Vec::from("b_2")));
+        let range = (Included(Bytes::from("b_1")), Excluded(Bytes::from("b_2")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("b_3")), Excluded(Vec::from("c_1")));
+        let range = (Included(Bytes::from("b_3")), Excluded(Bytes::from("c_1")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
-        let range = (Included(Vec::from("b__x")), Excluded(Vec::from("c__x")));
+        let range = (Included(Bytes::from("b__x")), Excluded(Bytes::from("c__x")));
         assert!(!shared_buffer_batch.range_exists(&map_table_key_range(range)));
     }
 

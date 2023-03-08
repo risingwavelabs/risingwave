@@ -15,3 +15,4 @@ curl http://localhost:5691/api/internal_tables > internal_tables.json
 curl http://localhost:5691/api/sinks > sinks.json
 curl http://localhost:5691/api/sources > sources.json
 curl http://localhost:5691/api/metrics/cluster > metrics_cluster.json
+curl http://localhost:5691/api/monitor/await_tree/1 > await_tree_1.json

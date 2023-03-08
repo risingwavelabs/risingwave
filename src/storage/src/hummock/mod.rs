@@ -418,7 +418,7 @@ pub fn hit_sstable_bloom_filter(
 }
 
 /// Get `user_value` from `ImmutableMemtable`
-pub fn get_from_imm(
+pub fn get_from_batch(
     imm: &ImmutableMemtable,
     table_key: TableKey<&[u8]>,
     read_epoch: HummockEpoch,

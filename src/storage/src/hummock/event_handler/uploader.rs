@@ -103,7 +103,7 @@ impl MergingImmTask {
                 table_id,
                 shard_id,
                 imms,
-                memory_limiter,
+                Some(memory_limiter),
             ))
         });
 

@@ -134,7 +134,7 @@ mod tests {
     use risingwave_pb::data::Datum as ProstDatum;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use crate::executor::test_utils::MockExecutor;
     use crate::executor::{Executor, FilterExecutor};
@@ -230,7 +230,7 @@ mod tests {
                 }],
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let rhs = ExprNode {
             expr_type: Type::ConstantValue as i32,
@@ -323,14 +323,14 @@ mod tests {
         }
     }
 
-    fn make_inputref(idx: i32) -> ExprNode {
+    fn make_inputref(idx: usize) -> ExprNode {
         ExprNode {
             expr_type: InputRef as i32,
             return_type: Some(risingwave_pb::data::DataType {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+            rex_node: Some(RexNode::InputRef(idx as _)),
         }
     }
 }

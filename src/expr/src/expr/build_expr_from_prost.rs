@@ -16,7 +16,7 @@ use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
 use super::expr_array_concat::ArrayConcatExpression;
 use super::expr_binary_bytes::{
@@ -49,6 +49,7 @@ use super::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
 use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
@@ -112,6 +113,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         ArrayToString => ArrayToStringExpression::try_from(prost).map(Expression::boxed),
+        ArrayDistinct => ArrayDistinctExpression::try_from(prost).map(Expression::boxed),
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         Now => build_now_expr(prost),
         Udf => UdfExpression::try_from(prost).map(Expression::boxed),
@@ -393,12 +395,12 @@ pub fn build_some_all_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         let left_expr_input_ref = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(left_expr.return_type().to_protobuf()),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let right_expr_input_ref = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(right_expr_return_type.to_protobuf()),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 1 })),
+            rex_node: Some(RexNode::InputRef(1)),
         };
         let mut root_expr_node = ExprNode {
             expr_type: inner_expr_type as i32,
