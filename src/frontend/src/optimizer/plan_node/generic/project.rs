@@ -171,13 +171,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-        schema: &Schema,
-    ) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>, schema: &Schema) {
         builder.field(
             "exprs",
             &self
@@ -198,6 +192,16 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                 })
                 .collect_vec(),
         );
+    }
+
+    pub fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        schema: &Schema,
+    ) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder, schema);
         builder.finish()
     }
 
