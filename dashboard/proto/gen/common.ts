@@ -62,9 +62,9 @@ export function workerTypeToJSON(object: WorkerType): string {
 }
 
 export const PbDirection = {
-  PbDirection_UNSPECIFIED: "PbDirection_UNSPECIFIED",
-  PbDirection_ASCENDING: "PbDirection_ASCENDING",
-  PbDirection_DESCENDING: "PbDirection_DESCENDING",
+  PB_DIRECTION_UNSPECIFIED: "PB_DIRECTION_UNSPECIFIED",
+  PB_DIRECTION_ASCENDING: "PB_DIRECTION_ASCENDING",
+  PB_DIRECTION_DESCENDING: "PB_DIRECTION_DESCENDING",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -73,14 +73,14 @@ export type PbDirection = typeof PbDirection[keyof typeof PbDirection];
 export function pbDirectionFromJSON(object: any): PbDirection {
   switch (object) {
     case 0:
-    case "PbDirection_UNSPECIFIED":
-      return PbDirection.PbDirection_UNSPECIFIED;
+    case "PB_DIRECTION_UNSPECIFIED":
+      return PbDirection.PB_DIRECTION_UNSPECIFIED;
     case 1:
-    case "PbDirection_ASCENDING":
-      return PbDirection.PbDirection_ASCENDING;
+    case "PB_DIRECTION_ASCENDING":
+      return PbDirection.PB_DIRECTION_ASCENDING;
     case 2:
-    case "PbDirection_DESCENDING":
-      return PbDirection.PbDirection_DESCENDING;
+    case "PB_DIRECTION_DESCENDING":
+      return PbDirection.PB_DIRECTION_DESCENDING;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -90,12 +90,12 @@ export function pbDirectionFromJSON(object: any): PbDirection {
 
 export function pbDirectionToJSON(object: PbDirection): string {
   switch (object) {
-    case PbDirection.PbDirection_UNSPECIFIED:
-      return "PbDirection_UNSPECIFIED";
-    case PbDirection.PbDirection_ASCENDING:
-      return "PbDirection_ASCENDING";
-    case PbDirection.PbDirection_DESCENDING:
-      return "PbDirection_DESCENDING";
+    case PbDirection.PB_DIRECTION_UNSPECIFIED:
+      return "PB_DIRECTION_UNSPECIFIED";
+    case PbDirection.PB_DIRECTION_ASCENDING:
+      return "PB_DIRECTION_ASCENDING";
+    case PbDirection.PB_DIRECTION_DESCENDING:
+      return "PB_DIRECTION_DESCENDING";
     case PbDirection.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -545,13 +545,13 @@ export const BatchQueryEpoch = {
 };
 
 function createBasePbOrderType(): PbOrderType {
-  return { direction: PbDirection.PbDirection_UNSPECIFIED };
+  return { direction: PbDirection.PB_DIRECTION_UNSPECIFIED };
 }
 
 export const PbOrderType = {
   fromJSON(object: any): PbOrderType {
     return {
-      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PbDirection_UNSPECIFIED,
+      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PB_DIRECTION_UNSPECIFIED,
     };
   },
 
@@ -563,7 +563,7 @@ export const PbOrderType = {
 
   fromPartial<I extends Exact<DeepPartial<PbOrderType>, I>>(object: I): PbOrderType {
     const message = createBasePbOrderType();
-    message.direction = object.direction ?? PbDirection.PbDirection_UNSPECIFIED;
+    message.direction = object.direction ?? PbDirection.PB_DIRECTION_UNSPECIFIED;
     return message;
   },
 };

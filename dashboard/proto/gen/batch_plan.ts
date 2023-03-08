@@ -1328,7 +1328,7 @@ function createBaseSortMergeJoinNode(): SortMergeJoinNode {
     joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
-    direction: PbDirection.PbDirection_UNSPECIFIED,
+    direction: PbDirection.PB_DIRECTION_UNSPECIFIED,
     outputIndices: [],
   };
 }
@@ -1339,7 +1339,7 @@ export const SortMergeJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PbDirection_UNSPECIFIED,
+      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PB_DIRECTION_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1371,7 +1371,7 @@ export const SortMergeJoinNode = {
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? PbDirection.PbDirection_UNSPECIFIED;
+    message.direction = object.direction ?? PbDirection.PB_DIRECTION_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
