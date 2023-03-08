@@ -324,7 +324,7 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry  
     
   - label: "S3 source check on lyvecloud.seagate.com"
@@ -340,5 +340,5 @@ steps:
           mount-buildkite-agent: true
           environment:
             - S3_SOURCE_TEST_CONF
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry  
