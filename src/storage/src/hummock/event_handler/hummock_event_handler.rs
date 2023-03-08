@@ -495,6 +495,8 @@ impl HummockEventHandler {
 
                             // start merging task if necessary
                             self.uploader.start_merge_imms(epoch);
+                            // merging task memory consumption may exceed the flush threshold
+                            self.uploader.may_flush();
 
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);

@@ -119,7 +119,7 @@ impl SharedBufferBatchInner {
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
-        _tracker: Option<MemoryTracker>,
+        tracker: Option<MemoryTracker>,
     ) -> Self {
         debug_assert!(!imm_ids.is_empty());
 
@@ -150,7 +150,7 @@ impl SharedBufferBatchInner {
             largest_table_key,
             smallest_table_key,
             size,
-            _tracker,
+            _tracker: tracker,
             batch_id: max_imm_id,
         }
     }
@@ -536,7 +536,7 @@ impl SharedBufferBatch {
         table_id: TableId,
         shard_id: ImmId,
         imms: Vec<ImmutableMemtable>,
-        _memory_limiter: Option<Arc<MemoryLimiter>>,
+        memory_limiter: Arc<MemoryLimiter>,
     ) -> Self {
         // use a binary heap to merge imms
         let mut heap = BinaryHeap::new();
@@ -606,6 +606,7 @@ impl SharedBufferBatch {
             merged_payload.push((pivot, versions));
         }
 
+        let tracker = memory_limiter.try_require_memory(merged_size as u64);
         SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
                 min_epoch,
@@ -614,7 +615,7 @@ impl SharedBufferBatch {
                 merged_imm_ids,
                 range_tombstone_list,
                 merged_size,
-                None,
+                tracker,
             )),
             table_id,
             shard_id,

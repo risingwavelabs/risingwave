@@ -95,12 +95,15 @@ impl MergingImmTask {
         table_id: TableId,
         shard_id: LocalInstanceId,
         imms: Vec<ImmutableMemtable>,
-        _context: &UploaderContext,
+        context: &UploaderContext,
     ) -> Self {
-        // let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
+        let memory_limiter = context.buffer_tracker.get_memory_limiter().clone();
         let join_handle = tokio::spawn(async move {
             Ok(ImmutableMemtable::build_merged_imm(
-                table_id, shard_id, imms, None,
+                table_id,
+                shard_id,
+                imms,
+                memory_limiter,
             ))
         });
 
@@ -407,7 +410,7 @@ impl SealedData {
     }
 
     // Flush can be triggered by either a sync_epoch or a spill (`may_flush`) request.
-    fn flush(&mut self, _is_sync: bool, context: &UploaderContext) {
+    fn flush(&mut self, context: &UploaderContext) {
         // clear imms waiting for merge
         self.imms_by_table_shard.clear();
         // drop unfinished merging tasks in the task queue
@@ -660,7 +663,7 @@ impl HummockUploader {
 
         // flush imms to SST file, the output SSTs will be uploaded to object store
         // return unfinished merging task
-        self.sealed_data.flush(true, &self.context);
+        self.sealed_data.flush(&self.context);
 
         let SealedData {
             epochs,
@@ -746,7 +749,7 @@ impl HummockUploader {
 
     pub(crate) fn may_flush(&mut self) {
         if self.context.buffer_tracker.need_more_flush() {
-            self.sealed_data.flush(false, &self.context);
+            self.sealed_data.flush(&self.context);
         }
 
         if self.context.buffer_tracker.need_more_flush() {
