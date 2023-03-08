@@ -57,7 +57,7 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
     };
 
     // Add a `Pb`-prefixed alias for all types.
-    let use_pb = {
+    let pb_alias = {
         let pb_name = format_ident!("Pb{name}");
         let doc = format!("Alias for [`{name}`].");
         quote! {
@@ -67,7 +67,7 @@ fn produce(ast: &DeriveInput) -> TokenStream2 {
     };
 
     quote! {
-        #use_pb
+        #pb_alias
         #struct_get
     }
 }
