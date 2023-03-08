@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,6 +23,7 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
+use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::system_param::reader::SystemParamsReader;
@@ -168,6 +169,7 @@ impl MetaClient {
         worker_node_parallelism: usize,
     ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
+        tracing::info!("register meta client using strategy: {}", addr_strategy);
 
         let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
 
@@ -1028,11 +1030,24 @@ pub enum MetaAddressStrategy {
     List(Vec<String>),
 }
 
+impl fmt::Display for MetaAddressStrategy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaAddressStrategy::LoadBalance(addr) => {
+                write!(f, "LoadBalance({})", addr)?;
+            }
+            MetaAddressStrategy::List(addrs) => {
+                write!(f, "List({:?})", addrs)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 type MetaMemberClient = MetaMemberServiceClient<Channel>;
 
 struct MetaMemberGroup {
-    client_cache: HashMap<String, MetaMemberClient>,
-    members: HashSet<String>,
+    members: LruCache<String, Option<MetaMemberClient>>,
 }
 
 struct ElectionMemberManagement {
@@ -1063,60 +1078,35 @@ impl ElectionMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for addr in &member_group.members {
-                    let mut client = match member_group.client_cache.get(addr) {
-                        Some(cached_client) => cached_client.to_owned(),
-                        None => {
-                            let endpoint = match GrpcMetaClient::addr_to_endpoint(addr.clone()) {
-                                Ok(endpoint) => endpoint,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create endpoint from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
+                for (addr, client) in member_group.members.iter_mut() {
+                    let client: Result<MetaMemberClient> = try {
+                        match client {
+                            Some(cached_client) => cached_client.to_owned(),
+                            None => {
+                                let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
+                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
+                                let new_client: MetaMemberServiceClient<Channel> =
+                                    MetaMemberServiceClient::new(channel);
+                                *client = Some(new_client.clone());
 
-                            let channel = match GrpcMetaClient::connect_to_endpoint(endpoint).await
-                            {
-                                Ok(channel) => channel,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create rpc channel from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let client: MetaMemberServiceClient<Channel> =
-                                MetaMemberServiceClient::new(channel);
-                            member_group
-                                .client_cache
-                                .insert(addr.clone(), client.clone());
-                            client.to_owned()
+                                new_client
+                            }
                         }
                     };
-
-                    let MembersResponse { members } = match client.members(MembersRequest {}).await
-                    {
-                        Ok(members) => members.into_inner(),
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to fetch members from MetaMemberClient {}: {}",
-                                addr,
-                                e
-                            );
+                    if let Err(err) = client {
+                        tracing::warn!("failed to create client from {}: {}", addr, err);
+                        continue;
+                    }
+                    match client.unwrap().members(MembersRequest {}).await {
+                        Err(err) => {
+                            tracing::warn!("failed to fetch members from {}: {}", addr, err);
                             continue;
                         }
-                    };
-
-                    fetched_members = Some(members);
-
-                    break;
+                        Ok(resp) => {
+                            fetched_members = Some(resp.into_inner().members);
+                            break;
+                        }
+                    }
                 }
 
                 let members =
@@ -1124,26 +1114,18 @@ impl ElectionMemberManagement {
 
                 // find new leader
                 let mut leader = None;
-                let mut member_addrs = HashSet::new();
                 for member in members {
                     if member.is_leader {
                         leader = Some(member.clone());
                     }
 
-                    member_addrs.insert(Self::host_address_to_url(member.address.unwrap()));
+                    let addr = Self::host_address_to_url(member.address.unwrap());
+                    // We don't clean any expired addrs here to deal with some extreme situations.
+                    if !member_group.members.contains(&addr) {
+                        tracing::info!("new meta member joined: {}", addr);
+                        member_group.members.put(addr, None);
+                    }
                 }
-
-                // drain old cache
-                let drained = member_group
-                    .client_cache
-                    .drain_filter(|addr, _| !member_addrs.borrow().contains(addr));
-
-                for (addr, _) in drained {
-                    tracing::info!("dropping meta client from {}", addr);
-                }
-
-                // update members
-                member_group.members = member_addrs;
 
                 leader
             }
@@ -1259,17 +1241,14 @@ impl GrpcMetaClient {
         let meta_member_client = client.core.read().await.meta_member_client.clone();
         let members = match &strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
-            MetaAddressStrategy::List(_) => {
-                let mut client_cache = HashMap::new();
-                let mut members = HashSet::new();
-                members.insert(addr.to_string());
+            MetaAddressStrategy::List(addrs) => {
+                let mut members = LruCache::new(20);
+                for addr in addrs {
+                    members.put(addr.clone(), None);
+                }
+                members.put(addr.clone(), Some(meta_member_client));
 
-                client_cache.insert(addr.to_string(), meta_member_client);
-
-                Either::Right(MetaMemberGroup {
-                    client_cache,
-                    members,
-                })
+                Either::Right(MetaMemberGroup { members })
             }
         };
 

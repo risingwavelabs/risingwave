@@ -351,7 +351,7 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
+    use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
 
@@ -459,7 +459,7 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_index: None,
-            row_id_index: Some(ColumnIndex { index: 0 }),
+            row_id_index: Some(0),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,

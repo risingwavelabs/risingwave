@@ -35,37 +35,30 @@ pub fn build_agg_call_from_prost(
     let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
         [] => AggArgs::None,
-        [arg] if agg_kind != AggKind::StringAgg => AggArgs::Unary(
-            DataType::from(arg.get_type()?),
-            arg.get_input()?.column_idx as usize,
-        ),
+        [arg] if agg_kind != AggKind::StringAgg => {
+            AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
+        }
         [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
             [
                 DataType::from(agg_arg.get_type()?),
                 DataType::from(extra_arg.get_type()?),
             ],
-            [
-                agg_arg.get_input()?.column_idx as usize,
-                extra_arg.get_input()?.column_idx as usize,
-            ],
+            [agg_arg.get_index() as usize, extra_arg.get_index() as usize],
         ),
         _ => bail!("Too many/few arguments for {:?}", agg_kind),
     };
-    let mut order_pairs = vec![];
-    let mut order_col_types = vec![];
-    agg_call_proto
+    let order_pairs = agg_call_proto
         .get_order_by_fields()
         .iter()
-        .for_each(|field| {
-            let col_idx = field.get_input().unwrap().get_column_idx() as usize;
-            let col_type = DataType::from(field.get_type().unwrap());
+        .map(|field| {
+            let col_idx = field.get_input() as usize;
             let order_type =
                 OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
             // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
             // see also `risingwave_common::util::sort_util::compare_values`
-            order_pairs.push(OrderPair::new(col_idx, order_type));
-            order_col_types.push(col_type);
-        });
+            OrderPair::new(col_idx, order_type)
+        })
+        .collect();
     let filter = match agg_call_proto.filter {
         Some(ref prost_filter) => Some(Arc::from(build_from_prost(prost_filter)?)),
         None => None,

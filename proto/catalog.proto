@@ -9,13 +9,6 @@ import "plan_common.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-// The rust prost library always treats uint64 as required and message as
-// optional. In order to allow `row_id_index` as an optional field, we wrap
-// uint64 inside this message.
-message ColumnIndex {
-  uint64 index = 1;
-}
-
 // A mapping of column indices.
 message ColIndexMapping {
   // The size of the target space.
@@ -49,7 +42,7 @@ message Source {
   string name = 4;
   // The column index of row ID. If the primary key is specified by the user,
   // this will be `None`.
-  ColumnIndex row_id_index = 5;
+  optional uint32 row_id_index = 5;
   // Columns of the source.
   repeated plan_common.ColumnCatalog columns = 6;
   // Column id of the primary key specified by the user. If the user does not
@@ -156,10 +149,10 @@ message Table {
   uint32 fragment_id = 17;
   // an optional column index which is the vnode of each row computed by the
   // table's consistent hash distribution
-  ColumnIndex vnode_col_index = 18;
+  optional uint32 vnode_col_index = 18;
   // An optional column index of row id. If the primary key is specified by users,
   // this will be `None`.
-  ColumnIndex row_id_index = 19;
+  optional uint32 row_id_index = 19;
   // The column indices which are stored in the state store's value with
   // row-encoding. Currently is not supported yet and expected to be
   // `[0..columns.len()]`.

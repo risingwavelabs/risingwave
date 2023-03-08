@@ -22,7 +22,7 @@ use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
 };
-use risingwave_pb::catalog::{ColumnIndex as ProstColumnIndex, Table as ProstTable};
+use risingwave_pb::catalog::Table as ProstTable;
 
 use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::optimizer::property::FieldOrder;
@@ -359,12 +359,8 @@ impl TableCatalog {
             owner: self.owner,
             properties: self.properties.inner().clone().into_iter().collect(),
             fragment_id: self.fragment_id,
-            vnode_col_index: self
-                .vnode_col_index
-                .map(|i| ProstColumnIndex { index: i as _ }),
-            row_id_index: self
-                .row_id_index
-                .map(|i| ProstColumnIndex { index: i as _ }),
+            vnode_col_index: self.vnode_col_index.map(|i| i as _),
+            row_id_index: self.row_id_index.map(|i| i as _),
             value_indices: self.value_indices.iter().map(|x| *x as _).collect(),
             definition: self.definition.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
@@ -422,8 +418,8 @@ impl From<ProstTable> for TableCatalog {
             owner: tb.owner,
             properties: WithOptions::new(tb.properties),
             fragment_id: tb.fragment_id,
-            vnode_col_index: tb.vnode_col_index.map(|x| x.index as usize),
-            row_id_index: tb.row_id_index.map(|x| x.index as usize),
+            vnode_col_index: tb.vnode_col_index.map(|x| x as usize),
+            row_id_index: tb.row_id_index.map(|x| x as usize),
             value_indices: tb.value_indices.iter().map(|x| *x as _).collect(),
             definition: tb.definition,
             conflict_behavior_type,

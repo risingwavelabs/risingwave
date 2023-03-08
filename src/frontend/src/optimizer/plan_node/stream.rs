@@ -20,7 +20,6 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
 
@@ -628,7 +627,7 @@ pub fn to_stream_prost_body(
         Node::HopWindow(me) => {
             let me = &me.core;
             ProstNode::HopWindow(HopWindowNode {
-                time_col: Some(me.time_col.to_proto()),
+                time_col: me.time_col.index() as _,
                 window_slide: Some(me.window_slide.into()),
                 window_size: Some(me.window_size.into()),
                 output_indices: me.output_indices.iter().map(|&x| x as u32).collect(),
@@ -697,9 +696,7 @@ pub fn to_stream_prost_body(
                         .to_internal_table_prost(),
                 ),
                 info: Some(me.info.clone()),
-                row_id_index: me
-                    .row_id_index
-                    .map(|index| ColumnIndex { index: index as _ }),
+                row_id_index: me.row_id_index.map(|index| index as _),
                 columns: me.columns.iter().map(|c| c.to_protobuf()).collect(),
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone().into_iter().collect(),

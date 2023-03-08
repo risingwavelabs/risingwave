@@ -1,20 +1,18 @@
 package com.risingwave.java.utils;
 
+import com.risingwave.proto.*;
 import com.risingwave.proto.Catalog.Table;
-import com.risingwave.proto.ClusterServiceGrpc;
 import com.risingwave.proto.ClusterServiceGrpc.ClusterServiceBlockingStub;
 import com.risingwave.proto.Common.HostAddress;
 import com.risingwave.proto.Common.WorkerType;
-import com.risingwave.proto.DdlServiceGrpc;
 import com.risingwave.proto.DdlServiceGrpc.DdlServiceBlockingStub;
 import com.risingwave.proto.DdlServiceOuterClass.GetTableRequest;
 import com.risingwave.proto.DdlServiceOuterClass.GetTableResponse;
-import com.risingwave.proto.HeartbeatServiceGrpc;
 import com.risingwave.proto.HeartbeatServiceGrpc.HeartbeatServiceBlockingStub;
 import com.risingwave.proto.Hummock.HummockVersion;
 import com.risingwave.proto.Hummock.PinVersionRequest;
 import com.risingwave.proto.Hummock.PinVersionResponse;
-import com.risingwave.proto.HummockManagerServiceGrpc;
+import com.risingwave.proto.Hummock.UnpinVersionBeforeRequest;
 import com.risingwave.proto.HummockManagerServiceGrpc.HummockManagerServiceBlockingStub;
 import com.risingwave.proto.Meta.AddWorkerNodeRequest;
 import com.risingwave.proto.Meta.AddWorkerNodeResponse;
@@ -94,6 +92,18 @@ public class MetaClient implements AutoCloseable {
         PinVersionRequest req = PinVersionRequest.newBuilder().setContextId(workerId).build();
         PinVersionResponse resp = hummockStub.pinVersion(req);
         return resp.getPinnedVersion();
+    }
+
+    public void unpinVersion(HummockVersion version) {
+        // TODO: we are calling UnpinBefore in this method. If there are multiple versions being
+        // used, unpin using UnpinBefore may accidentally unpin the version used by other thread. We
+        // may introduce reference counting in the meta client.
+        UnpinVersionBeforeRequest req =
+                UnpinVersionBeforeRequest.newBuilder()
+                        .setContextId(workerId)
+                        .setUnpinVersionBefore(version.getId())
+                        .build();
+        hummockStub.unpinVersionBefore(req);
     }
 
     public Table getTable(String databaseName, String tableName) {
