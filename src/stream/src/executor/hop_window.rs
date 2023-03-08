@@ -167,13 +167,12 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::{StreamExt};
+    use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, IntervalUnit};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
-    
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
 
@@ -208,7 +207,7 @@ mod tests {
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
-                schema: schema,
+                schema,
                 pk_indices,
                 identity: "test".to_string(),
             },
