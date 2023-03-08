@@ -28,7 +28,7 @@ enum-as-inner = "0.5"
 fixedbitset = { version = "0.4", features = ["std"] }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
-governor = "0.5"
+governor = { version = "0.5", features = ["std", "dashmap", "jitter"] }
 hytra = "0.1.2"
 iter-chunks = "0.1"
 itertools = "0.10"
