@@ -45,7 +45,7 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<Vec<Vec<u8>>> {
 pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec<u8>> {
     let encoded_columns = column_orders
         .iter()
-        .map(|o| encode_array(chunk.column_at(o.column_idx).array_ref(), &o.order_type).unwrap())
+        .map(|o| encode_array(chunk.column_at(o.column_index).array_ref(), &o.order_type).unwrap())
         .collect_vec();
 
     let mut encoded_chunk = vec![vec![]; chunk.capacity()];
@@ -61,7 +61,7 @@ pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec
 pub fn encode_row(row: &OwnedRow, column_orders: &[ColumnOrder]) -> Vec<u8> {
     let mut encoded_row = vec![];
     column_orders.iter().for_each(|o| {
-        let value = row[o.column_idx].as_ref();
+        let value = row[o.column_index].as_ref();
         encoded_row
             .extend(encode_value(value.map(|x| x.as_scalar_ref_impl()), &o.order_type).unwrap());
     });

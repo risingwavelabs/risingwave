@@ -261,7 +261,7 @@ mod tests {
             source_creators.push(fake_create_source.clone());
         }
         let column_orders = Arc::new(vec![ColumnOrder {
-            column_idx: 0,
+            column_index: 0,
             order_type: OrderType::ascending(),
         }]);
 

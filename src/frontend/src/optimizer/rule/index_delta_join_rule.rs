@@ -107,7 +107,7 @@ impl Rule for IndexDeltaJoinRule {
                 && primary_table_distribution_key == join_indices {
                 // Check join key is prefix of primary table order key
                 let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
-                    .map(|x| x.column_idx)
+                    .map(|x| x.column_index)
                     .take(primary_table_distribution_key.len())
                     .collect_vec();
 

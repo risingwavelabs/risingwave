@@ -90,7 +90,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 agg_call
                     .column_orders
                     .iter()
-                    .map(|p| (p.column_idx, p.order_type))
+                    .map(|p| (p.column_index, p.order_type))
                     .unzip()
             };
 

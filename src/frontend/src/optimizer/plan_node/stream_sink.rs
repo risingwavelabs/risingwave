@@ -194,7 +194,12 @@ impl fmt::Display for StreamSink {
             builder.field(
                 "pk",
                 &IndicesDisplay {
-                    indices: &self.sink_desc.pk.iter().map(|k| k.column_idx).collect_vec(),
+                    indices: &self
+                        .sink_desc
+                        .pk
+                        .iter()
+                        .map(|k| k.column_index)
+                        .collect_vec(),
                     input_schema: &self.base.schema,
                 },
             );

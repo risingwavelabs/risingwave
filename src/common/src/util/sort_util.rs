@@ -100,28 +100,28 @@ impl OrderType {
 /// Corresponds to protobuf [`PbColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ColumnOrder {
-    pub column_idx: usize,
+    pub column_index: usize,
     pub order_type: OrderType,
 }
 
 impl ColumnOrder {
-    pub fn new(column_idx: usize, order_type: OrderType) -> Self {
+    pub fn new(column_index: usize, order_type: OrderType) -> Self {
         Self {
-            column_idx,
+            column_index,
             order_type,
         }
     }
 
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         ColumnOrder {
-            column_idx: column_order.column_index as _,
+            column_index: column_order.column_index as _,
             order_type: OrderType::from_protobuf(column_order.get_order_type().unwrap()),
         }
     }
 
     pub fn to_protobuf(&self) -> PbColumnOrder {
         PbColumnOrder {
-            column_index: self.column_idx as _,
+            column_index: self.column_index as _,
             order_type: Some(self.order_type.to_protobuf()),
         }
     }
@@ -220,8 +220,8 @@ pub fn compare_rows_in_chunk(
     column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
     for column_order in column_orders.iter() {
-        let lhs_array = lhs_data_chunk.column_at(column_order.column_idx).array();
-        let rhs_array = rhs_data_chunk.column_at(column_order.column_idx).array();
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {

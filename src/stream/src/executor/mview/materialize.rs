@@ -75,7 +75,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = input.schema().clone();
 
@@ -108,7 +108,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let columns = column_ids

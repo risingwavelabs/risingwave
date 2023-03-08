@@ -129,7 +129,9 @@ impl TopNOnIndexRule {
             field_order: primary_key
                 .into_iter()
                 .map(|op| FieldOrder {
-                    index: *output_col_map.get(&op.column_idx).unwrap_or(&unmatched_idx),
+                    index: *output_col_map
+                        .get(&op.column_index)
+                        .unwrap_or(&unmatched_idx),
                     direct: op.order_type.direction(),
                 })
                 .collect::<Vec<_>>(),

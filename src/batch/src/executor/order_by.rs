@@ -168,11 +168,11 @@ mod tests {
         ));
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
         ];
@@ -218,11 +218,11 @@ mod tests {
         ));
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
         ];
@@ -267,11 +267,11 @@ mod tests {
         ));
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
         ];
@@ -337,15 +337,15 @@ mod tests {
         mock_executor.add(input_chunk);
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 2,
+                column_index: 2,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::descending(),
             },
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
         ];
@@ -410,15 +410,15 @@ mod tests {
         mock_executor.add(input_chunk);
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::descending(),
             },
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::descending(),
             },
             ColumnOrder {
-                column_idx: 2,
+                column_index: 2,
                 order_type: OrderType::ascending(),
             },
         ];
@@ -503,15 +503,15 @@ mod tests {
         mock_executor.add(input_chunk);
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 2,
+                column_index: 2,
                 order_type: OrderType::descending(),
             },
         ];
@@ -682,11 +682,11 @@ mod tests {
         mock_executor.add(input_chunk);
         let column_orders = vec![
             ColumnOrder {
-                column_idx: 0,
+                column_index: 0,
                 order_type: OrderType::ascending(),
             },
             ColumnOrder {
-                column_idx: 1,
+                column_index: 1,
                 order_type: OrderType::descending(),
             },
         ];

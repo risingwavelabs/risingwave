@@ -169,7 +169,7 @@ impl FieldOrder {
     // TODO(rc): unify them
     pub fn to_column_order(&self) -> ColumnOrder {
         ColumnOrder {
-            column_idx: self.index,
+            column_index: self.index,
             order_type: OrderType::new(self.direct),
         }
     }

@@ -60,13 +60,13 @@ impl TableDesc {
     }
 
     pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_idx)).collect()
+        self.pk.iter().map(|col| (col.column_index)).collect()
     }
 
     pub fn order_column_ids(&self) -> Vec<ColumnId> {
         self.pk
             .iter()
-            .map(|col| self.columns[col.column_idx].column_id)
+            .map(|col| self.columns[col.column_index].column_id)
             .collect()
     }
 

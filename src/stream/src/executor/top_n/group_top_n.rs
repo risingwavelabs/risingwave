@@ -123,7 +123,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager),
             cache_key_serde,

@@ -303,8 +303,8 @@ impl IndexSelectionRule {
                 Self::create_null_safe_equal_expr(
                     x,
                     schema.fields[x].data_type.clone(),
-                    y.column_idx + index_access_len,
-                    primary_table_desc.columns[y.column_idx].data_type.clone(),
+                    y.column_index + index_access_len,
+                    primary_table_desc.columns[y.column_index].data_type.clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -502,7 +502,7 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.pk[0].column_idx != idx {
+            if primary_table_desc.pk[0].column_index != idx {
                 return result;
             }
         }
@@ -513,7 +513,7 @@ impl IndexSelectionRule {
             primary_table_desc
                 .pk
                 .iter()
-                .map(|x| x.column_idx)
+                .map(|x| x.column_index)
                 .collect_vec(),
             primary_table_desc.clone().into(),
             vec![],
@@ -688,7 +688,7 @@ impl<'a> TableScanIoEstimator<'a> {
                     table_desc
                         .pk
                         .iter()
-                        .map(|x| &table_desc.columns[x.column_idx]),
+                        .map(|x| &table_desc.columns[x.column_index]),
                 )
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
                 .sum::<usize>()

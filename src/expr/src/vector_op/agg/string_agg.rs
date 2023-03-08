@@ -131,7 +131,7 @@ impl StringAggOrdered {
     fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
         let (order_col_indices, order_types) = column_orders
             .into_iter()
-            .map(|p| (p.column_idx, p.order_type))
+            .map(|p| (p.column_index, p.order_type))
             .unzip();
         Self {
             agg_col_idx,

@@ -131,7 +131,7 @@ pub(crate) fn gen_create_index_plan(
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
-        .filter(|x| set.insert(x.column_idx))
+        .filter(|x| set.insert(x.column_index))
         .collect_vec();
 
     // Remove include columns are already in index columns
@@ -145,7 +145,7 @@ pub(crate) fn gen_create_index_plan(
     // Distributed by columns should be a prefix of index columns
     if !index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .starts_with(&distributed_by_columns)
     {
@@ -205,7 +205,7 @@ pub(crate) fn gen_create_index_plan(
             .collect_vec(),
         original_columns: index_columns
             .iter()
-            .map(|x| x.column_idx)
+            .map(|x| x.column_index)
             .collect_vec()
             .iter()
             .chain(include_columns.iter())
@@ -290,7 +290,7 @@ fn assemble_materialize(
 
     let exprs = index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .iter()
         .chain(include_columns.iter())
@@ -307,7 +307,7 @@ fn assemble_materialize(
 
     let out_names: Vec<String> = index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .iter()
         .chain(include_columns.iter())

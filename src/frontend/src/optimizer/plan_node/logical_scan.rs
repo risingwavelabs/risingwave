@@ -224,7 +224,7 @@ impl LogicalScan {
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc().columns[order.column_idx].column_id)
+                        .get(&self.table_desc().columns[order.column_index].column_id)
                         .unwrap();
                     FieldOrder::new(*idx, order.order_type)
                 })
@@ -675,8 +675,8 @@ impl ToStream for LogicalScan {
                     .pk
                     .iter()
                     .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
-                            Some(c.column_idx)
+                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
+                            Some(c.column_index)
                         } else {
                             None
                         }

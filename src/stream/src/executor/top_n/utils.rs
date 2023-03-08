@@ -200,7 +200,7 @@ pub fn create_cache_key_serde(
     {
         // validate storage_key = group_by + order_by + additional_pk
         for i in 0..group_by.len() {
-            assert_eq!(storage_key[i].column_idx, group_by[i]);
+            assert_eq!(storage_key[i].column_index, group_by[i]);
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
             assert_eq!(storage_key[i], order_by[i - group_by.len()]);
@@ -208,7 +208,7 @@ pub fn create_cache_key_serde(
         let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
         for i in (group_by.len() + order_by.len())..storage_key.len() {
             assert!(
-                pk_indices.contains(&storage_key[i].column_idx),
+                pk_indices.contains(&storage_key[i].column_index),
                 "storage_key = {:?}, pk_indices = {:?}",
                 storage_key,
                 pk_indices
@@ -219,7 +219,7 @@ pub fn create_cache_key_serde(
     let (cache_key_data_types, cache_key_order_types): (Vec<_>, Vec<_>) = storage_key
         [group_by.len()..]
         .iter()
-        .map(|o| (schema[o.column_idx].data_type(), o.order_type))
+        .map(|o| (schema[o.column_index].data_type(), o.order_type))
         .unzip();
 
     let order_by_len = order_by.len();

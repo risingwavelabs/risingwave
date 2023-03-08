@@ -161,7 +161,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices.sort_unstable();
             let mut arrangement_order_types_indices = arrangement_order_rules
                 .iter()
-                .map(|x| x.column_idx)
+                .map(|x| x.column_index)
                 .collect_vec();
             arrangement_order_types_indices.sort_unstable();
             assert_eq!(
@@ -182,7 +182,7 @@ impl<S: StateStore> LookupExecutor<S> {
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
             .iter()
-            .map(|x| x.column_idx) // the required column idx in this position
+            .map(|x| x.column_index) // the required column idx in this position
             .filter_map(|x| arrange_join_key_indices.iter().position(|y| *y == x)) // the position of the item in join keys
             .map(|x| stream_join_key_indices[x]) // the actual column idx in stream
             .collect_vec();

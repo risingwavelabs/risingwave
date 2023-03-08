@@ -104,7 +104,7 @@ impl ArrayAggOrdered {
         debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
         let (order_col_indices, order_types) = column_orders
             .into_iter()
-            .map(|p| (p.column_idx, p.order_type))
+            .map(|p| (p.column_index, p.order_type))
             .unzip();
         ArrayAggOrdered {
             return_type,
