@@ -31,8 +31,8 @@ risingwave_compute = { path = "../../compute" }
 risingwave_ctl = { path = "../../ctl" }
 risingwave_frontend = { path = "../../frontend" }
 risingwave_meta = { path = "../../meta" }
-risingwave_sqlparser = { path = "../../sqlparser" }
 risingwave_pb = { path = "../../prost" }
+risingwave_sqlparser = { path = "../../sqlparser" }
 risingwave_sqlsmith = { path = "../sqlsmith" }
 serde = "1.0.152"
 serde_derive = "1.0.152"
