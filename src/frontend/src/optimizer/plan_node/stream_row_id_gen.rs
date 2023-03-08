@@ -31,10 +31,10 @@ impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
         let distribution = match input.distribution() {
             Distribution::Single => Distribution::Single,
-            Distribution::SomeShard | Distribution::HashShard(_) | Distribution::UpstreamHashShard(_, _) => {
-                Distribution::HashShard(vec![row_id_index])
-            }
-            Distribution::Broadcast => unreachable!("Broadcast should not be used in stream mode")
+            Distribution::SomeShard
+            | Distribution::HashShard(_)
+            | Distribution::UpstreamHashShard(_, _) => Distribution::HashShard(vec![row_id_index]),
+            Distribution::Broadcast => unreachable!("Broadcast should not be used in stream mode"),
         };
         let base = PlanBase::new_stream(
             input.ctx(),

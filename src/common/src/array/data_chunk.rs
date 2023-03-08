@@ -289,7 +289,7 @@ impl DataChunk {
         column_idxes: &[usize],
         hasher_builder: H,
     ) -> Vec<HashCode> {
-        if let Ok(idx) = column_idxes.iter().exactly_one() && let ArrayImpl::Serial(array) = self.column_at(*idx).array().as_ref() {
+        if let Ok(idx) = column_idxes.iter().exactly_one() && let ArrayImpl::Serial(array) = self.column_at(*idx).array_ref() {
             return array
                 .iter()
                 .map(|item| HashCode::from(item.unwrap().vnode_id() as u64))
@@ -492,8 +492,8 @@ pub trait DataChunkTestExt {
 
     /// Insert one invisible hole after every record.
     fn with_invisible_holes(self) -> Self
-        where
-            Self: Sized;
+    where
+        Self: Sized;
 
     /// Panic if the chunk is invalid.
     fn assert_valid(&self);
@@ -608,8 +608,8 @@ impl DataChunkTestExt for DataChunk {
     }
 
     fn with_invisible_holes(self) -> Self
-        where
-            Self: Sized,
+    where
+        Self: Sized,
     {
         let (cols, vis) = self.into_parts();
         let n = vis.len();
