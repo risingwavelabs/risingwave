@@ -21,7 +21,7 @@ pub type Result<T> = std::result::Result<T, BatchError>;
 
 pub trait Error = std::error::Error + Send + Sync + 'static;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum BatchError {
     #[error("Unsupported function: {0}")]
     UnsupportedFunction(String),
@@ -40,6 +40,9 @@ pub enum BatchError {
 
     #[error("Prometheus error: {0}")]
     Prometheus(#[from] prometheus::Error),
+
+    #[error("Task aborted: {0}")]
+    Aborted(String),
 }
 
 impl From<BatchError> for RwError {

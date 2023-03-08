@@ -35,7 +35,7 @@ use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
 use tonic::Status;
 
-use crate::error::BatchError::SenderError;
+use crate::error::BatchError::{Aborted, SenderError};
 use crate::error::{BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
@@ -518,56 +518,71 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     ) -> Result<()> {
         let mut data_chunk_stream = root.execute();
         let state;
-        let mut err_str = None;
+        let mut error = None;
         loop {
             tokio::select! {
-            // We prioritize abort signal over normal data chunks.
-            biased;
-            err_res = &mut shutdown_rx => {
-                state = TaskStatus::Aborted;
-                err_str = err_res.ok();
-                break;
-            }
-            res = data_chunk_stream.next() => {
-                if let Some(data_chunk) = res {
-                if let Err(e) = sender.send(Some(data_chunk?)).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                state = TaskStatus::Finished;
-                                break;
-                            },
-                            x => {
-                                return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
-                            }
-                        }
-                    }
-                } else {
-                    state = TaskStatus::Finished;
+                // We prioritize abort signal over normal data chunks.
+                biased;
+                err_resason = &mut shutdown_rx => {
+                    state = TaskStatus::Aborted;
+                    error = Some(Aborted(err_reason.ok()));
                     break;
                 }
-            }
+                res = data_chunk_stream.next() => {
+                    match res {
+                            Some(Ok(data_chunk)) => {
+                                if let Err(e) = sender.send(data_chunk).await {
+                                    match e {
+                                        BatchError::SenderError => {
+                                            // This is possible since when we have limit executor in parent
+                                            // stage, it may early stop receiving data from downstream, which
+                                            // leads to close of channel.
+                                            warn!("Task receiver closed!");
+                                            state = TaskStatus::Finished;
+                                            break;
+                                        },
+                                        x => {
+                                            error!("Failed to send data!");
+                                            error = Some(x);
+                                            state = TaskStatus::Failed;
+                                            break;
+                                        }
+                                    }
+                            }
+                        },
+                        Some(Err(e)) => {
+                              error!("Batch task failed: {:?}", e);
+                              error = Some(e);
+                              state = TaskStatus::Failed;
+                              break;
+                        },
+                        None => {
+                             debug!("Batch task {:?} finished successfully.", self.task_id);
+                             state = TaskStatus::Finished;
+                             break;
+                        }
+                    }
+                }
             }
         }
 
-        *self.state.lock() = state;
-        if let Err(e) = sender.send(None).await {
+        let err_str = error.as_ref().map(|e| format!("{:?}", e));
+        if let Err(e) = sender.close(error).await {
             match e {
-                BatchError::SenderError => {
+                SenderError => {
                     // This is possible since when we have limit executor in parent
                     // stage, it may early stop receiving data from downstream, which
                     // leads to close of channel.
                     warn!("Task receiver closed when sending None!");
                 }
                 x => {
-                    return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                    error!("Failed to close task output channel: {:?}", self.task_id);
+                    state = TaskStatus::Failed;
                 }
             }
         }
 
+        *self.state.lock() = state;
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",

@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::ops::BitAnd;
 use std::option::Option;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
@@ -26,14 +28,14 @@ use risingwave_pb::batch_plan::exchange_info::ConsistentHashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
-use crate::error::BatchError::SenderError;
-use crate::error::Result as BatchResult;
+use crate::error::BatchError::{Internal, SenderError};
+use crate::error::{BatchError, Result as BatchResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 
 #[derive(Clone)]
 pub struct ConsistentHashShuffleSender {
-    senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
+    senders: Vec<mpsc::Sender<BatchResult<Option<DataChunkInChannel>>>>,
     consistent_hash_info: ConsistentHashInfo,
     output_count: usize,
 }
@@ -47,7 +49,7 @@ impl Debug for ConsistentHashShuffleSender {
 }
 
 pub struct ConsistentHashShuffleReceiver {
-    receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
+    receiver: mpsc::Receiver<BatchResult<Option<DataChunkInChannel>>>,
 }
 
 fn generate_hash_values(
@@ -107,11 +109,14 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for ConsistentHashShuffleSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
-        match chunk {
-            Some(c) => self.send_chunk(c).await,
-            None => self.send_done().await,
-        }
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
+
+    fn send(&mut self, chunk: DataChunk) -> Self::SendFuture<'_> {
+        async move { self.send_chunk(chunk).await }
+    }
+
+    fn close(self, error: Option<BatchError>) -> Self::SendFuture<'static> {
+        async move { self.send_done(error).await }
     }
 }
 
@@ -130,7 +135,7 @@ impl ConsistentHashShuffleSender {
             // `generate_new_data_chunks` may generate an empty chunk.
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
-                    .send(Some(DataChunkInChannel::new(new_data_chunk)))
+                    .send(Ok(Some(DataChunkInChannel::new(new_data_chunk))))
                     .await
                     .map_err(|_| SenderError)?
             }
@@ -138,9 +143,10 @@ impl ConsistentHashShuffleSender {
         Ok(())
     }
 
-    async fn send_done(&mut self) -> BatchResult<()> {
-        for sender in &self.senders {
-            sender.send(None).await.map_err(|_| SenderError)?
+    async fn send_done(mut self, error: Option<BatchError>) -> BatchResult<()> {
+        for sender in self.senders {
+            let result = error.as_ref().map(|e| Err(e.clone())).unwrap_or(Ok(None));
+            sender.send(result).await.map_err(|_| SenderError)?
         }
 
         Ok(())
@@ -148,11 +154,15 @@ impl ConsistentHashShuffleSender {
 }
 
 impl ChanReceiver for ConsistentHashShuffleReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
-        match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
-            // Early close should be treated as error.
-            None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
+    type RecvFuture<'a> = impl Future<Output = BatchResult<Option<DataChunkInChannel>>> + 'a;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            match self.receiver.recv().await {
+                Some(data_chunk) => data_chunk,
+                // Early close should be treated as error.
+                None => Err(Internal(anyhow!("broken hash_shuffle_channel"))),
+            }
         }
     }
 }

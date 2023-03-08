@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::future::Future;
 use std::ops::BitAnd;
 use std::option::Option;
 
@@ -26,12 +27,12 @@ use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::SenderError;
-use crate::error::Result as BatchResult;
+use crate::error::{BatchError, Result as BatchResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]
 pub struct HashShuffleSender {
-    senders: Vec<mpsc::Sender<Option<DataChunkInChannel>>>,
+    senders: Vec<mpsc::Sender<BatchResult<Option<DataChunkInChannel>>>>,
     hash_info: HashInfo,
 }
 
@@ -44,7 +45,7 @@ impl Debug for HashShuffleSender {
 }
 
 pub struct HashShuffleReceiver {
-    receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
+    receiver: mpsc::Receiver<BatchResult<Option<DataChunkInChannel>>>,
 }
 
 fn generate_hash_values(chunk: &DataChunk, hash_info: &HashInfo) -> BatchResult<Vec<usize>> {
@@ -104,11 +105,14 @@ fn generate_new_data_chunks(
 }
 
 impl ChanSender for HashShuffleSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
-        match chunk {
-            Some(c) => self.send_chunk(c).await,
-            None => self.send_done().await,
-        }
+    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
+
+    fn send(&mut self, chunk: DataChunk) -> Self::SendFuture<'_> {
+        async move { self.send_chunk(chunk).await }
+    }
+
+    fn close(self, error: Option<BatchError>) -> Self::SendFuture<'_> {
+        async move { self.send_done(error).await }
     }
 }
 
@@ -127,7 +131,7 @@ impl HashShuffleSender {
             // `generate_new_data_chunks` may generate an empty chunk.
             if new_data_chunk.cardinality() > 0 {
                 self.senders[sink_id]
-                    .send(Some(DataChunkInChannel::new(new_data_chunk)))
+                    .send(Ok(Some(DataChunkInChannel::new(new_data_chunk))))
                     .await
                     .map_err(|_| SenderError)?
             }
@@ -135,9 +139,10 @@ impl HashShuffleSender {
         Ok(())
     }
 
-    async fn send_done(&mut self) -> BatchResult<()> {
-        for sender in &self.senders {
-            sender.send(None).await.map_err(|_| SenderError)?
+    async fn send_done(mut self, error: Option<BatchError>) -> BatchResult<()> {
+        for sender in self.senders {
+            let result = error.as_ref().map(|e| Err(e.clone())).unwrap_or(Ok(None));
+            sender.send(result).await.map_err(|_| SenderError)?;
         }
 
         Ok(())
@@ -145,11 +150,15 @@ impl HashShuffleSender {
 }
 
 impl ChanReceiver for HashShuffleReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
-        match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
-            // Early close should be treated as error.
-            None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
+    type RecvFuture<'a> = impl Future<Output = BatchResult<Option<DataChunkInChannel>>> + 'a;
+
+    fn recv(&mut self) -> Self::RecvFuture<'_> {
+        async move {
+            match self.receiver.recv().await {
+                Some(data_chunk) => data_chunk,
+                // Early close should be treated as error.
+                None => Err(InternalError("broken hash_shuffle_channel".to_string()).into()),
+            }
         }
     }
 }
