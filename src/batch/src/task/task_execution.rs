@@ -27,8 +27,8 @@ use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::task_info::TaskStatus;
-use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use risingwave_pb::task_service::task_info_response::TaskStatus;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
@@ -103,17 +103,19 @@ pub enum StateReporter {
 }
 
 impl StateReporter {
-    pub async fn send(&mut self, val: TaskInfoResponseResult) -> BatchResult<()> {
+    pub async fn send(&mut self, val: TaskInfoResponse) -> BatchResult<()> {
         match self {
             Self::Local(s) => {
-                if let Err(e) = val {
-                    s.send(Err(e)).await.map_err(|_| SenderError)
-                } else {
-                    // do nothing and just return.
-                    Ok(())
+                // A hack here to convert task failure message to data error
+                match val.task_status() {
+                    TaskStatus::Failed => s
+                        .send(Err(Status::internal(val.error_message)))
+                        .await
+                        .map_err(|_| SenderError),
+                    _ => Ok(()),
                 }
             }
-            Self::Distributed(s) => s.send(val).await.map_err(|_| SenderError),
+            Self::Distributed(s) => s.send(Ok(val)).await.map_err(|_| SenderError),
             Self::Mock() => Ok(()),
         }
     }
@@ -225,7 +227,6 @@ impl TaskOutput {
                     );
                     let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
-                        status: Default::default(),
                         record_batch: Some(pb),
                     };
                     writer.write(resp).await?;
@@ -306,7 +307,7 @@ pub struct BatchTaskExecution<C> {
 
     /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
     /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
+    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponse>>>,
 
     epoch: BatchQueryEpoch,
 
@@ -494,21 +495,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         err_str: Option<String>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
-        if let Some(err_str) = err_str {
-            state_tx.send(Err(Status::internal(err_str))).await
-        } else {
-            // Notify frontend the task status.
-            state_tx
-                .send(Ok(TaskInfoResponse {
-                    task_info: Some(TaskInfo {
-                        task_id: Some(TaskId::default().to_prost()),
-                        task_status: task_status.into(),
-                    }),
-                    // TODO: Fill the real status.
-                    ..Default::default()
-                }))
-                .await
-        }
+        // Notify frontend the task status.
+        state_tx
+            .send(TaskInfoResponse {
+                task_id: Some(self.task_id.to_prost()),
+                task_status: task_status.into(),
+                error_message: err_str.unwrap_or("".to_string()),
+            })
+            .await
     }
 
     pub fn change_state(&self, task_status: TaskStatus) {
@@ -523,7 +517,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         state_tx: &mut StateReporter,
     ) -> Result<()> {
         let mut data_chunk_stream = root.execute();
-        let mut state = TaskStatus::Unspecified;
+        let state;
         let mut err_str = None;
         loop {
             tokio::select! {
@@ -543,6 +537,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 // stage, it may early stop receiving data from downstream, which
                                 // leads to close of channel.
                                 warn!("Task receiver closed!");
+                                state = TaskStatus::Finished;
                                 break;
                             },
                             x => {
@@ -637,7 +632,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
+    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
         self.state_rx
             .lock()
             .take()

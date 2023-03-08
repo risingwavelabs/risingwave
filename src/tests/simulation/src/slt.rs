@@ -48,6 +48,7 @@ impl SqlCmd {
         matches!(
             self,
             SqlCmd::Dml
+                | SqlCmd::Flush
                 | SqlCmd::Create {
                     is_create_table_as: true
                 }
@@ -85,13 +86,15 @@ const KILL_IGNORE_FILES: &[&str] = &[
 
 /// Run the sqllogictest files in `glob`.
 pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
-    let risingwave = RisingWave::connect("frontend".into(), "dev".into())
-        .await
-        .unwrap();
     let kill = opts.kill_compute || opts.kill_meta || opts.kill_frontend || opts.kill_compactor;
-    let mut tester = sqllogictest::Runner::new(risingwave);
     let files = glob::glob(glob).expect("failed to read glob pattern");
     for file in files {
+        // use a session per file
+        let risingwave = RisingWave::connect("frontend".into(), "dev".into())
+            .await
+            .unwrap();
+        let mut tester = sqllogictest::Runner::new(risingwave);
+
         let file = file.unwrap();
         let path = file.as_path();
         println!("{}", path.display());
@@ -121,12 +124,6 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 | sqllogictest::Record::Query { sql, .. } => extract_sql_command(sql),
                 _ => SqlCmd::Others,
             };
-
-            // Since we've configured the session to always enable implicit flush, we don't need to
-            // execute `FLUSH` statements.
-            if cmd == SqlCmd::Flush {
-                continue;
-            }
 
             if cmd.ignore_kill() {
                 for i in 0usize.. {

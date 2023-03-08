@@ -59,7 +59,7 @@ use crate::scheduler::plan_fragmenter::{
     ExecutionPlanNode, PartitionInfo, QueryStageRef, StageId, TaskId, ROOT_TASK_ID,
 };
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
-use crate::scheduler::SchedulerError::TaskExecutionError;
+use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
 use crate::scheduler::{ExecutionContextRef, SchedulerError, SchedulerResult};
 
 const TASK_SCHEDULING_PARALLELISM: usize = 10;
@@ -395,54 +395,99 @@ impl StageRunner {
         let mut sent_signal_to_next = false;
 
         while let Some(status_res_inner) = all_streams.next().await {
-            // The status can be Running, Finished, Failed etc. This stream contains status from
-            // different tasks.
-            let status = status_res_inner.map_err(SchedulerError::from)?;
-            // Note: For Task execution failure, it now becomes a Rpc Error and will return here.
-            // Do not process this as task status like Running/Finished/ etc.
+            match status_res_inner {
+                Ok(status) => {
+                    use risingwave_pb::task_service::task_info_response::TaskStatus as TaskStatusProst;
+                    match TaskStatusProst::from_i32(status.task_status).unwrap() {
+                        TaskStatusProst::Running => {
+                            running_task_cnt += 1;
+                            // The task running count should always less or equal than the
+                            // registered tasks number.
+                            assert!(running_task_cnt <= self.tasks.keys().len());
+                            // All tasks in this stage have been scheduled. Notify query runner to
+                            // schedule next stage.
+                            if running_task_cnt == self.tasks.keys().len() {
+                                self.notify_stage_scheduled(QueryMessage::Stage(
+                                    StageEvent::Scheduled(self.stage.id),
+                                ))
+                                .await;
+                                sent_signal_to_next = true;
+                            }
+                        }
 
-            use risingwave_pb::task_service::task_info::TaskStatus as TaskStatusProst;
-            match TaskStatusProst::from_i32(status.task_info.as_ref().unwrap().task_status).unwrap()
-            {
-                TaskStatusProst::Running => {
-                    running_task_cnt += 1;
-                    // The task running count should always less or equal than the registered tasks
-                    // number.
-                    assert!(running_task_cnt <= self.tasks.keys().len());
-                    // All tasks in this stage have been scheduled. Notify query runner to schedule
-                    // next stage.
-                    if running_task_cnt == self.tasks.keys().len() {
-                        self.notify_stage_scheduled(QueryMessage::Stage(StageEvent::Scheduled(
-                            self.stage.id,
-                        )))
-                        .await;
-                        sent_signal_to_next = true;
+                        TaskStatusProst::Finished => {
+                            finished_task_cnt += 1;
+                            assert!(finished_task_cnt <= self.tasks.keys().len());
+                            assert!(running_task_cnt >= finished_task_cnt);
+                            if finished_task_cnt == self.tasks.keys().len() {
+                                // All tasks finished without failure, we should not break
+                                // this loop
+                                self.notify_stage_completed().await;
+                                sent_signal_to_next = true;
+                                break;
+                            }
+                        }
+                        TaskStatusProst::Aborted => {
+                            // Currently, the only reason that we receive an abort status is that
+                            // the task's memory usage is too high so
+                            // it's aborted.
+                            error!(
+                                "Abort task {:?} because of excessive memory usage. Please try again later.",
+                                status.task_id.unwrap()
+                            );
+                            self.notify_stage_state_changed(
+                                |_| StageState::Failed,
+                                QueryMessage::Stage(Failed {
+                                    id: self.stage.id,
+                                    reason: TaskRunningOutOfMemory,
+                                }),
+                            )
+                            .await;
+                            sent_signal_to_next = true;
+                            break;
+                        }
+                        TaskStatusProst::Failed => {
+                            // Task failed, we should fail whole query
+                            error!(
+                                "Task {:?} failed, reason: {:?}",
+                                status.task_id.unwrap(),
+                                status.error_message,
+                            );
+                            self.notify_stage_state_changed(
+                                |_| StageState::Failed,
+                                QueryMessage::Stage(Failed {
+                                    id: self.stage.id,
+                                    reason: TaskExecutionError(status.error_message),
+                                }),
+                            )
+                            .await;
+                            sent_signal_to_next = true;
+                            break;
+                        }
+                        status => {
+                            // The remain possible variant is Failed, but now they won't be pushed
+                            // from CN.
+                            unreachable!("Unexpected task status {:?}", status);
+                        }
                     }
                 }
-
-                TaskStatusProst::Finished => {
-                    finished_task_cnt += 1;
-                    assert!(finished_task_cnt <= self.tasks.keys().len());
-                    assert!(running_task_cnt >= finished_task_cnt);
-                    if finished_task_cnt == self.tasks.keys().len() {
-                        // All tasks finished without failure, we should not break
-                        // this loop
-                        self.notify_stage_completed().await;
-                        sent_signal_to_next = true;
-                        break;
-                    }
-                }
-                TaskStatusProst::Aborted => {
-                    // Currently, the only reason that we receive an abort status is that the task's
-                    // memory usage is too high so it's aborted.
-                    tracing::error!(
-                        "Abort task {:?} because of excessive memory usage. Please try again later.",
-                        status.task_info.as_ref().unwrap().task_id
+                Err(e) => {
+                    // rpc error here, we should also notify stage failure
+                    error!(
+                        "Fetching task status in stage {:?} failed, reason: {:?}",
+                        self.stage.id,
+                        e.message()
                     );
-                }
-                status => {
-                    // The remain possible variant is Failed, but now they won't be pushed from CN.
-                    unreachable!("Unexpected task status {:?}", status);
+                    self.notify_stage_state_changed(
+                        |_| StageState::Failed,
+                        QueryMessage::Stage(Failed {
+                            id: self.stage.id,
+                            reason: SchedulerError::from(e),
+                        }),
+                    )
+                    .await;
+                    sent_signal_to_next = true;
+                    break;
                 }
             }
         }
@@ -455,19 +500,23 @@ impl StageRunner {
             finished_task_cnt
         );
 
+        if !sent_signal_to_next || finished_task_cnt != self.tasks.keys().len() {
+            // This situation may come from recovery test: CN may get killed before reporting
+            // status. In this case, batch query is expected to fail. Client in
+            // simulation test should retry this query (w/o kill nodes).
+            self.notify_stage_state_changed(
+                |_| StageState::Failed,
+                QueryMessage::Stage(Failed {
+                    id: self.stage.id,
+                    reason: SchedulerError::Internal(anyhow!(
+                        "Compute node lost connection before finishing responding"
+                    )),
+                }),
+            )
+            .await;
+        }
+
         if let Some(shutdown) = all_streams.take_future() {
-            // After processing all stream status, we must have sent signal (Either Scheduled or
-            // Failed) to Query Runner. If this is not true, query runner will stuck cuz it do
-            // not receive any signals.
-            if !sent_signal_to_next {
-                // For now, this kind of situation may come from recovery test: CN may get
-                // killed before reporting status, so sent signal flag is not set yet.
-                // In this case, batch query is expected to fail. Client in simulation test
-                // should retry this query (w/o kill nodes).
-                return Err(TaskExecutionError(
-                    "Compute node lost connection before finishing responding".to_string(),
-                ));
-            }
             tracing::trace!(
                 "Stage [{:?}-{:?}] waiting for stopping signal.",
                 self.stage.query_id,

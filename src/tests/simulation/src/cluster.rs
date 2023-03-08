@@ -186,7 +186,7 @@ impl Cluster {
 
         let mut meta_addrs = vec![];
         for i in 1..=conf.meta_nodes {
-            meta_addrs.push(format!("https://meta-{i}:5690/"));
+            meta_addrs.push(format!("http://meta-{i}:5690"));
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
@@ -199,7 +199,7 @@ impl Cluster {
                 "--listen-addr",
                 "0.0.0.0:5690",
                 "--advertise-addr",
-                &format!("192.168.1.{i}:5690"),
+                &format!("meta-{i}:5690"),
                 "--backend",
                 "etcd",
                 "--etcd-endpoints",

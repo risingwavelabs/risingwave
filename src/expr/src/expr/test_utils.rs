@@ -21,9 +21,9 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{DataType as ProstDataType, DataType, Datum as ProstDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNode {
+pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> ExprNode {
     let mut exprs = Vec::new();
     for (idx, ret) in indices.iter().zip_eq_fast(rets.iter()) {
         exprs.push(make_input_ref(*idx, *ret));
@@ -40,14 +40,14 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[i32]) -> ExprNo
     }
 }
 
-pub fn make_input_ref(idx: i32, ret: TypeName) -> ExprNode {
+pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
         return_type: Some(DataType {
             type_name: ret as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+        rex_node: Some(RexNode::InputRef(idx as _)),
     }
 }
 

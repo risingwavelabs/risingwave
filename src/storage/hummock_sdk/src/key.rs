@@ -18,7 +18,7 @@ use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 
 use crate::HummockEpoch;
@@ -28,9 +28,19 @@ pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 // Max length for key overlap and diff length. See KeyPrefix::encode.
 pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
-pub type TableKeyRange = (Bound<TableKey<Vec<u8>>>, Bound<TableKey<Vec<u8>>>);
-pub type UserKeyRange = (Bound<UserKey<Vec<u8>>>, Bound<UserKey<Vec<u8>>>);
-pub type FullKeyRange = (Bound<FullKey<Vec<u8>>>, Bound<FullKey<Vec<u8>>>);
+pub type KeyPayloadType = Bytes;
+pub type TableKeyRange = (
+    Bound<TableKey<KeyPayloadType>>,
+    Bound<TableKey<KeyPayloadType>>,
+);
+pub type UserKeyRange = (
+    Bound<UserKey<KeyPayloadType>>,
+    Bound<UserKey<KeyPayloadType>>,
+);
+pub type FullKeyRange = (
+    Bound<FullKey<KeyPayloadType>>,
+    Bound<FullKey<KeyPayloadType>>,
+);
 
 /// Converts user key to full key by appending `epoch` to the user key.
 pub fn key_with_epoch(mut user_key: Vec<u8>, epoch: HummockEpoch) -> Vec<u8> {
@@ -267,35 +277,38 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Excluded(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Excluded(buf.freeze())
     } else {
         Unbounded
     }
 }
 
 /// Get the start bound of the given `prefix` when it is excluded from the range.
-pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Included(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Included(buf.freeze())
     } else {
         panic!("the prefix is the maximum value")
     }
 }
 
 /// Transform the given `prefix` to a key range.
-pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     if prefix.is_empty() {
         (Unbounded, Unbounded)
     } else {
-        (Included(prefix.to_vec()), end_bound_of_prefix(prefix))
+        (
+            Included(Bytes::copy_from_slice(prefix)),
+            end_bound_of_prefix(prefix),
+        )
     }
 }
 
@@ -303,23 +316,28 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
 pub fn prefixed_range<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     prefix: &[u8],
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
-    let start = match range.start_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    let prefixed = |b: &B| -> Bytes {
+        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
+        buf.extend_from_slice(prefix);
+        buf.extend_from_slice(b.as_ref());
+        buf.freeze()
+    };
+
+    let start: Bound<Bytes> = match range.start_bound() {
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
-        Unbounded => Included(prefix.to_vec()),
+        Unbounded => Included(Bytes::copy_from_slice(prefix)),
     };
 
     let end = match range.end_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
         Unbounded => end_bound_of_prefix(prefix),
     };
@@ -380,7 +398,7 @@ impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
 }
 
 #[inline]
-pub fn map_table_key_range(range: (Bound<Vec<u8>>, Bound<Vec<u8>>)) -> TableKeyRange {
+pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)) -> TableKeyRange {
     (range.0.map(TableKey), range.1.map(TableKey))
 }
 
@@ -462,6 +480,15 @@ impl<'a> UserKey<&'a [u8]> {
         UserKey {
             table_id: self.table_id,
             table_key: TableKey(T::copy_from_slice(self.table_key.0)),
+        }
+    }
+}
+
+impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
+    pub fn cloned(self) -> UserKey<T> {
+        UserKey {
+            table_id: self.table_id,
+            table_key: TableKey(self.table_key.0.clone()),
         }
     }
 }
@@ -644,23 +671,51 @@ impl<T: AsRef<[u8]> + Ord + Eq> PartialOrd for FullKey<T> {
     }
 }
 
+pub trait EmptySliceRef {
+    fn empty_slice_ref<'a>() -> &'a Self;
+}
+
+static EMPTY_BYTES: Bytes = Bytes::new();
+impl EmptySliceRef for Bytes {
+    fn empty_slice_ref<'a>() -> &'a Self {
+        &EMPTY_BYTES
+    }
+}
+
+static EMPTY_VEC: Vec<u8> = Vec::new();
+impl EmptySliceRef for Vec<u8> {
+    fn empty_slice_ref<'a>() -> &'a Self {
+        &EMPTY_VEC
+    }
+}
+
+const EMPTY_SLICE: &[u8] = b"";
+impl<'a> EmptySliceRef for &'a [u8] {
+    fn empty_slice_ref<'b>() -> &'b Self {
+        &EMPTY_SLICE
+    }
+}
+
 /// Bound table key range with table id to generate a new user key range.
-pub fn bound_table_key_range<T: AsRef<[u8]>>(
+pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
     table_id: TableId,
     table_key_range: &impl RangeBounds<TableKey<T>>,
-) -> UserKeyRange {
+) -> (Bound<UserKey<&T>>, Bound<UserKey<&T>>) {
     let start = match table_key_range.start_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Unbounded => Included(UserKey::new(table_id, TableKey(b"".to_vec()))),
+        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
+        Unbounded => Included(UserKey::new(table_id, TableKey(T::empty_slice_ref()))),
     };
 
     let end = match table_key_range.end_bound() {
-        Included(b) => Included(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
-        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(b.as_ref().to_vec()))),
+        Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
+        Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
         Unbounded => {
             if let Some(next_table_id) = table_id.table_id().checked_add(1) {
-                Excluded(UserKey::new(next_table_id.into(), TableKey(b"".to_vec())))
+                Excluded(UserKey::new(
+                    next_table_id.into(),
+                    TableKey(T::empty_slice_ref()),
+                ))
             } else {
                 Unbounded
             }
@@ -722,8 +777,8 @@ mod tests {
                 )
             ),
             (
-                Included(UserKey::for_test(TableId::default(), b"a".to_vec())),
-                Included(UserKey::for_test(TableId::default(), b"b".to_vec()),)
+                Included(UserKey::for_test(TableId::default(), &b"a".to_vec())),
+                Included(UserKey::for_test(TableId::default(), &b"b".to_vec()),)
             )
         );
         assert_eq!(
@@ -732,8 +787,8 @@ mod tests {
                 &(Included(TableKey(b"a".to_vec())), Unbounded)
             ),
             (
-                Included(UserKey::for_test(TableId::from(1), b"a".to_vec())),
-                Excluded(UserKey::for_test(TableId::from(2), b"".to_vec()),)
+                Included(UserKey::for_test(TableId::from(1), &b"a".to_vec())),
+                Excluded(UserKey::for_test(TableId::from(2), &b"".to_vec()),)
             )
         );
         assert_eq!(
@@ -742,7 +797,7 @@ mod tests {
                 &(Included(TableKey(b"a".to_vec())), Unbounded)
             ),
             (
-                Included(UserKey::for_test(TableId::from(u32::MAX), b"a".to_vec())),
+                Included(UserKey::for_test(TableId::from(u32::MAX), &b"a".to_vec())),
                 Unbounded,
             )
         );

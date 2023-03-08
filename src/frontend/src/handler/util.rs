@@ -208,7 +208,7 @@ mod tests {
         let field = Field::with_name(DataType::Int32, "v1");
         let pg_field = to_pg_field(&field);
         assert_eq!(pg_field.get_name(), "v1");
-        assert_eq!(pg_field.get_type_oid(), DataType::INT32.to_oid());
+        assert_eq!(pg_field.get_type_oid(), DataType::Int32.to_oid());
     }
 
     #[test]

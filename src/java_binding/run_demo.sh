@@ -4,22 +4,29 @@
 
 set -ex
 
+
+set +x
+INSERT_DATA=$(python3 ${RISINGWAVE_ROOT}/src/java_binding/gen-demo-insert-data.py 30000)
+
 psql -d ${DB_NAME} -h localhost -p 4566 -U root << EOF
 DROP TABLE IF EXISTS ${TABLE_NAME};
 CREATE TABLE ${TABLE_NAME} (v1 smallint, v2 int, v3 bigint, v4 float4, v5 float8, v6 bool, v7 varchar, may_null bigint);
-INSERT INTO ${TABLE_NAME} values (1, 1, 1, 1.0, 1.0, false, 'aaa', 1), (2, 2, 2, 2.0, 2.0, true, 'bbb', NULL);
+INSERT INTO ${TABLE_NAME} values ${INSERT_DATA};
 FLUSH;
 EOF
 
-cd ${JAVA_BINDING_ROOT}/java
-
-mvn exec:exec \
-    -pl java-binding \
-    -Dexec.executable=java \
-    -Dexec.args=" \
-        -cp %classpath:java-binding/target*.jar:proto/target/*.jar \
-        -Djava.library.path=${RISINGWAVE_ROOT}/target/debug com.risingwave.java.Demo"
-
-psql -d dev -h localhost -p 4566 -U root << EOF
-DROP TABLE ${TABLE_NAME};
-EOF
+#set -x
+#
+#cd ${RISINGWAVE_ROOT}/java
+#
+#mvn exec:exec \
+#    -pl java-binding-integration-test \
+#    -Dexec.executable=java \
+#    -Dexec.args=" \
+#        -cp %classpath:java-binding/target*.jar:proto/target/*.jar \
+#        -Djava.library.path=${RISINGWAVE_ROOT}/target/debug \
+#         com.risingwave.java.binding.Demo"
+#
+#psql -d dev -h localhost -p 4566 -U root << EOF
+#DROP TABLE ${TABLE_NAME};
+#EOF

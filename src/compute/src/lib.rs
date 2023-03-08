@@ -25,6 +25,7 @@
 extern crate tracing;
 
 pub mod memory_management;
+pub mod observer;
 pub mod rpc;
 pub mod server;
 
