@@ -228,7 +228,7 @@ message AggCall {
   repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  repeated order.PbColumnOrder order_by_fields = 5; // TODO(): rename
+  repeated order.PbColumnOrder order_by_fields = 5; // TODO(rc): rename to `order_by`
   ExprNode filter = 6;
 }
 

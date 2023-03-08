@@ -552,7 +552,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
-    pub order_by_fields: Vec<PlanAggOrderByField>, // TODO() rename
+    pub order_by_fields: Vec<PlanAggOrderByField>, // TODO(rc): rename to `order_by`
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,

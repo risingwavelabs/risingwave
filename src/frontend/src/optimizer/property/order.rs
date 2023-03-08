@@ -160,7 +160,7 @@ impl FieldOrder {
         }
     }
 
-    // TODO(): unify them
+    // TODO(rc): unify them
     pub fn to_order_pair(&self) -> OrderPair {
         OrderPair {
             column_idx: self.index,
@@ -210,7 +210,7 @@ impl Direction {
         }
     }
 
-    // TODO(): unify them
+    // TODO(rc): unify them
     pub fn to_order(self) -> OrderType {
         match self {
             Self::Asc => OrderType::Ascending,

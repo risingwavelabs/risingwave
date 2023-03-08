@@ -28,7 +28,7 @@ pub enum OrderType {
 }
 
 impl OrderType {
-    // TODO(): from `PbOrderType`
+    // TODO(rc): from `PbOrderType`
     pub fn from_protobuf(order_type: &PbDirection) -> OrderType {
         match order_type {
             PbDirection::Ascending => OrderType::Ascending,
@@ -37,7 +37,7 @@ impl OrderType {
         }
     }
 
-    // TODO(): to `PbOrderType`
+    // TODO(rc): to `PbOrderType`
     pub fn to_protobuf(self) -> PbDirection {
         match self {
             OrderType::Ascending => PbDirection::Ascending,

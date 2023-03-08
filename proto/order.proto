@@ -11,7 +11,7 @@ enum PbDirection {
     PbDirection_DESCENDING = 2;
 }
 
-// TODO(): enable `NULLS FIRST | LAST`
+// TODO(rc): enable `NULLS FIRST | LAST`
 // enum PbNullsAre {
 //     PbNullsAre_UNSPECIFIED = 0;
 //     PbNullsAre_SMALLEST = 1;
@@ -20,7 +20,7 @@ enum PbDirection {
 
 message PbOrderType {
     PbDirection direction = 1;
-    // TODO(): enable `NULLS FIRST | LAST`
+    // TODO(rc): enable `NULLS FIRST | LAST`
     // PbNullsAre nulls_are = 2;
 }
 
