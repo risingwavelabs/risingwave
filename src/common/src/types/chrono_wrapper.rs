@@ -250,15 +250,9 @@ impl NaiveTimeWrapper {
     }
 
     pub fn with_milli(milli: u32) -> Result<Self> {
-        let (time, overflow_cnt) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
-            .unwrap()
-            .overflowing_add_signed(Duration::milliseconds(milli.into()));
-        if overflow_cnt != 0 {
-            let secs = milli / 1_000;
-            let nano = (milli % 1_000) * 1_000_000;
-            return Err(InvalidParamsError::time(secs, nano));
-        }
-        Ok(NaiveTimeWrapper(time))
+        let secs = milli / 1_000;
+        let nano = (milli % 1_000) * 1_000_000;
+        Self::with_secs_nano(secs, nano)
     }
 
     pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {

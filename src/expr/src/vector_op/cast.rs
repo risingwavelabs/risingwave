@@ -38,7 +38,6 @@ const TRUE_BOOL_LITERALS: [&str; 9] = ["true", "tru", "tr", "t", "on", "1", "yes
 const FALSE_BOOL_LITERALS: [&str; 10] = [
     "false", "fals", "fal", "fa", "f", "off", "of", "0", "no", "n",
 ];
-const ERROR_INT_TO_TIME: &str = "Can't cast i64 to date, date/time field value out of range (expected time in range 00:00:00 to 23:59:59)";
 const ERROR_INT_TO_TIMESTAMP: &str = "Can't cast negative integer to timestamp";
 const PARSE_ERROR_STR_WITH_TIME_ZONE_TO_TIMESTAMPTZ: &str = concat!(
     "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
@@ -50,31 +49,9 @@ const PARSE_ERROR_STR_TO_TIME: &str =
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
-// input: the number of days since the epoch
-#[inline(always)]
-pub fn i32_to_date(days: i32) -> Result<NaiveDateWrapper> {
-    NaiveDateWrapper::with_days_since_unix_epoch(days).map_err(|_| ExprError::InvalidParam {
-        name: ("days"),
-        reason: (format!("date out of range {}", days)),
-    })
-}
-
 #[inline(always)]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
-}
-
-// input: the number of time in milliseconds since midnight (00:00:00.000)
-#[inline(always)]
-pub fn i64_to_time(milli: i64) -> Result<NaiveTimeWrapper> {
-    NaiveTimeWrapper::with_milli(milli.try_into().map_err(|_| ExprError::InvalidParam {
-        name: ("microseconds"),
-        reason: (ERROR_INT_TO_TIME.to_string()),
-    })?)
-    .map_err(|_| ExprError::InvalidParam {
-        name: ("microseconds"),
-        reason: (ERROR_INT_TO_TIME.to_string()),
-    })
 }
 
 #[inline(always)]
