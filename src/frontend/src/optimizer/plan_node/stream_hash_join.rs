@@ -170,6 +170,8 @@ impl StreamHashJoin {
                 }
             }
         }
+
+        assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
         dk_indices_in_jk
     }
 }
