@@ -549,7 +549,7 @@ where
         }
     }
 
-    /// Get the raw encoded row from state table.
+    /// Get a raw encoded row from state table.
     pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         assert!(pk.len() <= self.pk_indices.len());
 
@@ -581,7 +581,7 @@ where
             .map_err(Into::into)
     }
 
-    /// Get a compacted row from state table.
+    /// Get a row in value-encoding format from state table.
     pub async fn get_compacted_row(
         &self,
         pk: impl Row,
@@ -592,8 +592,8 @@ where
                 .await
                 .map(|bytes| bytes.map(CompactedRow::new))
         } else {
-            // For other encodings, we must first deserialize from the column-aware row encoding
-            // first, then serialize it back into value-encoding format.
+            // For other encodings, we must first deserialize it into a `Row` first, then serialize
+            // it back into value-encoding format.
             self.get_row(pk)
                 .await
                 .map(|row| row.map(CompactedRow::from))
