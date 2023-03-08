@@ -12,11 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Values;
-use std::collections::HashMap;
 use std::time::Duration;
 
 use itertools::Itertools;
+use lru::{Iter, LruCache};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 
@@ -33,9 +32,16 @@ pub struct RisingWave {
 
 /// `SetStmts` stores and compacts all `SET` statements that have been executed in the client
 /// history.
-#[derive(Debug, Clone, Default)]
 pub struct SetStmts {
-    stmts: HashMap<String, String>,
+    stmts_cache: LruCache<String, String>,
+}
+
+impl Default for SetStmts {
+    fn default() -> Self {
+        Self {
+            stmts_cache: LruCache::unbounded(),
+        }
+    }
 }
 
 struct SetStmtsIterator<'a, 'b>
@@ -43,14 +49,14 @@ where
     'a: 'b,
 {
     _stmts: &'a SetStmts,
-    stmts_iter: Values<'b, String, String>,
+    stmts_iter: core::iter::Rev<Iter<'b, String, String>>,
 }
 
 impl<'a, 'b> SetStmtsIterator<'a, 'b> {
     fn new(stmts: &'a SetStmts) -> Self {
         Self {
             _stmts: stmts,
-            stmts_iter: stmts.stmts.values(),
+            stmts_iter: stmts.stmts_cache.iter().rev(),
         }
     }
 }
@@ -71,7 +77,7 @@ impl SetStmts {
             } => {
                 let key = variable.real_value().to_lowercase();
                 // store complete sql as value.
-                self.stmts.insert(key, sql.to_string());
+                self.stmts_cache.put(key, sql.to_string());
             }
             _ => unreachable!(),
         }
@@ -82,7 +88,8 @@ impl Iterator for SetStmtsIterator<'_, '_> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        self.stmts_iter.next().cloned()
+        let (_, stmt) = self.stmts_iter.next()?;
+        Some(stmt.clone())
     }
 }
 
@@ -91,18 +98,27 @@ impl RisingWave {
         host: String,
         dbname: String,
     ) -> Result<Self, tokio_postgres::error::Error> {
-        Self::reconnect(host, dbname, SetStmts::default()).await
+        let set_stmts = SetStmts::default();
+        let (client, task) = Self::connect_inner(&host, &dbname, &set_stmts).await?;
+        Ok(Self {
+            client,
+            task,
+            host,
+            dbname,
+            set_stmts,
+        })
     }
 
-    pub async fn reconnect(
-        host: String,
-        dbname: String,
-        set_stmts: SetStmts,
-    ) -> Result<Self, tokio_postgres::error::Error> {
+    pub async fn connect_inner(
+        host: &str,
+        dbname: &str,
+        set_stmts: &SetStmts,
+    ) -> Result<(tokio_postgres::Client, tokio::task::JoinHandle<()>), tokio_postgres::error::Error>
+    {
         let (client, connection) = tokio_postgres::Config::new()
-            .host(&host)
+            .host(host)
             .port(4566)
-            .dbname(&dbname)
+            .dbname(dbname)
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
@@ -128,13 +144,14 @@ impl RisingWave {
         for stmt in SetStmtsIterator::new(&set_stmts) {
             client.simple_query(&stmt).await?;
         }
-        Ok(RisingWave {
-            client,
-            task,
-            host,
-            dbname,
-            set_stmts,
-        })
+        Ok((client, task))
+    }
+
+    pub async fn reconnect(&mut self) -> Result<(), tokio_postgres::error::Error> {
+        let (client, task) = Self::connect_inner(&self.host, &self.dbname, &self.set_stmts).await?;
+        self.client = client;
+        self.task = task;
+        Ok(())
     }
 
     /// Returns a reference of the inner Postgres client.
@@ -158,12 +175,7 @@ impl sqllogictest::AsyncDB for RisingWave {
 
         if self.client.is_closed() {
             // connection error, reset the client
-            *self = Self::reconnect(
-                self.host.clone(),
-                self.dbname.clone(),
-                self.set_stmts.clone(),
-            )
-            .await?;
+            self.reconnect().await?;
         }
 
         if sql.trim_start().to_lowercase().starts_with("set") {
