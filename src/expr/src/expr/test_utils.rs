@@ -24,10 +24,12 @@ use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
-use risingwave_pb::expr::{ExprNode,  FunctionCall};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
+use super::{
+    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression, Result,
+};
 use crate::ExprError;
-use super::{new_binary_expr, Result, BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> ExprNode {
     let mut exprs = Vec::new();
