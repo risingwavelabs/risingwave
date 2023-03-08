@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::order::PbColumnOrder;
+use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};

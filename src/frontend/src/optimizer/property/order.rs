@@ -19,7 +19,7 @@ use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;

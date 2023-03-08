@@ -29,7 +29,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "connector_service",
         "data",
         "ddl_service",
-        "order",
         "expr",
         "health",
         "hummock",

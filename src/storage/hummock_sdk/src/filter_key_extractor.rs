@@ -350,7 +350,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
     use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
     use tokio::task;
 

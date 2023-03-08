@@ -17,7 +17,7 @@ use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::order::{PbColumnOrder, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 use risingwave_pb::plan_common::ColumnCatalog;
 
 pub(crate) fn gen_prost_table(

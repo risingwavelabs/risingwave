@@ -20,8 +20,8 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 use risingwave_pb::expr::AggCall as ProstAggCall;
-use risingwave_pb::order::{PbColumnOrder, PbOrderType};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
 use super::super::utils::TableCatalogBuilder;
