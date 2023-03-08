@@ -216,6 +216,8 @@ export interface HopWindowNode {
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
+  windowStartExprs: ExprNode[];
+  windowEndExprs: ExprNode[];
 }
 
 export interface TableFunctionNode {
@@ -1373,7 +1375,14 @@ export const SortMergeJoinNode = {
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: 0, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return {
+    timeCol: 0,
+    windowSlide: undefined,
+    windowSize: undefined,
+    outputIndices: [],
+    windowStartExprs: [],
+    windowEndExprs: [],
+  };
 }
 
 export const HopWindowNode = {
@@ -1383,6 +1392,12 @@ export const HopWindowNode = {
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      windowStartExprs: Array.isArray(object?.windowStartExprs)
+        ? object.windowStartExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
+      windowEndExprs: Array.isArray(object?.windowEndExprs)
+        ? object.windowEndExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
@@ -1398,6 +1413,16 @@ export const HopWindowNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.windowStartExprs) {
+      obj.windowStartExprs = message.windowStartExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowStartExprs = [];
+    }
+    if (message.windowEndExprs) {
+      obj.windowEndExprs = message.windowEndExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowEndExprs = [];
+    }
     return obj;
   },
 
@@ -1411,6 +1436,8 @@ export const HopWindowNode = {
       ? IntervalUnit.fromPartial(object.windowSize)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.windowStartExprs = object.windowStartExprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.windowEndExprs = object.windowEndExprs?.map((e) => ExprNode.fromPartial(e)) || [];
     return message;
   },
 };

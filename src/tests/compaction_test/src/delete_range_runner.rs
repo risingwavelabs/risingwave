@@ -49,7 +49,7 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -392,6 +392,7 @@ impl NormalState {
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -417,6 +418,7 @@ impl NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -448,6 +450,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await

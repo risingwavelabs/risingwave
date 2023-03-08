@@ -448,7 +448,11 @@ async fn test_batch_scan_with_value_indices() {
     test_env.commit_epoch(epoch.prev).await;
 
     let iter = table
-        .batch_iter(HummockReadEpoch::Committed(epoch.prev), false)
+        .batch_iter(
+            HummockReadEpoch::Committed(epoch.prev),
+            false,
+            Default::default(),
+        )
         .await
         .unwrap();
     pin_mut!(iter);

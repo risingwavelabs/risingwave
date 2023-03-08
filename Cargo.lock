@@ -6376,6 +6376,7 @@ dependencies = [
  "either",
  "futures",
  "itertools",
+ "lru",
  "madsim-tokio",
  "madsim-tonic",
  "moka",

@@ -27,7 +27,7 @@ use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_tes
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead, WriteOptions,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
 };
 use risingwave_storage::StateStore;
 
@@ -105,6 +105,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -158,6 +159,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await;
@@ -172,6 +174,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await;
@@ -193,6 +196,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -233,6 +237,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -249,6 +254,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await
