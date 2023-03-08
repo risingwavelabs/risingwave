@@ -15,6 +15,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
+use cmd_impl::hummock::SstDumpArgs;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -95,7 +96,7 @@ enum HummockCommands {
         #[clap(short, long = "table-id")]
         table_id: u32,
     },
-    SstDump,
+    SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
@@ -229,8 +230,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             cmd_impl::hummock::list_kv(context, epoch, table_id).await?;
         }
-        Commands::Hummock(HummockCommands::SstDump) => {
-            cmd_impl::hummock::sst_dump(context).await.unwrap()
+        Commands::Hummock(HummockCommands::SstDump(args)) => {
+            cmd_impl::hummock::sst_dump(context, args).await.unwrap()
         }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,

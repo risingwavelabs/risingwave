@@ -36,6 +36,7 @@ pub struct TableCatalogBuilder {
     column_names: HashMap<String, i32>,
     read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
+    dist_key_in_pk: Option<Vec<usize>>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -98,6 +99,10 @@ impl TableCatalogBuilder {
         self.watermark_columns = Some(watermark_columns);
     }
 
+    pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
+        self.dist_key_in_pk = Some(dist_key_in_pk);
+    }
+
     /// Check the column name whether exist before. if true, record occurrence and change the name
     /// to avoid duplicate.
     fn avoid_duplicate_col_name(&mut self, column_desc: &mut ColumnDesc) {
@@ -149,6 +154,7 @@ impl TableCatalogBuilder {
             read_prefix_len_hint: self.read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
+            dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
         }
     }
 
