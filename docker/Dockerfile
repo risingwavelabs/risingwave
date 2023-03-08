@@ -35,7 +35,7 @@ RUN rustup self update \
 RUN cargo fetch
 
 RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
-  mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
