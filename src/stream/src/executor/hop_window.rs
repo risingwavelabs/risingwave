@@ -16,15 +16,11 @@ use std::num::NonZeroUsize;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{StreamChunk, Vis};
-use risingwave_common::types::{IntervalUnit};
-use risingwave_expr::expr::{
-    BoxedExpression, Expression,
-};
+use risingwave_common::types::IntervalUnit;
+use risingwave_expr::expr::{BoxedExpression, Expression};
 use risingwave_expr::ExprError;
-
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
@@ -94,7 +90,7 @@ impl HopWindowExecutor {
         let Self {
             ctx,
             input,
-            
+
             window_slide,
             window_size,
             output_indices,
@@ -171,15 +167,14 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::{StreamExt, executor};
+    use futures::{executor, StreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, IntervalUnit};
 
+    use super::HopWindowExecutor;
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
-
-    use super::HopWindowExecutor;
 
     fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
