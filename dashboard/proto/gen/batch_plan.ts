@@ -3,17 +3,14 @@ import { StreamSourceInfo } from "./catalog";
 import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
+import { PbColumnOrder, PbDirection, pbDirectionFromJSON, pbDirectionToJSON } from "./order";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
   joinTypeToJSON,
-  OrderType,
-  orderTypeFromJSON,
-  orderTypeToJSON,
   StorageTableDesc,
 } from "./plan_common";
 
@@ -139,18 +136,18 @@ export interface ValuesNode_ExprTuple {
 }
 
 export interface SortNode {
-  columnOrders: ColumnOrder[];
+  columnOrders: PbColumnOrder[];
 }
 
 export interface TopNNode {
-  columnOrders: ColumnOrder[];
+  columnOrders: PbColumnOrder[];
   limit: number;
   offset: number;
   withTies: boolean;
 }
 
 export interface GroupTopNNode {
-  columnOrders: ColumnOrder[];
+  columnOrders: PbColumnOrder[];
   limit: number;
   offset: number;
   groupKey: number[];
@@ -207,7 +204,7 @@ export interface SortMergeJoinNode {
   joinType: JoinType;
   leftKey: number[];
   rightKey: number[];
-  direction: OrderType;
+  direction: PbDirection;
   outputIndices: number[];
 }
 
@@ -260,7 +257,7 @@ export interface ExchangeNode {
 
 export interface MergeSortExchangeNode {
   exchange: ExchangeNode | undefined;
-  columnOrders: ColumnOrder[];
+  columnOrders: PbColumnOrder[];
 }
 
 export interface LocalLookupJoinNode {
@@ -923,7 +920,7 @@ export const SortNode = {
   fromJSON(object: any): SortNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
+        ? object.columnOrders.map((e: any) => PbColumnOrder.fromJSON(e))
         : [],
     };
   },
@@ -931,7 +928,7 @@ export const SortNode = {
   toJSON(message: SortNode): unknown {
     const obj: any = {};
     if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+      obj.columnOrders = message.columnOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
       obj.columnOrders = [];
     }
@@ -940,7 +937,7 @@ export const SortNode = {
 
   fromPartial<I extends Exact<DeepPartial<SortNode>, I>>(object: I): SortNode {
     const message = createBaseSortNode();
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.columnOrders = object.columnOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     return message;
   },
 };
@@ -953,7 +950,7 @@ export const TopNNode = {
   fromJSON(object: any): TopNNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
+        ? object.columnOrders.map((e: any) => PbColumnOrder.fromJSON(e))
         : [],
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
@@ -964,7 +961,7 @@ export const TopNNode = {
   toJSON(message: TopNNode): unknown {
     const obj: any = {};
     if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+      obj.columnOrders = message.columnOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
       obj.columnOrders = [];
     }
@@ -976,7 +973,7 @@ export const TopNNode = {
 
   fromPartial<I extends Exact<DeepPartial<TopNNode>, I>>(object: I): TopNNode {
     const message = createBaseTopNNode();
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.columnOrders = object.columnOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.withTies = object.withTies ?? false;
@@ -992,7 +989,7 @@ export const GroupTopNNode = {
   fromJSON(object: any): GroupTopNNode {
     return {
       columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
+        ? object.columnOrders.map((e: any) => PbColumnOrder.fromJSON(e))
         : [],
       limit: isSet(object.limit) ? Number(object.limit) : 0,
       offset: isSet(object.offset) ? Number(object.offset) : 0,
@@ -1006,7 +1003,7 @@ export const GroupTopNNode = {
   toJSON(message: GroupTopNNode): unknown {
     const obj: any = {};
     if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+      obj.columnOrders = message.columnOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
       obj.columnOrders = [];
     }
@@ -1023,7 +1020,7 @@ export const GroupTopNNode = {
 
   fromPartial<I extends Exact<DeepPartial<GroupTopNNode>, I>>(object: I): GroupTopNNode {
     const message = createBaseGroupTopNNode();
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.columnOrders = object.columnOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     message.limit = object.limit ?? 0;
     message.offset = object.offset ?? 0;
     message.groupKey = object.groupKey?.map((e) => e) || [];
@@ -1323,7 +1320,7 @@ function createBaseSortMergeJoinNode(): SortMergeJoinNode {
     joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
-    direction: OrderType.ORDER_UNSPECIFIED,
+    direction: PbDirection.PbDirection_UNSPECIFIED,
     outputIndices: [],
   };
 }
@@ -1334,7 +1331,7 @@ export const SortMergeJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
+      direction: isSet(object.direction) ? pbDirectionFromJSON(object.direction) : PbDirection.PbDirection_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1352,7 +1349,7 @@ export const SortMergeJoinNode = {
     } else {
       obj.rightKey = [];
     }
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
+    message.direction !== undefined && (obj.direction = pbDirectionToJSON(message.direction));
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -1366,7 +1363,7 @@ export const SortMergeJoinNode = {
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
+    message.direction = object.direction ?? PbDirection.PbDirection_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
@@ -1618,7 +1615,7 @@ export const MergeSortExchangeNode = {
     return {
       exchange: isSet(object.exchange) ? ExchangeNode.fromJSON(object.exchange) : undefined,
       columnOrders: Array.isArray(object?.columnOrders)
-        ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
+        ? object.columnOrders.map((e: any) => PbColumnOrder.fromJSON(e))
         : [],
     };
   },
@@ -1628,7 +1625,7 @@ export const MergeSortExchangeNode = {
     message.exchange !== undefined &&
       (obj.exchange = message.exchange ? ExchangeNode.toJSON(message.exchange) : undefined);
     if (message.columnOrders) {
-      obj.columnOrders = message.columnOrders.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+      obj.columnOrders = message.columnOrders.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
       obj.columnOrders = [];
     }
@@ -1640,7 +1637,7 @@ export const MergeSortExchangeNode = {
     message.exchange = (object.exchange !== undefined && object.exchange !== null)
       ? ExchangeNode.fromPartial(object.exchange)
       : undefined;
-    message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.columnOrders = object.columnOrders?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     return message;
   },
 };

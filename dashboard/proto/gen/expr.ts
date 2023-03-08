@@ -1,6 +1,6 @@
 /* eslint-disable */
 import { DataType, Datum } from "./data";
-import { OrderType, orderTypeFromJSON, orderTypeToJSON } from "./plan_common";
+import { PbColumnOrder } from "./order";
 
 export const protobufPackage = "expr";
 
@@ -741,7 +741,8 @@ export interface AggCall {
   args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
-  orderByFields: AggCall_OrderByField[];
+  /** TODO(rc): rename to `order_by` */
+  orderByFields: PbColumnOrder[];
   filter: ExprNode | undefined;
 }
 
@@ -856,12 +857,6 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
     default:
       return "UNRECOGNIZED";
   }
-}
-
-export interface AggCall_OrderByField {
-  input: number;
-  direction: OrderType;
-  nullsFirst: boolean;
 }
 
 export interface UserDefinedFunction {
@@ -1102,7 +1097,7 @@ export const AggCall = {
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
       orderByFields: Array.isArray(object?.orderByFields)
-        ? object.orderByFields.map((e: any) => AggCall_OrderByField.fromJSON(e))
+        ? object.orderByFields.map((e: any) => PbColumnOrder.fromJSON(e))
         : [],
       filter: isSet(object.filter) ? ExprNode.fromJSON(object.filter) : undefined,
     };
@@ -1120,7 +1115,7 @@ export const AggCall = {
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.distinct !== undefined && (obj.distinct = message.distinct);
     if (message.orderByFields) {
-      obj.orderByFields = message.orderByFields.map((e) => e ? AggCall_OrderByField.toJSON(e) : undefined);
+      obj.orderByFields = message.orderByFields.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
       obj.orderByFields = [];
     }
@@ -1136,40 +1131,10 @@ export const AggCall = {
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.distinct = object.distinct ?? false;
-    message.orderByFields = object.orderByFields?.map((e) => AggCall_OrderByField.fromPartial(e)) || [];
+    message.orderByFields = object.orderByFields?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     message.filter = (object.filter !== undefined && object.filter !== null)
       ? ExprNode.fromPartial(object.filter)
       : undefined;
-    return message;
-  },
-};
-
-function createBaseAggCall_OrderByField(): AggCall_OrderByField {
-  return { input: 0, direction: OrderType.ORDER_UNSPECIFIED, nullsFirst: false };
-}
-
-export const AggCall_OrderByField = {
-  fromJSON(object: any): AggCall_OrderByField {
-    return {
-      input: isSet(object.input) ? Number(object.input) : 0,
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
-      nullsFirst: isSet(object.nullsFirst) ? Boolean(object.nullsFirst) : false,
-    };
-  },
-
-  toJSON(message: AggCall_OrderByField): unknown {
-    const obj: any = {};
-    message.input !== undefined && (obj.input = Math.round(message.input));
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
-    message.nullsFirst !== undefined && (obj.nullsFirst = message.nullsFirst);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AggCall_OrderByField>, I>>(object: I): AggCall_OrderByField {
-    const message = createBaseAggCall_OrderByField();
-    message.input = object.input ?? 0;
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
-    message.nullsFirst = object.nullsFirst ?? false;
     return message;
   },
 };
