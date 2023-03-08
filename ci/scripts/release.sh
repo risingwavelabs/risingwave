@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-connector_node_version=$(cat ci/connector-node-version)
+REPO_ROOT=${PWD}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -63,10 +63,9 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
   echo "--- Release build and upload risingwave connector node jar asset"
-#  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-#  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
-#  cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
-#  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true
+  cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
 
 
