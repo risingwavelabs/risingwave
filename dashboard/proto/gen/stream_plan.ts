@@ -1,9 +1,8 @@
 /* eslint-disable */
 import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
-import { Buffer } from "./common";
+import { Buffer, PbColumnOrder } from "./common";
 import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
-import { PbColumnOrder } from "./order";
 import {
   ColumnCatalog,
   ColumnDesc,

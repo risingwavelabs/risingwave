@@ -1,7 +1,7 @@
 /* eslint-disable */
+import { PbColumnOrder } from "./common";
 import { DataType } from "./data";
 import { ExprNode } from "./expr";
-import { PbColumnOrder } from "./order";
 import { ColumnCatalog, Field, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "catalog";

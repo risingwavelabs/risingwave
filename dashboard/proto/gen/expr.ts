@@ -1,6 +1,6 @@
 /* eslint-disable */
+import { PbColumnOrder } from "./common";
 import { DataType, Datum } from "./data";
-import { PbColumnOrder } from "./order";
 
 export const protobufPackage = "expr";
 

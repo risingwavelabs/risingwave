@@ -1,9 +1,17 @@
 /* eslint-disable */
 import { StreamSourceInfo } from "./catalog";
-import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
+import {
+  BatchQueryEpoch,
+  Buffer,
+  HostAddress,
+  PbColumnOrder,
+  PbDirection,
+  pbDirectionFromJSON,
+  pbDirectionToJSON,
+  WorkerNode,
+} from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
-import { PbColumnOrder, PbDirection, pbDirectionFromJSON, pbDirectionToJSON } from "./order";
 import {
   ColumnCatalog,
   ColumnDesc,

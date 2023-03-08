@@ -1,6 +1,6 @@
 /* eslint-disable */
+import { PbColumnOrder } from "./common";
 import { DataType } from "./data";
-import { PbColumnOrder } from "./order";
 
 export const protobufPackage = "plan_common";
 
