@@ -161,6 +161,7 @@ message Table {
   HandleConflictBehavior handle_pk_conflict_behavior = 22;
   uint32 read_prefix_len_hint = 23;
   repeated int32 watermark_indices = 24;
+  repeated int32 dist_key_in_pk = 25;
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
