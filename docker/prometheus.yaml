@@ -36,3 +36,7 @@ scrape_configs:
   - job_name: redpanda
     static_configs:
       - targets: ["message_queue:9644"]
+
+  - job_name: connector-node
+    static_configs:
+      - targets: ["connector-node:50052"]

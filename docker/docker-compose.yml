@@ -296,6 +296,7 @@ services:
     entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
+      - 50052
     container_name: connector-node
   message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
@@ -347,6 +348,6 @@ volumes:
     external: false
   prometheus-0:
     external: false
-  message_queue:
+  redpanda:
     external: false
 name: risingwave-compose
