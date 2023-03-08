@@ -292,9 +292,8 @@ services:
       timeout: 5s
       retries: 5
   connector-node:
-    # TODO: use nightly build to keep aligned with other components
-    image: ghcr.io/risingwavelabs/risingwave-connector-node:latest
-    platform: linux/x86_64
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    entrypoint: "/risingwave/bin/connector-node/start-service.sh"
     ports:
       - 50051
     container_name: connector-node
