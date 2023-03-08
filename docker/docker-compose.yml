@@ -197,8 +197,11 @@ services:
       - "5690"
       - "1250"
       - "5691"
-    ports: []
-    depends_on: []
+    ports:
+      - "5690:5690"
+      - "5691:5691"
+    depends_on:
+      - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:

@@ -272,14 +272,12 @@ pub mod verify {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, epoch, read_options.clone()).await;
+                let actual = self
+                    .actual
+                    .get(key.clone(), epoch, read_options.clone())
+                    .await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, epoch, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -390,9 +388,9 @@ pub mod verify {
             self.actual.may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, read_options.clone()).await;
+                let actual = self.actual.get(key.clone(), read_options.clone()).await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -715,9 +713,9 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
@@ -732,9 +730,9 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -761,11 +759,7 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
@@ -803,11 +797,7 @@ pub mod boxed_state_store {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
@@ -872,7 +862,7 @@ pub mod boxed_state_store {
             self.deref().may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)
         }
 
@@ -965,12 +955,7 @@ pub mod boxed_state_store {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, epoch, read_options)
         }
 

@@ -14,6 +14,9 @@
 
 use std::fmt;
 
+use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::HopWindowNode;
 
@@ -38,12 +41,19 @@ impl StreamHopWindow {
         let i2o = logical.i2o_col_mapping();
         let dist = i2o.rewrite_provided_distribution(input.distribution());
 
-        let mut watermark_columns = i2o.rewrite_bitset(input.watermark_columns());
+        let mut watermark_columns = input.watermark_columns().clone();
+        watermark_columns.grow(logical.internal_column_num());
+
         if watermark_columns.contains(logical.core.time_col.index) {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
-            watermark_columns.insert(schema.len() - 2); // window_start
-            watermark_columns.insert(schema.len() - 1); // window_end
+            watermark_columns.insert(logical.window_start_col_idx());
+            watermark_columns.insert(logical.window_end_col_idx());
         }
+        let watermark_columns = ColIndexMapping::with_remaining_columns(
+            logical.output_indices(),
+            logical.internal_column_num(),
+        )
+        .rewrite_bitset(&watermark_columns);
 
         let base = PlanBase::new_stream(
             ctx,
@@ -60,7 +70,22 @@ impl StreamHopWindow {
 
 impl fmt::Display for StreamHopWindow {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamHopWindow")
+        let mut builder = f.debug_struct("StreamHopWindow");
+        self.logical.fmt_fields_with_builder(&mut builder);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
+
+        builder.finish()
     }
 }
 
@@ -79,7 +104,7 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.core.time_col.to_proto()),
+            time_col: self.logical.core.time_col.index() as _,
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),
             output_indices: self
