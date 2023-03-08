@@ -152,7 +152,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     progress,
                     schema,
                     params.pk_indices,
-                    params.env.config().barrier_interval_ms,
+                    params.env.config().developer.stream_chunk_size,
+                    params.env.config().developer.stream_backfill_rate_limit,
                 )
                 .boxed()
             }

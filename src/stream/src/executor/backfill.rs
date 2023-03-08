@@ -12,15 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::cmp::{max, Ordering};
+use std::num::NonZeroU32;
 use std::ops::Bound;
-use std::time::Instant;
+use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
+use governor::middleware::NoOpMiddleware;
+use governor::state::{InMemoryState, NotKeyed};
+use governor::{clock, Quota, RateLimiter};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
@@ -32,7 +36,6 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
-use tokio::time::{sleep, Duration};
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
@@ -75,13 +78,13 @@ pub struct BackfillExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    expected_barrier_latency_ms: u32,
+    stream_chunk_size: usize,
+
+    rate_limit: usize,
 }
 
-const CHUNK_SIZE: usize = 1024;
-
-/// A constant to multiply when calculating the maximum time to wait for a barrier.
-const WAIT_BARRIER_MULTIPLE_TIMES: u128 = 5;
+type RateLimiterRef =
+    Arc<RateLimiter<NotKeyed, InMemoryState, clock::DefaultClock, NoOpMiddleware>>;
 
 impl<S> BackfillExecutor<S>
 where
@@ -94,8 +97,11 @@ where
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
-        expected_barrier_latency_ms: u32,
+        stream_chunk_size: usize,
+        rate_limit: usize,
     ) -> Self {
+        // Backfill rate limit should be greater than the chunk size
+        let rate_limit = max(rate_limit, stream_chunk_size);
         Self {
             info: ExecutorInfo {
                 schema,
@@ -107,7 +113,8 @@ where
             upstream_indices,
             actor_id: progress.actor_id(),
             progress,
-            expected_barrier_latency_ms,
+            stream_chunk_size,
+            rate_limit
         }
     }
 
@@ -120,12 +127,13 @@ where
 
         let mut upstream = self.upstream.execute();
 
+        let rate_limiter = Arc::new(RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(self.rate_limit as u32).unwrap(),
+        )));
+
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
-
-        let flow_control_time_ms =
-            self.expected_barrier_latency_ms as u128 * WAIT_BARRIER_MULTIPLE_TIMES;
 
         // If the barrier is a conf change of creating this mview, we follow the procedure of
         // backfill. Otherwise, it means we've recovered and we can forward the upstream messages
@@ -134,7 +142,7 @@ where
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
             let snapshot =
-                Self::snapshot_read(&self.table, init_epoch, None, false, flow_control_time_ms);
+                Self::snapshot_read(&self.table, init_epoch, None, false, self.stream_chunk_size, rate_limiter.clone());
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
@@ -204,7 +212,8 @@ where
                     snapshot_read_epoch,
                     current_pos.clone(),
                     true,
-                    flow_control_time_ms,
+                    self.stream_chunk_size,
+                    rate_limiter.clone(),
                 )
                 .map(Either::Right),
             );
@@ -327,7 +336,8 @@ where
         epoch: u64,
         current_pos: Option<OwnedRow>,
         ordered: bool,
-        flow_control_time_ms: u128,
+        stream_chunk_size: usize,
+        rate_limiter: RateLimiterRef,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
@@ -357,19 +367,22 @@ where
             )
             .await?;
 
-        let start = Instant::now();
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
-            .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
+            .collect_data_chunk(table.schema(), Some(stream_chunk_size))
             .instrument_await("backfill_snapshot_read")
             .await?
         {
-            if start.elapsed().as_millis() > flow_control_time_ms {
-                tracing::trace!("Backfill flow control.");
-                sleep(Duration::from_millis(1000)).await;
-            }
-            if data_chunk.cardinality() != 0 {
+            let cardinality = data_chunk.cardinality();
+            if cardinality != 0 {
+                let result = rate_limiter
+                    .until_n_ready(NonZeroU32::new(cardinality as u32).unwrap())
+                    .await;
+                assert!(
+                    result.is_ok(),
+                    "the capacity of rate_limiter must be larger than the cardinality of the chunk"
+                );
                 let ops = vec![Op::Insert; data_chunk.capacity()];
                 let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
                 yield Some(stream_chunk);

@@ -429,6 +429,10 @@ pub struct DeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub stream_exchange_batched_permits: usize,
+
+    /// The rate limit per second for the backfill executor.
+    #[serde(default = "default::developer::stream_backfill_rate_limit")]
+    pub stream_backfill_rate_limit: usize,
 }
 
 impl Default for DeveloperConfig {
@@ -692,6 +696,10 @@ mod default {
 
         pub fn stream_exchange_batched_permits() -> usize {
             1024
+        }
+
+        pub fn stream_backfill_rate_limit() -> usize {
+            200000
         }
     }
 
