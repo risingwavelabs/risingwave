@@ -18,7 +18,7 @@ rustflags = ["-Ctarget-feature=+avx2"]
 
 [target.aarch64-apple-darwin]
 rustflags = [
-    "-Clink-arg=-fuse-ld=/Users/dylan/.rustup/toolchains/nightly-2022-12-12-aarch64-apple-darwin/lib/rustlib/aarch64-apple-darwin/bin/gcc-ld/ld64.lld"
+    "-Clink-arg=-fuse-ld=/opt/homebrew/opt/llvm/bin/ld64.lld"
 ]
 
 # Flags for all targets.
