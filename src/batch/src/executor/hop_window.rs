@@ -53,7 +53,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             source.plan_node().get_node_body().unwrap(),
             NodeBody::HopWindow
         )?;
-        let time_col = hop_window_node.get_time_col()?.column_idx as usize;
+        let time_col = hop_window_node.get_time_col() as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
         let output_indices = hop_window_node
@@ -316,14 +316,14 @@ mod tests {
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
-                &" I TS        TS        TS        
-                   1 ^09:45:00 ^10:15:00 ^10:00:00 
-                   3 ^09:45:00 ^10:15:00 ^10:05:00 
-                   2 ^09:45:00 ^10:15:00 ^10:14:00 
-                   1 ^10:00:00 ^10:30:00 ^10:22:00 
-                   3 ^10:15:00 ^10:45:00 ^10:33:00 
-                   2 ^10:15:00 ^10:45:00 ^10:42:00 
-                   1 ^10:30:00 ^11:00:00 ^10:51:00 
+                &" I TS        TS        TS
+                   1 ^09:45:00 ^10:15:00 ^10:00:00
+                   3 ^09:45:00 ^10:15:00 ^10:05:00
+                   2 ^09:45:00 ^10:15:00 ^10:14:00
+                   1 ^10:00:00 ^10:30:00 ^10:22:00
+                   3 ^10:15:00 ^10:45:00 ^10:33:00
+                   2 ^10:15:00 ^10:45:00 ^10:42:00
+                   1 ^10:30:00 ^11:00:00 ^10:51:00
                    3 ^10:45:00 ^11:15:00 ^11:02:00"
                     .replace('^', "2022-2-2T"),
             )
@@ -333,7 +333,7 @@ mod tests {
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
-                &"I TS        TS        TS       
+                &"I TS        TS        TS
                   1 ^10:00:00 ^10:30:00 ^10:00:00
                   3 ^10:00:00 ^10:30:00 ^10:05:00
                   2 ^10:00:00 ^10:30:00 ^10:14:00

@@ -12,30 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::ScalarImpl;
-use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
+use risingwave_common::util::select_all;
+use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
-use risingwave_storage::error::{StorageError, StorageResult};
+use risingwave_storage::error::StorageResult;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{SstableStore, TieredCache};
 use risingwave_storage::monitor::HummockStateStoreMetrics;
-use risingwave_storage::store::{ReadOptions, StreamTypeOfIter};
+use risingwave_storage::store::{ReadOptions, StateStoreReadIterStream, StreamTypeOfIter};
 use tokio::sync::mpsc::unbounded_channel;
+
+type SelectAllIterStream = impl StateStoreReadIterStream + Unpin;
+
+fn select_all_vnode_stream(
+    streams: Vec<StreamTypeOfIter<HummockStorageIterator>>,
+) -> SelectAllIterStream {
+    select_all(streams.into_iter().map(Box::pin))
+}
 
 pub struct Iterator {
     row_serializer: RowDeserializer,
-    stream: Pin<Box<StreamTypeOfIter<HummockStorageIterator>>>,
+    stream: SelectAllIterStream,
 }
 
 pub struct KeyedRow {
@@ -122,10 +131,17 @@ impl Iterator {
         let reader =
             HummockVersionReader::new(sstable_store, Arc::new(HummockStateStoreMetrics::unused()));
 
-        let stream = {
+        let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
+        let key_range = read_plan.key_range.unwrap();
+        let pin_version = PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0);
+
+        for vnode in read_plan.vnode_ids {
             let stream = reader
                 .iter(
-                    table_key_range_from_prost(read_plan.key_range.unwrap()),
+                    table_key_range_from_prost(
+                        VirtualNode::from_index(vnode as usize),
+                        key_range.clone(),
+                    ),
                     read_plan.epoch,
                     ReadOptions {
                         prefix_hint: None,
@@ -133,18 +149,15 @@ impl Iterator {
                         retention_seconds: None,
                         table_id: read_plan.table_id.into(),
                         read_version_from_backup: false,
+                        prefetch_options: Default::default(),
                     },
-                    (
-                        vec![],
-                        vec![],
-                        PinnedVersion::new(read_plan.version.unwrap(), unbounded_channel().0),
-                    ),
+                    (vec![], vec![], pin_version.clone()),
                 )
                 .await?;
-            Ok::<std::pin::Pin<Box<StreamTypeOfIter<HummockStorageIterator>>>, StorageError>(
-                Box::pin(stream),
-            )
-        }?;
+            streams.push(stream);
+        }
+
+        let stream = select_all_vnode_stream(streams);
 
         Ok(Self {
             row_serializer: RowDeserializer::new(
@@ -172,16 +185,19 @@ impl Iterator {
     }
 }
 
-fn table_key_range_from_prost(r: KeyRange) -> TableKeyRange {
+fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange {
     let map_bound = |b, v| match b {
         Bound::Unbounded => std::ops::Bound::Unbounded,
-        Bound::Included => std::ops::Bound::Included(TableKey(v)),
-        Bound::Excluded => std::ops::Bound::Excluded(TableKey(v)),
+        Bound::Included => std::ops::Bound::Included(v),
+        Bound::Excluded => std::ops::Bound::Excluded(v),
         _ => unreachable!(),
     };
     let left_bound = r.left_bound();
     let right_bound = r.right_bound();
     let left = map_bound(left_bound, r.left);
     let right = map_bound(right_bound, r.right);
-    (left, right)
+
+    let vnode_slice = vnode.to_be_bytes();
+
+    map_table_key_range(prefixed_range((left, right), &vnode_slice[..]))
 }

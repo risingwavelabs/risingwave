@@ -63,7 +63,7 @@ impl BackwardSstableIterator {
                 .sstable_store
                 .get(
                     self.sst.value(),
-                    idx as u64,
+                    idx as usize,
                     crate::hummock::CachePolicy::Fill,
                     &mut self.stats,
                 )

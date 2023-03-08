@@ -34,6 +34,9 @@ pub enum SchedulerError {
     #[error("{0}")]
     TaskExecutionError(String),
 
+    #[error("Task got killed because compute node running out of memory")]
+    TaskRunningOutOfMemory,
+
     /// Used when receive cancel request (ctrl-c) from user.
     #[error("Canceled by user")]
     QueryCancelError,

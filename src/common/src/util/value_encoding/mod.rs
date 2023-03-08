@@ -15,11 +15,16 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
+use std::marker::{Send, Sync};
+use std::sync::Arc;
+
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
 use itertools::Itertools;
 
 use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::catalog::ColumnId;
+use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -31,6 +36,77 @@ use error::ValueEncodingError;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
+
+/// Part of `ValueRowSerde` that implements `serialize` a `Row` into bytes
+pub trait ValueRowSerializer: Clone {
+    fn serialize(&self, row: impl Row) -> Vec<u8>;
+}
+
+/// Part of `ValueRowSerde` that implements `deserialize` bytes into a `Row`
+pub trait ValueRowDeserializer: Clone {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
+/// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
+pub trait ValueRowSerdeNew: Clone {
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
+}
+
+/// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
+pub trait ValueRowSerde:
+    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send
+{
+}
+
+/// Wrap of the original `Row` serializing function
+#[derive(Clone)]
+pub struct BasicSerializer;
+
+impl ValueRowSerializer for BasicSerializer {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+}
+
+impl ValueRowDeserializer for BasicDeserializer {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+/// Wrap of the original `Row` serializing and deserializing function
+#[derive(Clone)]
+pub struct BasicSerde {
+    serializer: BasicSerializer,
+    deserializer: BasicDeserializer,
+}
+
+impl ValueRowSerdeNew for BasicSerde {
+    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
+        BasicSerde {
+            serializer: BasicSerializer {},
+            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
+        }
+    }
+}
+
+impl ValueRowSerializer for BasicSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        self.serializer.serialize(row)
+    }
+}
+
+impl ValueRowDeserializer for BasicSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+impl ValueRowSerde for BasicSerde {}
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
@@ -70,6 +146,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Int16(v) => buf.put_i16_le(v),
         ScalarRefImpl::Int32(v) => buf.put_i32_le(v),
         ScalarRefImpl::Int64(v) => buf.put_i64_le(v),
+        ScalarRefImpl::Serial(v) => buf.put_i64_le(v.into_inner()),
         ScalarRefImpl::Float32(v) => buf.put_f32_le(v.into_inner()),
         ScalarRefImpl::Float64(v) => buf.put_f64_le(v.into_inner()),
         ScalarRefImpl::Utf8(v) => serialize_str(v.as_bytes(), buf),

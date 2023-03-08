@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::extra_unused_type_parameters, reason = "used by macro")]
+
 use std::convert::TryInto;
 use std::fmt::Debug;
 
