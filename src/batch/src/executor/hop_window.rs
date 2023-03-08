@@ -151,7 +151,7 @@ impl HopWindowExecutor {
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
-            time_col_idx,
+            
             window_slide,
             window_size,
             output_indices,
