@@ -741,8 +741,7 @@ export interface AggCall {
   args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
-  /** TODO(rc): rename to `order_by` */
-  orderByFields: PbColumnOrder[];
+  orderBy: PbColumnOrder[];
   filter: ExprNode | undefined;
 }
 
@@ -1084,7 +1083,7 @@ function createBaseAggCall(): AggCall {
     args: [],
     returnType: undefined,
     distinct: false,
-    orderByFields: [],
+    orderBy: [],
     filter: undefined,
   };
 }
@@ -1096,9 +1095,7 @@ export const AggCall = {
       args: Array.isArray(object?.args) ? object.args.map((e: any) => InputRef.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
-      orderByFields: Array.isArray(object?.orderByFields)
-        ? object.orderByFields.map((e: any) => PbColumnOrder.fromJSON(e))
-        : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => PbColumnOrder.fromJSON(e)) : [],
       filter: isSet(object.filter) ? ExprNode.fromJSON(object.filter) : undefined,
     };
   },
@@ -1114,10 +1111,10 @@ export const AggCall = {
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.distinct !== undefined && (obj.distinct = message.distinct);
-    if (message.orderByFields) {
-      obj.orderByFields = message.orderByFields.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? PbColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.orderByFields = [];
+      obj.orderBy = [];
     }
     message.filter !== undefined && (obj.filter = message.filter ? ExprNode.toJSON(message.filter) : undefined);
     return obj;
@@ -1131,7 +1128,7 @@ export const AggCall = {
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.distinct = object.distinct ?? false;
-    message.orderByFields = object.orderByFields?.map((e) => PbColumnOrder.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => PbColumnOrder.fromPartial(e)) || [];
     message.filter = (object.filter !== undefined && object.filter !== null)
       ? ExprNode.fromPartial(object.filter)
       : undefined;
