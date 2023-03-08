@@ -167,16 +167,17 @@ impl HopWindowExecutor {
 
 #[cfg(test)]
 mod tests {
-    use futures::{executor, StreamExt};
+    use futures::{StreamExt};
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::{DataType, IntervalUnit};
+    use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
-    use super::HopWindowExecutor;
+    
     use crate::executor::test_utils::MockSource;
     use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
 
-    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
+    fn create_executor(output_indices: Vec<usize>) -> Box<dyn Executor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -207,13 +208,15 @@ mod tests {
             input,
             ExecutorInfo {
                 // TODO: the schema is incorrect, but it seems useless here.
-                schema: schema.clone(),
+                schema: schema,
                 pk_indices,
                 identity: "test".to_string(),
             },
             2,
             window_slide,
             window_size,
+            window_start_exprs,
+            window_end_exprs,
             output_indices,
         )
         .boxed()
