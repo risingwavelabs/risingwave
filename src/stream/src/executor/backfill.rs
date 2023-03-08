@@ -128,10 +128,6 @@ where
 
         let mut upstream = self.upstream.execute();
 
-        let rate_limiter = Arc::new(RateLimiter::direct(Quota::per_second(
-            NonZeroU32::new(self.rate_limit as u32).unwrap(),
-        )));
-
         // Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let init_epoch = first_barrier.epoch.prev;
@@ -148,7 +144,7 @@ where
                 None,
                 false,
                 self.stream_chunk_size,
-                rate_limiter.clone(),
+                None,
             );
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
@@ -174,6 +170,10 @@ where
 
             return Ok(());
         }
+
+        let rate_limiter = Arc::new(RateLimiter::direct(Quota::per_second(
+            NonZeroU32::new(self.rate_limit as u32).unwrap(),
+        )));
 
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
@@ -220,7 +220,7 @@ where
                     current_pos.clone(),
                     true,
                     self.stream_chunk_size,
-                    rate_limiter.clone(),
+                    Some(rate_limiter.clone()),
                 )
                 .map(Either::Right),
             );
@@ -344,7 +344,7 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
         stream_chunk_size: usize,
-        rate_limiter: RateLimiterRef,
+        rate_limiter: Option<RateLimiterRef>,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
@@ -381,8 +381,8 @@ where
             .instrument_await("backfill_snapshot_read")
             .await?
         {
-            let cardinality = data_chunk.cardinality();
-            if cardinality != 0 {
+            if let Some(rate_limiter) = &rate_limiter {
+                let cardinality = data_chunk.cardinality();
                 let result = rate_limiter
                     .until_n_ready(NonZeroU32::new(cardinality as u32).unwrap())
                     .await;
@@ -390,10 +390,10 @@ where
                     result.is_ok(),
                     "the capacity of rate_limiter must be larger than the cardinality of the chunk"
                 );
-                let ops = vec![Op::Insert; data_chunk.capacity()];
-                let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
-                yield Some(stream_chunk);
             }
+            let ops = vec![Op::Insert; data_chunk.capacity()];
+            let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
+            yield Some(stream_chunk);
         }
 
         yield None;
