@@ -12,9 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Iter;
+use std::collections::hash_map::Values;
 use std::collections::HashMap;
 use std::time::Duration;
+
+use itertools::Itertools;
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
 
 /// A RisingWave client.
 pub struct RisingWave {
@@ -39,32 +43,38 @@ where
     'a: 'b,
 {
     _stmts: &'a SetStmts,
-    stmts_iter: Iter<'b, String, String>,
-    remaining_cnt: usize,
+    stmts_iter: Values<'b, String, String>,
 }
 
 impl<'a, 'b> SetStmtsIterator<'a, 'b> {
     fn new(stmts: &'a SetStmts) -> Self {
         Self {
             _stmts: stmts,
-            stmts_iter: stmts.stmts.iter(),
-            remaining_cnt: stmts.stmts.len(),
+            stmts_iter: stmts.stmts.values(),
         }
     }
 }
 
 impl SetStmts {
     fn push(&mut self, sql: &str) {
-        let sql = sql.trim_start().to_lowercase();
-        let mut tokens = sql.split_whitespace();
-        assert_eq!(tokens.next().unwrap_or_default(), "set");
-
-        let key = tokens.next().unwrap_or_default().to_string();
-        if key.is_empty() {
-            return;
+        let ast = Parser::parse_sql(&sql).expect("a set statement should be parsed successfully");
+        match ast
+            .into_iter()
+            .exactly_one()
+            .expect("should contain only one statement")
+        {
+            // record `local` for variable and `SetTransaction` if supported in the future.
+            Statement::SetVariable {
+                local: _,
+                variable,
+                value: _,
+            } => {
+                let key = variable.real_value().to_lowercase();
+                // store complete sql as value.
+                self.stmts.insert(key, sql.to_string());
+            }
+            _ => unreachable!(),
         }
-        let value = tokens.collect::<Vec<&str>>().join(" ");
-        self.stmts.insert(key, value);
     }
 }
 
@@ -72,12 +82,7 @@ impl Iterator for SetStmtsIterator<'_, '_> {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.remaining_cnt == 0 {
-            return None;
-        }
-        self.remaining_cnt -= 1;
-        let (k, v) = self.stmts_iter.next().unwrap();
-        format!("set {} {}", k, v).into()
+        self.stmts_iter.next().cloned()
     }
 }
 

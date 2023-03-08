@@ -6432,6 +6432,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "serde",
  "serde_derive",
