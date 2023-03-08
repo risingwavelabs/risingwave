@@ -169,9 +169,6 @@ impl HopWindowExecutor {
             })?
             .get();
 
-        let time_col_data_type = child.schema().fields()[time_col_idx].data_type();
-        let _output_type = DataType::window_of(&time_col_data_type).unwrap();
-
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
         let contains_window_start = output_indices.contains(&window_start_col_index);
