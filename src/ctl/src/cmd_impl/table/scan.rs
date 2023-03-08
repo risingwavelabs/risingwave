@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::monitor::MonitoredStateStore;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
@@ -114,7 +115,11 @@ async fn do_scan(table: TableCatalog, hummock: MonitoredStateStore<HummockStorag
     let read_epoch = hummock.inner().get_pinned_version().max_committed_epoch();
     let storage_table = make_storage_table(hummock, &table);
     let stream = storage_table
-        .batch_iter(HummockReadEpoch::Committed(read_epoch), true)
+        .batch_iter(
+            HummockReadEpoch::Committed(read_epoch),
+            true,
+            PrefetchOptions::new_for_exhaust_iter(),
+        )
         .await?;
     pin_mut!(stream);
     while let Some(item) = stream.next().await {

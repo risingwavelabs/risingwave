@@ -18,7 +18,7 @@ use std::mem::swap;
 use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId, TableOption};
-use risingwave_common::error::Result;
+use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
@@ -26,11 +26,11 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::expr::{build_from_prost, new_unary_expr, BoxedExpression, LiteralExpression};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::expr::expr_node::Type;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
@@ -368,13 +368,9 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
             let datum = if inner_type == outer_type {
                 datum
             } else {
-                let cast_expr = new_unary_expr(
-                    Type::Cast,
-                    inner_type.clone(),
-                    Box::new(LiteralExpression::new(outer_type.clone(), datum.clone())),
-                )?;
-
-                cast_expr.eval_row(&OwnedRow::empty())?
+                return Err(internal_error(format!(
+                    "Join key types are not aligned: LHS: {outer_type:?}, RHS: {inner_type:?}"
+                )));
             };
 
             scan_range.eq_conds.push(datum);
@@ -394,7 +390,13 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
+                .batch_iter_with_pk_bounds(
+                    self.epoch.clone().into(),
+                    &pk_prefix,
+                    ..,
+                    false,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
                 .await?;
 
             pin_mut!(iter);
