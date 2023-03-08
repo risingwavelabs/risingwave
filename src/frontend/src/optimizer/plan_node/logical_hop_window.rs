@@ -203,6 +203,97 @@ impl LogicalHopWindow {
     fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
     }
+
+    fn derive_window_start_and_end_exprs(&self) -> Result<(Vec<ExprImpl>, Vec<ExprImpl>)> {
+        let generic::HopWindow::<PlanRef> {
+            window_size,
+            window_slide,
+            time_col,
+            ..
+        } = &self.core;
+        let units = window_size
+            .exact_div(window_slide)
+            .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "window",
+                reason: format!(
+                    "window_size {} cannot be divided by window_slide {}",
+                    window_size, window_slide
+                ),
+            })?
+            .get();
+        let window_size_expr = Literal::new(Some((*window_size).into()), DataType::Interval).into();
+        let window_slide_expr: ExprImpl =
+            Literal::new(Some((*window_slide).into()), DataType::Interval).into();
+        let window_size_sub_slide = FunctionCall::new(
+            ExprType::Subtract,
+            vec![window_size_expr, window_slide_expr.clone()],
+        )?
+        .into();
+
+        let time_col_shifted = FunctionCall::new(
+            ExprType::Subtract,
+            vec![
+                ExprImpl::InputRef(Box::new(time_col.clone())),
+                window_size_sub_slide,
+            ],
+        )?
+        .into();
+
+        let hop_start: ExprImpl = FunctionCall::new(
+            ExprType::TumbleStart,
+            vec![time_col_shifted, window_slide_expr],
+        )?
+        .into();
+
+        let mut window_start_exprs = Vec::with_capacity(units);
+        let mut window_end_exprs = Vec::with_capacity(units);
+        for i in 0..units {
+            {
+                let window_start_offset =
+                    window_slide
+                        .checked_mul_int(i)
+                        .ok_or_else(|| ExprError::InvalidParam {
+                            name: "window",
+                            reason: format!(
+                                "window_slide {} cannot be multiplied by {}",
+                                window_slide, i
+                            ),
+                        })?;
+                let window_start_offset_expr =
+                    Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
+                let window_start_expr = FunctionCall::new(
+                    ExprType::Add,
+                    vec![hop_start.clone(), window_start_offset_expr],
+                )?
+                .into();
+                window_start_exprs.push(window_start_expr);
+            }
+            {
+                let window_end_offset =
+                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                        ExprError::InvalidParam {
+                            name: "window",
+                            reason: format!(
+                                "window_slide {} cannot be multiplied by {}",
+                                window_slide,
+                                i + units
+                            ),
+                        }
+                    })?;
+                let window_end_offset_expr =
+                    Literal::new(Some(window_end_offset.into()), DataType::Interval).into();
+                let window_end_expr = FunctionCall::new(
+                    ExprType::Add,
+                    vec![hop_start.clone(), window_end_offset_expr],
+                )?
+                .into();
+                window_end_exprs.push(window_end_expr);
+            }
+        }
+        assert_eq!(window_start_exprs.len(), window_end_exprs.len());
+        Ok((window_start_exprs, window_end_exprs))
+    }
 }
 
 impl PlanTreeNodeUnary for LogicalHopWindow {
@@ -364,105 +455,12 @@ impl PredicatePushdown for LogicalHopWindow {
     }
 }
 
-pub fn derive_window_start_and_end_exprs(
-    logical_hop: &LogicalHopWindow,
-) -> Result<(Vec<ExprImpl>, Vec<ExprImpl>)> {
-    let generic::HopWindow::<PlanRef> {
-        window_size,
-        window_slide,
-        time_col,
-        ..
-    } = &logical_hop.core;
-    let units = window_size
-        .exact_div(window_slide)
-        .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-        .ok_or_else(|| ExprError::InvalidParam {
-            name: "window",
-            reason: format!(
-                "window_size {} cannot be divided by window_slide {}",
-                window_size, window_slide
-            ),
-        })?
-        .get();
-    let window_size_expr = Literal::new(Some((*window_size).into()), DataType::Interval).into();
-    let window_slide_expr: ExprImpl =
-        Literal::new(Some((*window_slide).into()), DataType::Interval).into();
-    let window_size_sub_slide = FunctionCall::new(
-        ExprType::Subtract,
-        vec![window_size_expr, window_slide_expr.clone()],
-    )?
-    .into();
-
-    let time_col_shifted = FunctionCall::new(
-        ExprType::Subtract,
-        vec![
-            ExprImpl::InputRef(Box::new(time_col.clone())),
-            window_size_sub_slide,
-        ],
-    )?
-    .into();
-
-    let hop_start: ExprImpl = FunctionCall::new(
-        ExprType::TumbleStart,
-        vec![time_col_shifted, window_slide_expr],
-    )?
-    .into();
-
-    let mut window_start_exprs = Vec::with_capacity(units);
-    let mut window_end_exprs = Vec::with_capacity(units);
-    for i in 0..units {
-        {
-            let window_start_offset =
-                window_slide
-                    .checked_mul_int(i)
-                    .ok_or_else(|| ExprError::InvalidParam {
-                        name: "window",
-                        reason: format!(
-                            "window_slide {} cannot be multiplied by {}",
-                            window_slide, i
-                        ),
-                    })?;
-            let window_start_offset_expr =
-                Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
-            let window_start_expr = FunctionCall::new(
-                ExprType::Add,
-                vec![hop_start.clone(), window_start_offset_expr],
-            )?
-            .into();
-            window_start_exprs.push(window_start_expr);
-        }
-        {
-            let window_end_offset =
-                window_slide
-                    .checked_mul_int(i + units)
-                    .ok_or_else(|| ExprError::InvalidParam {
-                        name: "window",
-                        reason: format!(
-                            "window_slide {} cannot be multiplied by {}",
-                            window_slide,
-                            i + units
-                        ),
-                    })?;
-            let window_end_offset_expr =
-                Literal::new(Some(window_end_offset.into()), DataType::Interval).into();
-            let window_end_expr = FunctionCall::new(
-                ExprType::Add,
-                vec![hop_start.clone(), window_end_offset_expr],
-            )?
-            .into();
-            window_end_exprs.push(window_end_expr);
-        }
-    }
-    assert_eq!(window_start_exprs.len(), window_end_exprs.len());
-    Ok((window_start_exprs, window_end_exprs))
-}
-
 impl ToBatch for LogicalHopWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         let (window_start_exprs, window_end_exprs) =
-            derive_window_start_and_end_exprs(&new_logical)?;
+            new_logical.derive_window_start_and_end_exprs()?;
         Ok(BatchHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 }
