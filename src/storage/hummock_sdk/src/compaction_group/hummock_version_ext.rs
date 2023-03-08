@@ -118,7 +118,7 @@ pub trait HummockVersionUpdateExt {
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
-        member_table_ids: &HashSet<StateTableId>,
+        member_table_ids: HashSet<StateTableId>,
     ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
@@ -203,7 +203,7 @@ impl HummockVersionUpdateExt for HummockVersion {
         &mut self,
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
-        member_table_ids: &HashSet<StateTableId>,
+        member_table_ids: HashSet<StateTableId>,
     ) -> Vec<SstSplitInfo> {
         let mut split_id_vers = vec![];
         if parent_group_id == StaticCompactionGroupId::NewCompactionGroup as CompactionGroupId
@@ -222,17 +222,27 @@ impl HummockVersionUpdateExt for HummockVersion {
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let mut insert_table_infos = vec![];
+                let target_l0 = cur_levels.l0.as_mut().unwrap();
+                let mut target_level_idx = target_l0.sub_levels.len();
+                for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
+                    if other.sub_level_id == sub_level.sub_level_id {
+                        target_level_idx = idx;
+                    }
+                }
                 for sst_info in &mut sub_level.table_infos {
-                    if sst_info
-                        .get_table_ids()
-                        .iter()
-                        .any(|table_id| member_table_ids.contains(table_id))
-                    {
-                        let is_trivial = sst_info
-                            .get_table_ids()
-                            .iter()
-                            .all(|table_id| member_table_ids.contains(table_id));
-                        if !is_trivial {
+                    let removed_table_ids = sst_info
+                        .table_ids
+                        .drain_filter(|table_id| member_table_ids.contains(table_id))
+                        .collect_vec();
+                    if !removed_table_ids.is_empty() {
+                        let exist = check_sst_id_exist_in_l0(
+                            sst_info.id,
+                            target_l0,
+                            target_level_idx,
+                            &removed_table_ids,
+                        );
+                        let is_trivial = sst_info.table_ids.is_empty();
+                        if is_trivial {
                             sst_info.divide_version += 1;
                         }
                         split_id_vers.push((
@@ -241,12 +251,11 @@ impl HummockVersionUpdateExt for HummockVersion {
                             0,
                             is_trivial,
                         ));
-                        let mut branch_table_info = sst_info.clone();
-                        branch_table_info.table_ids = sst_info
-                            .table_ids
-                            .drain_filter(|table_id| member_table_ids.contains(table_id))
-                            .collect_vec();
-                        insert_table_infos.push(branch_table_info);
+                        if !exist {
+                            let mut branch_table_info = sst_info.clone();
+                            branch_table_info.table_ids = removed_table_ids;
+                            insert_table_infos.push(branch_table_info);
+                        }
                     }
                 }
                 // Remove SST from sub level may result in empty sub level. It will be purged
@@ -258,9 +267,10 @@ impl HummockVersionUpdateExt for HummockVersion {
                 for removed_sst in removed {
                     remove_sst_stat_from_level(sub_level, &removed_sst);
                 }
-                add_new_sub_level(
-                    cur_levels.l0.as_mut().unwrap(),
-                    sub_level.get_sub_level_id(),
+                add_ssts_to_sub_level(
+                    target_l0,
+                    target_level_idx,
+                    sub_level.sub_level_id,
                     sub_level.level_type(),
                     insert_table_infos,
                 );
@@ -269,15 +279,17 @@ impl HummockVersionUpdateExt for HummockVersion {
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
             let level_idx = level.get_level_idx();
             for sst_info in &mut level.table_infos {
-                if sst_info
-                    .get_table_ids()
-                    .iter()
-                    .any(|table_id| member_table_ids.contains(table_id))
-                {
-                    let is_trivial = sst_info
-                        .get_table_ids()
-                        .iter()
-                        .all(|table_id| member_table_ids.contains(table_id));
+                let removed_table_ids = sst_info
+                    .table_ids
+                    .drain_filter(|table_id| member_table_ids.contains(table_id))
+                    .collect_vec();
+                if !removed_table_ids.is_empty() {
+                    let exist = check_sst_id_exist(
+                        sst_info.id,
+                        &mut cur_levels.levels[z],
+                        &removed_table_ids,
+                    );
+                    let is_trivial = sst_info.table_ids.is_empty();
                     if !is_trivial {
                         sst_info.divide_version += 1;
                     }
@@ -287,15 +299,19 @@ impl HummockVersionUpdateExt for HummockVersion {
                         level_idx,
                         is_trivial,
                     ));
-                    let mut branch_table_info = sst_info.clone();
-                    branch_table_info.table_ids = sst_info
-                        .table_ids
-                        .drain_filter(|table_id| member_table_ids.contains(table_id))
-                        .collect_vec();
-                    cur_levels.levels[z].total_file_size += branch_table_info.file_size;
-                    cur_levels.levels[z].uncompressed_file_size +=
-                        branch_table_info.uncompressed_file_size;
-                    cur_levels.levels[z].table_infos.push(branch_table_info);
+                    if !exist {
+                        let mut branch_table_info = sst_info.clone();
+                        branch_table_info.table_ids = removed_table_ids;
+                        cur_levels.levels[z].total_file_size += branch_table_info.file_size;
+                        cur_levels.levels[z].uncompressed_file_size +=
+                            branch_table_info.uncompressed_file_size;
+                        cur_levels.levels[z].table_infos.push(branch_table_info);
+                        cur_levels.levels[z].table_infos.sort_by(|sst1, sst2| {
+                            let a = sst1.key_range.as_ref().unwrap();
+                            let b = sst2.key_range.as_ref().unwrap();
+                            a.compare(b)
+                        });
+                    }
                 }
             }
             let removed = level
@@ -325,21 +341,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                 sst_split_info.extend(self.init_with_parent_group(
                     parent_group_id,
                     *compaction_group_id,
-                    &HashSet::from_iter(group_construct.table_ids.clone()),
+                    HashSet::from_iter(group_construct.table_ids.clone()),
                 ));
             } else if let Some(group_change) = &summary.group_table_change {
                 sst_split_info.extend(self.init_with_parent_group(
                     group_change.origin_group_id,
                     group_change.target_group_id,
-                    &HashSet::from_iter(group_change.table_ids.clone()),
+                    HashSet::from_iter(group_change.table_ids.clone()),
                 ));
-                let levels = self
-                    .levels
-                    .get_mut(compaction_group_id)
-                    .expect("compaction group should exist");
-                levels
-                    .member_table_ids
-                    .extend(group_change.table_ids.clone());
+
                 let levels = self
                     .levels
                     .get_mut(&group_change.origin_group_id)
@@ -550,6 +560,38 @@ pub fn build_initial_compaction_group_levels(
     }
 }
 
+pub fn check_sst_id_exist(
+    sst_id: HummockSstableId,
+    level: &mut Level,
+    move_table_ids: &[u32],
+) -> bool {
+    if level.level_type == LevelType::Overlapping as i32 {
+        if let Some(ret) = level.table_infos.iter_mut().find(|sst| sst.id == sst_id) {
+            ret.table_ids.extend(move_table_ids);
+            return true;
+        }
+    } else if let Ok(idx) = level
+        .table_infos
+        .binary_search_by(|sst| sst.id.cmp(&sst_id))
+    {
+        level.table_infos[idx].table_ids.extend(move_table_ids);
+        return true;
+    }
+    false
+}
+
+pub fn check_sst_id_exist_in_l0(
+    sst_id: HummockSstableId,
+    l0: &mut OverlappingLevel,
+    sub_level_idx: usize,
+    move_table_ids: &[u32],
+) -> bool {
+    if sub_level_idx < l0.sub_levels.len() {
+        return check_sst_id_exist(sst_id, &mut l0.sub_levels[sub_level_idx], move_table_ids);
+    }
+    false
+}
+
 pub fn try_get_compaction_group_id_by_table_id(
     version: &HummockVersion,
     table_id: StateTableId,
@@ -619,6 +661,31 @@ pub fn new_sub_level(
         sub_level_id,
         uncompressed_file_size,
     }
+}
+
+pub fn add_ssts_to_sub_level(
+    l0: &mut OverlappingLevel,
+    sub_level_idx: usize,
+    insert_sub_level_id: u64,
+    level_type: LevelType,
+    insert_table_infos: Vec<SstableInfo>,
+) {
+    if sub_level_idx < l0.sub_levels.len() {
+        l0.sub_levels[sub_level_idx]
+            .table_infos
+            .extend(insert_table_infos);
+        if l0.sub_levels[sub_level_idx].level_type == LevelType::Nonoverlapping as i32 {
+            l0.sub_levels[sub_level_idx]
+                .table_infos
+                .sort_by(|sst1, sst2| {
+                    let a = sst1.key_range.as_ref().unwrap();
+                    let b = sst2.key_range.as_ref().unwrap();
+                    a.compare(b)
+                });
+        }
+        return;
+    }
+    add_new_sub_level(l0, insert_sub_level_id, level_type, insert_table_infos);
 }
 
 pub fn add_new_sub_level(

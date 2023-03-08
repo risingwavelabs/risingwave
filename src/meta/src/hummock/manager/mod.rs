@@ -1631,6 +1631,13 @@ where
         read_lock!(self, versioning).await.current_version.clone()
     }
 
+    /// Gets branched sstable infos
+    /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    #[named]
+    pub async fn get_branched_ssts_info(&self) -> BTreeMap<HummockSstableId, BranchedSstInfo> {
+        read_lock!(self, versioning).await.branched_ssts.clone()
+    }
+
     /// Get version deltas from meta store
     #[cfg_attr(coverage, no_coverage)]
     pub async fn list_version_deltas(

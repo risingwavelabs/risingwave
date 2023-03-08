@@ -56,6 +56,8 @@ impl Drop for HummockVersionSafePoint {
     }
 }
 
+pub type BranchedSstInfo = HashMap<CompactionGroupId, /* divide version */ u64>;
+
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
@@ -75,8 +77,7 @@ pub struct Versioning {
     ///   `extend_ssts_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
     /// SST which is referenced more than once
-    pub branched_ssts:
-        BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
+    pub branched_ssts: BTreeMap<HummockSstableId, BranchedSstInfo>,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
     pub version_safe_points: Vec<HummockVersionId>,

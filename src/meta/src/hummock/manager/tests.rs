@@ -58,6 +58,35 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
         .collect_vec()
 }
 
+fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo {
+    SstableInfo {
+        id: sst_id,
+        key_range: Some(KeyRange {
+            left: iterator_test_key_of_epoch(1, idx, 1),
+            right: iterator_test_key_of_epoch(1, idx, 1),
+            right_exclusive: false,
+        }),
+        table_ids,
+        divide_version: 0,
+        min_epoch: 20,
+        max_epoch: 20,
+        ..Default::default()
+    }
+}
+
+fn gen_extend_sstable_info(
+    sst_id: u64,
+    group_id: u64,
+    idx: usize,
+    table_ids: Vec<u32>,
+) -> ExtendedSstableInfo {
+    ExtendedSstableInfo {
+        compaction_group_id: group_id,
+        sst_info: gen_sstable_info(sst_id, idx, table_ids),
+        table_stats: Default::default(),
+    }
+}
+
 #[tokio::test]
 async fn test_unpin_snapshot_before() {
     let (env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
@@ -1706,6 +1735,12 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             .len(),
         1
     );
+
+    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
+    assert_eq!(branched_ssts.len(), 2);
+    let info = branched_ssts.get(&11).unwrap();
+    assert_eq!(info.keys().cloned().collect_vec(), vec![2, new_group_id]);
+
     assert_eq!(
         current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
             .table_ids,
@@ -1823,5 +1858,116 @@ async fn test_compaction_task_expiration_due_to_split_group() {
     assert_ne!(
         version_2, version_3,
         "version should change because compaction task has succeeded"
+    );
+}
+
+#[tokio::test]
+async fn test_move_tables_between_compaction_group() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(102, 2)])
+        .await
+        .unwrap();
+    let sst_1 = gen_extend_sstable_info(10, 2, 1, vec![100, 101, 102]);
+    hummock_manager
+        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .await
+        .unwrap();
+    // Construct data via manual compaction
+    let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
+    let base_level: usize = 6;
+    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
+    assert_eq!(compaction_task.target_level, base_level as u32);
+    compaction_task.sorted_output_ssts = vec![
+        gen_sstable_info(11, 1, vec![100]),
+        gen_sstable_info(12, 2, vec![100, 101]),
+        gen_sstable_info(13, 3, vec![101, 102]),
+    ];
+    compaction_task.task_status = TaskStatus::Success.into();
+    assert!(hummock_manager
+        .report_compact_task(context_id, &mut compaction_task, None)
+        .await
+        .unwrap());
+    let sst_2 = gen_extend_sstable_info(14, 2, 1, vec![101, 102]);
+    hummock_manager
+        .commit_epoch(31, vec![sst_2.clone()], HashMap::from([(14, context_id)]))
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1]
+            .table_infos
+            .len(),
+        3
+    );
+
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1]
+            .table_infos
+            .len(),
+        2
+    );
+
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .len(),
+        2
+    );
+
+    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
+    assert_eq!(branched_ssts.len(), 2);
+    let info = branched_ssts.get(&12).unwrap();
+    let groups = info.keys().sorted().cloned().collect_vec();
+    assert_eq!(groups, vec![2, new_group_id]);
+    hummock_manager
+        .move_state_table_to_compaction_group(2, &[101], Some(new_group_id), false)
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .len(),
+        3
+    );
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1]
+            .table_infos
+            .len(),
+        1
+    );
+    let branched_ssts = hummock_manager.get_branched_ssts_info().await;
+    assert_eq!(branched_ssts.len(), 4);
+    let info = branched_ssts.get(&12).unwrap();
+    assert_eq!(
+        info.keys().cloned().sorted().collect_vec(),
+        vec![new_group_id]
+    );
+    let info = branched_ssts.get(&14).unwrap();
+    assert_eq!(
+        info.keys().cloned().sorted().collect_vec(),
+        vec![2, new_group_id]
     );
 }

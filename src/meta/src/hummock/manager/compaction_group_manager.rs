@@ -499,7 +499,6 @@ impl<S: MetaStore> HummockManager<S> {
                         table_ids: table_ids.to_vec(),
                         origin_group_id: parent_group_id,
                         target_group_id: compaction_group_id,
-                        ..Default::default()
                     })),
                 });
                 compaction_group_id
@@ -527,7 +526,6 @@ impl<S: MetaStore> HummockManager<S> {
                                 group_id: new_compaction_group_id,
                                 parent_group_id,
                                 table_ids: table_ids.to_vec(),
-                                ..Default::default()
                             })),
                         }],
                     },
@@ -570,16 +568,12 @@ impl<S: MetaStore> HummockManager<S> {
                 }
                 None => {
                     let to_insert: HashMap<CompactionGroupId, u64> = if is_trivial_adjust {
-                        [(target_compaction_group_id, divide_ver)]
-                            .into_iter()
-                            .collect()
+                        HashMap::from([(target_compaction_group_id, divide_ver)])
                     } else {
-                        [
+                        HashMap::from([
                             (parent_group_id, divide_ver),
                             (target_compaction_group_id, divide_ver),
-                        ]
-                        .into_iter()
-                        .collect()
+                        ])
                     };
                     branched_ssts.insert(id, to_insert);
                 }
