@@ -236,7 +236,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 50
+    timeout_in_minutes: 55
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
