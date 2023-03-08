@@ -107,16 +107,17 @@ impl Default for OrderType {
     }
 }
 
-/// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
+/// Column index with an order type (ASC or DESC). Used to represent a sort key
+/// (`Vec<ColumnOrder>`).
 ///
 /// Corresponds to protobuf [`PbColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct OrderPair {
+pub struct ColumnOrder {
     pub column_idx: usize,
     pub order_type: OrderType,
 }
 
-impl OrderPair {
+impl ColumnOrder {
     pub fn new(column_idx: usize, order_type: OrderType) -> Self {
         Self {
             column_idx,
@@ -125,7 +126,7 @@ impl OrderPair {
     }
 
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
-        OrderPair {
+        ColumnOrder {
             column_idx: column_order.column_index as _,
             order_type: OrderType::from_protobuf(&column_order.get_order_type().unwrap()),
         }
@@ -141,7 +142,7 @@ impl OrderPair {
 
 #[derive(Clone, Debug)]
 pub struct HeapElem {
-    pub order_pairs: Arc<Vec<OrderPair>>,
+    pub column_orders: Arc<Vec<ColumnOrder>>,
     pub chunk: DataChunk,
     pub chunk_idx: usize,
     pub elem_idx: usize,
@@ -166,7 +167,7 @@ impl Ord for HeapElem {
                 self.elem_idx,
                 &other.chunk,
                 other.elem_idx,
-                self.order_pairs.as_ref(),
+                self.column_orders.as_ref(),
             )
             .unwrap()
         };
@@ -229,15 +230,15 @@ pub fn compare_rows_in_chunk(
     lhs_idx: usize,
     rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
-    order_pairs: &[OrderPair],
+    column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
-    for order_pair in order_pairs.iter() {
-        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
-        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx).array();
+    for column_order in column_orders.iter() {
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_idx).array();
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_idx).array();
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
+                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &column_order.order_type)),)*
                     (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
                 }?
             }
@@ -256,7 +257,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use super::{OrderPair, OrderType};
+    use super::{ColumnOrder, OrderType};
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
@@ -277,18 +278,18 @@ mod tests {
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::ascending()),
-            OrderPair::new(1, OrderType::descending()),
+        let column_orders = vec![
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
         );
     }
 
@@ -339,8 +340,8 @@ mod tests {
             ]))),
         ]);
 
-        let order_pairs = (0..row1.len())
-            .map(|i| OrderPair::new(i, OrderType::ascending()))
+        let column_orders = (0..row1.len())
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
             .collect_vec();
 
         let chunk = DataChunk::from_rows(
@@ -366,11 +367,11 @@ mod tests {
         );
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
         );
     }
 }

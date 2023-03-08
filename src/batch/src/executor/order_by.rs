@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::encoding_for_comparison::encode_chunk;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
@@ -33,7 +33,7 @@ use crate::task::BatchTaskContext;
 /// 4. Build and yield data chunks according to the row order
 pub struct SortExecutor {
     child: BoxedExecutor,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
     identity: String,
     schema: Schema,
     chunk_size: usize,
@@ -64,14 +64,14 @@ impl BoxedExecutorBuilder for SortExecutor {
         let order_by_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::Sort)?;
 
-        let order_pairs = order_by_node
+        let column_orders = order_by_node
             .column_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
         Ok(Box::new(SortExecutor::new(
             child,
-            order_pairs,
+            column_orders,
             source.plan_node().get_identity().clone(),
             source.context.get_config().developer.batch_chunk_size,
         )))
@@ -91,7 +91,7 @@ impl SortExecutor {
         }
 
         for chunk in &chunks {
-            let encoded_chunk = encode_chunk(chunk, &self.order_pairs);
+            let encoded_chunk = encode_chunk(chunk, &self.column_orders);
             encoded_rows.extend(
                 encoded_chunk
                     .into_iter()
@@ -117,14 +117,14 @@ impl SortExecutor {
 impl SortExecutor {
     pub fn new(
         child: BoxedExecutor,
-        order_pairs: Vec<OrderPair>,
+        column_orders: Vec<ColumnOrder>,
         identity: String,
         chunk_size: usize,
     ) -> Self {
         let schema = child.schema().clone();
         Self {
             child,
-            order_pairs,
+            column_orders,
             identity,
             schema,
             chunk_size,
@@ -166,12 +166,12 @@ mod tests {
              2 2
              3 1",
         ));
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
@@ -179,7 +179,7 @@ mod tests {
 
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -216,19 +216,19 @@ mod tests {
               2.2 -1.1
               3.3 -2.2",
         ));
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -265,19 +265,19 @@ mod tests {
              2.2 2.2
              3.3 1.1",
         ));
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor2".to_string(),
             CHUNK_SIZE,
         ));
@@ -335,23 +335,23 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 2,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::descending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -408,23 +408,23 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::descending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::descending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 2,
                 order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -501,23 +501,23 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 2,
                 order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));
@@ -680,19 +680,19 @@ mod tests {
         );
         let mut mock_executor = MockExecutor::new(schema);
         mock_executor.add(input_chunk);
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             "SortExecutor".to_string(),
             CHUNK_SIZE,
         ));

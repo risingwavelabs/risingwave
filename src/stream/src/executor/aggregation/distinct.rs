@@ -275,7 +275,7 @@ mod tests {
             return_type: DataType::Int64,
             distinct,
 
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
         }

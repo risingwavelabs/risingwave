@@ -20,7 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -85,11 +85,11 @@ pub(crate) fn gen_create_index_plan(
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
-    let to_order_pair = |(ident, order): &(Ident, OrderType)| {
+    let to_column_order = |(ident, order): &(Ident, OrderType)| {
         let x = ident.real_value();
         table_desc_map
             .get(&x)
-            .map(|x| OrderPair::new(*x, *order))
+            .map(|x| ColumnOrder::new(*x, *order))
             .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
     };
 
@@ -103,7 +103,7 @@ pub(crate) fn gen_create_index_plan(
 
     let mut index_columns = columns
         .iter()
-        .map(to_order_pair)
+        .map(to_column_order)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     let mut include_columns = if include.is_empty() {
@@ -269,7 +269,7 @@ fn assemble_materialize(
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
-    index_columns: &[OrderPair],
+    index_columns: &[ColumnOrder],
     include_columns: &[usize],
     distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
@@ -323,7 +323,7 @@ fn assemble_materialize(
             index_columns
                 .iter()
                 .enumerate()
-                .map(|(i, order_pair)| FieldOrder::new(i, order_pair.order_type))
+                .map(|(i, column_order)| FieldOrder::new(i, column_order.order_type))
                 .collect(),
         ),
         project_required_cols,

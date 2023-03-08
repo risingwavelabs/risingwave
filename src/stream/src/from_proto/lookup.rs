@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -42,7 +42,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .get_arrangement_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let arrangement_col_descs = lookup

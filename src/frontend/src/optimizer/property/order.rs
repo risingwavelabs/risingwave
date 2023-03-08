@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::{Direction, OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, Direction, OrderType};
 use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 
 use super::super::plan_node::*;
@@ -167,8 +167,8 @@ impl FieldOrder {
     }
 
     // TODO(rc): unify them
-    pub fn to_order_pair(&self) -> OrderPair {
-        OrderPair {
+    pub fn to_column_order(&self) -> ColumnOrder {
+        ColumnOrder {
             column_idx: self.index,
             order_type: OrderType::new(self.direct),
         }

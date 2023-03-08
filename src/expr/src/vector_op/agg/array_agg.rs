@@ -17,7 +17,7 @@ use risingwave_common::bail;
 use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -100,9 +100,9 @@ struct ArrayAggOrdered {
 }
 
 impl ArrayAggOrdered {
-    fn new(return_type: DataType, agg_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
+    fn new(return_type: DataType, agg_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
         debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
-        let (order_col_indices, order_types) = order_pairs
+        let (order_col_indices, order_types) = column_orders
             .into_iter()
             .map(|p| (p.column_idx, p.order_type))
             .unzip();
@@ -169,15 +169,15 @@ impl Aggregator for ArrayAggOrdered {
 pub fn create_array_agg_state(
     return_type: DataType,
     agg_col_idx: usize,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
 ) -> Result<Box<dyn Aggregator>> {
-    if order_pairs.is_empty() {
+    if column_orders.is_empty() {
         Ok(Box::new(ArrayAggUnordered::new(return_type, agg_col_idx)))
     } else {
         Ok(Box::new(ArrayAggOrdered::new(
             return_type,
             agg_col_idx,
-            order_pairs,
+            column_orders,
         )))
     }
 }
@@ -274,8 +274,8 @@ mod tests {
             return_type.clone(),
             0,
             vec![
-                OrderPair::new(1, OrderType::ascending()),
-                OrderPair::new(0, OrderType::descending()),
+                ColumnOrder::new(1, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::descending()),
             ],
         )?;
         let mut builder = return_type.create_array_builder(0);

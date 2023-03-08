@@ -88,7 +88,7 @@ impl<S: StateStore> MaterializedInputState<S> {
                 (vec![arg_col_indices[0]], vec![order_type])
             } else {
                 agg_call
-                    .order_pairs
+                    .column_orders
                     .iter()
                     .map(|p| (p.column_idx, p.order_type))
                     .unzip()
@@ -290,7 +290,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -350,7 +350,7 @@ mod tests {
             kind,
             args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
             distinct: false,
@@ -1044,9 +1044,9 @@ mod tests {
             kind: AggKind::StringAgg,
             args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::ascending()),  // b ASC
-                OrderPair::new(0, OrderType::descending()), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // b ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1146,9 +1146,9 @@ mod tests {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::ascending()),  // c ASC
-                OrderPair::new(0, OrderType::descending()), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // c ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,

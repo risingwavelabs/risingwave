@@ -291,7 +291,7 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
-            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
+            pk: self.pk.iter().map(FieldOrder::to_column_order).collect(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),

@@ -24,7 +24,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::encoding_for_comparison::encode_chunk;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::executor::{
@@ -37,7 +37,7 @@ use crate::task::BatchTaskContext;
 /// Use a N-heap to store the smallest N rows.
 pub struct TopNExecutor {
     child: BoxedExecutor,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
     offset: usize,
     limit: usize,
     with_ties: bool,
@@ -57,14 +57,14 @@ impl BoxedExecutorBuilder for TopNExecutor {
         let top_n_node =
             try_match_expand!(source.plan_node().get_node_body().unwrap(), NodeBody::TopN)?;
 
-        let order_pairs = top_n_node
+        let column_orders = top_n_node
             .column_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
         Ok(Box::new(Self::new(
             child,
-            order_pairs,
+            column_orders,
             top_n_node.get_offset() as usize,
             top_n_node.get_limit() as usize,
             top_n_node.get_with_ties(),
@@ -77,7 +77,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
 impl TopNExecutor {
     pub fn new(
         child: BoxedExecutor,
-        order_pairs: Vec<OrderPair>,
+        column_orders: Vec<ColumnOrder>,
         offset: usize,
         limit: usize,
         with_ties: bool,
@@ -87,7 +87,7 @@ impl TopNExecutor {
         let schema = child.schema().clone();
         Self {
             child,
-            order_pairs,
+            column_orders,
             offset,
             limit,
             with_ties,
@@ -218,7 +218,7 @@ impl TopNExecutor {
         #[for_await]
         for chunk in self.child.execute() {
             let chunk = Arc::new(chunk?.compact());
-            for (row_id, encoded_row) in encode_chunk(&chunk, &self.order_pairs)
+            for (row_id, encoded_row) in encode_chunk(&chunk, &self.column_orders)
                 .into_iter()
                 .enumerate()
             {
@@ -275,19 +275,19 @@ mod tests {
              4 2
              5 1",
         ));
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
         ];
         let top_n_executor = Box::new(TopNExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             1,
             3,
             false,
@@ -332,19 +332,19 @@ mod tests {
              4 2
              5 1",
         ));
-        let order_pairs = vec![
-            OrderPair {
+        let column_orders = vec![
+            ColumnOrder {
                 column_idx: 1,
                 order_type: OrderType::ascending(),
             },
-            OrderPair {
+            ColumnOrder {
                 column_idx: 0,
                 order_type: OrderType::ascending(),
             },
         ];
         let top_n_executor = Box::new(TopNExecutor::new(
             Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             1,
             0,
             false,

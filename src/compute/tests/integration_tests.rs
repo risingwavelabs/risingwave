@@ -38,7 +38,7 @@ use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
@@ -203,7 +203,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         Box::new(row_id_gen_executor),
         memory_state_store.clone(),
         table_id,
-        vec![OrderPair::new(0, OrderType::ascending())],
+        vec![ColumnOrder::new(0, OrderType::ascending())],
         all_column_ids.clone(),
         4,
         Arc::new(AtomicU64::new(0)),

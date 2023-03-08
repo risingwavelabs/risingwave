@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{Direction, OrderPair};
+use risingwave_common::util::sort_util::{ColumnOrder, Direction};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -312,7 +312,7 @@ impl LogicalScan {
         self.core.chunk_size
     }
 
-    pub fn primary_key(&self) -> Vec<OrderPair> {
+    pub fn primary_key(&self) -> Vec<ColumnOrder> {
         self.core.table_desc.pk.clone()
     }
 

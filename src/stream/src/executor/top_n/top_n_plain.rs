@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::utils::*;
@@ -37,9 +37,9 @@ impl<S: StateStore> TopNExecutor<S, false> {
     pub fn new_without_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -65,9 +65,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
     pub fn new_with_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -94,9 +94,9 @@ impl<S: StateStore> TopNExecutor<S, true> {
     pub fn new_with_ties_for_test(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -143,9 +143,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -295,14 +295,14 @@ mod tests {
             }
         }
 
-        fn storage_key() -> Vec<OrderPair> {
+        fn storage_key() -> Vec<ColumnOrder> {
             let mut v = order_by();
-            v.extend([OrderPair::new(1, OrderType::ascending())]);
+            v.extend([ColumnOrder::new(1, OrderType::ascending())]);
             v
         }
 
-        fn order_by() -> Vec<OrderPair> {
-            vec![OrderPair::new(0, OrderType::ascending())]
+        fn order_by() -> Vec<ColumnOrder> {
+            vec![ColumnOrder::new(0, OrderType::ascending())]
         }
 
         fn pk_indices() -> PkIndices {
@@ -847,14 +847,14 @@ mod tests {
             ))
         }
 
-        fn storage_key() -> Vec<OrderPair> {
+        fn storage_key() -> Vec<ColumnOrder> {
             order_by()
         }
 
-        fn order_by() -> Vec<OrderPair> {
+        fn order_by() -> Vec<ColumnOrder> {
             vec![
-                OrderPair::new(0, OrderType::ascending()),
-                OrderPair::new(3, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::ascending()),
+                ColumnOrder::new(3, OrderType::ascending()),
             ]
         }
 
@@ -1113,14 +1113,14 @@ mod tests {
             ))
         }
 
-        fn storage_key() -> Vec<OrderPair> {
+        fn storage_key() -> Vec<ColumnOrder> {
             let mut v = order_by();
-            v.push(OrderPair::new(1, OrderType::ascending()));
+            v.push(ColumnOrder::new(1, OrderType::ascending()));
             v
         }
 
-        fn order_by() -> Vec<OrderPair> {
-            vec![OrderPair::new(0, OrderType::ascending())]
+        fn order_by() -> Vec<ColumnOrder> {
+            vec![ColumnOrder::new(0, OrderType::ascending())]
         }
 
         fn pk_indices() -> PkIndices {

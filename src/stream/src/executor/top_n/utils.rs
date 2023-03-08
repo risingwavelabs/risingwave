@@ -26,7 +26,7 @@ use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
@@ -191,10 +191,10 @@ pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) 
 pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 pub fn create_cache_key_serde(
-    storage_key: &[OrderPair],
+    storage_key: &[ColumnOrder],
     pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
-    order_by: &[OrderPair],
+    order_by: &[ColumnOrder],
     group_by: &[usize],
 ) -> CacheKeySerde {
     {

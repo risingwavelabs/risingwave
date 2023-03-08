@@ -28,7 +28,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
@@ -67,7 +67,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     pub async fn new(
         input: BoxedExecutor,
         store: S,
-        key: Vec<OrderPair>,
+        key: Vec<ColumnOrder>,
         executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
@@ -102,7 +102,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        keys: Vec<OrderPair>,
+        keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
@@ -569,7 +569,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -635,7 +635,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -752,7 +752,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -885,7 +885,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1068,7 +1068,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1201,7 +1201,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),

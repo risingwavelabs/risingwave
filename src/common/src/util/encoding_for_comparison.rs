@@ -20,7 +20,7 @@ use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::OwnedRow;
 use crate::types::{memcmp_serialize_datum_into, ScalarRefImpl};
-use crate::util::sort_util::{OrderPair, OrderType};
+use crate::util::sort_util::{ColumnOrder, OrderType};
 
 fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
@@ -42,8 +42,8 @@ fn encode_array(array: &ArrayImpl, order: &OrderType) -> Result<Vec<Vec<u8>>> {
 /// the datachunk.
 ///
 /// TODO: specify the order for `NULL`.
-pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>> {
-    let encoded_columns = order_pairs
+pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec<u8>> {
+    let encoded_columns = column_orders
         .iter()
         .map(|o| encode_array(chunk.column_at(o.column_idx).array_ref(), &o.order_type).unwrap())
         .collect_vec();
@@ -58,9 +58,9 @@ pub fn encode_chunk(chunk: &DataChunk, order_pairs: &[OrderPair]) -> Vec<Vec<u8>
     encoded_chunk
 }
 
-pub fn encode_row(row: &OwnedRow, order_pairs: &[OrderPair]) -> Vec<u8> {
+pub fn encode_row(row: &OwnedRow, column_orders: &[ColumnOrder]) -> Vec<u8> {
     let mut encoded_row = vec![];
-    order_pairs.iter().for_each(|o| {
+    column_orders.iter().for_each(|o| {
         let value = row[o.column_idx].as_ref();
         encoded_row
             .extend(encode_value(value.map(|x| x.as_scalar_ref_impl()), &o.order_type).unwrap());
@@ -76,7 +76,7 @@ mod tests {
     use crate::array::DataChunk;
     use crate::row::OwnedRow;
     use crate::types::{DataType, ScalarImpl};
-    use crate::util::sort_util::{OrderPair, OrderType};
+    use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]
     fn test_encode_row() {
@@ -91,12 +91,12 @@ mod tests {
 
         let row1 = OwnedRow::new(vec![v10, v11, v12]);
         let row2 = OwnedRow::new(vec![v20, v21, v22]);
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::ascending()),
-            OrderPair::new(1, OrderType::descending()),
+        let column_orders = vec![
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
-        let encoded_row1 = encode_row(&row1, &order_pairs);
+        let encoded_row1 = encode_row(&row1, &column_orders);
         let encoded_v10 = encode_value(
             v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
             &OrderType::ascending(),
@@ -113,7 +113,7 @@ mod tests {
             .collect_vec();
         assert_eq!(encoded_row1, concated_encoded_row1);
 
-        let encoded_row2 = encode_row(&row2, &order_pairs);
+        let encoded_row2 = encode_row(&row2, &column_orders);
         assert!(encoded_row1 < encoded_row2);
     }
 
@@ -132,14 +132,14 @@ mod tests {
             &[row1.clone(), row2.clone()],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::ascending()),
-            OrderPair::new(1, OrderType::descending()),
+        let column_orders = vec![
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
-        let encoded_row1 = encode_row(&row1, &order_pairs);
-        let encoded_row2 = encode_row(&row2, &order_pairs);
-        let encoded_chunk = encode_chunk(&chunk, &order_pairs);
+        let encoded_row1 = encode_row(&row1, &column_orders);
+        let encoded_row2 = encode_row(&row2, &column_orders);
+        let encoded_chunk = encode_chunk(&chunk, &column_orders);
         assert_eq!(&encoded_chunk, &[encoded_row1, encoded_row2]);
     }
 }

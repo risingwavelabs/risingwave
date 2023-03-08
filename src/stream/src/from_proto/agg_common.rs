@@ -19,7 +19,7 @@ use std::sync::Arc;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::{build_from_prost, AggKind};
 
 use super::*;
@@ -46,7 +46,7 @@ pub fn build_agg_call_from_prost(
         ),
         _ => bail!("Too many/few arguments for {:?}", agg_kind),
     };
-    let order_pairs = agg_call_proto
+    let column_orders = agg_call_proto
         .get_order_by()
         .iter()
         .map(|col_order| {
@@ -54,7 +54,7 @@ pub fn build_agg_call_from_prost(
             let order_type = OrderType::from_protobuf(&col_order.get_order_type().unwrap());
             // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
             // see also `risingwave_common::util::sort_util::compare_values`
-            OrderPair::new(col_idx, order_type)
+            ColumnOrder::new(col_idx, order_type)
         })
         .collect();
     let filter = match agg_call_proto.filter {
@@ -65,7 +65,7 @@ pub fn build_agg_call_from_prost(
         kind: agg_kind,
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
-        order_pairs,
+        column_orders,
         append_only,
         filter,
         distinct: agg_call_proto.distinct,
