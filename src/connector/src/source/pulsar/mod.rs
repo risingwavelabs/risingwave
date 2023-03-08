@@ -17,13 +17,20 @@ pub mod source;
 pub mod split;
 pub mod topic;
 
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+
 use anyhow::{anyhow, Result};
 pub use enumerator::*;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use serde::Deserialize;
 pub use split::*;
+use tempfile::{tempfile, NamedTempFile, TempPath};
 use url::Url;
+
+use crate::aws_utils::{load_file_descriptor_from_s3, AWS_DEFAULT_CONFIG};
 
 pub const PULSAR_CONNECTOR: &str = "pulsar";
 
@@ -40,8 +47,10 @@ pub struct PulsarOauth {
 
     #[serde(rename = "oauth.scope")]
     pub scope: Option<String>,
-    // #[serde(flatten)]
-    // pub s3_cridentials: Option<>,
+
+    #[serde(flatten)]
+    /// required keys refer to [`AWS_DEFAULT_CONFIG`]
+    pub s3_credentials: HashMap<String, String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -68,15 +77,30 @@ pub struct PulsarProperties {
 impl PulsarProperties {
     pub async fn build_pulsar_client(&self) -> Result<Pulsar<TokioExecutor>> {
         let mut pulsar_builder = Pulsar::builder(&self.service_url, TokioExecutor);
+        let mut temp_file = None;
         if let Some(oauth) = &self.oauth {
             let url = Url::parse(&oauth.credentials_url)?;
             if url.scheme() == "s3" {
-                todo!("s3 oauth credentials not supported yet");
+                let credentials = load_file_descriptor_from_s3(&url, &oauth.s3_credentials).await?;
+                let mut f = NamedTempFile::new()?;
+                f.write_all(&credentials)?;
+                f.as_file().sync_all()?;
+                temp_file = Some(f);
             }
 
             let auth_params = OAuth2Params {
                 issuer_url: oauth.issuer_url.clone(),
-                credentials_url: oauth.credentials_url.clone(),
+                credentials_url: if temp_file.is_none() {
+                    oauth.credentials_url.clone()
+                } else {
+                    temp_file
+                        .as_ref()
+                        .unwrap()
+                        .path()
+                        .to_str()
+                        .unwrap()
+                        .to_string()
+                },
                 audience: Some(oauth.audience.clone()),
                 scope: oauth.scope.clone(),
             };
@@ -90,6 +114,8 @@ impl PulsarProperties {
             });
         }
 
-        pulsar_builder.build().await.map_err(|e| anyhow!(e))
+        let res = pulsar_builder.build().await.map_err(|e| anyhow!(e))?;
+        drop(temp_file);
+        Ok(res)
     }
 }
