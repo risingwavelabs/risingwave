@@ -5,26 +5,26 @@ package order;
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-enum Direction {
-    Direction_UNSPECIFIED = 0;
-    Direction_ASCENDING = 1;
-    Direction_DESCENDING = 2;
+enum PbDirection {
+    PbDirection_UNSPECIFIED = 0;
+    PbDirection_ASCENDING = 1;
+    PbDirection_DESCENDING = 2;
 }
 
 // TODO(): enable `NULLS FIRST | LAST`
-// enum NullsAre {
-//     NullsAre_UNSPECIFIED = 0;
-//     NullsAre_SMALLEST = 1;
-//     NullsAre_LARGEST = 2;
+// enum PbNullsAre {
+//     PbNullsAre_UNSPECIFIED = 0;
+//     PbNullsAre_SMALLEST = 1;
+//     PbNullsAre_LARGEST = 2;
 // }
 
-message Order {
-    Direction direction = 1;
+message PbOrderType {
+    PbDirection direction = 1;
     // TODO(): enable `NULLS FIRST | LAST`
-    // NullsAre nulls_are = 2;
+    // PbNullsAre nulls_are = 2;
 }
 
-message ColumnOrder {
+message PbColumnOrder {
     uint32 column_index = 1;
-    Order order = 2;
+    PbOrderType order_type = 2;
 }

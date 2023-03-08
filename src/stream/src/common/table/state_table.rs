@@ -145,9 +145,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             .pk
             .iter()
             .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
             })
             .collect();
         let dist_key_indices: Vec<usize> = table_catalog

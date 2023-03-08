@@ -26,7 +26,8 @@ use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
 use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRef as ProstInputRef};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field, OrderType};
+use risingwave_pb::order::{PbDirection, PbOrderType};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -93,7 +94,9 @@ fn make_field(type_name: TypeName) -> Field {
 
 fn make_column_order(index: u32) -> ColumnOrder {
     ColumnOrder {
-        order_type: OrderType::Ascending as i32,
+        order_type: Some(PbOrderType {
+            direction: PbDirection::Ascending as _,
+        }),
         index,
     }
 }
@@ -125,7 +128,9 @@ fn make_source_internal_table(id: u32) -> ProstTable {
         columns,
         pk: vec![ColumnOrder {
             index: 0,
-            order_type: 2,
+            order_type: Some(PbOrderType {
+                direction: PbDirection::Descending as _,
+            }),
         }],
         ..Default::default()
     }
@@ -144,7 +149,9 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
         columns,
         pk: vec![ColumnOrder {
             index: 0,
-            order_type: 2,
+            order_type: Some(PbOrderType {
+                direction: PbDirection::Descending as _,
+            }),
         }],
         stream_key: vec![2],
         ..Default::default()

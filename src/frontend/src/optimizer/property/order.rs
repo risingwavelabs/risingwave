@@ -19,7 +19,8 @@ use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
+use risingwave_pb::order::{PbDirection, PbOrderType};
+use risingwave_pb::plan_common::ColumnOrder;
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
@@ -146,20 +147,21 @@ impl FieldOrder {
 
     pub fn to_protobuf(&self) -> ColumnOrder {
         ColumnOrder {
-            order_type: self.direct.to_protobuf() as i32,
+            order_type: Some(PbOrderType {
+                direction: self.direct.to_protobuf() as _,
+            }),
             index: self.index as u32,
         }
     }
 
     pub fn from_protobuf(column_order: &ColumnOrder) -> Self {
-        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
         Self {
-            direct: Direction::from_protobuf(&order_type),
+            direct: Direction::from_protobuf(&column_order.get_order_type().unwrap().direction()),
             index: column_order.index as usize,
         }
     }
 
-    // TODO: unify them
+    // TODO(): unify them
     pub fn to_order_pair(&self) -> OrderPair {
         OrderPair {
             column_idx: self.index,
@@ -193,23 +195,23 @@ impl From<Direction> for OrderType {
 }
 
 impl Direction {
-    pub fn to_protobuf(self) -> ProstOrderType {
+    pub fn to_protobuf(self) -> PbDirection {
         match self {
-            Self::Asc => ProstOrderType::Ascending,
-            Self::Desc => ProstOrderType::Descending,
+            Self::Asc => PbDirection::Ascending,
+            Self::Desc => PbDirection::Descending,
             _ => unimplemented!(),
         }
     }
 
-    pub fn from_protobuf(order_type: &ProstOrderType) -> Self {
+    pub fn from_protobuf(order_type: &PbDirection) -> Self {
         match order_type {
-            ProstOrderType::Ascending => Self::Asc,
-            ProstOrderType::Descending => Self::Desc,
-            ProstOrderType::OrderUnspecified => unreachable!(),
+            PbDirection::Ascending => Self::Asc,
+            PbDirection::Descending => Self::Desc,
+            PbDirection::Unspecified => unreachable!(),
         }
     }
 
-    // TODO: unify them
+    // TODO(): unify them
     pub fn to_order(self) -> OrderType {
         match self {
             Self::Asc => OrderType::Ascending,

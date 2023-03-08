@@ -3,6 +3,7 @@ syntax = "proto3";
 package plan_common;
 
 import "data.proto";
+import "order.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -57,16 +58,11 @@ enum JoinType {
   RIGHT_ANTI = 8;
 }
 
-enum OrderType {
-  ORDER_UNSPECIFIED = 0;
-  ASCENDING = 1;
-  DESCENDING = 2;
-}
-
+// TODO(): to be removed
 // Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
 message ColumnOrder {
   // maybe other name
-  OrderType order_type = 1;
+  order.PbOrderType order_type = 1;
   uint32 index = 2;
 }
 

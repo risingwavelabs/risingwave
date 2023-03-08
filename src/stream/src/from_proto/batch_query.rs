@@ -15,7 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::BatchPlanNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -44,7 +44,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let order_types = table_desc
             .pk
             .iter()
-            .map(|desc| OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap()))
+            .map(|desc| OrderType::from_protobuf(&desc.get_order_type().unwrap().direction()))
             .collect_vec();
 
         let column_descs = table_desc

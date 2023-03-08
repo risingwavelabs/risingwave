@@ -174,9 +174,7 @@ impl SchemaFilterKeyExtractor {
             .pk
             .iter()
             .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
             })
             .collect();
 
@@ -352,6 +350,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::order::{PbDirection, PbOrderType};
     use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
     use tokio::task;
 
@@ -439,11 +438,15 @@ mod tests {
             ],
             pk: vec![
                 ColumnOrder {
-                    order_type: 1, // Ascending
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                     index: 1,
                 },
                 ColumnOrder {
-                    order_type: 1, // Ascending
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                     index: 3,
                 },
             ],

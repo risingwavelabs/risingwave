@@ -21,7 +21,6 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
 use risingwave_expr::expr::{build_from_prost, AggKind};
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -52,9 +51,8 @@ pub fn build_agg_call_from_prost(
         .iter()
         .map(|col_order| {
             let col_idx = col_order.get_column_index() as usize;
-            let order = col_order.get_order().unwrap();
             let order_type =
-                OrderType::from_prost(&ProstOrderType::from_i32(order.direction).unwrap());
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction());
             // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
             // see also `risingwave_common::util::sort_util::compare_values`
             OrderPair::new(col_idx, order_type)

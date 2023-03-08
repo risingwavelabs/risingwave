@@ -21,9 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::expr::AggCall as ProstAggCall;
-use risingwave_pb::order::{
-    ColumnOrder as ProstColumnOrder, Direction as ProstDirection, Order as ProstOrder,
-};
+use risingwave_pb::order::{PbColumnOrder, PbOrderType};
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
 use super::super::utils::TableCatalogBuilder;
@@ -519,15 +517,11 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
 }
 
 impl PlanAggOrderByField {
-    fn to_protobuf(&self) -> ProstColumnOrder {
-        ProstColumnOrder {
+    fn to_protobuf(&self) -> PbColumnOrder {
+        PbColumnOrder {
             column_index: self.input.index() as _,
-            order: Some(ProstOrder {
-                direction: match self.direction {
-                    Direction::Asc => ProstDirection::Ascending,
-                    Direction::Desc => ProstDirection::Descending,
-                    Direction::Any => unreachable!(),
-                } as _, // TODO(): use `to_proto`
+            order_type: Some(PbOrderType {
+                direction: self.direction.to_protobuf() as _,
             }),
         }
     }

@@ -179,7 +179,7 @@ message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
-  order.Direction direction = 4;
+  order.PbDirection direction = 4;
   repeated uint32 output_indices = 5;
 }
 

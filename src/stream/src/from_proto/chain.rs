@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -91,7 +91,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .pk
                     .iter()
                     .map(|desc| {
-                        OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap())
+                        OrderType::from_protobuf(&desc.get_order_type().unwrap().direction())
                     })
                     .collect_vec();
 

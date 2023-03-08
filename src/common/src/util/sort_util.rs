@@ -15,7 +15,8 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
+use risingwave_pb::order::{PbDirection, PbOrderType};
+use risingwave_pb::plan_common::ColumnOrder;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
@@ -28,18 +29,20 @@ pub enum OrderType {
 }
 
 impl OrderType {
-    pub fn from_prost(order_type: &ProstOrderType) -> OrderType {
+    // TODO(): from `PbOrderType`
+    pub fn from_protobuf(order_type: &PbDirection) -> OrderType {
         match order_type {
-            ProstOrderType::Ascending => OrderType::Ascending,
-            ProstOrderType::Descending => OrderType::Descending,
-            ProstOrderType::OrderUnspecified => unreachable!(),
+            PbDirection::Ascending => OrderType::Ascending,
+            PbDirection::Descending => OrderType::Descending,
+            PbDirection::Unspecified => unreachable!(),
         }
     }
 
-    pub fn to_prost(self) -> ProstOrderType {
+    // TODO(): to `PbOrderType`
+    pub fn to_protobuf(self) -> PbDirection {
         match self {
-            OrderType::Ascending => ProstOrderType::Ascending,
-            OrderType::Descending => ProstOrderType::Descending,
+            OrderType::Ascending => PbDirection::Ascending,
+            OrderType::Descending => PbDirection::Descending,
         }
     }
 }
@@ -62,16 +65,19 @@ impl OrderPair {
     }
 
     pub fn from_prost(column_order: &ColumnOrder) -> Self {
-        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
         OrderPair {
-            order_type: OrderType::from_prost(&order_type),
+            order_type: OrderType::from_protobuf(
+                &column_order.get_order_type().unwrap().direction(),
+            ),
             column_idx: column_order.index as usize,
         }
     }
 
     pub fn to_protobuf(&self) -> ColumnOrder {
         ColumnOrder {
-            order_type: self.order_type.to_prost() as i32,
+            order_type: Some(PbOrderType {
+                direction: self.order_type.to_protobuf() as _,
+            }),
             index: self.column_idx as u32,
         }
     }
