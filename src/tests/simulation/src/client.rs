@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Iter;
+use std::collections::HashMap;
 use std::time::Duration;
 
 /// A RisingWave client.
@@ -22,7 +24,61 @@ pub struct RisingWave {
     dbname: String,
     /// The `SET` statements that have been executed on this client.
     /// We need to replay them when reconnecting.
-    set_stmts: Vec<String>,
+    set_stmts: SetStmts,
+}
+
+/// `SetStmts` stores and compacts all `SET` statements that have been executed in the client
+/// history.
+#[derive(Debug, Clone, Default)]
+pub struct SetStmts {
+    stmts: HashMap<String, String>,
+}
+
+struct SetStmtsIterator<'a, 'b>
+where
+    'a: 'b,
+{
+    _stmts: &'a SetStmts,
+    stmts_iter: Iter<'b, String, String>,
+    remaining_cnt: usize,
+}
+
+impl<'a, 'b> SetStmtsIterator<'a, 'b> {
+    fn new(stmts: &'a SetStmts) -> Self {
+        Self {
+            _stmts: stmts,
+            stmts_iter: stmts.stmts.iter(),
+            remaining_cnt: stmts.stmts.len(),
+        }
+    }
+}
+
+impl SetStmts {
+    fn push(&mut self, sql: &str) {
+        let sql = sql.trim_start().to_lowercase();
+        let mut tokens = sql.split_whitespace();
+        assert_eq!(tokens.next().unwrap_or_default(), "set");
+
+        let key = tokens.next().unwrap_or_default().to_string();
+        if key.is_empty() {
+            return;
+        }
+        let value = tokens.collect::<Vec<&str>>().join(" ");
+        self.stmts.insert(key, value);
+    }
+}
+
+impl Iterator for SetStmtsIterator<'_, '_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining_cnt == 0 {
+            return None;
+        }
+        self.remaining_cnt -= 1;
+        let (k, v) = self.stmts_iter.next().unwrap();
+        format!("set {} {}", k, v).into()
+    }
 }
 
 impl RisingWave {
@@ -30,13 +86,13 @@ impl RisingWave {
         host: String,
         dbname: String,
     ) -> Result<Self, tokio_postgres::error::Error> {
-        Self::reconnect(host, dbname, vec![]).await
+        Self::reconnect(host, dbname, SetStmts::default()).await
     }
 
     pub async fn reconnect(
         host: String,
         dbname: String,
-        set_stmts: Vec<String>,
+        set_stmts: SetStmts,
     ) -> Result<Self, tokio_postgres::error::Error> {
         let (client, connection) = tokio_postgres::Config::new()
             .host(&host)
@@ -64,8 +120,8 @@ impl RisingWave {
             .simple_query("SET VISIBILITY_MODE TO checkpoint;")
             .await?;
         // replay all SET statements
-        for stmt in &set_stmts {
-            client.simple_query(stmt).await?;
+        for stmt in SetStmtsIterator::new(&set_stmts) {
+            client.simple_query(&stmt).await?;
         }
         Ok(RisingWave {
             client,
@@ -106,7 +162,7 @@ impl sqllogictest::AsyncDB for RisingWave {
         }
 
         if sql.trim_start().to_lowercase().starts_with("set") {
-            self.set_stmts.push(sql.to_string());
+            self.set_stmts.push(sql);
         }
 
         let mut output = vec![];
