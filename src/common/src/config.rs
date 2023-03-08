@@ -430,7 +430,8 @@ pub struct DeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub stream_exchange_batched_permits: usize,
 
-    /// The rate limit per second for the backfill executor.
+    /// The rate limit for the backfill executor represents the maximum number of rows per second
+    /// allowed for snapshot read.
     #[serde(default = "default::developer::stream_backfill_rate_limit")]
     pub stream_backfill_rate_limit: usize,
 }

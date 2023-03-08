@@ -90,6 +90,7 @@ impl<S> BackfillExecutor<S>
 where
     S: StateStore,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         table: StorageTable<S>,
         upstream: BoxedExecutor,
@@ -100,7 +101,7 @@ where
         stream_chunk_size: usize,
         rate_limit: usize,
     ) -> Self {
-        // Backfill rate limit should be greater than the chunk size
+        // The backfill rate limit should either be greater than the chunk size or equal to it.
         let rate_limit = max(rate_limit, stream_chunk_size);
         Self {
             info: ExecutorInfo {
