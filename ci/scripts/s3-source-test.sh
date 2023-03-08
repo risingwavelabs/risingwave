@@ -4,8 +4,6 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-set +e
-
 while getopts 'p:' opt; do
     case ${opt} in
         p )
