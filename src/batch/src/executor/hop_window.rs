@@ -223,7 +223,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_executor() -> Box<HopWindowExecutor> {
+    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -249,7 +249,6 @@ mod tests {
         let window_size = IntervalUnit::from_minutes(30);
         let (window_start_exprs, window_end_exprs) =
             make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
-        let default_indices = (0..schema.len() + 2).collect_vec();
 
         Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
@@ -260,13 +259,14 @@ mod tests {
             "test".to_string(),
             window_start_exprs,
             window_end_exprs,
-            default_indices,
+            output_indices,
         ))
     }
 
     #[tokio::test]
     async fn test_execute() {
-        let executor = create_executor();
+        let default_indices = (0..3 + 2).collect_vec();
+        let executor = create_executor(default_indices);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
@@ -307,7 +307,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let executor = create_executor();
+        let executor = create_executor(vec![1, 3, 4, 2]);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
