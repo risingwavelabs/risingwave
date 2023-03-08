@@ -40,7 +40,7 @@ impl Binder {
         };
 
         // TODO(rc): nulls smallest/largest
-        let nulls_first = nulls_first.unwrap_or_else(|| match direction {
+        let nulls_first = nulls_first.unwrap_or(match direction {
             Direction::Ascending => false,
             Direction::Descending => true,
         });

@@ -173,7 +173,7 @@ impl SchemaFilterKeyExtractor {
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| OrderType::from_protobuf(&col_order.get_order_type().unwrap()))
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect();
 
         Self {

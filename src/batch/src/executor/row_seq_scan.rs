@@ -193,7 +193,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| OrderType::from_protobuf(&order.get_order_type().unwrap()))
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
         let pk_indices = table_desc

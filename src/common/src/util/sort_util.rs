@@ -22,8 +22,9 @@ use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 pub enum Direction {
+    #[default]
     #[display("ASC")]
     Ascending,
     #[display("DESC")]
@@ -47,13 +48,7 @@ impl Direction {
     }
 }
 
-impl Default for Direction {
-    fn default() -> Self {
-        Direction::Ascending
-    }
-}
-
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
 pub struct OrderType {
     direction: Direction,
     // TODO(rc): enable `NULLS FIRST | LAST`
@@ -99,14 +94,6 @@ impl OrderType {
     }
 }
 
-impl Default for OrderType {
-    fn default() -> Self {
-        Self {
-            direction: Default::default(),
-        }
-    }
-}
-
 /// Column index with an order type (ASC or DESC). Used to represent a sort key
 /// (`Vec<ColumnOrder>`).
 ///
@@ -128,7 +115,7 @@ impl ColumnOrder {
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         ColumnOrder {
             column_idx: column_order.column_index as _,
-            order_type: OrderType::from_protobuf(&column_order.get_order_type().unwrap()),
+            order_type: OrderType::from_protobuf(column_order.get_order_type().unwrap()),
         }
     }
 
