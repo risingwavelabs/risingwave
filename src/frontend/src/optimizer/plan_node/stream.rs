@@ -14,6 +14,7 @@
 
 use derivative::Derivative;
 use generic::PlanAggCall;
+use itertools::Itertools;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
@@ -225,23 +226,16 @@ impl HashJoin {
     pub fn infer_internal_and_degree_table_catalog(
         input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
+        dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
-        let internal_table_dist_keys = input.distribution().dist_column_indices().to_vec();
-
-        // Find the dist key position in join key.
-        // FIXME(yuhao): currently the dist key position is not the exact position mapped to the
-        // join key when there are duplicate value in join key indices.
-        let degree_table_dist_keys = internal_table_dist_keys
+        let internal_table_dist_keys = dk_indices_in_jk
             .iter()
-            .map(|idx| {
-                join_key_indices
-                    .iter()
-                    .position(|v| v == idx)
-                    .expect("join key should contain dist key.")
-            })
-            .collect();
+            .map(|idx| join_key_indices[*idx])
+            .collect_vec();
+
+        let degree_table_dist_keys = dk_indices_in_jk.clone();
 
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
@@ -287,6 +281,10 @@ impl HashJoin {
 
         internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
         degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
+
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
+
         (
             internal_table_catalog_builder.build(internal_table_dist_keys),
             degree_table_catalog_builder.build(degree_table_dist_keys),
@@ -623,63 +621,8 @@ pub fn to_stream_prost_body(
                     .collect(),
             })
         }
-        Node::HashJoin(me) => {
-            let left_key_indices = me.eq_join_predicate.left_eq_indexes();
-            let right_key_indices = me.eq_join_predicate.right_eq_indexes();
-            let left_key_indices_prost = left_key_indices.iter().map(|&idx| idx as i32).collect();
-            let right_key_indices_prost = right_key_indices.iter().map(|&idx| idx as i32).collect();
-
-            let (left_table, left_degree_table, left_deduped_input_pk_indices) =
-                HashJoin::infer_internal_and_degree_table_catalog(
-                    &me.core.left.0,
-                    left_key_indices,
-                );
-            let (right_table, right_degree_table, right_deduped_input_pk_indices) =
-                HashJoin::infer_internal_and_degree_table_catalog(
-                    &me.core.right.0,
-                    right_key_indices,
-                );
-
-            let left_deduped_input_pk_indices = left_deduped_input_pk_indices
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect();
-
-            let right_deduped_input_pk_indices = right_deduped_input_pk_indices
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect();
-
-            let (left_table, left_degree_table) = (
-                left_table.with_id(state.gen_table_id_wrapped()),
-                left_degree_table.with_id(state.gen_table_id_wrapped()),
-            );
-            let (right_table, right_degree_table) = (
-                right_table.with_id(state.gen_table_id_wrapped()),
-                right_degree_table.with_id(state.gen_table_id_wrapped()),
-            );
-
-            let null_safe_prost = me.eq_join_predicate.null_safes().into_iter().collect();
-
-            ProstNode::HashJoin(HashJoinNode {
-                join_type: me.core.join_type as i32,
-                left_key: left_key_indices_prost,
-                right_key: right_key_indices_prost,
-                null_safe: null_safe_prost,
-                condition: me
-                    .eq_join_predicate
-                    .other_cond()
-                    .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
-                left_table: Some(left_table.to_internal_table_prost()),
-                right_table: Some(right_table.to_internal_table_prost()),
-                left_degree_table: Some(left_degree_table.to_internal_table_prost()),
-                right_degree_table: Some(right_degree_table.to_internal_table_prost()),
-                left_deduped_input_pk_indices,
-                right_deduped_input_pk_indices,
-                output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
-                is_append_only: me.is_append_only,
-            })
+        Node::HashJoin(_) => {
+            unreachable!();
         }
         Node::HopWindow(me) => {
             let me = &me.core;

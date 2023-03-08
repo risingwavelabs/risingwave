@@ -198,6 +198,7 @@ impl StreamMaterialize {
             read_prefix_len_hint,
             version,
             watermark_columns,
+            dist_key_in_pk: vec![],
         })
     }
 

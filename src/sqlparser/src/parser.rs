@@ -1971,9 +1971,15 @@ impl Parser {
         // parse optional column list (schema) and watermarks on source.
         let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
 
-        let append_only = if cfg!(debug_assertions) && self.parse_keyword(Keyword::APPEND) {
+        let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            true
+            if cfg!(debug_assertions) {
+                true
+            } else {
+                return Err(ParserError::ParserError(
+                    "APPEND ONLY is only allowed in debug model".to_string(),
+                ));
+            }
         } else {
             false
         };

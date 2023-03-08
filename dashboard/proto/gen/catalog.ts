@@ -252,6 +252,7 @@ export interface Table {
   handlePkConflictBehavior: HandleConflictBehavior;
   readPrefixLenHint: number;
   watermarkIndices: number[];
+  distKeyInPk: number[];
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -896,6 +897,7 @@ function createBaseTable(): Table {
     handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     readPrefixLenHint: 0,
     watermarkIndices: [],
+    distKeyInPk: [],
     version: undefined,
   };
 }
@@ -942,6 +944,7 @@ export const Table = {
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
         : [],
+      distKeyInPk: Array.isArray(object?.distKeyInPk) ? object.distKeyInPk.map((e: any) => Number(e)) : [],
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -1005,6 +1008,11 @@ export const Table = {
     } else {
       obj.watermarkIndices = [];
     }
+    if (message.distKeyInPk) {
+      obj.distKeyInPk = message.distKeyInPk.map((e) => Math.round(e));
+    } else {
+      obj.distKeyInPk = [];
+    }
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
     return obj;
@@ -1051,6 +1059,7 @@ export const Table = {
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
+    message.distKeyInPk = object.distKeyInPk?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;
