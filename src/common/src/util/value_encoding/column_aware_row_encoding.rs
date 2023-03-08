@@ -75,13 +75,13 @@ impl RowEncoding {
                 self.flag |= Flag::OFFSET16;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u16(*m as u16));
+                    .for_each(|m| self.offsets.put_u16_le(*m as u16));
             }
             _n @ ..=const { u32::MAX as usize } => {
                 self.flag |= Flag::OFFSET32;
                 usize_offsets
                     .iter()
-                    .for_each(|m| self.offsets.put_u32(*m as u32));
+                    .for_each(|m| self.offsets.put_u32_le(*m as u32));
             }
             _ => unreachable!("encoding length exceeds u32"),
         }
@@ -339,5 +339,44 @@ mod tests {
             decoded.unwrap(),
             vec![Some(Int16(5)), Some(Utf8("abc".into()))]
         );
+    }
+    #[test]
+    fn test_row_hard1() {
+        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
+        let row = OwnedRow::new(vec![Some(Int16(233)); 20000]);
+        let data_types = vec![DataType::Int16; 20000];
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), vec![Some(Int16(233)); 20000]);
+    }
+    #[test]
+    fn test_row_hard2() {
+        let column_ids = (0..20000).map(ColumnId::new).collect_vec();
+        let mut data = vec![Some(Int16(233)); 5000];
+        data.extend(vec![None; 5000]);
+        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 5000]);
+        data.extend(vec![None; 5000]);
+        let row = OwnedRow::new(data.clone());
+        let mut data_types = vec![DataType::Int16; 10000];
+        data_types.extend(vec![DataType::Varchar; 10000]);
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), data);
+    }
+    #[test]
+    fn test_row_hard3() {
+        let column_ids = (0..1000000).map(ColumnId::new).collect_vec();
+        let mut data = vec![Some(Int64(233)); 500000];
+        data.extend(vec![None; 250000]);
+        data.extend(vec![Some(Utf8("risingwave risingwave".into())); 250000]);
+        let row = OwnedRow::new(data.clone());
+        let mut data_types = vec![DataType::Int64; 500000];
+        data_types.extend(vec![DataType::Varchar; 500000]);
+        let serde = ColumnAwareSerde::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        let encoded_bytes = serde.serialize(row);
+        let decoded_row = serde.deserialize(&encoded_bytes);
+        assert_eq!(decoded_row.unwrap(), data);
     }
 }

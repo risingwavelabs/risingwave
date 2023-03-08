@@ -1,12 +1,11 @@
 /* eslint-disable */
 import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
-import { Buffer } from "./common";
+import { Buffer, ColumnOrder } from "./common";
 import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
 import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
