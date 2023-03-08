@@ -22,9 +22,8 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{clock, Quota, RateLimiter};
+use governor::clock::MonotonicClock;
+use governor::{Quota, RateLimiter};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
@@ -82,9 +81,6 @@ pub struct BackfillExecutor<S: StateStore> {
 
     rate_limit: usize,
 }
-
-type RateLimiterRef =
-    Arc<RateLimiter<NotKeyed, InMemoryState, clock::DefaultClock, NoOpMiddleware>>;
 
 impl<S> BackfillExecutor<S>
 where
@@ -144,7 +140,7 @@ where
                 None,
                 false,
                 self.stream_chunk_size,
-                None,
+                self.rate_limit,
             );
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
@@ -170,10 +166,6 @@ where
 
             return Ok(());
         }
-
-        let rate_limiter = Arc::new(RateLimiter::direct(Quota::per_second(
-            NonZeroU32::new(self.rate_limit as u32).unwrap(),
-        )));
 
         // The epoch used to snapshot read upstream mv.
         let mut snapshot_read_epoch = init_epoch;
@@ -220,7 +212,7 @@ where
                     current_pos.clone(),
                     true,
                     self.stream_chunk_size,
-                    Some(rate_limiter.clone()),
+                    self.rate_limit,
                 )
                 .map(Either::Right),
             );
@@ -344,7 +336,7 @@ where
         current_pos: Option<OwnedRow>,
         ordered: bool,
         stream_chunk_size: usize,
-        rate_limiter: Option<RateLimiterRef>,
+        rate_limit: usize,
     ) {
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
@@ -374,6 +366,10 @@ where
             )
             .await?;
 
+        let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
+        let clock = MonotonicClock::default();
+        let rate_limiter = Arc::new(RateLimiter::direct_with_clock(quota, &clock));
+
         pin_mut!(iter);
 
         while let Some(data_chunk) = iter
@@ -381,16 +377,14 @@ where
             .instrument_await("backfill_snapshot_read")
             .await?
         {
-            if let Some(rate_limiter) = &rate_limiter {
-                let cardinality = data_chunk.cardinality();
-                let result = rate_limiter
-                    .until_n_ready(NonZeroU32::new(cardinality as u32).unwrap())
-                    .await;
-                assert!(
-                    result.is_ok(),
-                    "the capacity of rate_limiter must be larger than the cardinality of the chunk"
-                );
-            }
+            let cardinality = data_chunk.cardinality();
+            let result = rate_limiter
+                .until_n_ready(NonZeroU32::new(cardinality as u32).unwrap())
+                .await;
+            assert!(
+                result.is_ok(),
+                "the capacity of rate_limiter must be larger than the cardinality of the chunk"
+            );
             let ops = vec![Op::Insert; data_chunk.capacity()];
             let stream_chunk = StreamChunk::from_parts(ops, data_chunk);
             yield Some(stream_chunk);
