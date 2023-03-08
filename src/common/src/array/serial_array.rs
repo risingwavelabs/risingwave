@@ -17,7 +17,9 @@ use std::hash::Hash;
 use postgres_types::{ToSql as _, Type};
 use serde::{Serialize, Serializer};
 
+
 use crate::array::{PrimitiveArray, PrimitiveArrayBuilder};
+use crate::hash::VirtualNode;
 
 // Serial is an alias for i64
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
@@ -36,6 +38,10 @@ impl Serial {
     #[inline]
     pub fn into_inner(self) -> i64 {
         self.0
+    }
+
+    pub fn vnode_id(&self) -> u32 {
+        ((self.0 >> 12) & 0x3FF) as u32
     }
 }
 

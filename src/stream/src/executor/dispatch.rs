@@ -22,7 +22,7 @@ use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
@@ -174,7 +174,7 @@ impl DispatchExecutorInner {
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
@@ -199,7 +199,7 @@ impl DispatchExecutorInner {
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
     fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
