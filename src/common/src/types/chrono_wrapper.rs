@@ -16,7 +16,7 @@ use std::hash::Hash;
 use std::io::Write;
 
 use bytes::{Bytes, BytesMut};
-use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
+use chrono::{Datelike, Days, Duration, NaiveDate, NaiveDateTime, NaiveTime, Timelike, Weekday};
 use postgres_types::{ToSql, Type};
 use thiserror::Error;
 
@@ -184,6 +184,15 @@ impl NaiveDateWrapper {
         ))
     }
 
+    pub fn with_days_since_unix_epoch(days: i32) -> Result<Self> {
+        Ok(NaiveDateWrapper::new(
+            NaiveDate::from_num_days_from_ce_opt(days)
+                .ok_or_else(|| InvalidParamsError::date(days))?
+                .checked_add_days(Days::new(UNIX_EPOCH_DAYS.try_into().unwrap()))
+                .ok_or_else(|| InvalidParamsError::date(days))?,
+        ))
+    }
+
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
             .write(&(self.0.num_days_from_ce()).to_be_bytes())
@@ -238,6 +247,18 @@ impl NaiveTimeWrapper {
         let secs = (nano / 1_000_000_000) as u32;
         let nano = (nano % 1_000_000_000) as u32;
         Self::with_secs_nano(secs, nano).map_err(Into::into)
+    }
+
+    pub fn with_milli(milli: u32) -> Result<Self> {
+        let (time, overflow_cnt) = NaiveTime::from_num_seconds_from_midnight_opt(0, 0)
+            .unwrap()
+            .overflowing_add_signed(Duration::milliseconds(milli.into()));
+        if overflow_cnt != 0 {
+            let secs = milli / 1_000;
+            let nano = (milli % 1_000) * 1_000_000;
+            return Err(InvalidParamsError::time(secs, nano));
+        }
+        Ok(NaiveTimeWrapper(time))
     }
 
     pub fn from_hms_uncheck(hour: u32, min: u32, sec: u32) -> Self {

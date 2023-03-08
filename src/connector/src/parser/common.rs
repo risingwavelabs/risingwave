@@ -24,33 +24,23 @@ use risingwave_expr::vector_op::cast::{
 use simd_json::value::StaticNode;
 use simd_json::{BorrowedValue, ValueAccess};
 
-use crate::{ensure_i32, ensure_int, ensure_str, simd_json_ensure_float};
+use crate::{ensure_i16, ensure_i32, ensure_i64, ensure_str, simd_json_ensure_float};
 
 fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<ScalarImpl> {
     let v = match dtype {
         DataType::Boolean => match v {
-            BorrowedValue::Static(StaticNode::Bool(_)) => {
-                v.as_bool().ok_or_else(|| anyhow!("expect bool"))?.into()
-            }
+            BorrowedValue::Static(StaticNode::Bool(b)) => (*b).into(),
             // debezium converts bool to int, false -> 0, true -> 1, for mysql and postgres
-            BorrowedValue::Static(StaticNode::I64(i)) => match i {
-                0i64 => ScalarImpl::Bool(false),
-                1i64 => ScalarImpl::Bool(true),
+            BorrowedValue::Static(v) => match v.as_i64() {
+                Some(0i64) => ScalarImpl::Bool(false),
+                Some(1i64) => ScalarImpl::Bool(true),
                 _ => anyhow::bail!("expect bool, but found {v}"),
             },
             _ => anyhow::bail!("expect bool, but found {v}"),
         },
-        DataType::Int16 => ScalarImpl::Int16(
-            ensure_int!(v, i16)
-                .try_into()
-                .map_err(|e| anyhow!("expect i16: {}", e))?,
-        ),
-        DataType::Int32 => ScalarImpl::Int32(
-            ensure_int!(v, i32)
-                .try_into()
-                .map_err(|e| anyhow!("expect i32: {}", e))?,
-        ),
-        DataType::Int64 => ensure_int!(v, i64).into(),
+        DataType::Int16 => ensure_i16!(v, i16).into(),
+        DataType::Int32 => ensure_i32!(v, i32).into(),
+        DataType::Int64 => ensure_i64!(v, i64).into(),
         // when f32 overflows, the value is converted to `inf` which is inappropriate
         DataType::Float32 => {
             let scalar_val = ScalarImpl::Float32((simd_json_ensure_float!(v, f32) as f32).into());
@@ -61,15 +51,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
             }
             scalar_val
         }
-        DataType::Float64 => {
-            let scalar_val = ScalarImpl::Float64((simd_json_ensure_float!(v, f64)).into());
-            if let ScalarImpl::Float64(f) = scalar_val {
-                if f.is_infinite() {
-                    anyhow::bail!("{v} is out of range for type f64");
-                }
-            }
-            scalar_val
-        }
+        DataType::Float64 => simd_json_ensure_float!(v, f64).into(),
         // FIXME: decimal should have more precision than f64
         DataType::Decimal => Decimal::from_f64(simd_json_ensure_float!(v, Decimal))
             .ok_or_else(|| anyhow!("expect decimal"))?
@@ -78,24 +60,24 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Bytea => ensure_str!(v, "bytea").to_string().into(),
         // debezium converts date to i32 for mysql and postgres
         DataType::Date => match v {
-            BorrowedValue::String(_) => str_to_date(ensure_str!(v, "date"))?.into(),
+            BorrowedValue::String(s) => str_to_date(s)?.into(),
             BorrowedValue::Static(_) => i32_to_date(ensure_i32!(v, i32))?.into(),
             _ => anyhow::bail!("expect date, but found {v}"),
         },
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
             BorrowedValue::String(_) => str_to_time(ensure_str!(v, "time"))?.into(),
-            BorrowedValue::Static(_) => i64_to_time(ensure_int!(v, i64))?.into(),
+            BorrowedValue::Static(_) => i64_to_time(ensure_i64!(v, i64))?.into(),
             _ => anyhow::bail!("expect time, but found {v}"),
         },
         DataType::Timestamp => match v {
             BorrowedValue::String(s) => str_to_timestamp(s)?.into(),
-            BorrowedValue::Static(_) => i64_to_timestamp(ensure_int!(v, i64))?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamp(ensure_i64!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamp, but found {v}"),
         },
         DataType::Timestamptz => match v {
             BorrowedValue::String(s) => str_with_time_zone_to_timestamptz(s)?.into(),
-            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_int!(v, i64))?.into(),
+            BorrowedValue::Static(_) => i64_to_timestamptz(ensure_i64!(v, i64))?.into(),
             _ => anyhow::bail!("expect timestamptz, but found {v}"),
         },
         DataType::Jsonb => {
