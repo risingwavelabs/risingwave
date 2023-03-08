@@ -114,7 +114,7 @@ where
             actor_id: progress.actor_id(),
             progress,
             stream_chunk_size,
-            rate_limit
+            rate_limit,
         }
     }
 
@@ -141,8 +141,14 @@ where
         let to_create_mv = first_barrier.is_add_dispatcher(self.actor_id);
         // If the snapshot is empty, we don't need to backfill.
         let is_snapshot_empty: bool = {
-            let snapshot =
-                Self::snapshot_read(&self.table, init_epoch, None, false, self.stream_chunk_size, rate_limiter.clone());
+            let snapshot = Self::snapshot_read(
+                &self.table,
+                init_epoch,
+                None,
+                false,
+                self.stream_chunk_size,
+                rate_limiter.clone(),
+            );
             pin_mut!(snapshot);
             snapshot.try_next().await?.unwrap().is_none()
         };
