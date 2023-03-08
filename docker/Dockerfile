@@ -33,14 +33,14 @@ RUN rustup self update \
   && rustup component add rustfmt
 
 RUN cargo fetch
-RUN mkdir -p /risingwave/bin/connector-node
 
 RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
   mv /risingwave/target/release/risingwave /risingwave/bin/ && \
   cargo clean
 
-RUN cd risingwave-connector-node && mvn -B package -Dmaven.test.skip=true
-RUN tar -zxvf /risingwave/risingwave-connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
+    mkdir -p /risingwave/bin/connector-node && \
+    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
