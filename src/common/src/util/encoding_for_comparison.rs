@@ -15,6 +15,7 @@
 use itertools::Itertools;
 
 use super::iter_util::ZipEqFast;
+use super::sort_util::Direction;
 use crate::array::{ArrayImpl, DataChunk};
 use crate::error::Result;
 use crate::row::OwnedRow;
@@ -23,7 +24,7 @@ use crate::util::sort_util::{OrderPair, OrderType};
 
 fn encode_value(value: Option<ScalarRefImpl<'_>>, order: &OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
-    serializer.set_reverse(order == &OrderType::Descending);
+    serializer.set_reverse(order.direction() == Direction::Descending);
     memcmp_serialize_datum_into(value, &mut serializer)?;
     Ok(serializer.into_inner())
 }
@@ -91,19 +92,19 @@ mod tests {
         let row1 = OwnedRow::new(vec![v10, v11, v12]);
         let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let order_pairs = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Descending),
+            OrderPair::new(0, OrderType::ascending()),
+            OrderPair::new(1, OrderType::descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &order_pairs);
         let encoded_v10 = encode_value(
             v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            &OrderType::Ascending,
+            &OrderType::ascending(),
         )
         .unwrap();
         let encoded_v11 = encode_value(
             v11_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            &OrderType::Descending,
+            &OrderType::descending(),
         )
         .unwrap();
         let concated_encoded_row1 = encoded_v10
@@ -132,8 +133,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let order_pairs = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Descending),
+            OrderPair::new(0, OrderType::ascending()),
+            OrderPair::new(1, OrderType::descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &order_pairs);

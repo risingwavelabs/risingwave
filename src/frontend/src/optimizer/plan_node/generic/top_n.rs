@@ -58,21 +58,21 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         // does a prefix scanning with the group key, we can fetch the data in the
         // desired order.
         self.group_key.iter().for_each(|&idx| {
-            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending);
+            internal_table_catalog_builder.add_order_column(idx, OrderType::ascending());
             order_cols.insert(idx);
         });
 
         field_order.iter().for_each(|field_order| {
             if !order_cols.contains(&field_order.index) {
                 internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
+                    .add_order_column(field_order.index, OrderType::new(field_order.direct));
                 order_cols.insert(field_order.index);
             }
         });
 
         pk_indices.iter().for_each(|idx| {
             if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
             }
         });

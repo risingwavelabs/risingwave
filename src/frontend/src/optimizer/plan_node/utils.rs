@@ -22,7 +22,7 @@ use risingwave_common::util::sort_util::OrderType;
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::{Direction, FieldOrder};
+use crate::optimizer::property::FieldOrder;
 use crate::utils::WithOptions;
 
 #[derive(Default)]
@@ -75,10 +75,7 @@ impl TableCatalogBuilder {
     pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
         self.pk.push(FieldOrder {
             index,
-            direct: match order_type {
-                OrderType::Ascending => Direction::Asc,
-                OrderType::Descending => Direction::Desc,
-            },
+            direct: order_type.direction(),
         });
     }
 

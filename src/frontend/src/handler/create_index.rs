@@ -323,10 +323,7 @@ fn assemble_materialize(
             index_columns
                 .iter()
                 .enumerate()
-                .map(|(i, order_pair)| match order_pair.order_type {
-                    OrderType::Ascending => FieldOrder::ascending(i),
-                    OrderType::Descending => FieldOrder::descending(i),
-                })
+                .map(|(i, order_pair)| FieldOrder::new(i, order_pair.order_type))
                 .collect(),
         ),
         project_required_cols,
@@ -339,6 +336,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
+            // TODO(rc): support `NULLS FIRST | LAST`
             if column.nulls_first.is_some() {
                 return Err(ErrorCode::NotImplemented(
                     "nulls_first not supported".into(),
@@ -352,11 +350,11 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
             if let Expr::Identifier(ident) = column.expr {
                 Ok::<(_, _), RwError>((
                     ident,
-                    column.asc.map_or(OrderType::Ascending, |x| {
+                    column.asc.map_or(OrderType::ascending(), |x| {
                         if x {
-                            OrderType::Ascending
+                            OrderType::ascending()
                         } else {
-                            OrderType::Descending
+                            OrderType::descending()
                         }
                     }),
                 ))

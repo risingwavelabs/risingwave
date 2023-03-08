@@ -315,9 +315,9 @@ mod tests {
             1,
             0,
             vec![
-                OrderPair::new(2, OrderType::Ascending),
-                OrderPair::new(3, OrderType::Descending),
-                OrderPair::new(1, OrderType::Descending),
+                OrderPair::new(2, OrderType::ascending()),
+                OrderPair::new(3, OrderType::descending()),
+                OrderPair::new(1, OrderType::descending()),
             ],
         )?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));

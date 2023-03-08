@@ -203,7 +203,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         Box::new(row_id_gen_executor),
         memory_state_store.clone(),
         table_id,
-        vec![OrderPair::new(0, OrderType::Ascending)],
+        vec![OrderPair::new(0, OrderType::ascending())],
         all_column_ids.clone(),
         4,
         Arc::new(AtomicU64::new(0)),
@@ -251,7 +251,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         memory_state_store.clone(),
         table_id,
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0],
         value_indices,
     );
@@ -436,7 +436,7 @@ async fn test_row_seq_scan() -> Result<()> {
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0_usize],
     )
     .await;
@@ -444,7 +444,7 @@ async fn test_row_seq_scan() -> Result<()> {
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
-        vec![OrderType::Ascending],
+        vec![OrderType::ascending()],
         vec![0],
         vec![0, 1, 2],
     );

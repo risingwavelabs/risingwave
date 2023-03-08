@@ -169,11 +169,11 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
 
@@ -219,11 +219,11 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -268,11 +268,11 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -338,15 +338,15 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 2,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Descending,
+                order_type: OrderType::descending(),
             },
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -411,15 +411,15 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Descending,
+                order_type: OrderType::descending(),
             },
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Descending,
+                order_type: OrderType::descending(),
             },
             OrderPair {
                 column_idx: 2,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -504,15 +504,15 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 2,
-                order_type: OrderType::Descending,
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -683,11 +683,11 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Descending,
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(

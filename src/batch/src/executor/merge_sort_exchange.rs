@@ -262,7 +262,7 @@ mod tests {
         }
         let order_pairs = Arc::new(vec![OrderPair {
             column_idx: 0,
-            order_type: OrderType::Ascending,
+            order_type: OrderType::ascending(),
         }]);
 
         let executor = Box::new(MergeSortExchangeExecutorImpl::<

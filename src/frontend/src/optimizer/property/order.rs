@@ -15,11 +15,10 @@
 use std::fmt;
 
 use itertools::Itertools;
-use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_common::util::sort_util::{Direction, OrderPair, OrderType};
+use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
@@ -130,17 +129,24 @@ impl fmt::Debug for FieldOrderDisplay<'_> {
 }
 
 impl FieldOrder {
+    pub fn new(index: usize, order_type: OrderType) -> Self {
+        Self {
+            index,
+            direct: order_type.direction(),
+        }
+    }
+
     pub fn ascending(index: usize) -> Self {
         Self {
             index,
-            direct: Direction::Asc,
+            direct: Direction::Ascending,
         }
     }
 
     pub fn descending(index: usize) -> Self {
         Self {
             index,
-            direct: Direction::Desc,
+            direct: Direction::Descending,
         }
     }
 
@@ -164,7 +170,7 @@ impl FieldOrder {
     pub fn to_order_pair(&self) -> OrderPair {
         OrderPair {
             column_idx: self.index,
-            order_type: self.direct.to_order(),
+            order_type: OrderType::new(self.direct),
         }
     }
 }
@@ -172,60 +178,6 @@ impl FieldOrder {
 impl fmt::Display for FieldOrder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "${} {}", self.index, self.direct)
-    }
-}
-
-#[derive(Debug, Display, Clone, Eq, PartialEq, Copy, Hash)]
-#[display(style = "UPPERCASE")]
-pub enum Direction {
-    Asc,
-    Desc,
-    Any, // only used in order requirement
-}
-
-impl From<Direction> for OrderType {
-    fn from(dir: Direction) -> Self {
-        match dir {
-            Direction::Asc => OrderType::Ascending,
-            Direction::Desc => OrderType::Descending,
-            Direction::Any => OrderType::Ascending,
-        }
-    }
-}
-
-impl Direction {
-    pub fn to_protobuf(self) -> PbDirection {
-        match self {
-            Self::Asc => PbDirection::Ascending,
-            Self::Desc => PbDirection::Descending,
-            _ => unimplemented!(),
-        }
-    }
-
-    pub fn from_protobuf(order_type: &PbDirection) -> Self {
-        match order_type {
-            PbDirection::Ascending => Self::Asc,
-            PbDirection::Descending => Self::Desc,
-            PbDirection::Unspecified => unreachable!(),
-        }
-    }
-
-    // TODO(rc): unify them
-    pub fn to_order(self) -> OrderType {
-        match self {
-            Self::Asc => OrderType::Ascending,
-            Self::Desc => OrderType::Descending,
-            _ => unreachable!(),
-        }
-    }
-}
-
-impl Direction {
-    pub fn satisfies(&self, other: &Direction) -> bool {
-        match other {
-            Direction::Any => true,
-            _ => self == other,
-        }
     }
 }
 
@@ -253,7 +205,7 @@ impl Order {
         }
         #[expect(clippy::disallowed_methods)]
         for (order, other_order) in self.field_order.iter().zip(other.field_order.iter()) {
-            if order.index != other_order.index || !order.direct.satisfies(&other_order.direct) {
+            if order != other_order {
                 return false;
             }
         }
@@ -281,15 +233,15 @@ mod tests {
             field_order: vec![
                 FieldOrder {
                     index: 0,
-                    direct: Direction::Asc,
+                    direct: Direction::Ascending,
                 },
                 FieldOrder {
                     index: 1,
-                    direct: Direction::Desc,
+                    direct: Direction::Descending,
                 },
                 FieldOrder {
                     index: 2,
-                    direct: Direction::Asc,
+                    direct: Direction::Ascending,
                 },
             ],
         };
@@ -297,11 +249,11 @@ mod tests {
             field_order: vec![
                 FieldOrder {
                     index: 0,
-                    direct: Direction::Asc,
+                    direct: Direction::Ascending,
                 },
                 FieldOrder {
                     index: 1,
-                    direct: Direction::Desc,
+                    direct: Direction::Descending,
                 },
             ],
         };
@@ -309,23 +261,11 @@ mod tests {
             field_order: vec![
                 FieldOrder {
                     index: 0,
-                    direct: Direction::Asc,
+                    direct: Direction::Ascending,
                 },
                 FieldOrder {
                     index: 1,
-                    direct: Direction::Asc,
-                },
-            ],
-        };
-        let o4 = Order {
-            field_order: vec![
-                FieldOrder {
-                    index: 0,
-                    direct: Direction::Asc,
-                },
-                FieldOrder {
-                    index: 1,
-                    direct: Direction::Any,
+                    direct: Direction::Ascending,
                 },
             ],
         };
@@ -336,10 +276,5 @@ mod tests {
 
         assert!(!o2.satisfies(&o3));
         assert!(!o3.satisfies(&o2));
-
-        assert!(o3.satisfies(&o4));
-        assert!(o3.satisfies(&o4));
-        assert!(!o4.satisfies(&o2));
-        assert!(!o4.satisfies(&o3));
     }
 }

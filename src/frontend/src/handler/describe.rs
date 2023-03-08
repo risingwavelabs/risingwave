@@ -22,6 +22,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::Direction;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
@@ -29,7 +30,6 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
-use crate::optimizer::property::Direction;
 
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
@@ -120,7 +120,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
             .filter(|x| !index_table.columns[x.index].is_hidden)
             .map(|x| {
                 let index_column_name = index_table.columns[x.index].name().to_string();
-                if Direction::Desc == x.direct {
+                if Direction::Descending == x.direct {
                     index_column_name + " DESC"
                 } else {
                     index_column_name

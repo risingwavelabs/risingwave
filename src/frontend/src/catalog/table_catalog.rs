@@ -454,6 +454,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
+    use risingwave_common::util::sort_util::Direction;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
@@ -461,7 +462,7 @@ mod tests {
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
-    use crate::optimizer::property::{Direction, FieldOrder};
+    use crate::optimizer::property::FieldOrder;
     use crate::WithOptions;
 
     #[test]
@@ -500,7 +501,7 @@ mod tests {
             ],
             pk: vec![FieldOrder {
                 index: 0,
-                direct: Direction::Asc,
+                direct: Direction::Ascending,
             }
             .to_protobuf()],
             stream_key: vec![0],
@@ -571,7 +572,7 @@ mod tests {
                 stream_key: vec![0],
                 pk: vec![FieldOrder {
                     index: 0,
-                    direct: Direction::Asc,
+                    direct: Direction::Ascending,
                 }],
                 distribution_key: vec![],
                 append_only: false,

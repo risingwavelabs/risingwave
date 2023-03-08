@@ -15,33 +15,94 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
+use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub enum OrderType {
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display)]
+pub enum Direction {
+    #[display("ASC")]
     Ascending,
+    #[display("DESC")]
     Descending,
 }
 
-impl OrderType {
-    // TODO(rc): from `PbOrderType`
-    pub fn from_protobuf(order_type: &PbDirection) -> OrderType {
+impl Direction {
+    pub fn from_protobuf(order_type: &PbDirection) -> Direction {
         match order_type {
-            PbDirection::Ascending => OrderType::Ascending,
-            PbDirection::Descending => OrderType::Descending,
+            PbDirection::Ascending => Direction::Ascending,
+            PbDirection::Descending => Direction::Descending,
             PbDirection::Unspecified => unreachable!(),
         }
     }
 
-    // TODO(rc): to `PbOrderType`
     pub fn to_protobuf(self) -> PbDirection {
         match self {
-            OrderType::Ascending => PbDirection::Ascending,
-            OrderType::Descending => PbDirection::Descending,
+            Direction::Ascending => PbDirection::Ascending,
+            Direction::Descending => PbDirection::Descending,
+        }
+    }
+}
+
+impl Default for Direction {
+    fn default() -> Self {
+        Direction::Ascending
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub struct OrderType {
+    direction: Direction,
+    // TODO(rc): enable `NULLS FIRST | LAST`
+    // nulls_are: NullsAre,
+}
+
+impl OrderType {
+    pub fn from_protobuf(order_type: &PbOrderType) -> OrderType {
+        OrderType {
+            direction: Direction::from_protobuf(&order_type.direction()),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbOrderType {
+        PbOrderType {
+            direction: self.direction.to_protobuf() as _,
+        }
+    }
+}
+
+impl OrderType {
+    pub const fn new(direction: Direction) -> Self {
+        Self { direction }
+    }
+
+    // Create an ascending order type, with other options set to default.
+    pub const fn ascending() -> Self {
+        Self {
+            direction: Direction::Ascending,
+        }
+    }
+
+    // Create an descending order type, with other options set to default.
+    pub const fn descending() -> Self {
+        Self {
+            direction: Direction::Descending,
+        }
+    }
+
+    // Get the order direction.
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+}
+
+impl Default for OrderType {
+    fn default() -> Self {
+        Self {
+            direction: Default::default(),
         }
     }
 }
@@ -66,18 +127,14 @@ impl OrderPair {
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         OrderPair {
             column_idx: column_order.column_index as _,
-            order_type: OrderType::from_protobuf(
-                &column_order.get_order_type().unwrap().direction(),
-            ),
+            order_type: OrderType::from_protobuf(&column_order.get_order_type().unwrap()),
         }
     }
 
     pub fn to_protobuf(&self) -> PbColumnOrder {
         PbColumnOrder {
             column_index: self.column_idx as _,
-            order_type: Some(PbOrderType {
-                direction: self.order_type.to_protobuf() as _,
-            }),
+            order_type: Some(self.order_type.to_protobuf()),
         }
     }
 }
@@ -142,7 +199,7 @@ where
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
     };
-    if *order_type == OrderType::Descending {
+    if order_type.direction == Direction::Descending {
         ord.reverse()
     } else {
         ord
@@ -221,8 +278,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let order_pairs = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Descending),
+            OrderPair::new(0, OrderType::ascending()),
+            OrderPair::new(1, OrderType::descending()),
         ];
 
         assert_eq!(
@@ -283,7 +340,7 @@ mod tests {
         ]);
 
         let order_pairs = (0..row1.len())
-            .map(|i| OrderPair::new(i, OrderType::Ascending))
+            .map(|i| OrderPair::new(i, OrderType::ascending()))
             .collect_vec();
 
         let chunk = DataChunk::from_rows(

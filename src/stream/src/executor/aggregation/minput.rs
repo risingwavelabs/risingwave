@@ -81,9 +81,9 @@ impl<S: StateStore> MaterializedInputState<S> {
                 // `min`/`max` need not to order by any other columns, but have to
                 // order by the agg value implicitly.
                 let order_type = if agg_call.kind == AggKind::Min {
-                    OrderType::Ascending
+                    OrderType::ascending()
                 } else {
-                    OrderType::Descending
+                    OrderType::descending()
                 };
                 (vec![arg_col_indices[0]], vec![order_type])
             } else {
@@ -96,7 +96,7 @@ impl<S: StateStore> MaterializedInputState<S> {
 
         let pk_len = pk_indices.len();
         order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::Ascending, pk_len));
+        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -376,8 +376,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -485,8 +485,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -595,8 +595,8 @@ mod tests {
             &input_schema,
             vec![0, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -604,8 +604,8 @@ mod tests {
             &input_schema,
             vec![1, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -704,9 +704,9 @@ mod tests {
             &input_schema,
             vec![2, 1, 3],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // b DESC for AggKind::Max
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // b DESC for AggKind::Max
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -811,8 +811,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -925,8 +925,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -1045,8 +1045,8 @@ mod tests {
             args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // b ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+                OrderPair::new(2, OrderType::ascending()),  // b ASC
+                OrderPair::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1058,9 +1058,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::Ascending,  // b ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // b ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -1147,8 +1147,8 @@ mod tests {
             args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
             order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // c ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+                OrderPair::new(2, OrderType::ascending()),  // c ASC
+                OrderPair::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1160,9 +1160,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 3, 1],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;

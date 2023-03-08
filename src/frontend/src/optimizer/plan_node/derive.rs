@@ -18,9 +18,10 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::Direction;
 
 use super::PlanRef;
-use crate::optimizer::property::{Direction, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order};
 
 pub(crate) fn derive_columns(
     input_schema: &Schema,
@@ -112,7 +113,7 @@ pub(crate) fn derive_pk(
         }
         pk.push(FieldOrder {
             index: idx,
-            direct: Direction::Asc,
+            direct: Direction::Ascending,
         });
         in_order.insert(idx);
     }

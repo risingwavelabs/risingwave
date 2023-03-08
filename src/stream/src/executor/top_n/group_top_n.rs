@@ -282,20 +282,20 @@ mod tests {
 
     fn storage_key() -> Vec<OrderPair> {
         vec![
-            OrderPair::new(1, OrderType::Ascending),
-            OrderPair::new(2, OrderType::Ascending),
-            OrderPair::new(0, OrderType::Ascending),
+            OrderPair::new(1, OrderType::ascending()),
+            OrderPair::new(2, OrderType::ascending()),
+            OrderPair::new(0, OrderType::ascending()),
         ]
     }
 
     /// group by 1, order by 2
     fn order_by_1() -> Vec<OrderPair> {
-        vec![OrderPair::new(2, OrderType::Ascending)]
+        vec![OrderPair::new(2, OrderType::ascending())]
     }
 
     /// group by 1,2, order by 0
     fn order_by_2() -> Vec<OrderPair> {
-        vec![OrderPair::new(0, OrderType::Ascending)]
+        vec![OrderPair::new(0, OrderType::ascending())]
     }
 
     fn pk_indices() -> PkIndices {
@@ -360,9 +360,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -456,9 +456,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -546,9 +546,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )

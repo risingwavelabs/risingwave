@@ -18,11 +18,12 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::Direction;
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{CorrelatedId, Depth, ExprImpl};
-use crate::optimizer::property::{Direction, FieldOrder};
+use crate::optimizer::property::FieldOrder;
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -216,8 +217,8 @@ impl Binder {
             .into());
         }
         let direct = match asc {
-            None | Some(true) => Direction::Asc,
-            Some(false) => Direction::Desc,
+            None | Some(true) => Direction::Ascending,
+            Some(false) => Direction::Descending,
         };
         let index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {

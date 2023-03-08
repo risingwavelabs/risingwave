@@ -18,7 +18,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_expr::expr::AggKind;
 use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 use risingwave_pb::expr::AggCall as ProstAggCall;
@@ -28,7 +28,6 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Direction;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -180,13 +179,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             };
 
             for &idx in &self.group_key {
-                add_column(idx, Some(OrderType::Ascending), false);
+                add_column(idx, Some(OrderType::ascending()), false);
             }
             for (order_type, idx) in sort_keys {
                 add_column(idx, Some(order_type), true);
             }
             for &idx in &in_pks {
-                add_column(idx, Some(OrderType::Ascending), true);
+                add_column(idx, Some(OrderType::ascending()), true);
             }
             for idx in include_keys {
                 add_column(idx, None, true);
@@ -222,7 +221,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                    .add_order_column(tb_column_idx, OrderType::ascending());
                 included_upstream_indices.push(idx);
             }
 
@@ -272,15 +271,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
-                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
+                                    vec![(OrderType::ascending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::Max => {
-                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
+                                    vec![(OrderType::descending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                     .order_by
                                     .iter()
-                                    .map(|o| (o.direction.to_order(), o.input.index))
+                                    .map(|o| (OrderType::new(o.direction), o.input.index))
                                     .collect(),
                                 _ => unreachable!(),
                             }
@@ -351,7 +350,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                    .add_order_column(tb_column_idx, OrderType::ascending());
             }
         }
         internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
@@ -400,7 +399,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .collect_vec();
                 for &idx in &key_cols {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
-                    table_builder.add_order_column(table_col_idx, OrderType::Ascending);
+                    table_builder.add_order_column(table_col_idx, OrderType::ascending());
                 }
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
@@ -477,15 +476,11 @@ pub struct PlanAggOrderByField {
 
 impl fmt::Debug for PlanAggOrderByField {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.input)?;
-        match self.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
         write!(
             f,
-            " NULLS {}",
+            "{:?} {} NULLS {}",
+            self.input,
+            self.direction,
             if self.nulls_first { "FIRST" } else { "LAST" }
         )?;
         Ok(())
@@ -506,14 +501,10 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
             input_schema: self.input_schema,
         }
         .fmt(f)?;
-        match that.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
         write!(
             f,
-            " NULLS {}",
+            " {} NULLS {}",
+            that.direction,
             if that.nulls_first { "FIRST" } else { "LAST" }
         )?;
         Ok(())

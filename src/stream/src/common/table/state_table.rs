@@ -158,9 +158,7 @@ where
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| {
-                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
-            })
+            .map(|col_order| OrderType::from_protobuf(&col_order.get_order_type().unwrap()))
             .collect();
         let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key

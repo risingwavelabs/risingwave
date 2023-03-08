@@ -560,11 +560,11 @@ mod tests {
         let order_pairs = vec![
             OrderPair {
                 column_idx: 0,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
             OrderPair {
                 column_idx: 1,
-                order_type: OrderType::Ascending,
+                order_type: OrderType::ascending(),
             },
         ];
 

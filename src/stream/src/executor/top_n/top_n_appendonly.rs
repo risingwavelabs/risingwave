@@ -252,8 +252,8 @@ mod tests {
 
     fn order_by() -> Vec<OrderPair> {
         vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
+            OrderPair::new(0, OrderType::ascending()),
+            OrderPair::new(1, OrderType::ascending()),
         ]
     }
 
@@ -284,7 +284,7 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &pk_indices(),
         )
         .await;
@@ -366,7 +366,7 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &pk_indices(),
         )
         .await;

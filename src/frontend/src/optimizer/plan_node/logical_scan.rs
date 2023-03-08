@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{Direction, OrderPair};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -36,7 +36,6 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::Asc;
 use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
@@ -227,10 +226,7 @@ impl LogicalScan {
                     let idx = id_to_tb_idx
                         .get(&self.table_desc().columns[order.column_idx].column_id)
                         .unwrap();
-                    match order.order_type {
-                        OrderType::Ascending => FieldOrder::ascending(*idx),
-                        OrderType::Descending => FieldOrder::descending(*idx),
-                    }
+                    FieldOrder::new(*idx, order.order_type)
                 })
                 .collect(),
         );
@@ -579,7 +575,7 @@ impl LogicalScan {
                     .iter()
                     .map(|idx_item| FieldOrder {
                         index: idx_item.index,
-                        direct: Asc,
+                        direct: Direction::Ascending,
                     })
                     .collect(),
             }

@@ -15,9 +15,9 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
+use risingwave_common::util::sort_util::Direction;
 
 use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
-use crate::optimizer::property::Direction;
 
 /// A sort expression in the `ORDER BY` clause.
 ///
@@ -32,7 +32,7 @@ pub struct OrderByExpr {
 impl Display for OrderByExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.expr)?;
-        if self.direction == Direction::Desc {
+        if self.direction == Direction::Descending {
             write!(f, " DESC")?;
         }
         if self.nulls_first {

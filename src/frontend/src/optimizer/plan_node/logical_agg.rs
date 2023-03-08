@@ -19,6 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
+use risingwave_common::util::sort_util::Direction;
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
@@ -39,7 +40,6 @@ use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::{Asc, Desc};
 use crate::optimizer::property::{
     Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
 };
@@ -340,13 +340,13 @@ impl LogicalAgg {
                 .map(|group_by_idx| {
                     let direct = if required_order.field_order.contains(&FieldOrder {
                         index: *group_by_idx,
-                        direct: Desc,
+                        direct: Direction::Descending,
                     }) {
                         // If output requires descending order, use descending order
-                        Desc
+                        Direction::Descending
                     } else {
                         // In all other cases use ascending order
-                        Asc
+                        Direction::Ascending
                     };
                     FieldOrder {
                         index: *group_by_idx,

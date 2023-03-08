@@ -34,7 +34,7 @@ fn create_top_n_executor(
     const CHUNK_SIZE: usize = 1024;
     let (child, order_pairs) = if single_column {
         let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
-        (input, vec![OrderPair::new(0, OrderType::Ascending)])
+        (input, vec![OrderPair::new(0, OrderType::ascending())])
     } else {
         let input = create_input(
             &[
@@ -49,9 +49,9 @@ fn create_top_n_executor(
         (
             input,
             vec![
-                OrderPair::new(0, OrderType::Ascending),
-                OrderPair::new(1, OrderType::Descending),
-                OrderPair::new(2, OrderType::Ascending),
+                OrderPair::new(0, OrderType::ascending()),
+                OrderPair::new(1, OrderType::descending()),
+                OrderPair::new(2, OrderType::ascending()),
             ],
         )
     };

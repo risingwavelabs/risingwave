@@ -19,11 +19,9 @@
 
 use std::collections::BTreeMap;
 
-use risingwave_common::util::sort_util::OrderType;
-
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
-use crate::optimizer::property::{Direction, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
 
 pub struct TopNOnIndexRule {}
@@ -132,11 +130,7 @@ impl TopNOnIndexRule {
                 .into_iter()
                 .map(|op| FieldOrder {
                     index: *output_col_map.get(&op.column_idx).unwrap_or(&unmatched_idx),
-                    direct: if op.order_type == OrderType::Ascending {
-                        Direction::Asc
-                    } else {
-                        Direction::Desc
-                    },
+                    direct: op.order_type.direction(),
                 })
                 .collect::<Vec<_>>(),
         };

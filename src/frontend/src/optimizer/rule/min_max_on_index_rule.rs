@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::Direction;
 use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
@@ -29,7 +29,7 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
 };
-use crate::optimizer::property::{Direction, FieldOrder, Order};
+use crate::optimizer::property::{FieldOrder, Order};
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -68,9 +68,9 @@ impl Rule for MinMaxOnIndexRule {
                 field_order: vec![FieldOrder {
                     index: calls.first()?.inputs.first()?.index(),
                     direct: if kind == AggKind::Min {
-                        Direction::Asc
+                        Direction::Ascending
                     } else {
-                        Direction::Desc
+                        Direction::Descending
                     },
                 }],
             };
@@ -188,11 +188,7 @@ impl MinMaxOnIndexRule {
                 .into_iter()
                 .map(|op| FieldOrder {
                     index: *output_col_map.get(&op.column_idx).unwrap_or(&unmatched_idx),
-                    direct: if op.order_type == OrderType::Ascending {
-                        Direction::Asc
-                    } else {
-                        Direction::Desc
-                    },
+                    direct: op.order_type.direction(),
                 })
                 .collect::<Vec<_>>(),
         };
