@@ -99,7 +99,6 @@ profile:
       - use: frontend
 
   full:
-    config-path: src/config/example.toml
     steps:
       - use: minio
       - use: etcd
