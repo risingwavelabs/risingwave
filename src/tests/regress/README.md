@@ -33,7 +33,7 @@ In general, these files are not meant to be modified a lot. The test runner has 
 * Run tests against RisingWave.
 
 ```shell
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 4566 \
   -u root \
   --input `pwd`/src/tests/regress/data \
@@ -45,7 +45,7 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
 * Run tests against PostgreSQL. Make sure PostgreSQL is running.
 
 ```shell
-RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
+RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   -p 5432 \
   -u `user name` \
   --database `database name` \
@@ -53,9 +53,10 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test -h 127.0.0.1 \
   --output `pwd`/src/tests/regress/output \
   --schedule `pwd`/src/tests/regress/data/schedule \
   --mode postgres
-
 ```
+
 Please remove the `output` directory before running the test again.
+
 ```shell
 rm -rf `pwd`/src/tests/regress/output
 ```

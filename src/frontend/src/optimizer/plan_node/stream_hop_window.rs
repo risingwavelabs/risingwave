@@ -79,7 +79,7 @@ impl_plan_tree_node_for_unary! {StreamHopWindow}
 impl StreamNode for StreamHopWindow {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         ProstStreamNode::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.core.time_col.to_proto()),
+            time_col: self.logical.core.time_col.index() as _,
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),
             output_indices: self

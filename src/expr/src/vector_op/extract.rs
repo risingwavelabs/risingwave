@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
 use crate::{bail, Result};
 
@@ -66,6 +66,10 @@ pub fn extract_from_timestamptz(time_unit: &str, usecs: i64) -> Result<Decimal> 
             time_unit
         ),
     }
+}
+
+pub fn extract_from_time(time_unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
+    extract_time(time.0, time_unit)
 }
 
 #[cfg(test)]

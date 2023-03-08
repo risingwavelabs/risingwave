@@ -519,8 +519,7 @@ impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
 impl PlanAggOrderByField {
     fn to_protobuf(&self) -> ProstAggOrderByField {
         ProstAggOrderByField {
-            input: Some(self.input.to_proto()),
-            r#type: Some(self.input.data_type.to_protobuf()),
+            input: self.input.index() as _,
             direction: self.direction.to_protobuf() as i32,
             nulls_first: self.nulls_first,
         }
@@ -612,7 +611,7 @@ impl PlanAggCall {
         ProstAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
-            args: self.inputs.iter().map(InputRef::to_agg_arg_proto).collect(),
+            args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
             order_by_fields: self
                 .order_by_fields
@@ -623,17 +622,7 @@ impl PlanAggCall {
         }
     }
 
-    pub fn partial_to_total_agg_call(
-        &self,
-        partial_output_idx: usize,
-        is_stream_row_count: bool,
-    ) -> PlanAggCall {
-        if self.agg_kind == AggKind::Count && is_stream_row_count {
-            // For stream row count agg, should only count output rows of partial phase,
-            // but not all inputs of partial phase. Here we just generate exact the same
-            // agg call for global phase as partial phase, which should be `count(*)`.
-            return self.clone();
-        }
+    pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {
         let total_agg_kind = match &self.agg_kind {
             AggKind::Min | AggKind::Max | AggKind::StringAgg | AggKind::FirstValue => self.agg_kind,
             AggKind::Count | AggKind::ApproxCountDistinct | AggKind::Sum0 => AggKind::Sum0,

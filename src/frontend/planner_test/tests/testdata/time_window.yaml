@@ -152,7 +152,7 @@
   stream_plan: |
     StreamMaterialize { columns: [v1, window_end, avg], pk_columns: [v1, window_end], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64) as $expr1] }
-      └─StreamHashAgg { group_key: [t.v1, window_end], aggs: [count, sum(t.v3), count(t.v3)] }
+      └─StreamHashAgg { group_key: [t.v1, window_end], aggs: [sum(t.v3), count(t.v3), count] }
         └─StreamExchange { dist: HashShard(t.v1, window_end) }
           └─StreamHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: [t.v1, t.v3, window_end, t._row_id] }
             └─StreamFilter { predicate: IsNotNull(t.v2) }
@@ -164,7 +164,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, $expr2] }
     └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
-      └─LogicalShare { id = 9 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
             └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
@@ -186,7 +186,7 @@
     LogicalProject { exprs: [t1.id, t1.v1, t1.created_at, window_start, window_end] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalShare { id = 10 }
+        └─LogicalShare { id = 3 }
           └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
             └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
               └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
@@ -205,7 +205,7 @@
   logical_plan: |
     LogicalProject { exprs: [*VALUES*_0.column_0, $expr1, $expr2] }
     └─LogicalProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
-      └─LogicalShare { id = 5 }
+      └─LogicalShare { id = 1 }
         └─LogicalValues { rows: [['2020-01-01 12:00:00':Timestamp]], schema: Schema { fields: [*VALUES*_0.column_0:Timestamp] } }
   batch_plan: |
     BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }

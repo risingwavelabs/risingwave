@@ -100,15 +100,6 @@ export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): st
   }
 }
 
-/**
- * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as an optional field, we wrap
- * uint64 inside this message.
- */
-export interface ColumnIndex {
-  index: number;
-}
-
 /** A mapping of column indices. */
 export interface ColIndexMapping {
   /** The size of the target space. */
@@ -146,8 +137,8 @@ export interface Source {
    * The column index of row ID. If the primary key is specified by the user,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /** Columns of the source. */
   columns: ColumnCatalog[];
@@ -247,15 +238,15 @@ export interface Table {
    * an optional column index which is the vnode of each row computed by the
    * table's consistent hash distribution
    */
-  vnodeColIndex:
-    | ColumnIndex
+  vnodeColIndex?:
+    | number
     | undefined;
   /**
    * An optional column index of row id. If the primary key is specified by users,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /**
    * The column indices which are stored in the state store's value with
@@ -375,28 +366,6 @@ export interface Database {
   name: string;
   owner: number;
 }
-
-function createBaseColumnIndex(): ColumnIndex {
-  return { index: 0 };
-}
-
-export const ColumnIndex = {
-  fromJSON(object: any): ColumnIndex {
-    return { index: isSet(object.index) ? Number(object.index) : 0 };
-  },
-
-  toJSON(message: ColumnIndex): unknown {
-    const obj: any = {};
-    message.index !== undefined && (obj.index = Math.round(message.index));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
-    const message = createBaseColumnIndex();
-    message.index = object.index ?? 0;
-    return message;
-  },
-};
 
 function createBaseColIndexMapping(): ColIndexMapping {
   return { targetSize: 0, map: [] };
@@ -529,7 +498,7 @@ export const Source = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
       pkColumnIds: Array.isArray(object?.pkColumnIds) ? object.pkColumnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -552,8 +521,7 @@ export const Source = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.columns) {
       obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
@@ -586,9 +554,7 @@ export const Source = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.pkColumnIds = object.pkColumnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -969,8 +935,8 @@ export const Table = {
         }, {})
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      vnodeColIndex: isSet(object.vnodeColIndex) ? Number(object.vnodeColIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
@@ -1029,10 +995,8 @@ export const Table = {
       });
     }
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.vnodeColIndex !== undefined &&
-      (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.vnodeColIndex !== undefined && (obj.vnodeColIndex = Math.round(message.vnodeColIndex));
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
@@ -1086,12 +1050,8 @@ export const Table = {
       {},
     );
     message.fragmentId = object.fragmentId ?? 0;
-    message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
-      ? ColumnIndex.fromPartial(object.vnodeColIndex)
-      : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.vnodeColIndex = object.vnodeColIndex ?? undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;

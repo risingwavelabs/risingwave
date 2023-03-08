@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
@@ -34,6 +34,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_expr::ExprError;
 use risingwave_pb::data::{Datum as ProstDatum, Epoch as ProstEpoch};
+use risingwave_pb::expr::InputRef as ProstInputRef;
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation as ProstMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
@@ -614,8 +615,10 @@ impl Watermark {
 
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
-            col_idx: self.col_idx as _,
-            data_type: Some(self.data_type.to_protobuf()),
+            column: Some(ProstInputRef {
+                index: self.col_idx as _,
+                r#type: Some(self.data_type.to_protobuf()),
+            }),
             val: Some(ProstDatum {
                 body: serialize_datum(Some(&self.val)),
             }),
@@ -623,11 +626,12 @@ impl Watermark {
     }
 
     pub fn from_protobuf(prost: &ProstWatermark) -> StreamExecutorResult<Self> {
-        let data_type = DataType::from(prost.get_data_type()?);
+        let col_ref = prost.get_column()?;
+        let data_type = DataType::from(col_ref.get_type()?);
         let val = deserialize_datum(prost.get_val()?.get_body().as_slice(), &data_type)?
             .expect("watermark value cannot be null");
         Ok(Watermark {
-            col_idx: prost.col_idx as _,
+            col_idx: col_ref.get_index() as _,
             data_type,
             val,
         })
@@ -717,7 +721,7 @@ pub async fn expect_first_barrier(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
-        .stack_trace("expect_first_barrier")
+        .instrument_await("expect_first_barrier")
         .await
         .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message
@@ -732,7 +736,7 @@ pub async fn expect_first_barrier_from_aligned_stream(
 ) -> StreamExecutorResult<Barrier> {
     let message = stream
         .next()
-        .stack_trace("expect_first_barrier")
+        .instrument_await("expect_first_barrier")
         .await
         .context("failed to extract the first message: stream closed unexpectedly")??;
     let barrier = message

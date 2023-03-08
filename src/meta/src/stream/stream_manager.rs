@@ -693,6 +693,7 @@ mod tests {
             sleep(Duration::from_secs(1)).await;
 
             let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
+            let system_params = env.system_params_manager().get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -723,8 +724,10 @@ mod tests {
             )
             .await?;
 
-            let (barrier_scheduler, scheduled_barriers) =
-                BarrierScheduler::new_pair(hummock_manager.clone(), env.opts.checkpoint_frequency);
+            let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
+                hummock_manager.clone(),
+                system_params.checkpoint_frequency() as usize,
+            );
 
             let source_manager = Arc::new(
                 SourceManager::new(

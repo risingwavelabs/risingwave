@@ -30,6 +30,7 @@ use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::OrderType as ProstOrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
@@ -389,7 +390,13 @@ impl<S: StateStore> LookupExecutorBuilder for InnerSideExecutorBuilder<S> {
         } else {
             let iter = self
                 .table
-                .batch_iter_with_pk_bounds(self.epoch.clone().into(), &pk_prefix, .., false)
+                .batch_iter_with_pk_bounds(
+                    self.epoch.clone().into(),
+                    &pk_prefix,
+                    ..,
+                    false,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
                 .await?;
 
             pin_mut!(iter);

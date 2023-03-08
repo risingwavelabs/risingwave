@@ -77,8 +77,7 @@ impl BatchHashAgg {
             .iter()
             .enumerate()
             .map(|(partial_output_idx, agg_call)| {
-                agg_call
-                    .partial_to_total_agg_call(partial_output_idx + self.group_key().len(), false)
+                agg_call.partial_to_total_agg_call(partial_output_idx + self.group_key().len())
             })
             .collect();
         let total_agg_logical = LogicalAgg::new(
