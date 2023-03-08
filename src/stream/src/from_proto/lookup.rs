@@ -42,7 +42,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .get_arrangement_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
 
         let arrangement_col_descs = lookup
@@ -76,7 +76,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
 
         // Use indices based on full table instead of streaming executor output.
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices

@@ -103,7 +103,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
 
                 // Use indices based on full table instead of streaming executor output.
-                let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+                let pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
+                    .collect_vec();
 
                 let dist_key_indices = table_desc
                     .dist_key_indices

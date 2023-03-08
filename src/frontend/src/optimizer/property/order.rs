@@ -19,8 +19,7 @@ use parse_display::Display;
 use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::order::{PbDirection, PbOrderType};
-use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
@@ -35,7 +34,7 @@ impl Order {
         Self { field_order }
     }
 
-    pub fn to_protobuf(&self) -> Vec<ColumnOrder> {
+    pub fn to_protobuf(&self) -> Vec<PbColumnOrder> {
         self.field_order
             .iter()
             .map(FieldOrder::to_protobuf)
@@ -145,19 +144,19 @@ impl FieldOrder {
         }
     }
 
-    pub fn to_protobuf(&self) -> ColumnOrder {
-        ColumnOrder {
+    pub fn to_protobuf(&self) -> PbColumnOrder {
+        PbColumnOrder {
+            column_index: self.index as _,
             order_type: Some(PbOrderType {
                 direction: self.direct.to_protobuf() as _,
             }),
-            index: self.index as u32,
         }
     }
 
-    pub fn from_protobuf(column_order: &ColumnOrder) -> Self {
+    pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         Self {
+            index: column_order.column_index as _,
             direct: Direction::from_protobuf(&column_order.get_order_type().unwrap().direction()),
-            index: column_order.index as usize,
         }
     }
 

@@ -60,7 +60,7 @@ impl BoxedExecutorBuilder for TopNExecutor {
         let order_pairs = top_n_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
         Ok(Box::new(Self::new(
             child,

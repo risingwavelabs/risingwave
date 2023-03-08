@@ -30,8 +30,8 @@ use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::order::{PbDirection, PbOrderType};
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
+use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -219,8 +219,8 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         columns,
         table_type: TableType::Internal as i32,
         value_indices: vec![0, 1],
-        pk: vec![ColumnOrder {
-            index: 0,
+        pk: vec![PbColumnOrder {
+            column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Ascending as _,
             }),

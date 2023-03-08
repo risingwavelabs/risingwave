@@ -189,7 +189,11 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|order| OrderType::from_protobuf(&order.get_order_type().unwrap().direction()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices

@@ -24,6 +24,7 @@ message PbOrderType {
     // PbNullsAre nulls_are = 2;
 }
 
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated PbColumnOrder`).
 message PbColumnOrder {
     uint32 column_index = 1;
     PbOrderType order_type = 2;

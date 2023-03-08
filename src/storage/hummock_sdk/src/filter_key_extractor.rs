@@ -159,7 +159,7 @@ impl SchemaFilterKeyExtractor {
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect();
 
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
@@ -350,8 +350,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::order::{PbDirection, PbOrderType};
-    use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
+    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -437,17 +437,17 @@ mod tests {
                 },
             ],
             pk: vec![
-                ColumnOrder {
+                PbColumnOrder {
+                    column_index: 1,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
                     }),
-                    index: 1,
                 },
-                ColumnOrder {
+                PbColumnOrder {
+                    column_index: 3,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
                     }),
-                    index: 3,
                 },
             ],
             stream_key: vec![0],

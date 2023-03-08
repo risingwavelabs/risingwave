@@ -157,7 +157,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         let pk_indices = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect_vec();
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);

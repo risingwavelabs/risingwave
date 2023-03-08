@@ -15,8 +15,7 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use risingwave_pb::order::{PbDirection, PbOrderType};
-use risingwave_pb::plan_common::ColumnOrder;
+use risingwave_pb::order::{PbColumnOrder, PbDirection, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
@@ -49,7 +48,7 @@ impl OrderType {
 
 /// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
 ///
-/// Corresponds to protobuf [`ColumnOrder`].
+/// Corresponds to protobuf [`PbColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OrderPair {
     pub column_idx: usize,
@@ -64,21 +63,21 @@ impl OrderPair {
         }
     }
 
-    pub fn from_prost(column_order: &ColumnOrder) -> Self {
+    pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         OrderPair {
+            column_idx: column_order.column_index as _,
             order_type: OrderType::from_protobuf(
                 &column_order.get_order_type().unwrap().direction(),
             ),
-            column_idx: column_order.index as usize,
         }
     }
 
-    pub fn to_protobuf(&self) -> ColumnOrder {
-        ColumnOrder {
+    pub fn to_protobuf(&self) -> PbColumnOrder {
+        PbColumnOrder {
+            column_index: self.column_idx as _,
             order_type: Some(PbOrderType {
                 direction: self.order_type.to_protobuf() as _,
             }),
-            index: self.column_idx as u32,
         }
     }
 }
