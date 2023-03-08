@@ -434,11 +434,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder);
+        builder.finish()
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
         if !self.group_key.is_empty() {
             builder.field("group_key", &self.group_key_display());
         }
         builder.field("aggs", &self.agg_calls_display());
-        builder.finish()
     }
 
     fn agg_calls_display(&self) -> Vec<PlanAggCallDisplay<'_>> {

@@ -21,7 +21,9 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, WriteOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
+};
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
@@ -29,9 +31,9 @@ macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
+        let bounds: (Bound<Bytes>, Bound<Bytes>) = (
+            range.start_bound().map(|x: &Bytes| x.clone()),
+            range.end_bound().map(|x: &Bytes| x.clone()),
         );
         let it = $storage
             .iter(
@@ -43,6 +45,7 @@ macro_rules! assert_count_range_scan {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await

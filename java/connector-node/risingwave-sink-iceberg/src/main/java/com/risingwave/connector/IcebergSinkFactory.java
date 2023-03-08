@@ -38,6 +38,38 @@ public class IcebergSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
+        validate(tableSchema, tableProperties);
+
+        String mode = tableProperties.get(SINK_MODE_PROP);
+        String location = tableProperties.get(LOCATION_TYPE_PROP);
+        String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
+        String databaseName = tableProperties.get(DATABASE_NAME_PROP);
+        String tableName = tableProperties.get(TABLE_NAME_PROP);
+
+        TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
+        HadoopCatalog hadoopCatalog = createHadoopCatalog(location, warehousePath);
+        Table icebergTable;
+        try {
+            icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+        } catch (Exception e) {
+            LOG.error("load table error: {}", e);
+            throw Status.FAILED_PRECONDITION
+                    .withDescription("failed to load iceberg table")
+                    .withCause(e)
+                    .asRuntimeException();
+        }
+
+        if (mode.equals("append-only")) {
+            return new IcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
+        } else if (mode.equals("upsert")) {
+            return new UpsertIcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
+        }
+        throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
+    }
+
+    @Override
+    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(SINK_MODE_PROP) // only append-only, upsert
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP) // only local, s3, minio
                 || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
@@ -94,8 +126,8 @@ public class IcebergSinkFactory implements SinkFactory {
             }
         }
 
-        if (mode.equals("append-only")) {
-            return new IcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
+        if (!mode.equals("append-only") && !mode.equals("upsert")) {
+            throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
         }
 
         if (mode.equals("upsert")) {
@@ -104,10 +136,7 @@ public class IcebergSinkFactory implements SinkFactory {
                         .withDescription("no primary keys for upsert mode")
                         .asRuntimeException();
             }
-            return new UpsertIcebergSink(tableSchema, hadoopCatalog, icebergTable, FILE_FORMAT);
         }
-
-        throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
     }
 
     private HadoopCatalog createHadoopCatalog(String location, String warehousePath) {
