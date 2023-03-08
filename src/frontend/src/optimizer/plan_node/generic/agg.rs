@@ -278,7 +278,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                     vec![(OrderType::Descending, agg_call.inputs[0].index)]
                                 }
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                    .order_by_fields
+                                    .order_by
                                     .iter()
                                     .map(|o| (o.direction.to_order(), o.input.index))
                                     .collect(),
@@ -552,7 +552,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
-    pub order_by_fields: Vec<PlanAggOrderByField>, // TODO(rc): rename to `order_by`
+    pub order_by: Vec<PlanAggOrderByField>,
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
@@ -572,12 +572,8 @@ impl fmt::Debug for PlanAggCall {
                     write!(f, ",")?;
                 }
             }
-            if !self.order_by_fields.is_empty() {
-                let clause_text = self
-                    .order_by_fields
-                    .iter()
-                    .map(|e| format!("{:?}", e))
-                    .join(", ");
+            if !self.order_by.is_empty() {
+                let clause_text = self.order_by.iter().map(|e| format!("{:?}", e)).join(", ");
                 write!(f, " order_by({})", clause_text)?;
             }
             write!(f, ")")?;
@@ -600,8 +596,8 @@ impl PlanAggCall {
             x.index = mapping.map(x.index);
         });
 
-        // modify order_by_fields
-        self.order_by_fields.iter_mut().for_each(|x| {
+        // modify order_by exprs
+        self.order_by.iter_mut().for_each(|x| {
             x.input.index = mapping.map(x.input.index);
         });
 
@@ -618,8 +614,8 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
-            order_by_fields: self
-                .order_by_fields
+            order_by: self
+                .order_by
                 .iter()
                 .map(PlanAggOrderByField::to_protobuf)
                 .collect(),
@@ -645,7 +641,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
-            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
+            order_by: vec![], // order must make no difference when we use 2-phase agg
             filter: Condition::true_cond(),
             ..self.clone()
         }
@@ -657,7 +653,7 @@ impl PlanAggCall {
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         }
     }
@@ -699,11 +695,11 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                     write!(f, ", ")?;
                 }
             }
-            if !that.order_by_fields.is_empty() {
+            if !that.order_by.is_empty() {
                 write!(
                     f,
                     " order_by({})",
-                    that.order_by_fields.iter().format_with(", ", |e, f| {
+                    that.order_by.iter().format_with(", ", |e, f| {
                         f(&PlanAggOrderByFieldDisplay {
                             plan_agg_order_by_field: e,
                             input_schema: self.input_schema,

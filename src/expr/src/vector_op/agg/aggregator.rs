@@ -71,7 +71,7 @@ impl AggStateFactory {
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
         let order_pairs = prost
-            .get_order_by_fields()
+            .get_order_by()
             .iter()
             .map(|col_order| {
                 let col_idx = col_order.get_column_index() as usize;

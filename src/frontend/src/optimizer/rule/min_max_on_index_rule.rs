@@ -50,7 +50,7 @@ impl Rule for MinMaxOnIndexRule {
         if matches!(first_call.agg_kind, AggKind::Min | AggKind::Max)
             && !first_call.distinct
             && first_call.filter.always_true()
-            && first_call.order_by_fields.is_empty()
+            && first_call.order_by.is_empty()
         {
             let logical_scan: LogicalScan = logical_agg.input().as_logical_scan()?.to_owned();
             let kind = calls.first()?.agg_kind;
@@ -161,7 +161,7 @@ impl MinMaxOnIndexRule {
                     0,
                     logical_agg.schema().fields[0].data_type.clone(),
                 )],
-                order_by_fields: vec![],
+                order_by: vec![],
                 distinct: false,
                 filter: Condition {
                     conjunctions: vec![],
@@ -220,7 +220,7 @@ impl MinMaxOnIndexRule {
                         0,
                         logical_agg.schema().fields[0].data_type.clone(),
                     )],
-                    order_by_fields: vec![],
+                    order_by: vec![],
                     distinct: false,
                     filter: Condition {
                         conjunctions: vec![],

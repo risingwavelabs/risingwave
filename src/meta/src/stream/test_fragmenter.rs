@@ -69,7 +69,7 @@ fn make_sum_aggcall(idx: u32) -> AggCall {
             ..Default::default()
         }),
         distinct: false,
-        order_by_fields: vec![],
+        order_by: vec![],
         filter: None,
     }
 }

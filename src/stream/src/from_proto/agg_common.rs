@@ -47,7 +47,7 @@ pub fn build_agg_call_from_prost(
         _ => bail!("Too many/few arguments for {:?}", agg_kind),
     };
     let order_pairs = agg_call_proto
-        .get_order_by_fields()
+        .get_order_by()
         .iter()
         .map(|col_order| {
             let col_idx = col_order.get_column_index() as usize;
