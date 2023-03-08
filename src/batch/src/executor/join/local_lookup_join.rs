@@ -22,7 +22,6 @@ use risingwave_common::error::{internal_error, Result};
 use risingwave_common::hash::{
     ExpandedParallelUnitMapping, HashKey, HashKeyDispatcher, ParallelUnitId, VirtualNode,
 };
-
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -37,7 +36,6 @@ use risingwave_pb::batch_plan::{
     PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
-
 use risingwave_pb::plan_common::StorageTableDesc;
 use uuid::Uuid;
 
