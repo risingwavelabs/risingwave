@@ -5,9 +5,9 @@ import string
 from time import sleep
 from minio import Minio
 import psycopg2
+import random
 
-
-def do_test(config, N, n):
+def do_test(config, N, n, prefix):
     conn = psycopg2.connect(
         host="localhost",
         port="4566",
@@ -26,6 +26,7 @@ def do_test(config, N, n):
         mark int,
     ) WITH (
         connector = 's3',
+        match_pattern = '{prefix}*.ndjson',
         s3.region_name = '{config['S3_REGION']}',
         s3.bucket_name = '{config['S3_BUCKET']}',
         s3.credentials.access = '{config['S3_ACCESS_KEY']}',
@@ -62,7 +63,7 @@ def do_test(config, N, n):
 
 if __name__ == "__main__":
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
-
+    run_id = str(random.randint(1000, 9999))
     N = 10000
 
     items = [
@@ -100,17 +101,18 @@ if __name__ == "__main__":
         try:
             client.fput_object(
                 config["S3_BUCKET"],
-                f"data_{i}.ndjson",
+                   f"{run_id}_data_{i}.ndjson",
                 f"data_{i}.ndjson"
+             
             )
-            print(f"Uploaded data_{i}.ndjson to S3")
+            print(f"Uploaded {run_id}_data_{i}.ndjson to S3")
             os.remove(f"data_{i}.ndjson")
         except Exception as e:
             print(f"Error uploading data_{i}.ndjson: {e}")
 
     return_code = 0
     try:
-        do_test(config, N, n)
+        do_test(config, N, n, run_id)
     except Exception as e:
         print("Test failed", e)
         return_code = 1
@@ -118,8 +120,8 @@ if __name__ == "__main__":
     # Clean up
     for i in range(20):
         try:
-            client.remove_object(config["S3_BUCKET"], f"data_{i}.ndjson")
-            print(f"Removed data_{i}.ndjson from S3")
+            client.remove_object(config["S3_BUCKET"], f"{run_id}_data_{i}.ndjson")
+            print(f"Removed {run_id}_data_{i}.ndjson from S3")
         except Exception as e:
             print(f"Error removing data_{i}.ndjson: {e}")
 
