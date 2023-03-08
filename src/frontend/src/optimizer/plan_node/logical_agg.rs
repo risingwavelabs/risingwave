@@ -1028,6 +1028,10 @@ impl LogicalAgg {
         self.core.fmt_with_name(f, name)
     }
 
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
+    }
+
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
