@@ -22,49 +22,11 @@ use risingwave_common::error::ErrorCode::{InternalError, InvalidConfigValue, Pro
 use risingwave_common::error::{Result, RwError};
 use url::Url;
 
-use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2};
+use crate::aws_utils::{default_conn_config, s3_client, AwsConfigV2, AWS_DEFAULT_CONFIG};
 use crate::parser::schema_registry::Client;
 use crate::parser::util::download_from_http;
 
 const PB_SCHEMA_LOCATION_S3_REGION: &str = "region";
-
-// TODO(Tao): Probably we should never allow to use S3 URI.
-pub(super) async fn load_file_descriptor_from_s3(
-    location: &Url,
-    properties: &HashMap<String, String>,
-) -> Result<Vec<u8>> {
-    let bucket = location.domain().ok_or_else(|| {
-        RwError::from(InternalError(format!(
-            "Illegal Protobuf schema path {}",
-            location
-        )))
-    })?;
-    if properties.get(PB_SCHEMA_LOCATION_S3_REGION).is_none() {
-        return Err(RwError::from(InvalidConfigValue {
-            config_entry: PB_SCHEMA_LOCATION_S3_REGION.to_string(),
-            config_value: "NONE".to_string(),
-        }));
-    }
-    let key = location.path().replace('/', "");
-    let config = AwsConfigV2::from(properties.clone());
-    let sdk_config = config.load_config(None).await;
-    let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
-    let response = s3_client
-        .get_object()
-        .bucket(bucket.to_string())
-        .key(&key)
-        .send()
-        .await
-        .map_err(|e| RwError::from(InternalError(e.to_string())))?;
-
-    let body = response.body.collect().await.map_err(|e| {
-        RwError::from(InternalError(format!(
-            "Read Protobuf schema file from s3 {}",
-            e
-        )))
-    })?;
-    Ok(body.into_bytes().to_vec())
-}
 
 pub(super) async fn load_file_descriptor_from_http(location: &Url) -> Result<Vec<u8>> {
     let schema_bytes = download_from_http(location).await?;
