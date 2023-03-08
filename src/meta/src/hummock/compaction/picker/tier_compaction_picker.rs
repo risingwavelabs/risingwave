@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
 use std::sync::Arc;
 
+use rand::thread_rng;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, LevelType, OverlappingLevel};
 
@@ -185,7 +185,7 @@ impl TierCompactionPicker {
         &self,
         l0: &OverlappingLevel,
         level_handler: &LevelHandler,
-        mut member_table_ids: HashSet<u32>,
+        member_table_ids: Vec<u32>,
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         // do not pick the first sub-level because we do not want to block the level compaction.
@@ -201,7 +201,6 @@ impl TierCompactionPicker {
                 if level_handler.is_pending_compact(&sst.id) {
                     continue;
                 }
-                member_table_ids.insert(sst.table_ids[0]);
             }
 
             let max_compaction_bytes = std::cmp::min(
@@ -371,12 +370,21 @@ impl CompactionPicker for TierCompactionPicker {
         if !self.config.split_by_state_table {
             return self.pick_whole_level(l0, &level_handlers[0], stats);
         }
-        let mut member_table_ids: HashSet<u32> = HashSet::default();
+        let mut member_table_ids = levels.member_table_ids.clone();
         for level in &l0.sub_levels {
+            if level.level_type != LevelType::Nonoverlapping as i32 {
+                continue;
+            }
             for sst in &level.table_infos {
-                member_table_ids.extend(sst.table_ids.clone());
+                if sst.table_ids[0] != *member_table_ids.last().unwrap() {
+                    member_table_ids.push(sst.table_ids[0]);
+                }
             }
         }
+        member_table_ids.sort();
+        member_table_ids.dedup();
+        use rand::prelude::SliceRandom;
+        member_table_ids.shuffle(&mut thread_rng());
         self.pick_table_same_files(l0, &level_handlers[0], member_table_ids, stats)
     }
 }

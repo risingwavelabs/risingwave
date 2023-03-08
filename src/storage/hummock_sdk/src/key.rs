@@ -744,13 +744,10 @@ mod tests {
         assert_eq!(FullKey::decode(&buf), key);
         let mut table_key = vec![1];
         let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
-        println!("a: {}", a.user_key.get_vnode_id());
         table_key[0] = 2;
         let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
-        println!("b: {}", b.user_key.get_vnode_id());
         table_key[0] = 129;
         let c = FullKey::for_test(TableId::new(1), table_key, 1);
-        println!("c: {}", c.user_key.get_vnode_id());
         assert!(a.lt(&b));
         assert!(b.lt(&c));
     }

@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use itertools::Itertools;
+use rand::thread_rng;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactionConfig, InputLevel, Level, LevelType, OverlappingLevel};
@@ -57,10 +58,17 @@ impl CompactionPicker for LevelCompactionPicker {
                 if level.level_type != LevelType::Nonoverlapping as i32 {
                     continue;
                 }
+                // expand table id because there may be some state-table drop from member_table_ids.
                 for sst in &level.table_infos {
-                    member_table_ids.extend(sst.table_ids.clone());
+                    if sst.table_ids[0] != *member_table_ids.last().unwrap() {
+                        member_table_ids.push(sst.table_ids[0]);
+                    }
                 }
             }
+            member_table_ids.sort();
+            member_table_ids.dedup();
+            use rand::prelude::SliceRandom;
+            member_table_ids.shuffle(&mut thread_rng());
             for table_id in member_table_ids {
                 if let Some(ret) = self.pick_files_to_target_level(
                     l0,
