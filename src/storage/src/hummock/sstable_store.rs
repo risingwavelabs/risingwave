@@ -79,7 +79,7 @@ impl TieredCacheValue for Box<Block> {
     }
 
     fn decode(buf: Vec<u8>) -> Self {
-        Box::new(Block::decode_from_raw(Bytes::from(buf), 0))
+        Box::new(Block::decode_from_raw(Bytes::from(buf)))
     }
 }
 

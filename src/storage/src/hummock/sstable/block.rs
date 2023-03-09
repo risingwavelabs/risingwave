@@ -45,15 +45,14 @@ impl Block {
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
         // Verify checksum.
 
-        
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
-        let table_id = (&buf[buf.len() - 12..buf.len() - 8]).get_u32_le();
+
         // Decompress.
-        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 13..buf.len() - 12])?;
-        let compressed_data = &buf[..buf.len() - 13];
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
+        let compressed_data = &buf[..buf.len() - 9];
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 13)),
+            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -76,16 +75,16 @@ impl Block {
             }
         };
 
-        Ok(Self::decode_from_raw(buf, table_id))
+        Ok(Self::decode_from_raw(buf))
     }
 
-    pub fn decode_from_raw(buf: Bytes, table_id: u32) -> Self {
-        
+    pub fn decode_from_raw(buf: Bytes) -> Self {
+        let table_id = (&buf[buf.len() - 4..]).get_u32_le();
         // Decode restart points.
-        let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
-        let data_len = buf.len() - 4 - n_restarts as usize * 4;
+        let n_restarts = (&buf[buf.len() - 8..buf.len() - 4]).get_u32_le();
+        let data_len = buf.len() - 8 - n_restarts as usize * 4;
         let mut restart_points = Vec::with_capacity(n_restarts as usize);
-        let mut restart_points_buf = &buf[data_len..buf.len() - 4];
+        let mut restart_points_buf = &buf[data_len..buf.len() - 8];
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
@@ -107,7 +106,7 @@ impl Block {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>()
+        self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>() + 4
     }
 
 
@@ -339,7 +338,7 @@ impl BlockBuilder {
 
     /// Calculate block size without compression.
     pub fn uncompressed_block_size(&mut self) -> usize {
-        self.buf.len() + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
+        self.buf.len() +4 + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
     }
 
     /// Finishes building block.
@@ -356,10 +355,13 @@ impl BlockBuilder {
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
+        
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
         self.buf.put_u32_le(self.restart_points.len() as u32);
+
+        self.buf.put_u32_le(self.table_id.unwrap());
         match self.compression_algorithm {
             CompressionAlgorithm::None => (),
             CompressionAlgorithm::Lz4 => {
@@ -393,7 +395,6 @@ impl BlockBuilder {
             }
         };
         self.compression_algorithm.encode(&mut self.buf);
-        self.buf.put_u32_le(self.table_id.unwrap());
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
         
@@ -402,8 +403,8 @@ impl BlockBuilder {
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        // block + restart_points + restart_points.len + compression_algorithm + checksum
-        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8
+        // block + restart_points + restart_points.len + compression_algorithm + checksum  + table_id
+        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8 + 4
     }
 }
 
