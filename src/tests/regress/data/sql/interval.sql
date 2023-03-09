@@ -124,9 +124,6 @@ FROM INTERVAL_MULDIV_TBL;
 
 DROP TABLE INTERVAL_MULDIV_TBL;
 
-SET DATESTYLE = 'postgres';
-SET IntervalStyle to postgres_verbose;
-
 SELECT * FROM INTERVAL_TBL;
 
 -- test avg(interval), which is somewhat fragile since people have been
@@ -154,9 +151,6 @@ SELECT justify_days(interval '6 months 36 days 5 hours 4 minutes 3 seconds') as 
 SELECT justify_interval(interval '1 month -1 hour') as "1 month -1 hour";
 
 -- test fractional second input, and detection of duplicate units
-SET DATESTYLE = 'ISO';
-SET IntervalStyle TO postgres;
-
 SELECT '1 millisecond'::interval, '1 microsecond'::interval,
        '500 seconds 99 milliseconds 51 microseconds'::interval;
 SELECT '3 days 5 milliseconds'::interval;
@@ -289,7 +283,6 @@ select  interval 'P0002'                  AS "year only",
         interval 'PT10:30'                AS "hour minute";
 
 -- test a couple rounding cases that changed since 8.3 w/ HAVE_INT64_TIMESTAMP.
-SET IntervalStyle to postgres_verbose;
 select interval '-10 mons -3 days +03:55:06.70';
 select interval '1 year 2 mons 3 days 04:05:06.699999';
 select interval '0:0:0.7', interval '@ 0.70 secs', interval '0.7 seconds';
@@ -355,3 +348,5 @@ SELECT f1,
 
 -- internal overflow test case
 SELECT extract(epoch from interval '1000000000 days');
+
+DROP TABLE INTERVAL_TBL;
