@@ -39,7 +39,7 @@
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }
+            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamProject { exprs: [id, _row_id] }
               |   └─StreamFilter { predicate: (initial_bid = 1:Int32) }
@@ -189,7 +189,7 @@
       └─StreamAppendOnlyGlobalSimpleAgg { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [count] }
-            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id, id] }
+            └─StreamAppendOnlyHashJoin { type: Inner, predicate: id = id, output: [_row_id, id, _row_id] }
               ├─StreamExchange { dist: HashShard(id) }
               | └─StreamProject { exprs: [id, _row_id] }
               |   └─StreamShare { id = 4 }

@@ -26,7 +26,7 @@ use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
 };
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
@@ -44,7 +44,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
 
         let literal2 = ExprNode {

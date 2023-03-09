@@ -47,11 +47,10 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
         .filter(|s| s.starts_with("INSERT"))
         .collect::<String>();
     tracing::info!("[DML]: {}", dml);
-    let setup_sql = format!("{}\n{}", ddl, dml);
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        validate_response(&setup_sql, &sql, client.simple_query(&sql).await).unwrap();
+        validate_response(client.simple_query(&sql).await).unwrap();
     }
 }
 
@@ -67,22 +66,26 @@ pub async fn generate(
     _outdir: &str,
     seed: Option<u64>,
 ) {
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    tracing::info!("Set session variables");
+
     let mut rng = generate_rng(seed);
-    let (tables, base_tables, mviews, setup_sql) =
-        create_tables(&mut rng, testdata, client).await.unwrap();
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 10;
     let max_rows_inserted = rows_per_table * base_tables.len();
-
-    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
-    let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
+
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
 
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        &setup_sql,
         base_tables,
         max_rows_inserted,
     )
@@ -92,11 +95,11 @@ pub async fn generate(
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
-        let session_sql = test_session_variable(client, &mut rng).await;
+        test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        match validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response) {
+        match validate_response(response) {
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
@@ -115,11 +118,11 @@ pub async fn generate(
 
     let mut generated_queries = 0;
     for _ in 0..count {
-        let session_sql = test_session_variable(client, &mut rng).await;
+        test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        match validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response) {
+        match validate_response(response) {
             Err(_e) => {
                 generated_queries += 1;
                 queries.push_str(&format!("-- {};\n", &sql));
@@ -146,38 +149,36 @@ pub async fn generate(
 /// e2e test runner for sqlsmith
 pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
     let mut rng = generate_rng(seed);
-    let (tables, base_tables, mviews, mut setup_sql) =
-        create_tables(&mut rng, testdata, client).await.unwrap();
-    tracing::info!("Created tables");
 
-    let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
-    setup_sql.push_str(&session_sql);
-    let session_sql = set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
-    setup_sql.push_str(&session_sql);
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
     tracing::info!("Set session variables");
 
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+    tracing::info!("Created tables");
+
     let rows_per_table = 10;
-    let populate_sql = populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
-    let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
-
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        &setup_sql,
         base_tables,
         max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
-    test_batch_queries(client, &mut rng, tables.clone(), &setup_sql, count)
+    test_batch_queries(client, &mut rng, tables.clone(), count)
         .await
         .unwrap();
     tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), &setup_sql, count)
+    test_stream_queries(client, &mut rng, tables.clone(), count)
         .await
         .unwrap();
     tracing::info!("Passed stream queries");
@@ -220,7 +221,6 @@ async fn test_sqlsmith<R: Rng>(
     client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
     base_tables: Vec<Table>,
     row_count: usize,
 ) {
@@ -234,10 +234,9 @@ async fn test_sqlsmith<R: Rng>(
     let threshold = 0.40; // permit at most 40% of queries to be skipped.
     let sample_size = 50;
 
-    let skipped_percentage =
-        test_batch_queries(client, rng, tables.clone(), setup_sql, sample_size)
-            .await
-            .unwrap();
+    let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
     tracing::info!(
         "percentage of skipped batch queries = {}, threshold: {}",
         skipped_percentage,
@@ -247,10 +246,9 @@ async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage =
-        test_stream_queries(client, rng, tables.clone(), setup_sql, sample_size)
-            .await
-            .unwrap();
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
     tracing::info!(
         "percentage of skipped stream queries = {}, threshold: {}",
         skipped_percentage,
@@ -300,16 +298,15 @@ async fn test_batch_queries<R: Rng>(
     client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        let session_sql = test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response)?;
+        skipped += validate_response(response)?;
     }
     Ok(skipped as f64 / sample_size as f64)
 }
@@ -319,16 +316,15 @@ async fn test_stream_queries<R: Rng>(
     client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
     sample_size: usize,
 ) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        let session_sql = test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response)?;
+        skipped += validate_response(response)?;
         tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
@@ -345,14 +341,9 @@ fn get_seed_table_sql(testdata: &str) -> String {
 
 /// Create the tables defined in testdata, along with some mviews.
 /// TODO: Generate indexes and sinks.
-async fn create_tables(
-    rng: &mut impl Rng,
-    testdata: &str,
-    client: &Client,
-) -> Result<(Vec<Table>, Vec<Table>, Vec<Table>, String)> {
+async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table>> {
     tracing::info!("Preparing tables...");
 
-    let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
     let statements = parse_sql(&sql);
     let mut mvs_and_base_tables = vec![];
@@ -366,9 +357,19 @@ async fn create_tables(
         let create_sql = stmt.to_string();
         tracing::info!("[EXECUTING CREATE TABLE]: {}", &create_sql);
         client.simple_query(&create_sql).await.unwrap();
-        setup_sql.push_str(&format!("{};\n", &create_sql));
     }
 
+    Ok(base_tables)
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// TODO: Generate indexes and sinks.
+async fn create_mviews(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+) -> Result<(Vec<Table>, Vec<Table>)> {
+    let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
     for i in 0..10 {
@@ -376,14 +377,13 @@ async fn create_tables(
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
-        let skip_count = validate_response(&setup_sql, &create_sql, response)?;
+        let skip_count = validate_response(response)?;
         if skip_count == 0 {
-            setup_sql.push_str(&format!("{};\n", &create_sql));
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
         }
     }
-    Ok((mvs_and_base_tables, base_tables, mviews, setup_sql))
+    Ok((mvs_and_base_tables, mviews))
 }
 
 fn format_drop_mview(mview: &Table) -> String {
@@ -417,26 +417,8 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     }
 }
 
-fn format_fail_reason(setup_sql: &str, query: &str, e: &PgError) -> String {
-    format!(
-        "
-[UNEXPECTED ERROR]:
----- START
--- Setup
-{}
--- Query
-{}
----- END
-
-Reason:
-{}
-",
-        setup_sql, query, e
-    )
-}
-
 /// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(setup_sql: &str, query: &str, response: PgResult<_Row>) -> Result<i64> {
+fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
     match response {
         Ok(_) => Ok(0),
         Err(e) => {
@@ -448,9 +430,8 @@ fn validate_response<_Row>(setup_sql: &str, query: &str, response: PgResult<_Row
                 return Ok(1);
             }
             // consolidate error reason for deterministic test
-            let error_msg = format_fail_reason(setup_sql, query, &e);
-            tracing::info!("{}", error_msg);
-            Err(anyhow_error!(error_msg))
+            tracing::info!("[UNEXPECTED ERROR]: {}", e);
+            Err(anyhow_error!(e))
         }
     }
 }

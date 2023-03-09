@@ -37,7 +37,7 @@ const CACHE_FILE_FILENAME: &str = "cache";
 
 const FREELIST_DEFAULT_CAPACITY: usize = 64;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 pub enum FsType {
     Xfs,
     Ext4,
@@ -268,6 +268,7 @@ where
         let fs_block_size = fs_stat.block_size() as usize;
 
         let cf_opts = CacheFileOptions {
+            fs_type,
             // TODO: Make it configurable.
             block_size: fs_block_size,
             fallocate_unit: options.cache_file_fallocate_unit,

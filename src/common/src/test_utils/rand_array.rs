@@ -25,6 +25,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
+use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
@@ -117,6 +118,13 @@ impl RandValue for bool {
     }
 }
 
+impl RandValue for Serial {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        // TODO(peng), serial should be in format of RowId
+        i64::rand_value(rand).into()
+    }
+}
+
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
         JsonbVal::dummy()
@@ -177,6 +185,7 @@ where
 mod tests {
     use super::*;
     use crate::array::interval_array::IntervalArray;
+    use crate::array::serial_array::SerialArray;
     use crate::array::*;
     use crate::for_all_variants;
 

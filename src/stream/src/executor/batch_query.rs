@@ -18,6 +18,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
@@ -52,7 +53,11 @@ where
     async fn execute_inner(self, epoch: u64) {
         let iter = self
             .table
-            .batch_iter(HummockReadEpoch::Committed(epoch), false)
+            .batch_iter(
+                HummockReadEpoch::Committed(epoch),
+                false,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
             .await?;
         pin_mut!(iter);
 

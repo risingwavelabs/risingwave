@@ -375,6 +375,7 @@ impl Binder {
                 ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
+                ("array_distinct", raw_call(ExprType::ArrayDistinct)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),

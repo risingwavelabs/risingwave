@@ -65,6 +65,7 @@ use strum_macros::EnumDiscriminants;
 use self::struct_type::StructType;
 use self::to_binary::ToBinary;
 use self::to_text::ToText;
+use crate::array::serial_array::Serial;
 use crate::array::{
     read_interval_unit, ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue,
     PrimitiveArrayItemType, StructRef, StructValue,
@@ -457,6 +458,7 @@ macro_rules! for_all_scalar_variants {
             { Int16, int16, i16, i16 },
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
+            { Serial, serial, Serial, Serial },
             { Float32, float32, OrderedF32, OrderedF32 },
             { Float64, float64, OrderedF64, OrderedF64 },
             { Utf8, utf8, Box<str>, &'scalar str },
@@ -639,6 +641,7 @@ macro_rules! for_all_native_types {
             { i16, Int16 },
             { i32, Int32 },
             { i64, Int64 },
+            { Serial, Serial },
             { $crate::types::OrderedF32, Float32 },
             { $crate::types::OrderedF64, Float64 }
         }
@@ -836,6 +839,7 @@ impl ScalarRefImpl<'_> {
             Self::Int16(v) => v.serialize(ser)?,
             Self::Int32(v) => v.serialize(ser)?,
             Self::Int64(v) => v.serialize(ser)?,
+            Self::Serial(v) => v.serialize(ser)?,
             Self::Float32(v) => v.serialize(ser)?,
             Self::Float64(v) => v.serialize(ser)?,
             Self::Utf8(v) => v.serialize(ser)?,

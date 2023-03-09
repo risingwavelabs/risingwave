@@ -31,7 +31,8 @@ use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
 use risingwave_storage::{dispatch_state_store, StateStore};
@@ -187,17 +188,19 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let pk_types = table_desc
             .pk
             .iter()
-            .map(|order| column_descs[order.index as usize].clone().data_type)
+            .map(|order| column_descs[order.column_index as usize].clone().data_type)
             .collect_vec();
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(&order.get_order_type().unwrap().direction()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -417,6 +420,7 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
                     end_bound.map(|x| OwnedRow::new(vec![x])),
                 ),
                 ordered,
+                PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
 

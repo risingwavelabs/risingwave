@@ -187,9 +187,17 @@ fn run_batch_query(
     let mut logical_plan = planner
         .plan(bound)
         .map_err(|e| Failed::from(format!("Failed to generate logical plan:\nReason:\n{}", e)))?;
-    logical_plan
-        .gen_batch_distributed_plan()
+    let batch_plan = logical_plan
+        .gen_batch_plan()
         .map_err(|e| Failed::from(format!("Failed to generate batch plan:\nReason:\n{}", e)))?;
+    logical_plan
+        .gen_batch_distributed_plan(batch_plan)
+        .map_err(|e| {
+            Failed::from(format!(
+                "Failed to generate batch distributed plan:\nReason:\n{}",
+                e
+            ))
+        })?;
     Ok(())
 }
 
