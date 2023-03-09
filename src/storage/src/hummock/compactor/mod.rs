@@ -748,6 +748,7 @@ impl Compactor {
             task_progress,
             del_agg,
             self.task_config.key_range.clone(),
+            self.task_config.split_by_table,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,

@@ -302,6 +302,7 @@ impl TableCatalog {
             value_indices: self.value_indices.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
+            versioned: self.version.is_some(),
         }
     }
 

@@ -230,6 +230,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         let scan_ranges = {
             let scan_ranges = &seq_scan_node.scan_ranges;
             if scan_ranges.is_empty() {
@@ -265,6 +266,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,

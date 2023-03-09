@@ -92,7 +92,7 @@ public class ConnectorNodeMetrics {
         collector.start();
 
         try {
-            HTTPServer server = new HTTPServer(new InetSocketAddress("localhost", 60071), registry);
+            HTTPServer server = new HTTPServer(new InetSocketAddress("localhost", port), registry);
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)

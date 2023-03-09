@@ -51,6 +51,12 @@ pub struct TableDesc {
 
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    /// Whether the table is versioned. If `true`, column-aware row encoding will be used
+    /// to be compatible with schema changes.
+    ///
+    /// See `version` field in `TableCatalog` for more details.
+    pub versioned: bool,
 }
 
 impl TableDesc {
@@ -79,6 +85,7 @@ impl TableDesc {
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            versioned: self.versioned,
         }
     }
 

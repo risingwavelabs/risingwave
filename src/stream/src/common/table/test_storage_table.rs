@@ -310,6 +310,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
         TableOption::default(),
         value_indices,
         0,
+        false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
@@ -418,6 +419,7 @@ async fn test_batch_scan_with_value_indices() {
         TableOption::default(),
         value_indices,
         0,
+        false,
     );
     let mut epoch = EpochPair::new_test_epoch(1);
     state.init_epoch(epoch);
