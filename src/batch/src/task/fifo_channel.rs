@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
@@ -40,28 +39,20 @@ pub struct FifoReceiver {
 }
 
 impl ChanSender for FifoSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
-
-    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_> {
-        async {
-            self.sender
-                .send(chunk.map(DataChunkInChannel::new))
-                .await
-                .map_err(|_| SenderError)
-        }
+    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
+        self.sender
+            .send(chunk.map(DataChunkInChannel::new))
+            .await
+            .map_err(|_| SenderError)
     }
 }
 
 impl ChanReceiver for FifoReceiver {
-    type RecvFuture<'a> = impl Future<Output = Result<Option<DataChunkInChannel>>> + 'a;
-
-    fn recv(&mut self) -> Self::RecvFuture<'_> {
-        async move {
-            match self.receiver.recv().await {
-                Some(data_chunk) => Ok(data_chunk),
-                // Early close should be treated as error.
-                None => Err(InternalError("broken fifo_channel".to_string()).into()),
-            }
+    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
+        match self.receiver.recv().await {
+            Some(data_chunk) => Ok(data_chunk),
+            // Early close should be treated as error.
+            None => Err(InternalError("broken fifo_channel".to_string()).into()),
         }
     }
 }

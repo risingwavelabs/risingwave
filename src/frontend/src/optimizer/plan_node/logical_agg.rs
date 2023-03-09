@@ -324,8 +324,6 @@ impl LogicalAgg {
                     call.agg_kind,
                     AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
                 ) && !call.distinct
-                // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
-                //    && call.order_by_fields.is_empty()
             })
             && !self.is_agg_result_affected_by_order()
             && self.two_phase_agg_enabled()
@@ -480,7 +478,7 @@ impl LogicalAggBuilder {
             if agg_call.distinct {
                 has_distinct = true;
             }
-            if !agg_call.order_by_fields.is_empty() {
+            if !agg_call.order_by.is_empty() {
                 has_order_by = true;
             }
             if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
@@ -591,7 +589,7 @@ impl LogicalAggBuilder {
                 ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
             })?;
 
-        let order_by_fields: Vec<_> = order_by
+        let order_by: Vec<_> = order_by
             .sort_exprs
             .iter()
             .map(|e| {
@@ -622,7 +620,7 @@ impl LogicalAggBuilder {
                     return_type: left_return_type,
                     inputs: inputs.clone(),
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 });
                 let left = ExprImpl::from(left_ref).cast_implicit(return_type).unwrap();
@@ -635,7 +633,7 @@ impl LogicalAggBuilder {
                     return_type: right_return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 });
 
@@ -681,7 +679,7 @@ impl LogicalAggBuilder {
                         squared_input_expr.return_type(),
                     )],
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
                 .cast_implicit(return_type.clone())
@@ -696,7 +694,7 @@ impl LogicalAggBuilder {
                     return_type: sum_return_type,
                     inputs: inputs.clone(),
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
                 .cast_implicit(return_type.clone())
@@ -711,7 +709,7 @@ impl LogicalAggBuilder {
                     return_type: count_return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 }));
 
@@ -822,7 +820,7 @@ impl LogicalAggBuilder {
                     return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 })
                 .into()),
@@ -1007,7 +1005,7 @@ impl LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
-                agg_call.order_by_fields.iter_mut().for_each(|field| {
+                agg_call.order_by.iter_mut().for_each(|field| {
                     let i = &mut field.input;
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
@@ -1026,6 +1024,10 @@ impl LogicalAgg {
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
     }
 
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
@@ -1095,7 +1097,7 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_key().len();
                     let agg_call = self.agg_calls()[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
-                    tmp.extend(agg_call.order_by_fields.iter().map(|x| x.input.index()));
+                    tmp.extend(agg_call.order_by.iter().map(|x| x.input.index()));
                     // collect columns used in aggregate filter expressions
                     for i in &agg_call.filter.conjunctions {
                         tmp.union_with(&i.collect_input_refs(input_cnt));
@@ -1464,7 +1466,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
@@ -1583,7 +1585,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         };
         let agg: PlanRef = LogicalAgg::new(vec![agg_call], vec![1], values.into()).into();
@@ -1648,7 +1650,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
-                order_by_fields: vec![],
+                order_by: vec![],
                 filter: Condition::true_cond(),
             },
             PlanAggCall {
@@ -1656,7 +1658,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
-                order_by_fields: vec![],
+                order_by: vec![],
                 filter: Condition::true_cond(),
             },
         ];

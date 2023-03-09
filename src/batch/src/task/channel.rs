@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
-
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistributionMode;
@@ -31,13 +29,10 @@ use crate::task::hash_shuffle_channel::{
 };
 
 pub(super) trait ChanSender: Send {
-    type SendFuture<'a>: Future<Output = BatchResult<()>> + Send
-    where
-        Self: 'a;
     /// This function will block until there's enough resource to process the chunk.
     /// Currently, it will only be called from single thread.
     /// `None` is sent as a mark of the ending of channel.
-    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
+    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -60,12 +55,9 @@ impl ChanSenderImpl {
 }
 
 pub(super) trait ChanReceiver: Send {
-    type RecvFuture<'a>: Future<Output = Result<Option<DataChunkInChannel>>> + Send
-    where
-        Self: 'a;
     /// Returns `None` if there's no more data to read.
     /// Otherwise it will wait until there's data.
-    fn recv(&mut self) -> Self::RecvFuture<'_>;
+    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>>;
 }
 
 pub enum ChanReceiverImpl {

@@ -198,6 +198,7 @@ impl StreamMaterialize {
             read_prefix_len_hint,
             version,
             watermark_columns,
+            dist_key_in_pk: vec![],
         })
     }
 
@@ -252,6 +253,18 @@ impl fmt::Display for StreamMaterialize {
             pk_conflict_behavior = "ignore conflict";
         }
         builder.field("pk_conflict", &pk_conflict_behavior);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let watermark_column_names = watermark_columns
+                .ones()
+                .map(|i| table.columns()[i].name_with_hidden())
+                .join(", ");
+            builder.field(
+                "watermark_columns",
+                &format_args!("[{}]", watermark_column_names),
+            );
+        };
 
         builder.finish()
     }

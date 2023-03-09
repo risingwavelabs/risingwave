@@ -498,7 +498,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Notify frontend the task status.
         state_tx
             .send(TaskInfoResponse {
-                task_id: Some(TaskId::default().to_prost()),
+                task_id: Some(self.task_id.to_prost()),
                 task_status: task_status.into(),
                 error_message: err_str.unwrap_or("".to_string()),
             })
@@ -517,7 +517,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         state_tx: &mut StateReporter,
     ) -> Result<()> {
         let mut data_chunk_stream = root.execute();
-        let mut state = TaskStatus::Unspecified;
+        let state;
         let mut err_str = None;
         loop {
             tokio::select! {
@@ -537,6 +537,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                                 // stage, it may early stop receiving data from downstream, which
                                 // leads to close of channel.
                                 warn!("Task receiver closed!");
+                                state = TaskStatus::Finished;
                                 break;
                             },
                             x => {

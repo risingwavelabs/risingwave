@@ -39,7 +39,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let pk_indices = sink_desc
             .pk
             .iter()
-            .map(|pk| pk.index as usize)
+            .map(|pk| pk.column_index as usize)
             .collect::<Vec<_>>();
         let schema = sink_desc.columns.iter().map(Into::into).collect();
         // This field can be used to distinguish a specific actor in parallelism to prevent

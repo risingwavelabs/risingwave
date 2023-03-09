@@ -33,7 +33,7 @@ use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef};
+use crate::optimizer::{ExecutionModeDecider, OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -62,7 +62,8 @@ fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
         )
     }
 
-    let stmt_type = to_statement_type(stmt)?;
+    let stmt_type = StatementType::infer_from_statement(stmt)
+        .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
 
     Ok(matches!(
         stmt_type,
@@ -99,6 +100,10 @@ pub fn gen_batch_query_plan(
         }
     }
 
+    let mut logical = planner.plan(bound)?;
+    let schema = logical.schema();
+    let batch_plan = logical.gen_batch_plan()?;
+
     let query_mode = match (must_dist, must_local) {
         (true, true) => {
             return Err(ErrorCode::InternalError(
@@ -108,17 +113,27 @@ pub fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => session.config().get_query_mode(),
+        (false, false) => match session.config().get_query_mode() {
+            QueryMode::Auto => determine_query_mode(batch_plan.clone()),
+            QueryMode::Local => QueryMode::Local,
+            QueryMode::Distributed => QueryMode::Distributed,
+        },
     };
-
-    let mut logical = planner.plan(bound)?;
-    let schema = logical.schema();
 
     let physical = match query_mode {
-        QueryMode::Local => logical.gen_batch_local_plan()?,
-        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
     };
     Ok((physical, query_mode, schema))
+}
+
+fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
+    if ExecutionModeDecider::run_in_local_mode(batch_plan) {
+        QueryMode::Local
+    } else {
+        QueryMode::Distributed
+    }
 }
 
 pub async fn handle_query(
@@ -126,7 +141,8 @@ pub async fn handle_query(
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
-    let stmt_type = to_statement_type(&stmt)?;
+    let stmt_type = StatementType::infer_from_statement(&stmt)
+        .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
@@ -181,6 +197,7 @@ pub async fn handle_query(
             PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
         };
         match query_mode {
+            QueryMode::Auto => unreachable!(),
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
@@ -249,6 +266,7 @@ pub async fn handle_query(
 
         // update some metrics
         match query_mode {
+            QueryMode::Auto => unreachable!(),
             QueryMode::Local => {
                 session
                     .env()
@@ -285,38 +303,6 @@ pub async fn handle_query(
     Ok(PgResponse::new_for_stream_extra(
         stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
-}
-
-fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
-    use StatementType::*;
-
-    match stmt {
-        Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { returning, .. } => {
-            if returning.is_empty() {
-                Ok(INSERT)
-            } else {
-                Ok(INSERT_RETURNING)
-            }
-        }
-        Statement::Delete { returning, .. } => {
-            if returning.is_empty() {
-                Ok(DELETE)
-            } else {
-                Ok(DELETE_RETURNING)
-            }
-        }
-        Statement::Update { returning, .. } => {
-            if returning.is_empty() {
-                Ok(UPDATE)
-            } else {
-                Ok(UPDATE_RETURNING)
-            }
-        }
-        _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "unsupported statement type".to_string(),
-        ))),
-    }
 }
 
 pub async fn distribute_execute(

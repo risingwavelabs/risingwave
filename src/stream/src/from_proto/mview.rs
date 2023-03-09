@@ -38,7 +38,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let order_key = node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
 
         let table = node.get_table()?;
@@ -90,7 +90,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .get_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
 
         let table = node.get_table()?;

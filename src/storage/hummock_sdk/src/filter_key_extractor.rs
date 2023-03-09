@@ -159,7 +159,7 @@ impl SchemaFilterKeyExtractor {
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect();
 
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
@@ -174,9 +174,7 @@ impl SchemaFilterKeyExtractor {
             .pk
             .iter()
             .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
             })
             .collect();
 
@@ -351,8 +349,9 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
-    use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -438,13 +437,17 @@ mod tests {
                 },
             ],
             pk: vec![
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 1,
+                PbColumnOrder {
+                    column_index: 1,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                 },
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 3,
+                PbColumnOrder {
+                    column_index: 3,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                 },
             ],
             stream_key: vec![0],
@@ -459,13 +462,14 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_index: None,
-            row_id_index: Some(ColumnIndex { index: 0 }),
+            row_id_index: Some(0),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],
+            dist_key_in_pk: vec![],
         }
     }
 

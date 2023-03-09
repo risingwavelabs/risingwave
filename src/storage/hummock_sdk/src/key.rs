@@ -18,7 +18,7 @@ use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 
@@ -29,7 +29,7 @@ pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 // Max length for key overlap and diff length. See KeyPrefix::encode.
 pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
-pub type KeyPayloadType = Vec<u8>;
+pub type KeyPayloadType = Bytes;
 pub type TableKeyRange = (
     Bound<TableKey<KeyPayloadType>>,
     Bound<TableKey<KeyPayloadType>>,
@@ -278,35 +278,38 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Excluded(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Excluded(buf.freeze())
     } else {
         Unbounded
     }
 }
 
 /// Get the start bound of the given `prefix` when it is excluded from the range.
-pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Included(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Included(buf.freeze())
     } else {
         panic!("the prefix is the maximum value")
     }
 }
 
 /// Transform the given `prefix` to a key range.
-pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     if prefix.is_empty() {
         (Unbounded, Unbounded)
     } else {
-        (Included(prefix.to_vec()), end_bound_of_prefix(prefix))
+        (
+            Included(Bytes::copy_from_slice(prefix)),
+            end_bound_of_prefix(prefix),
+        )
     }
 }
 
@@ -314,23 +317,28 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
 pub fn prefixed_range<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     prefix: &[u8],
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
-    let start = match range.start_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    let prefixed = |b: &B| -> Bytes {
+        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
+        buf.extend_from_slice(prefix);
+        buf.extend_from_slice(b.as_ref());
+        buf.freeze()
+    };
+
+    let start: Bound<Bytes> = match range.start_bound() {
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
-        Unbounded => Included(prefix.to_vec()),
+        Unbounded => Included(Bytes::copy_from_slice(prefix)),
     };
 
     let end = match range.end_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
         Unbounded => end_bound_of_prefix(prefix),
     };

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package plan_common;
 
+import "common.proto";
 import "data.proto";
 
 option java_package = "com.risingwave.proto";
@@ -36,7 +37,7 @@ message StorageTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
   // TODO: may refactor primary key representations
-  repeated ColumnOrder pk = 3;
+  repeated common.ColumnOrder pk = 3;
   repeated uint32 dist_key_indices = 4;
   uint32 retention_seconds = 5;
   repeated uint32 value_indices = 6;
@@ -55,19 +56,6 @@ enum JoinType {
   LEFT_ANTI = 6;
   RIGHT_SEMI = 7;
   RIGHT_ANTI = 8;
-}
-
-enum OrderType {
-  ORDER_UNSPECIFIED = 0;
-  ASCENDING = 1;
-  DESCENDING = 2;
-}
-
-// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
-message ColumnOrder {
-  // maybe other name
-  OrderType order_type = 1;
-  uint32 index = 2;
 }
 
 enum RowFormatType {

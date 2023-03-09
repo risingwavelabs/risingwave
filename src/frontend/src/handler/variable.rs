@@ -45,7 +45,7 @@ pub fn handle_set(
         .session
         .set_config(&name.real_value().to_lowercase(), string_vals)?;
 
-    Ok(PgResponse::empty_result(StatementType::SET_OPTION))
+    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }
 
 pub(super) async fn handle_show(
@@ -65,7 +65,7 @@ pub(super) async fn handle_show(
     let row = Row::new(vec![Some(config_reader.get(&name)?.into())]);
 
     Ok(PgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
+        StatementType::SHOW_VARIABLE,
         None,
         vec![row].into(),
         vec![PgFieldDescriptor::new(
@@ -93,7 +93,7 @@ fn handle_show_all(handler_args: HandlerArgs) -> Result<RwPgResponse> {
         .collect_vec();
 
     Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
+        StatementType::SHOW_VARIABLE,
         None,
         rows.into(),
         vec![
@@ -130,7 +130,7 @@ async fn handle_show_system_params(handler_args: HandlerArgs) -> Result<RwPgResp
         .collect_vec();
 
     Ok(RwPgResponse::new_for_stream(
-        StatementType::SHOW_COMMAND,
+        StatementType::SHOW_VARIABLE,
         None,
         rows.into(),
         vec![
