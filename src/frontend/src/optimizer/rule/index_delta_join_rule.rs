@@ -81,7 +81,7 @@ impl Rule for IndexDeltaJoinRule {
                     .index_table
                     .pk
                     .iter()
-                    .map(|x| x.index)
+                    .map(|x| x.column_index)
                     .take(index.index_table.distribution_key.len())
                     .collect_vec();
 

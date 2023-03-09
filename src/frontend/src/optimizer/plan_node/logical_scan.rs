@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{ColumnOrder, Direction};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -36,7 +36,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -226,7 +226,7 @@ impl LogicalScan {
                     let idx = id_to_tb_idx
                         .get(&self.table_desc().columns[order.column_index].column_id)
                         .unwrap();
-                    FieldOrder::new(*idx, order.order_type)
+                    ColumnOrder::new(*idx, order.order_type)
                 })
                 .collect(),
         );
@@ -564,19 +564,16 @@ impl LogicalScan {
         &self,
         required_order: &Order,
     ) -> Option<Result<PlanRef>> {
-        if required_order.field_order.is_empty() {
+        if required_order.column_orders.is_empty() {
             return None;
         }
 
         let index = self.indexes().iter().find(|idx| {
             Order {
-                field_order: idx
+                column_orders: idx
                     .index_item
                     .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: idx_item.index,
-                        direct: Direction::Ascending,
-                    })
+                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::ascending()))
                     .collect(),
             }
             .satisfies(required_order)

@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use anyhow::{anyhow, Result};
 use futures::{pin_mut, StreamExt};
 use risingwave_common::catalog::TableOption;
-use risingwave_common::util::sort_util::OrderType;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_rpc_client::MetaClient;
@@ -64,12 +63,8 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table
-            .pk()
-            .iter()
-            .map(|x| OrderType::new(x.direct))
-            .collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
@@ -90,12 +85,8 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
             .iter()
             .map(|x| x.column_desc.column_id)
             .collect(),
-        table
-            .pk()
-            .iter()
-            .map(|x| OrderType::new(x.direct))
-            .collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
         table.value_indices.clone(),

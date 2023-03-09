@@ -19,9 +19,11 @@
 
 use std::collections::BTreeMap;
 
+use risingwave_common::util::sort_util::ColumnOrder;
+
 use super::{BoxedRule, Rule};
 use crate::optimizer::plan_node::{LogicalLimit, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 
 pub struct TopNOnIndexRule {}
@@ -34,7 +36,7 @@ impl Rule for TopNOnIndexRule {
             return None;
         }
         let order = logical_top_n.topn_order();
-        if order.field_order.is_empty() {
+        if order.column_orders.is_empty() {
             return None;
         }
         let output_col_map = logical_scan
@@ -69,19 +71,21 @@ impl TopNOnIndexRule {
         let index = logical_scan.indexes().iter().find(|idx| {
             let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
-                field_order: idx
+                column_orders: idx
                     .index_table
                     .pk()
                     .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: *output_col_map
-                            .get(
-                                s2p_mapping
-                                    .get(&idx_item.index)
-                                    .expect("should be in s2p mapping"),
-                            )
-                            .unwrap_or(&unmatched_idx),
-                        direct: idx_item.direct,
+                    .map(|idx_item| {
+                        ColumnOrder::new(
+                            *output_col_map
+                                .get(
+                                    s2p_mapping
+                                        .get(&idx_item.column_index)
+                                        .expect("should be in s2p mapping"),
+                                )
+                                .unwrap_or(&unmatched_idx),
+                            idx_item.order_type,
+                        )
                     })
                     .collect(),
             }
@@ -126,13 +130,15 @@ impl TopNOnIndexRule {
         let unmatched_idx = output_col_map.len();
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
-            field_order: primary_key
+            column_orders: primary_key
                 .into_iter()
-                .map(|op| FieldOrder {
-                    index: *output_col_map
-                        .get(&op.column_index)
-                        .unwrap_or(&unmatched_idx),
-                    direct: op.order_type.direction(),
+                .map(|o| {
+                    ColumnOrder::new(
+                        *output_col_map
+                            .get(&o.column_index)
+                            .unwrap_or(&unmatched_idx),
+                        o.order_type,
+                    )
                 })
                 .collect::<Vec<_>>(),
         };

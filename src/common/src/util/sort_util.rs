@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::cmp::{Ord, Ordering};
+use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
@@ -94,11 +96,17 @@ impl OrderType {
     }
 }
 
+impl fmt::Display for OrderType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.direction)
+    }
+}
+
 /// Column index with an order type (ASC or DESC). Used to represent a sort key
 /// (`Vec<ColumnOrder>`).
 ///
 /// Corresponds to protobuf [`PbColumnOrder`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct ColumnOrder {
     pub column_index: usize,
     pub order_type: OrderType,
@@ -124,6 +132,35 @@ impl ColumnOrder {
             column_index: self.column_index as _,
             order_type: Some(self.order_type.to_protobuf()),
         }
+    }
+}
+
+impl fmt::Display for ColumnOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${} {}", self.column_index, self.order_type)
+    }
+}
+
+impl fmt::Debug for ColumnOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+pub struct ColumnOrderDisplay<'a> {
+    pub column_order: &'a ColumnOrder,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for ColumnOrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.column_order;
+        write!(
+            f,
+            "{} {}",
+            FieldDisplay(self.input_schema.fields.get(that.column_index).unwrap()),
+            that.order_type
+        )
     }
 }
 

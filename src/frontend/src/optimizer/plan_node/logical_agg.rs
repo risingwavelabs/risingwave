@@ -19,7 +19,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
-use risingwave_common::util::sort_util::Direction;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
@@ -40,9 +40,7 @@ use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{
-    Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
-};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -334,29 +332,26 @@ impl LogicalAgg {
     // aggregation and use sort aggregation. The data type of the columns need to be int32
     fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
         let group_key_order = Order {
-            field_order: self
+            column_orders: self
                 .group_key()
                 .iter()
                 .map(|group_by_idx| {
-                    let direct = if required_order.field_order.contains(&FieldOrder {
-                        index: *group_by_idx,
-                        direct: Direction::Descending,
-                    }) {
+                    let order_type = if required_order
+                        .column_orders
+                        .contains(&ColumnOrder::new(*group_by_idx, OrderType::descending()))
+                    {
                         // If output requires descending order, use descending order
-                        Direction::Descending
+                        OrderType::descending()
                     } else {
                         // In all other cases use ascending order
-                        Direction::Ascending
+                        OrderType::ascending()
                     };
-                    FieldOrder {
-                        index: *group_by_idx,
-                        direct,
-                    }
+                    ColumnOrder::new(*group_by_idx, order_type)
                 })
                 .collect(),
         };
         return (
-            !required_order.field_order.is_empty()
+            !required_order.column_orders.is_empty()
                 && group_key_order.satisfies(required_order)
                 && self.group_key().iter().all(|group_by_idx| {
                     self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
@@ -373,9 +368,9 @@ impl LogicalAgg {
             new_logical
                 .input()
                 .order()
-                .field_order
+                .column_orders
                 .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
+                .any(|order| order.column_index == *group_by_idx)
                 && new_logical
                     .input()
                     .schema()

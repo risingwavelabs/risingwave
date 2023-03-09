@@ -116,7 +116,7 @@ impl StreamSink {
             name,
             definition,
             columns,
-            pk: pk.iter().map(|k| k.to_column_order()).collect_vec(),
+            pk,
             stream_key,
             distribution_key,
             properties: properties.into_inner(),

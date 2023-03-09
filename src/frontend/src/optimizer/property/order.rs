@@ -15,46 +15,46 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::Result;
-use risingwave_common::util::sort_util::{ColumnOrder, Direction, OrderType};
-use risingwave_pb::common::{PbColumnOrder, PbOrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
+use risingwave_pb::common::PbColumnOrder;
 
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Order {
-    pub field_order: Vec<FieldOrder>,
+    pub column_orders: Vec<ColumnOrder>,
 }
 
 impl Order {
-    pub const fn new(field_order: Vec<FieldOrder>) -> Self {
-        Self { field_order }
+    pub const fn new(column_orders: Vec<ColumnOrder>) -> Self {
+        Self { column_orders }
     }
 
     pub fn to_protobuf(&self) -> Vec<PbColumnOrder> {
-        self.field_order
+        self.column_orders
             .iter()
-            .map(FieldOrder::to_protobuf)
+            .map(ColumnOrder::to_protobuf)
             .collect_vec()
     }
 
     pub fn len(&self) -> usize {
-        self.field_order.len()
+        self.column_orders.len()
     }
 }
 
 impl fmt::Display for Order {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("[")?;
-        for (i, field_order) in self.field_order.iter().enumerate() {
+        write!(f, "[")?;
+        for (i, column_order) in self.column_orders.iter().enumerate() {
             if i > 0 {
-                f.write_str(", ")?;
+                write!(f, ", ")?;
             }
-            field_order.fmt(f)?;
+            write!(f, "{}", column_order)?;
         }
-        f.write_str("]")
+        write!(f, "]")
     }
 }
 
@@ -63,126 +63,29 @@ pub struct OrderDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl OrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.order;
-        f.write_str("[")?;
-        for (i, field_order) in that.field_order.iter().enumerate() {
-            if i > 0 {
-                f.write_str(", ")?;
-            }
-            FieldOrderDisplay {
-                field_order,
-                input_schema: self.input_schema,
-            }
-            .fmt(f)?;
-        }
-        f.write_str("]")
-    }
-}
-
 impl fmt::Display for OrderDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt(f)
-    }
-}
-
-impl fmt::Debug for OrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt(f)
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct FieldOrder {
-    pub index: usize,
-    pub direct: Direction,
-}
-
-impl std::fmt::Debug for FieldOrder {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${} {}", self.index, self.direct)
-    }
-}
-
-pub struct FieldOrderDisplay<'a> {
-    pub field_order: &'a FieldOrder,
-    pub input_schema: &'a Schema,
-}
-
-impl FieldOrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.field_order;
-        write!(
-            f,
-            "{} {}",
-            FieldDisplay(self.input_schema.fields.get(that.index).unwrap()),
-            that.direct
-        )
-    }
-}
-
-impl fmt::Debug for FieldOrderDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.fmt(f)
-    }
-}
-
-impl FieldOrder {
-    pub fn new(index: usize, order_type: OrderType) -> Self {
-        Self {
-            index,
-            direct: order_type.direction(),
+        let that = self.order;
+        write!(f, "[")?;
+        for (i, column_order) in that.column_orders.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(
+                f,
+                "{}",
+                ColumnOrderDisplay {
+                    column_order,
+                    input_schema: self.input_schema,
+                }
+            )?;
         }
-    }
-
-    pub fn ascending(index: usize) -> Self {
-        Self {
-            index,
-            direct: Direction::Ascending,
-        }
-    }
-
-    pub fn descending(index: usize) -> Self {
-        Self {
-            index,
-            direct: Direction::Descending,
-        }
-    }
-
-    pub fn to_protobuf(&self) -> PbColumnOrder {
-        PbColumnOrder {
-            column_index: self.index as _,
-            order_type: Some(PbOrderType {
-                direction: self.direct.to_protobuf() as _,
-            }),
-        }
-    }
-
-    pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
-        Self {
-            index: column_order.column_index as _,
-            direct: Direction::from_protobuf(&column_order.get_order_type().unwrap().direction()),
-        }
-    }
-
-    // TODO(rc): unify them
-    pub fn to_column_order(&self) -> ColumnOrder {
-        ColumnOrder {
-            column_index: self.index,
-            order_type: OrderType::new(self.direct),
-        }
-    }
-}
-
-impl fmt::Display for FieldOrder {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "${} {}", self.index, self.direct)
+        write!(f, "]")
     }
 }
 
 const ANY_ORDER: Order = Order {
-    field_order: vec![],
+    column_orders: vec![],
 };
 
 impl Order {
@@ -200,11 +103,11 @@ impl Order {
     }
 
     pub fn satisfies(&self, other: &Order) -> bool {
-        if self.field_order.len() < other.field_order.len() {
+        if self.column_orders.len() < other.column_orders.len() {
             return false;
         }
         #[expect(clippy::disallowed_methods)]
-        for (order, other_order) in self.field_order.iter().zip(other.field_order.iter()) {
+        for (order, other_order) in self.column_orders.iter().zip(other.column_orders.iter()) {
             if order != other_order {
                 return false;
             }
@@ -219,53 +122,55 @@ impl Order {
 
     #[inline(always)]
     pub fn is_any(&self) -> bool {
-        self.field_order.is_empty()
+        self.column_orders.is_empty()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Direction, FieldOrder, Order};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+
+    use super::Order;
 
     #[test]
     fn test_order_satisfy() {
         let o1 = Order {
-            field_order: vec![
-                FieldOrder {
-                    index: 0,
-                    direct: Direction::Ascending,
+            column_orders: vec![
+                ColumnOrder {
+                    column_index: 0,
+                    order_type: OrderType::ascending(),
                 },
-                FieldOrder {
-                    index: 1,
-                    direct: Direction::Descending,
+                ColumnOrder {
+                    column_index: 1,
+                    order_type: OrderType::descending(),
                 },
-                FieldOrder {
-                    index: 2,
-                    direct: Direction::Ascending,
+                ColumnOrder {
+                    column_index: 2,
+                    order_type: OrderType::ascending(),
                 },
             ],
         };
         let o2 = Order {
-            field_order: vec![
-                FieldOrder {
-                    index: 0,
-                    direct: Direction::Ascending,
+            column_orders: vec![
+                ColumnOrder {
+                    column_index: 0,
+                    order_type: OrderType::ascending(),
                 },
-                FieldOrder {
-                    index: 1,
-                    direct: Direction::Descending,
+                ColumnOrder {
+                    column_index: 1,
+                    order_type: OrderType::descending(),
                 },
             ],
         };
         let o3 = Order {
-            field_order: vec![
-                FieldOrder {
-                    index: 0,
-                    direct: Direction::Ascending,
+            column_orders: vec![
+                ColumnOrder {
+                    column_index: 0,
+                    order_type: OrderType::ascending(),
                 },
-                FieldOrder {
-                    index: 1,
-                    direct: Direction::Ascending,
+                ColumnOrder {
+                    column_index: 1,
+                    order_type: OrderType::ascending(),
                 },
             ],
         };

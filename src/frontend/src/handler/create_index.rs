@@ -33,7 +33,7 @@ use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -323,7 +323,7 @@ fn assemble_materialize(
             index_columns
                 .iter()
                 .enumerate()
-                .map(|(i, column_order)| FieldOrder::new(i, column_order.order_type))
+                .map(|(i, column_order)| ColumnOrder::new(i, column_order.order_type))
                 .collect(),
         ),
         project_required_cols,

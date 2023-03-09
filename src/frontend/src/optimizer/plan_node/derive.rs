@@ -18,10 +18,10 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema, USER_COLUMN_ID_OFFSET};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::sort_util::Direction;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::PlanRef;
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 
 pub(crate) fn derive_columns(
     input_schema: &Schema,
@@ -80,7 +80,7 @@ pub(crate) fn derive_pk(
     input: PlanRef,
     user_order_by: Order,
     columns: &[ColumnCatalog],
-) -> (Vec<FieldOrder>, Vec<usize>) {
+) -> (Vec<ColumnOrder>, Vec<usize>) {
     // Note(congyi): avoid pk duplication
     let stream_key = input.logical_pk().iter().copied().unique().collect_vec();
     let schema = input.schema();
@@ -101,9 +101,9 @@ pub(crate) fn derive_pk(
     let mut in_order = FixedBitSet::with_capacity(schema.len());
     let mut pk = vec![];
 
-    for field in &user_order_by.field_order {
-        let idx = field.index;
-        pk.push(field.clone());
+    for order in &user_order_by.column_orders {
+        let idx = order.column_index;
+        pk.push(order.clone());
         in_order.insert(idx);
     }
 
@@ -111,10 +111,7 @@ pub(crate) fn derive_pk(
         if in_order.contains(idx) {
             continue;
         }
-        pk.push(FieldOrder {
-            index: idx,
-            direct: Direction::Ascending,
-        });
+        pk.push(ColumnOrder::new(idx, OrderType::ascending()));
         in_order.insert(idx);
     }
 

@@ -21,7 +21,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::Direction;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
 use super::{BoxedRule, Rule};
@@ -29,7 +29,7 @@ use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalLimit, LogicalScan, PlanAggCall, PlanTreeNodeUnary,
 };
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::PlanRef;
 use crate::utils::Condition;
 
@@ -65,14 +65,14 @@ impl Rule for MinMaxOnIndexRule {
                 .map(|(id, col)| (col, id))
                 .collect::<BTreeMap<_, _>>();
             let order = Order {
-                field_order: vec![FieldOrder {
-                    index: calls.first()?.inputs.first()?.index(),
-                    direct: if kind == AggKind::Min {
-                        Direction::Ascending
+                column_orders: vec![ColumnOrder::new(
+                    calls.first()?.inputs.first()?.index(),
+                    if kind == AggKind::Min {
+                        OrderType::ascending()
                     } else {
-                        Direction::Descending
+                        OrderType::descending()
                     },
-                }],
+                )],
             };
             if let Some(p) =
                 self.try_on_index(logical_agg, logical_scan.clone(), &order, &output_col_map)
@@ -103,19 +103,21 @@ impl MinMaxOnIndexRule {
         let index = logical_scan.indexes().iter().find(|idx| {
             let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
-                field_order: idx
+                column_orders: idx
                     .index_table
                     .pk()
                     .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: *output_col_map
-                            .get(
-                                s2p_mapping
-                                    .get(&idx_item.index)
-                                    .expect("should be in s2p mapping"),
-                            )
-                            .unwrap_or(&unmatched_idx),
-                        direct: idx_item.direct,
+                    .map(|idx_item| {
+                        ColumnOrder::new(
+                            *output_col_map
+                                .get(
+                                    s2p_mapping
+                                        .get(&idx_item.column_index)
+                                        .expect("should be in s2p mapping"),
+                                )
+                                .unwrap_or(&unmatched_idx),
+                            idx_item.order_type,
+                        )
                     })
                     .collect(),
             }
@@ -184,13 +186,15 @@ impl MinMaxOnIndexRule {
         let unmatched_idx = output_col_map.len();
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {
-            field_order: primary_key
+            column_orders: primary_key
                 .into_iter()
-                .map(|op| FieldOrder {
-                    index: *output_col_map
-                        .get(&op.column_index)
-                        .unwrap_or(&unmatched_idx),
-                    direct: op.order_type.direction(),
+                .map(|o| {
+                    ColumnOrder::new(
+                        *output_col_map
+                            .get(&o.column_index)
+                            .unwrap_or(&unmatched_idx),
+                        o.order_type,
+                    )
                 })
                 .collect::<Vec<_>>(),
         };

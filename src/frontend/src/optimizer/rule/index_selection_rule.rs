@@ -207,10 +207,14 @@ impl IndexSelectionRule {
             .zip_eq_fast(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
-                    x.index,
-                    index.index_table.columns[x.index].data_type().clone(),
-                    y.index + index.index_item.len(),
-                    index.primary_table.columns[y.index].data_type().clone(),
+                    x.column_index,
+                    index.index_table.columns[x.column_index]
+                        .data_type()
+                        .clone(),
+                    y.column_index + index.index_item.len(),
+                    index.primary_table.columns[y.column_index]
+                        .data_type()
+                        .clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -477,7 +481,7 @@ impl IndexSelectionRule {
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
-                        if index.index_table.pk()[0].index != idx {
+                        if index.index_table.pk()[0].column_index != idx {
                             // not match, prune this index
                             continue;
                         }
@@ -561,7 +565,7 @@ impl IndexSelectionRule {
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
-                    .map(|x| x.index)
+                    .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.table_desc().into(),
                 vec![],

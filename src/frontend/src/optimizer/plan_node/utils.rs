@@ -18,18 +18,17 @@ use std::{fmt, vec};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::FieldOrder;
 use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
-    pk: Vec<FieldOrder>,
+    pk: Vec<ColumnOrder>,
     properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
@@ -72,11 +71,8 @@ impl TableCatalogBuilder {
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
-    pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk.push(FieldOrder {
-            index,
-            direct: order_type.direction(),
-        });
+    pub fn add_order_column(&mut self, column_index: usize, order_type: OrderType) {
+        self.pk.push(ColumnOrder::new(column_index, order_type));
     }
 
     pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {

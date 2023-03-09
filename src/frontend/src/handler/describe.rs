@@ -60,7 +60,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .table_catalog
                     .pk()
                     .iter()
-                    .map(|idx| t.table_catalog.columns[idx.index].clone())
+                    .map(|x| t.table_catalog.columns[x.column_index].clone())
                     .collect_vec();
                 (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
             }
@@ -117,10 +117,10 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         let index_columns_with_ordering = index_table
             .pk
             .iter()
-            .filter(|x| !index_table.columns[x.index].is_hidden)
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
             .map(|x| {
-                let index_column_name = index_table.columns[x.index].name().to_string();
-                if Direction::Descending == x.direct {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                if Direction::Descending == x.order_type.direction() {
                     index_column_name + " DESC"
                 } else {
                     index_column_name
@@ -131,7 +131,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         let pk_column_index_set = index_table
             .pk
             .iter()
-            .map(|x| x.index)
+            .map(|x| x.column_index)
             .collect::<HashSet<_>>();
 
         let include_columns = index_table

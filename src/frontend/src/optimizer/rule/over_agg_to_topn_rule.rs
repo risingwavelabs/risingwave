@@ -14,13 +14,14 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::Rule;
 use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
 use crate::optimizer::plan_node::{
     LogicalFilter, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
 };
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::PlanRef;
 
@@ -93,12 +94,9 @@ impl Rule for OverAggToTopNRule {
             offset,
             with_ties,
             Order {
-                field_order: order_by
+                column_orders: order_by
                     .iter()
-                    .map(|f| FieldOrder {
-                        index: f.input.index,
-                        direct: f.direction,
-                    })
+                    .map(|f| ColumnOrder::new(f.input.index, OrderType::new(f.direction)))
                     .collect(),
             },
             partition_by.iter().map(|i| i.index).collect(),
