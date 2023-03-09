@@ -33,7 +33,9 @@ public class PostgresSourceConfig implements SourceConfig {
         }
 
         String dbName = userProps.getNonNull(ConnectorConfig.DB_NAME);
-        String schema = userProps.getOrDefault(ConnectorConfig.PG_SCHEMA_NAME, ConnectorConfig.PG_DEFAULT_SCHEMA);
+        String schema =
+                userProps.getOrDefault(
+                        ConnectorConfig.PG_SCHEMA_NAME, ConnectorConfig.PG_DEFAULT_SCHEMA);
         String table = userProps.getNonNull(ConnectorConfig.TABLE_NAME);
 
         // Begin of connector configs
@@ -56,8 +58,10 @@ public class PostgresSourceConfig implements SourceConfig {
         // Slot names must conform to PostgreSQL replication slot naming rules,
         // which state: "Each replication slot has a name, which can contain lower-case letters,
         // numbers, and the underscore character."
-        props.setProperty("slot.name", userProps.getOrCompute(ConnectorConfig.PG_SLOT_NAME,
-                PostgresSourceConfig::generateReplicaSlot));
+        props.setProperty(
+                "slot.name",
+                userProps.getOrCompute(
+                        ConnectorConfig.PG_SLOT_NAME, PostgresSourceConfig::generateReplicaSlot));
 
         // Sending heartbeat messages enables the connector to send the latest retrieved LSN to the
         // database, which allows the database to reclaim disk space being
@@ -67,7 +71,6 @@ public class PostgresSourceConfig implements SourceConfig {
         props.setProperty(
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.name(),
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.defaultValueAsString());
-
 
         String tableFilter = schema + "." + table;
         props.setProperty("table.include.list", tableFilter);
@@ -79,7 +82,11 @@ public class PostgresSourceConfig implements SourceConfig {
                         + ":"
                         + userProps.getNonNull(ConnectorConfig.PORT)
                         + ":"
-                        + dbName + "." + schema + "." + table;
+                        + dbName
+                        + "."
+                        + schema
+                        + "."
+                        + table;
         props.setProperty("name", sourceName);
 
         // pass through debezium properties if any

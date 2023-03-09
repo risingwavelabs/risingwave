@@ -5,7 +5,6 @@ import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.sourcenode.mysql.MySqlSourceConfig;
 import com.risingwave.sourcenode.postgres.PostgresSourceConfig;
-import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

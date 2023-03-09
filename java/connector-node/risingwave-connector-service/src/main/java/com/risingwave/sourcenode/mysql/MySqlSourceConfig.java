@@ -5,7 +5,6 @@ import com.risingwave.connector.api.source.SourceConfig;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.sourcenode.common.DebeziumCdcUtils;
-import java.util.Map;
 import java.util.Properties;
 
 /** MySQL Source Config */
