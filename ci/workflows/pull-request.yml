@@ -20,6 +20,9 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
+  - label: ":pipeline: Pipeline upload"
+    command: buildkite-agent main-cron upload
+
   - label: "check ci image rebuild"
     plugins:
       - chronotc/monorepo-diff#v2.3.0:
