@@ -1475,7 +1475,7 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        let start_off = if self.index >= 10 { self.index - 10 } else { 0 };
+        let start_off = self.index.saturating_sub(10);
         let near_tokens = &self.tokens[start_off..self.index];
         struct TokensDisplay<'a>(&'a [Token]);
         impl<'a> fmt::Display for TokensDisplay<'a> {
