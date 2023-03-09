@@ -1475,7 +1475,24 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        parser_err!(format!("Expected {}, found: {}", expected, found))
+        let near_tokens = if self.index >= 10 {
+            &self.tokens[..self.index - 10]
+        } else {
+            &self.tokens[..self.index]
+        };
+        struct TokensDisplay<'a>(&'a [Token]);
+        impl<'a> fmt::Display for TokensDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for token in self.0 {
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
+            }
+        }
+        parser_err!(format!(
+            "Near \"{}\", Expected {}, found: {}",
+            TokensDisplay(near_tokens), expected, found
+        ))
     }
 
     /// Look for an expected keyword and consume it if it exists
