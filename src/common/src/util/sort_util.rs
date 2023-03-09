@@ -15,7 +15,7 @@
 use std::cmp::{Ord, Ordering};
 use std::sync::Arc;
 
-use risingwave_pb::plan_common::{ColumnOrder, OrderType as ProstOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::error::ErrorCode::InternalError;
@@ -28,25 +28,27 @@ pub enum OrderType {
 }
 
 impl OrderType {
-    pub fn from_prost(order_type: &ProstOrderType) -> OrderType {
+    // TODO(rc): from `PbOrderType`
+    pub fn from_protobuf(order_type: &PbDirection) -> OrderType {
         match order_type {
-            ProstOrderType::Ascending => OrderType::Ascending,
-            ProstOrderType::Descending => OrderType::Descending,
-            ProstOrderType::OrderUnspecified => unreachable!(),
+            PbDirection::Ascending => OrderType::Ascending,
+            PbDirection::Descending => OrderType::Descending,
+            PbDirection::Unspecified => unreachable!(),
         }
     }
 
-    pub fn to_prost(self) -> ProstOrderType {
+    // TODO(rc): to `PbOrderType`
+    pub fn to_protobuf(self) -> PbDirection {
         match self {
-            OrderType::Ascending => ProstOrderType::Ascending,
-            OrderType::Descending => ProstOrderType::Descending,
+            OrderType::Ascending => PbDirection::Ascending,
+            OrderType::Descending => PbDirection::Descending,
         }
     }
 }
 
 /// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
 ///
-/// Corresponds to protobuf [`ColumnOrder`].
+/// Corresponds to protobuf [`PbColumnOrder`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OrderPair {
     pub column_idx: usize,
@@ -61,18 +63,21 @@ impl OrderPair {
         }
     }
 
-    pub fn from_prost(column_order: &ColumnOrder) -> Self {
-        let order_type: ProstOrderType = ProstOrderType::from_i32(column_order.order_type).unwrap();
+    pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         OrderPair {
-            order_type: OrderType::from_prost(&order_type),
-            column_idx: column_order.index as usize,
+            column_idx: column_order.column_index as _,
+            order_type: OrderType::from_protobuf(
+                &column_order.get_order_type().unwrap().direction(),
+            ),
         }
     }
 
-    pub fn to_protobuf(&self) -> ColumnOrder {
-        ColumnOrder {
-            order_type: self.order_type.to_prost() as i32,
-            index: self.column_idx as u32,
+    pub fn to_protobuf(&self) -> PbColumnOrder {
+        PbColumnOrder {
+            column_index: self.column_idx as _,
+            order_type: Some(PbOrderType {
+                direction: self.order_type.to_protobuf() as _,
+            }),
         }
     }
 }

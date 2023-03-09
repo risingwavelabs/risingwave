@@ -13,19 +13,21 @@
 // limitations under the License.
 
 use std::fmt;
+use std::num::NonZeroUsize;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_expr::ExprError;
 
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::{ExprType, FunctionCall, InputRef};
+use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -136,11 +138,11 @@ impl LogicalHopWindow {
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
-    fn window_start_col_idx(&self) -> usize {
+    pub fn window_start_col_idx(&self) -> usize {
         self.input().schema().len()
     }
 
-    fn window_end_col_idx(&self) -> usize {
+    pub fn window_end_col_idx(&self) -> usize {
         self.window_start_col_idx() + 1
     }
 
@@ -154,7 +156,7 @@ impl LogicalHopWindow {
             .composite(&self.internal2output_col_mapping())
     }
 
-    fn internal_column_num(&self) -> usize {
+    pub fn internal_column_num(&self) -> usize {
         self.window_start_col_idx() + 2
     }
 
@@ -191,6 +193,10 @@ impl LogicalHopWindow {
         self.core.fmt_with_name(f, name)
     }
 
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
+    }
+
     /// Map the order of the input to use the updated indices
     pub fn get_out_column_index_order(&self) -> Order {
         self.i2o_col_mapping()
@@ -198,8 +204,99 @@ impl LogicalHopWindow {
     }
 
     /// Get output indices
-    fn output_indices(&self) -> &Vec<usize> {
+    pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
+    }
+
+    fn derive_window_start_and_end_exprs(&self) -> Result<(Vec<ExprImpl>, Vec<ExprImpl>)> {
+        let generic::HopWindow::<PlanRef> {
+            window_size,
+            window_slide,
+            time_col,
+            ..
+        } = &self.core;
+        let units = window_size
+            .exact_div(window_slide)
+            .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
+            .ok_or_else(|| ExprError::InvalidParam {
+                name: "window",
+                reason: format!(
+                    "window_size {} cannot be divided by window_slide {}",
+                    window_size, window_slide
+                ),
+            })?
+            .get();
+        let window_size_expr = Literal::new(Some((*window_size).into()), DataType::Interval).into();
+        let window_slide_expr: ExprImpl =
+            Literal::new(Some((*window_slide).into()), DataType::Interval).into();
+        let window_size_sub_slide = FunctionCall::new(
+            ExprType::Subtract,
+            vec![window_size_expr, window_slide_expr.clone()],
+        )?
+        .into();
+
+        let time_col_shifted = FunctionCall::new(
+            ExprType::Subtract,
+            vec![
+                ExprImpl::InputRef(Box::new(time_col.clone())),
+                window_size_sub_slide,
+            ],
+        )?
+        .into();
+
+        let hop_start: ExprImpl = FunctionCall::new(
+            ExprType::TumbleStart,
+            vec![time_col_shifted, window_slide_expr],
+        )?
+        .into();
+
+        let mut window_start_exprs = Vec::with_capacity(units);
+        let mut window_end_exprs = Vec::with_capacity(units);
+        for i in 0..units {
+            {
+                let window_start_offset =
+                    window_slide
+                        .checked_mul_int(i)
+                        .ok_or_else(|| ExprError::InvalidParam {
+                            name: "window",
+                            reason: format!(
+                                "window_slide {} cannot be multiplied by {}",
+                                window_slide, i
+                            ),
+                        })?;
+                let window_start_offset_expr =
+                    Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
+                let window_start_expr = FunctionCall::new(
+                    ExprType::Add,
+                    vec![hop_start.clone(), window_start_offset_expr],
+                )?
+                .into();
+                window_start_exprs.push(window_start_expr);
+            }
+            {
+                let window_end_offset =
+                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
+                        ExprError::InvalidParam {
+                            name: "window",
+                            reason: format!(
+                                "window_slide {} cannot be multiplied by {}",
+                                window_slide,
+                                i + units
+                            ),
+                        }
+                    })?;
+                let window_end_offset_expr =
+                    Literal::new(Some(window_end_offset.into()), DataType::Interval).into();
+                let window_end_expr = FunctionCall::new(
+                    ExprType::Add,
+                    vec![hop_start.clone(), window_end_offset_expr],
+                )?
+                .into();
+                window_end_exprs.push(window_end_expr);
+            }
+        }
+        assert_eq!(window_start_exprs.len(), window_end_exprs.len());
+        Ok((window_start_exprs, window_end_exprs))
     }
 }
 
@@ -366,7 +463,9 @@ impl ToBatch for LogicalHopWindow {
     fn to_batch(&self) -> Result<PlanRef> {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
-        Ok(BatchHopWindow::new(new_logical).into())
+        let (window_start_exprs, window_end_exprs) =
+            new_logical.derive_window_start_and_end_exprs()?;
+        Ok(BatchHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 }
 
@@ -374,7 +473,9 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
-        Ok(StreamHopWindow::new(new_logical).into())
+        let (window_start_exprs, window_end_exprs) =
+            new_logical.derive_window_start_and_end_exprs()?;
+        Ok(StreamHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 
     fn logical_rewrite_for_stream(

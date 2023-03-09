@@ -91,6 +91,7 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
         TableOption::build_table_option(&HashMap::new()),
         table.value_indices.clone(),
         table.read_prefix_len_hint,
+        table.version.is_some(),
     )
 }
 

@@ -128,7 +128,7 @@ impl Rule for ApplyAggTransposeRule {
                     input_ref.shift_with_offset(offset);
                 });
                 agg_call
-                    .order_by_fields
+                    .order_by
                     .iter_mut()
                     .for_each(|o| o.input.shift_with_offset(offset));
                 agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut shift_index);

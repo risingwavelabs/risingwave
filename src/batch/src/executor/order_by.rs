@@ -67,7 +67,7 @@ impl BoxedExecutorBuilder for SortExecutor {
         let order_pairs = order_by_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
         Ok(Box::new(SortExecutor::new(
             child,

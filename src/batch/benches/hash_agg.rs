@@ -44,7 +44,7 @@ fn create_agg_call(
             .collect(),
         return_type: Some(return_type.to_protobuf()),
         distinct: false,
-        order_by_fields: vec![],
+        order_by: vec![],
         filter: None,
     }
 }

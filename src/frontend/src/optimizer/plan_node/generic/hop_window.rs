@@ -16,7 +16,7 @@ use std::fmt;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::types::{DataType, IntervalUnit, IntervalUnitDisplay};
 
 use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
@@ -104,46 +104,63 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         )
     }
 
-    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
         let output_type = DataType::window_of(&self.time_col.data_type).unwrap();
-        write!(
-            f,
-            "{} {{ time_col: {}, slide: {}, size: {}, output: {} }}",
-            name,
-            InputRefDisplay {
+        builder.field(
+            "time_col",
+            &InputRefDisplay {
                 input_ref: &self.time_col,
-                input_schema: self.input.schema()
+                input_schema: self.input.schema(),
             },
-            self.window_slide,
-            self.window_size,
-            if self
-                .output_indices
-                .iter()
-                .copied()
-                // Behavior is the same as `LogicalHopWindow::internal_column_num`
-                .eq(0..(self.input.schema().len() + 2))
-            {
-                "all".to_string()
-            } else {
-                let original_schema: Schema = self
-                    .input
-                    .schema()
-                    .clone()
-                    .into_fields()
-                    .into_iter()
-                    .chain([
-                        Field::with_name(output_type.clone(), "window_start"),
-                        Field::with_name(output_type, "window_end"),
-                    ])
-                    .collect();
-                format!(
-                    "{:?}",
-                    &IndicesDisplay {
-                        indices: &self.output_indices,
-                        input_schema: &original_schema,
-                    }
-                )
+        );
+
+        builder.field(
+            "slide",
+            &IntervalUnitDisplay {
+                core: &self.window_slide,
             },
-        )
+        );
+
+        builder.field(
+            "size",
+            &IntervalUnitDisplay {
+                core: &self.window_size,
+            },
+        );
+
+        if self
+            .output_indices
+            .iter()
+            .copied()
+            // Behavior is the same as `LogicalHopWindow::internal_column_num`
+            .eq(0..(self.input.schema().len() + 2))
+        {
+            builder.field("output", &format_args!("all"));
+        } else {
+            let original_schema: Schema = self
+                .input
+                .schema()
+                .clone()
+                .into_fields()
+                .into_iter()
+                .chain([
+                    Field::with_name(output_type.clone(), "window_start"),
+                    Field::with_name(output_type, "window_end"),
+                ])
+                .collect();
+            builder.field(
+                "output",
+                &IndicesDisplay {
+                    indices: &self.output_indices,
+                    input_schema: &original_schema,
+                },
+            );
+        }
+    }
+
+    pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder);
+        builder.finish()
     }
 }

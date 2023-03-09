@@ -14,14 +14,22 @@
 
 //! Helper functions to construct prost [`ExprNode`] for test.
 
-use risingwave_common::types::ScalarImpl;
+use std::num::NonZeroUsize;
+
+use num_traits::CheckedSub;
+use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::{DataType as ProstDataType, DataType, Datum as ProstDatum};
+use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
+
+use super::{
+    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression, Result,
+};
+use crate::ExprError;
 
 pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> ExprNode {
     let mut exprs = Vec::new();
@@ -29,7 +37,7 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> Expr
         exprs.push(make_input_ref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };
-    let return_type = DataType {
+    let return_type = ProstDataType {
         type_name: TypeName::Timestamp as i32,
         ..Default::default()
     };
@@ -43,7 +51,7 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> Expr
 pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
-        return_type: Some(DataType {
+        return_type: Some(ProstDataType {
             type_name: ret as i32,
             ..Default::default()
         }),
@@ -86,4 +94,114 @@ pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         }),
         rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
     }
+}
+
+pub fn make_hop_window_expression(
+    time_col_data_type: DataType,
+    time_col_idx: usize,
+    window_size: IntervalUnit,
+    window_slide: IntervalUnit,
+) -> Result<(Vec<BoxedExpression>, Vec<BoxedExpression>)> {
+    let units = window_size
+        .exact_div(&window_slide)
+        .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
+        .ok_or_else(|| ExprError::InvalidParam {
+            name: "window",
+            reason: format!(
+                "window_size {} cannot be divided by window_slide {}",
+                window_size, window_slide
+            ),
+        })?
+        .get();
+
+    let output_type = DataType::window_of(&time_col_data_type).unwrap();
+    let get_hop_window_start = || -> Result<BoxedExpression> {
+        let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
+
+        let window_slide_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
+                .boxed();
+
+        // The first window_start of hop window should be:
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
+        // Let's pre calculate (`window_size` - `window_slide`).
+        let window_size_sub_slide =
+            window_size
+                .checked_sub(&window_slide)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_size {} cannot be subtracted by window_slide {}",
+                        window_size, window_slide
+                    ),
+                })?;
+        let window_size_sub_slide_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_size_sub_slide)),
+        )
+        .boxed();
+
+        let hop_start = new_binary_expr(
+            expr_node::Type::TumbleStart,
+            output_type.clone(),
+            new_binary_expr(
+                expr_node::Type::Subtract,
+                output_type.clone(),
+                time_col_ref,
+                window_size_sub_slide_expr,
+            )?,
+            window_slide_expr,
+        )?;
+        Ok(hop_start)
+    };
+
+    let mut window_start_exprs = Vec::with_capacity(units);
+    let mut window_end_exprs = Vec::with_capacity(units);
+    for i in 0..units {
+        let window_start_offset =
+            window_slide
+                .checked_mul_int(i)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_slide {} cannot be multiplied by {}",
+                        window_slide, i
+                    ),
+                })?;
+        let window_start_offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_start_offset)),
+        )
+        .boxed();
+        let window_end_offset =
+            window_slide
+                .checked_mul_int(i + units)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_slide {} cannot be multiplied by {}",
+                        window_slide, i
+                    ),
+                })?;
+        let window_end_offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_end_offset)),
+        )
+        .boxed();
+        let window_start_expr = new_binary_expr(
+            expr_node::Type::Add,
+            output_type.clone(),
+            get_hop_window_start.clone()()?,
+            window_start_offset_expr,
+        )?;
+        window_start_exprs.push(window_start_expr);
+        let window_end_expr = new_binary_expr(
+            expr_node::Type::Add,
+            output_type.clone(),
+            get_hop_window_start.clone()()?,
+            window_end_offset_expr,
+        )?;
+        window_end_exprs.push(window_end_expr);
+    }
+    Ok((window_start_exprs, window_end_exprs))
 }

@@ -196,7 +196,7 @@ impl From<ProstSink> for SinkCatalog {
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect_vec(),
-            pk: pb.pk.iter().map(OrderPair::from_prost).collect_vec(),
+            pk: pb.pk.iter().map(OrderPair::from_protobuf).collect_vec(),
             stream_key: pb.stream_key.iter().map(|k| *k as _).collect_vec(),
             distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: pb.properties.clone(),
