@@ -24,6 +24,10 @@ steps:
   - label: ":pipeline: Pipeline upload"
     command: buildkite-agent pipeline upload ci/workflows/main-cron.yml
 
+  # Docs: https://buildkite.com/docs/agent/v3/cli-pipeline
+  - label: ":pipeline: Pipeline upload"
+    command: buildkite-agent pipeline upload ci/workflows/main.yml
+
   - label: "check ci image rebuild"
     plugins:
       - chronotc/monorepo-diff#v2.3.0:
