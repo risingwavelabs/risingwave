@@ -7,6 +7,7 @@ import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.Iterator;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.slf4j.Logger;
@@ -20,6 +21,8 @@ public class JDBCSink extends SinkBase {
     private final String tableName;
     private final Connection conn;
     private final String jdbcUrl;
+    private final List<String> pkColumnNames;
+    public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
     private String updateDeleteConditionBuffer;
     private Object[] updateDeleteValueBuffer;
@@ -34,9 +37,23 @@ public class JDBCSink extends SinkBase {
         try {
             this.conn = DriverManager.getConnection(jdbcUrl);
             this.conn.setAutoCommit(false);
+            this.pkColumnNames = GetPkColumnNames(conn, tableName);
         } catch (SQLException e) {
             throw Status.INTERNAL.withCause(e).asRuntimeException();
         }
+    }
+
+    private List<String> GetPkColumnNames(Connection conn, String tableName) {
+        try {
+            var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
+            while (pks.next()) {
+                pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
+            }
+        } catch (SQLException e) {
+            throw Status.INTERNAL.withCause(e).asRuntimeException();
+        }
+        LOG.info("detected pk {}", this.pkColumnNames);
+        return pkColumnNames;
     }
 
     public JDBCSink(Connection conn, TableSchema tableSchema, String tableName) {
@@ -44,6 +61,7 @@ public class JDBCSink extends SinkBase {
         this.tableName = tableName;
         this.jdbcUrl = null;
         this.conn = conn;
+        this.pkColumnNames = GetPkColumnNames(conn, tableName);
     }
 
     private PreparedStatement prepareStatement(SinkRow row) {
@@ -68,16 +86,27 @@ public class JDBCSink extends SinkBase {
                     throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
                 }
             case DELETE:
-                String deleteCondition =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
+                String deleteCondition;
+                if (this.pkColumnNames.isEmpty()) {
+                    deleteCondition =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema().getColumnNames()[index]
+                                                            + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                } else {
+                    deleteCondition =
+                            this.pkColumnNames.stream()
+                                    .map(key -> key + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                }
                 String deleteStmt = String.format(DELETE_TEMPLATE, tableName, deleteCondition);
                 try {
                     int placeholderIdx = 1;
                     PreparedStatement stmt =
                             conn.prepareStatement(deleteStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (String primaryKey : getTableSchema().getPrimaryKeys()) {
+                    for (String primaryKey : this.pkColumnNames) {
                         Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                         stmt.setObject(placeholderIdx++, fromRow);
                     }
@@ -86,14 +115,35 @@ public class JDBCSink extends SinkBase {
                     throw Status.INTERNAL.withCause(e).asRuntimeException();
                 }
             case UPDATE_DELETE:
-                updateDeleteConditionBuffer =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-                updateDeleteValueBuffer =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> getTableSchema().getFromRow(key, row))
-                                .toArray();
+                if (this.pkColumnNames.isEmpty()) {
+                    updateDeleteConditionBuffer =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema().getColumnNames()[index]
+                                                            + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                    updateDeleteValueBuffer =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema()
+                                                            .getFromRow(
+                                                                    getTableSchema()
+                                                                            .getColumnNames()[
+                                                                            index],
+                                                                    row))
+                                    .toArray();
+                } else {
+                    updateDeleteConditionBuffer =
+                            this.pkColumnNames.stream()
+                                    .map(key -> key + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                    updateDeleteValueBuffer =
+                            this.pkColumnNames.stream()
+                                    .map(key -> getTableSchema().getFromRow(key, row))
+                                    .toArray();
+                }
                 LOG.debug(
                         "update delete condition: {} on values {}",
                         updateDeleteConditionBuffer,

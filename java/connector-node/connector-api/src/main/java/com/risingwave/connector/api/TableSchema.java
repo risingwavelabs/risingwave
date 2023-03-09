@@ -88,6 +88,8 @@ public class TableSchema {
                         .collect(Collectors.toList()));
     }
 
+    /** @deprecated pk here is from Risingwave, it may not match the pk in the database */
+    @Deprecated
     public List<String> getPrimaryKeys() {
         return primaryKeys;
     }
