@@ -435,6 +435,8 @@ impl IntervalUnit {
     }
 }
 
+/// Wrapper so that `Debug for IntervalUnitDisplay` would use the concise format of `Display for
+/// IntervalUnit`.
 #[derive(Clone, Copy)]
 pub struct IntervalUnitDisplay<'a> {
     pub core: &'a IntervalUnit,
@@ -452,6 +454,8 @@ impl std::fmt::Debug for IntervalUnitDisplay<'_> {
     }
 }
 
+/// Loss of information during the process due to `justify`. Only intended for memcomparable
+/// encoding.
 impl Serialize for IntervalUnit {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -473,6 +477,7 @@ impl<'de> Deserialize<'de> for IntervalUnit {
     }
 }
 
+/// Duplicated logic only used by `HopWindow`. See #8452.
 #[expect(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {
