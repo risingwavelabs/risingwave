@@ -8,6 +8,8 @@ header:
     - "dashboard/**/*.js"
     - "dashboard/**/*.ts"
     - "src/**/*.html"
+    - "java/**/*.java"
+    - "java/**/*.py"
 
   paths-ignore:
     - "**/gen/**"
