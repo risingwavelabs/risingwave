@@ -1475,11 +1475,8 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        let near_tokens = if self.index >= 10 {
-            &self.tokens[..self.index - 10]
-        } else {
-            &self.tokens[..self.index]
-        };
+        let start_off = if self.index >= 10 { self.index - 10 } else { 0 };
+        let near_tokens = &self.tokens[start_off..self.index];
         struct TokensDisplay<'a>(&'a [Token]);
         impl<'a> fmt::Display for TokensDisplay<'a> {
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -1491,7 +1488,9 @@ impl Parser {
         }
         parser_err!(format!(
             "Near \"{}\", expected {}, found: {}",
-            TokensDisplay(near_tokens), expected, found
+            TokensDisplay(near_tokens),
+            expected,
+            found
         ))
     }
 
