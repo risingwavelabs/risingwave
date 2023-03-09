@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 use std::ops::BitAnd;
 use std::option::Option;
 use std::sync::Arc;
@@ -21,8 +20,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::batch_plan::exchange_info::HashInfo;
 use risingwave_pb::batch_plan::*;
@@ -139,10 +136,10 @@ impl HashShuffleSender {
         Ok(())
     }
 
-    async fn send_done(mut self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
+    async fn send_done(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
         for sender in self.senders {
             sender
-                .send(error.clone().map(|e| Err(e)).unwrap_or(Ok(None)))
+                .send(error.clone().map(Err).unwrap_or(Ok(None)))
                 .await
                 .map_err(|_| SenderError)?
         }

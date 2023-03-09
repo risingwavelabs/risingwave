@@ -13,13 +13,10 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use tokio::sync::mpsc;
 
 use crate::error::BatchError::{Internal, SenderError};
@@ -51,7 +48,7 @@ impl ChanSender for FifoSender {
     }
 
     async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
-        let result = error.map(|e| Err(e)).unwrap_or(Ok(None));
+        let result = error.map(Err).unwrap_or(Ok(None));
         self.sender.send(result).await.map_err(|_| SenderError)
     }
 }

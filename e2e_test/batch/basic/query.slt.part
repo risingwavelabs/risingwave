@@ -30,6 +30,10 @@ select count(*) from t3;
 ----
 1
 
+statement error
+select v1/0 from t3;
+
+
 statement ok
 drop table t3;
 

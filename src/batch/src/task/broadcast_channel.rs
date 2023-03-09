@@ -13,14 +13,10 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
-use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::anyhow;
-use futures::AsyncWriteExt;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::BroadcastInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
@@ -61,7 +57,7 @@ impl ChanSender for BroadcastSender {
     async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
         for sender in self.senders {
             sender
-                .send(error.clone().map(|e| Err(e)).unwrap_or(Ok(None)))
+                .send(error.clone().map(Err).unwrap_or(Ok(None)))
                 .await
                 .map_err(|_| SenderError)?
         }

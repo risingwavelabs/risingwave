@@ -21,7 +21,6 @@ use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
@@ -377,7 +376,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         let sender = self.sender.clone();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<String>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
-        let failure = self.failure.clone();
+        let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
@@ -392,7 +391,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
-            let mut sender = sender;
+            let sender = sender;
             let mut state_tx = state_tx;
             let task_metrics = t_1.context.task_metrics();
 
@@ -546,7 +545,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        let error = error.map(|e| Arc::new(e));
+        let error = error.map(Arc::new);
         *self.failure.lock() = error.clone().map(to_rw_error);
         let err_str = error.as_ref().map(|e| format!("{:?}", e));
         if let Err(e) = sender.close(error).await {
@@ -557,7 +556,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     // leads to close of channel.
                     warn!("Task receiver closed when sending None!");
                 }
-                x => {
+                _x => {
                     error!("Failed to close task output channel: {:?}", self.task_id);
                     state = TaskStatus::Failed;
                 }
