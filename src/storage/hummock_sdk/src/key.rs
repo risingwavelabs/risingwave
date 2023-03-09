@@ -441,7 +441,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
         buf.put_slice(self.table_key.as_ref());
     }
-    
+
     /// Encode in to a buffer.
     pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
@@ -583,8 +583,7 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         self.user_key.encode_table_key_into(buf);
         buf.put_u64(self.epoch);
     }
-
-
+    
 
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(

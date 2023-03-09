@@ -16,6 +16,7 @@ use std::{cmp::Ordering, ops::Deref};
 use std::ops::Range;
 
 use bytes::{BytesMut, Buf, BufMut};
+use futures::executor::block_on;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, EPOCH_LEN, TableKey};
 use risingwave_hummock_sdk::KeyComparator;
@@ -101,20 +102,21 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        let mut full_key_encoded: BufMut::default() ;
-        key.encode_into_without_table_id(&mut full_key_encoded);
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        let mut full_key_encoded_without_table_id: BytesMut = Default::default();
+        key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
+        self.seek_restart_point_by_key(&full_key_encoded_without_table_id);
+        self.next_until_key(&full_key_encoded_without_table_id);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        let mut full_key_encoded_without_table_id: BytesMut = Default::default();
+        key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
+        self.seek_restart_point_by_key(&full_key_encoded_without_table_id);
+        self.next_until_key(&full_key_encoded_without_table_id);
         if !self.is_valid() {
             self.seek_to_last();
         }
-        self.prev_until_key(&full_key_encoded);
+        self.prev_until_key(&full_key_encoded_without_table_id);
     }
 }
 
@@ -217,6 +219,7 @@ impl BlockIterator {
 
     /// Decodes [`KeyPrefix`] at given offset.
     fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
+        println!("block.data() = {:?}", self.block.data().len());
         KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
