@@ -27,7 +27,7 @@ public class MySQLSourceTest {
     static final Logger LOG = LoggerFactory.getLogger(MySQLSourceTest.class.getName());
 
     private static final MySQLContainer<?> mysql =
-            new MySQLContainer<>("mysql:5.7.34")
+            new MySQLContainer<>("mysql:8.0")
                     .withDatabaseName("test")
                     .withUsername("root")
                     .withCopyFileToContainer(
