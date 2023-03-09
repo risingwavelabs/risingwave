@@ -23,6 +23,7 @@ mod tests {
     use super::IntervalArray;
     use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
     use crate::array::{Array, ArrayBuilder};
+    use crate::types::interval::test_utils::IntervalUnitTestExt;
 
     #[test]
     fn test_interval_array() {
