@@ -80,7 +80,8 @@ impl IntervalUnit {
     /// If day is positive, complement the ms negative value.
     /// These rules only use in interval comparison.
     pub fn justify_interval(&mut self) {
-        let total_ms = self.total_ms();
+        #[expect(deprecated)]
+        let total_ms = self.as_ms_i64();
         *self = Self {
             months: 0,
             days: (total_ms / DAY_MS) as i32,
@@ -94,8 +95,8 @@ impl IntervalUnit {
         interval
     }
 
-    #[must_use]
-    pub fn from_total_ms(ms: i64) -> Self {
+    #[deprecated]
+    fn from_total_ms(ms: i64) -> Self {
         let mut remaining_ms = ms;
         let months = remaining_ms / MONTH_MS;
         remaining_ms -= months * MONTH_MS;
@@ -106,10 +107,6 @@ impl IntervalUnit {
             days: (days as i32),
             ms: remaining_ms,
         }
-    }
-
-    pub fn total_ms(&self) -> i64 {
-        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
     #[must_use]
@@ -184,10 +181,13 @@ impl IntervalUnit {
             return None;
         }
 
+        #[expect(deprecated)]
         let ms = self.as_ms_i64();
+        #[expect(deprecated)]
         Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
     }
 
+    #[deprecated]
     fn as_ms_i64(&self) -> i64 {
         self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
@@ -200,7 +200,9 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
 
+        #[expect(deprecated)]
         let ms = self.as_ms_i64();
+        #[expect(deprecated)]
         Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
     }
 
