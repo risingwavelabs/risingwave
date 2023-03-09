@@ -53,12 +53,28 @@ public class JsonDeserializer implements Deserializer {
         if (value instanceof Integer) {
             return ((Integer) value).longValue();
         } else if (value instanceof Double) {
+            double d = (Double) value;
+            if (d % 1.0 != 0.0) {
+
+                throw io.grpc.Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "unable to cast into long from non-integer double value: " + d)
+                        .asRuntimeException();
+            }
             return ((Double) value).longValue();
         } else if (value instanceof Long) {
             return (Long) value;
         } else if (value instanceof Short) {
             return ((Short) value).longValue();
         } else if (value instanceof Float) {
+            double f = (Float) value;
+            if (f % 1.0 != 0.0) {
+
+                throw io.grpc.Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "unable to cast into long from non-integer float value: " + f)
+                        .asRuntimeException();
+            }
             return ((Float) value).longValue();
         } else {
             throw io.grpc.Status.INVALID_ARGUMENT
