@@ -320,7 +320,7 @@ pub trait CompactionPicker {
     ) -> Option<CompactionInput>;
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct ScaleCompactorInfo {
     pub running_cores: u64,
     pub total_cores: u64,

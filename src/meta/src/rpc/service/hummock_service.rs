@@ -240,6 +240,7 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
+
         let rx = self.compactor_manager.add_compactor(
             context_id,
             req.max_concurrent_task_number,

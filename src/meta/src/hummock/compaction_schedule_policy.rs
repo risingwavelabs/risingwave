@@ -223,10 +223,7 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
     fn refresh_state(&mut self) {}
 
     fn total_cpu_core_num(&self) -> u32 {
-        self.compactor_map
-            .values()
-            .map(|c| c.cpu_ratio.load(Ordering::Acquire))
-            .sum()
+        self.compactor_map.values().map(|c| c.total_cpu_core).sum()
     }
 
     fn total_running_cpu_core_num(&self) -> u32 {
@@ -475,6 +472,8 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             .filter(|compactor| !compactor.is_busy())
             .count();
 
+        let old_state = self.state.clone();
+
         if idle_count == 0 {
             match self.state {
                 CompactorState::Idle(last_update) => {
@@ -507,26 +506,31 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             }
         }
 
-        tracing::info!(
-            "refresh_state idle_count {} total {} state {:?} suggest_scale_policy {:?}",
-            idle_count,
-            self.score_to_compactor.len(),
-            self.state,
-            self.suggest_scale_policy(),
-        );
+        if self.state != old_state {
+            tracing::info!(
+                "refresh_state idle_count {} total {} state {:?} suggest_scale_policy {:?}",
+                idle_count,
+                self.score_to_compactor.len(),
+                self.state,
+                self.suggest_scale_policy(),
+            );
+        }
     }
 
     fn total_cpu_core_num(&self) -> u32 {
         self.score_to_compactor
             .values()
-            .map(|c| c.cpu_ratio.load(Ordering::Acquire))
+            .map(|c| c.total_cpu_core)
             .sum()
     }
 
     fn total_running_cpu_core_num(&self) -> u32 {
         self.score_to_compactor
             .values()
-            .map(|c| c.cpu_ratio.load(Ordering::Acquire) * c.total_cpu_core / 100)
+            .map(|c| {
+                (c.cpu_ratio.load(Ordering::Acquire) as f64 * c.total_cpu_core as f64 / 100.0)
+                    .ceil() as u32
+            })
             .sum()
     }
 }

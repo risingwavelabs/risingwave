@@ -1968,6 +1968,12 @@ where
         self.metrics
             .waiting_compaction_bytes
             .set(info.waiting_compaction_bytes as i64);
+
+        tracing::info!(
+            "report_scale_compactor_info {:?} suggest_core {:?}",
+            info,
+            suggest_core
+        );
     }
 
     #[named]
@@ -1990,6 +1996,7 @@ where
                 let cg = self.get_compaction_group_config(*group_id).await;
                 let info = status.get_compaction_info(levels, cg.compaction_config());
                 global_info.add(&info);
+                tracing::info!("cg {} info {:?}", group_id, info);
             }
         }
         global_info

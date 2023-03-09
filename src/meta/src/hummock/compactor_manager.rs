@@ -219,7 +219,11 @@ impl CompactorManager {
     ) -> Receiver<MetaResult<SubscribeCompactTasksResponse>> {
         let mut policy = self.policy.write();
         let rx = policy.add_compactor(context_id, max_concurrent_task_number, cpu_core_num);
-        tracing::info!("Added compactor session {}", context_id);
+        tracing::info!(
+            "Added compactor session {} cpu_core_num {}",
+            context_id,
+            cpu_core_num
+        );
         rx
     }
 
@@ -426,7 +430,6 @@ impl CompactorManager {
     ) {
         if let Some(compactor) = self.policy.read().get_compactor(context_id) {
             compactor.cpu_ratio.store(workload.cpu, Ordering::Release);
-            tracing::info!("update_compactor_state cpu {}", workload.cpu,);
         }
 
         self.policy.write().refresh_state();
