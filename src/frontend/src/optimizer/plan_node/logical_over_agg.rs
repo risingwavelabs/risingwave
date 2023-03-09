@@ -19,7 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
 
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
@@ -192,7 +192,7 @@ impl LogicalOverAgg {
             .sort_exprs
             .into_iter()
             .map(|e| match e.expr.as_input_ref() {
-                Some(i) => Ok(ColumnOrder::new(i.index(), OrderType::new(e.direction))),
+                Some(i) => Ok(ColumnOrder::new(i.index(), e.order_type)),
                 None => Err(ErrorCode::NotImplemented(
                     "ORDER BY expression in window function".to_string(),
                     None.into(),

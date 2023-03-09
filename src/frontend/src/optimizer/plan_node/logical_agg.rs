@@ -588,7 +588,7 @@ impl LogicalAggBuilder {
             .iter()
             .map(|e| {
                 let index = self.input_proj_builder.add_expr(&e.expr)?;
-                Ok(ColumnOrder::new(index, OrderType::new(e.direction)))
+                Ok(ColumnOrder::new(index, e.order_type))
             })
             .try_collect()
             .map_err(|err: &'static str| {

@@ -15,7 +15,7 @@
 use std::fmt::Display;
 
 use itertools::Itertools;
-use risingwave_common::util::sort_util::Direction;
+use risingwave_common::util::sort_util::OrderType;
 
 use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
 
@@ -25,19 +25,12 @@ use crate::expr::{ExprImpl, ExprMutator, ExprRewriter, ExprVisitor};
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct OrderByExpr {
     pub expr: ExprImpl,
-    pub direction: Direction,
-    pub nulls_first: bool,
+    pub order_type: OrderType,
 }
 
 impl Display for OrderByExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.expr)?;
-        if self.direction == Direction::Descending {
-            write!(f, " DESC")?;
-        }
-        if self.nulls_first {
-            write!(f, " NULLS FIRST")?;
-        }
+        write!(f, "{:?} {}", self.expr, self.order_type)?;
         Ok(())
     }
 }
@@ -72,8 +65,7 @@ impl OrderBy {
                 .into_iter()
                 .map(|e| OrderByExpr {
                     expr: rewriter.rewrite_expr(e.expr),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
+                    order_type: e.order_type,
                 })
                 .collect(),
         }
