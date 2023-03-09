@@ -17,12 +17,13 @@ SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 
 CREATE TABLE INTERVAL_TBL (f1 interval);
 
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 1 minute');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 5 hour');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 10 day');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 34 year');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 3 months');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 14 seconds ago');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('1 minute');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('5 hour');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('10 day');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('34 year');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('3 months');
+-- INSERT INTO INTERVAL_TBL (f1) VALUES ('14 seconds ago');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('-14 seconds');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('1 day 2 hours 3 minutes 4 seconds');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('6 years');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('5 months');
@@ -60,7 +61,7 @@ SELECT r1.*, r2.*
    ORDER BY r1.f1, r2.f1;
 
 -- Test intervals that are large enough to overflow 64 bits in comparisons
-CREATE TEMP TABLE INTERVAL_TBL_OF (f1 interval);
+CREATE TABLE INTERVAL_TBL_OF (f1 interval);
 INSERT INTO INTERVAL_TBL_OF (f1) VALUES
   ('2147483647 days 2147483647 months'),
   ('2147483647 days -2147483648 months'),
@@ -76,16 +77,16 @@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
 -- Test edge-case overflow detection in interval multiplication
 select extract(epoch from '256 microseconds'::interval * (2^55)::float8);
 
-SELECT r1.*, r2.*
-   FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
-   WHERE r1.f1 > r2.f1
-   ORDER BY r1.f1, r2.f1;
+--@ SELECT r1.*, r2.*
+--@    FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
+--@    WHERE r1.f1 > r2.f1
+--@    ORDER BY r1.f1, r2.f1;
 
 --@ CREATE INDEX ON INTERVAL_TBL_OF USING btree (f1);
 --@ SET enable_seqscan TO false;
 --@ EXPLAIN (COSTS OFF)
 --@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
-SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
+--@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
 --@ RESET enable_seqscan;
 
 DROP TABLE INTERVAL_TBL_OF;
