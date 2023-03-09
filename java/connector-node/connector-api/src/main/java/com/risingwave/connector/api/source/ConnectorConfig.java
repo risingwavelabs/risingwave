@@ -2,11 +2,11 @@ package com.risingwave.connector.api.source;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.function.Supplier;
 
 public class ConnectorConfig extends HashMap<String, String> {
 
-    public ConnectorConfig() {
-    }
+    public ConnectorConfig() {}
 
     public ConnectorConfig(Map<? extends String, ? extends String> m) {
         super(m);
@@ -16,6 +16,14 @@ public class ConnectorConfig extends HashMap<String, String> {
         String value = super.get(key);
         if (value == null) {
             throw new RuntimeException(key + "cannot be null");
+        }
+        return value;
+    }
+
+    public String getOrCompute(String key, Supplier<String> fn) {
+        String value = super.get(key);
+        if (value == null) {
+            return fn.get();
         }
         return value;
     }
