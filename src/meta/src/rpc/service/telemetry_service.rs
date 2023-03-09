@@ -54,10 +54,10 @@ impl<S: MetaStore> TelemetryInfoService for TelemetryInfoServiceImpl<S> {
         _request: Request<TelemetryInfoRequest>,
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
         match self.get_tracking_id().await {
-            Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse { tracking_id })),
-            None => Ok(Response::new(TelemetryInfoResponse {
-                tracking_id: String::default(),
+            Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
+                tracking_id: Some(tracking_id),
             })),
+            None => Ok(Response::new(TelemetryInfoResponse { tracking_id: None })),
         }
     }
 }

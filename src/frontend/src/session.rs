@@ -236,7 +236,10 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
+        let telemetry_enabled = system_params_reader.telemetry_enabled();
+
+        let system_params_manager =
+            Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -274,7 +277,7 @@ impl FrontendEnv {
 
         // if the toml config file or env variable disables telemetry, do not watch system params
         // change because if any of configs disable telemetry, we should never start it
-        if config.server.telemetry_enabled && telemetry_env_enabled() {
+        if config.server.telemetry_enabled && telemetry_env_enabled() && telemetry_enabled {
             telemetry_manager.start_telemetry_reporting();
             let (telemetry_join_handle, telemetry_shutdown_sender) =
                 telemetry_manager.watch_params_change();

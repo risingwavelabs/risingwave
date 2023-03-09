@@ -17,7 +17,7 @@ message TelemetryInfoRequest {
 }
 
 message TelemetryInfoResponse {
-  string tracking_id = 1;
+  optional string tracking_id = 1;
 }
 
 service TelemetryInfoService {

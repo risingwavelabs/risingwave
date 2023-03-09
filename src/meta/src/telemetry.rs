@@ -13,17 +13,13 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use anyhow::anyhow;
+use risingwave_common::telemetry::report::{TelemetryInfoFetcher, TelemetryReportCreator};
 use risingwave_common::telemetry::{
-    post_telemetry_report, SystemData, TelemetryNodeType, TelemetryReportBase,
-    TELEMETRY_REPORT_INTERVAL, TELEMETRY_REPORT_URL,
+    current_timestamp, SystemData, TelemetryNodeType, TelemetryReport, TelemetryReportBase,
 };
 use serde::{Deserialize, Serialize};
-use tokio::sync::oneshot::Sender;
-use tokio::task::JoinHandle;
-use tokio::time::{interval, Duration};
 use uuid::Uuid;
 
 use crate::storage::MetaStore;
@@ -33,76 +29,55 @@ pub const TELEMETRY_CF: &str = "cf/telemetry";
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
 
 #[derive(Debug, Serialize, Deserialize)]
-struct TelemetryReport {
+pub(crate) struct MetaTelemetryReport {
     #[serde(flatten)]
     base: TelemetryReportBase,
 }
 
-/// This function spawns a new tokio task to report telemetry.
-/// It creates a channel for killing itself and a join handle to the spawned task.
-/// It then creates an interval of `TELEMETRY_REPORT_INTERVAL` seconds and checks if telemetry is
-/// enabled. If it is, it gets or creates a tracking ID from the meta store,
-/// creates a `TelemetryReport` object with system data, uptime, timestamp, and tracking ID.
-/// Finally, it posts the report to `TELEMETRY_REPORT_URL`.
-/// If an error occurs at any point in the process, it logs an error message.
-pub async fn start_meta_telemetry_reporting(
-    meta_store: Arc<impl MetaStore>,
-) -> (JoinHandle<()>, Sender<()>) {
-    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-    let join_handle = tokio::spawn(async move {
-        let begin_time = std::time::Instant::now();
-        let session_id = Uuid::new_v4();
-        let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
-        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {},
-                _ = &mut shutdown_rx => {
-                    return;
-                }
-            }
-
-            let tracking_id = match get_or_create_tracking_id(meta_store.clone()).await {
-                Ok(tracking_id) => tracking_id,
-                Err(e) => {
-                    tracing::error!("Telemetry fetch tacking id error {}", e);
-                    continue;
-                }
-            };
-
-            let report = TelemetryReport {
-                base: TelemetryReportBase {
-                    tracking_id: tracking_id.to_string(),
-                    session_id: session_id.to_string(),
-                    system_data: SystemData::new(),
-                    up_time: begin_time.elapsed().as_secs(),
-                    time_stamp: SystemTime::now()
-                        .duration_since(SystemTime::UNIX_EPOCH)
-                        .expect("Clock might go backward")
-                        .as_secs(),
-                    node_type: TelemetryNodeType::Meta,
-                },
-            };
-
-            let report_json = match serde_json::to_string(&report) {
-                Ok(report_json) => report_json,
-                Err(e) => {
-                    tracing::error!("Telemetry failed to serialize report{}", e);
-                    continue;
-                }
-            };
-            let url = TELEMETRY_REPORT_URL.to_owned() + "/meta";
-            match post_telemetry_report(&url, report_json).await {
-                Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),
-                Err(e) => tracing::error!("Telemetry post error, {}", e),
-            }
+impl MetaTelemetryReport {
+    pub(crate) fn new(tracking_id: String, session_id: String, up_time: u64) -> Self {
+        Self {
+            base: TelemetryReportBase {
+                tracking_id,
+                session_id,
+                system_data: SystemData::new(),
+                up_time,
+                time_stamp: current_timestamp(),
+                node_type: TelemetryNodeType::Meta,
+            },
         }
-    });
-    (join_handle, shutdown_tx)
+    }
 }
 
-/// fetch `tracking_id` from etcd
+impl TelemetryReport for MetaTelemetryReport {
+    fn to_json(&self) -> anyhow::Result<String> {
+        let json = serde_json::to_string(self)?;
+        Ok(json)
+    }
+}
+
+pub(crate) struct MetaTelemetryInfoFetcher<S: MetaStore> {
+    meta_store: Arc<S>,
+}
+
+impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
+    pub(crate) fn new(meta_store: Arc<S>) -> Self {
+        Self { meta_store }
+    }
+}
+
+#[async_trait::async_trait]
+impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+        let tracking_id = get_or_create_tracking_id(self.meta_store.clone())
+            .await
+            .map(|id| id.to_string())?;
+
+        Ok(tracking_id)
+    }
+}
+
+/// fetch or create a `tracking_id` from etcd
 async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
     match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
         Ok(id) => Uuid::from_slice_le(&id).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
@@ -121,6 +96,30 @@ async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uu
                 Ok(_) => Ok(uuid),
             }
         }
+    }
+}
+
+#[derive(Copy, Clone)]
+pub(crate) struct MetaReportCreator {}
+
+impl MetaReportCreator {
+    pub(crate) fn new() -> Self {
+        Self {}
+    }
+}
+
+impl TelemetryReportCreator for MetaReportCreator {
+    fn create_report(
+        &self,
+        tracking_id: String,
+        session_id: String,
+        up_time: u64,
+    ) -> anyhow::Result<MetaTelemetryReport> {
+        Ok(MetaTelemetryReport::new(tracking_id, session_id, up_time))
+    }
+
+    fn report_type(&self) -> &str {
+        "meta"
     }
 }
 

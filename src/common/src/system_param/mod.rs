@@ -282,6 +282,10 @@ impl ValidateOnSet for OverrideValidateOnSet {
     fn checkpoint_frequency(v: &u64) -> Result<()> {
         Self::expect_range(*v, 1..)
     }
+
+    fn telemetry_enabled(_: &bool) -> Result<()> {
+        Ok(())
+    }
 }
 
 for_all_undeprecated_params!(impl_default_from_other_params);

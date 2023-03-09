@@ -252,6 +252,8 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
+    let telemetry_enabled = system_params.telemetry_enabled();
+
     // Initialize observer manager.
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
     let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
@@ -317,7 +319,7 @@ pub async fn compute_node_serve(
 
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
-    if config.server.telemetry_enabled && telemetry_env_enabled() {
+    if config.server.telemetry_enabled && telemetry_env_enabled() && telemetry_enabled {
         telemetry_manager.start_telemetry_reporting();
         sub_tasks.push(telemetry_manager.watch_params_change());
     } else {

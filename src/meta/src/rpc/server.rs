@@ -21,6 +21,8 @@ use etcd_client::ConnectOptions;
 use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
@@ -69,7 +71,7 @@ use crate::rpc::service::telemetry_service::TelemetryInfoServiceImpl;
 use crate::rpc::service::user_service::UserServiceImpl;
 use crate::storage::{EtcdMetaStore, MemStore, MetaStore, WrappedEtcdClient as EtcdClient};
 use crate::stream::{GlobalStreamManager, SourceManager};
-use crate::telemetry::start_meta_telemetry_reporting;
+use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
 use crate::{hummock, MetaResult};
 
 #[derive(Debug)]
@@ -560,9 +562,18 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     });
     sub_tasks.push((stream_abort_handler, abort_sender));
 
+    let local_system_params_manager = LocalSystemParamsManager::new(system_params_reader.clone());
+
+    let mgr = TelemetryManager::new(
+        local_system_params_manager.watch_params(),
+        Arc::new(MetaTelemetryInfoFetcher::new(meta_store.clone())),
+        Arc::new(MetaReportCreator::new()),
+    );
+
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled{
-        sub_tasks.push(start_meta_telemetry_reporting(meta_store.clone()).await);
+    if let MetaBackend::Etcd = meta_store.meta_store_type() && system_params_reader.telemetry_enabled() && env.opts.telemetry_enabled{
+        mgr.start_telemetry_reporting();
+        sub_tasks.push(mgr.watch_params_change());
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }

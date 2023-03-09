@@ -979,10 +979,12 @@ impl HummockMetaClient for MetaClient {
 
 #[async_trait]
 impl TelemetryInfoFetcher for MetaClient {
-    async fn fetch_telemetry_info(&self) -> anyhow::Result<(bool, String)> {
-        let params = self.get_system_params().await?;
-        let id = self.get_telemetry_info().await?;
-        Ok((params.telemetry_enabled(), id.get_tracking_id().to_owned()))
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+        let resp = self.get_telemetry_info().await?;
+        let tracking_id = resp
+            .get_tracking_id()
+            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
+        Ok(tracking_id.to_string())
     }
 }
 
@@ -1440,7 +1442,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
-            ,{telemetry_client, get_telemetry_info, TelemetryInfoRequest, TelemetryInfoResponse}
+            ,{ telemetry_client, get_telemetry_info, TelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }

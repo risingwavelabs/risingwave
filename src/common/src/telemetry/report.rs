@@ -26,7 +26,7 @@ use super::{
 
 #[async_trait::async_trait]
 pub trait TelemetryInfoFetcher {
-    async fn fetch_telemetry_info(&self) -> Result<(bool, String)>;
+    async fn fetch_telemetry_info(&self) -> Result<String>;
 }
 
 pub trait TelemetryReportCreator {
@@ -59,6 +59,17 @@ where
         let mut interval = interval(Duration::from_secs(TELEMETRY_REPORT_INTERVAL));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
+        // fetch telemetry tracking_id from the meta node only at the beginning
+        // There is only one case tracking_id updated at the runtime ---- etcd data has been
+        // cleaned. There is no way that etcd has been cleaned but nodes are still running
+        let tracking_id = match info_fetcher.fetch_telemetry_info().await {
+            Ok(resp) => resp,
+            Err(err) => {
+                tracing::error!("Telemetry failed to get tracking_id, err {}", err);
+                return;
+            }
+        };
+
         loop {
             tokio::select! {
                 _ = interval.tick() => {},
@@ -67,14 +78,6 @@ where
                     return;
                 }
             }
-            // fetch telemetry tracking_id and configs from the meta node
-            let (_, tracking_id) = match info_fetcher.fetch_telemetry_info().await {
-                Ok(resp) => resp,
-                Err(err) => {
-                    tracing::error!("Telemetry failed to get tracking_id, err {}", err);
-                    continue;
-                }
-            };
 
             // create a report and serialize to json
             let report_json = match report_creator
