@@ -8,7 +8,6 @@ import com.risingwave.sourcenode.common.DebeziumCdcUtils;
 import io.debezium.heartbeat.Heartbeat;
 import java.time.Duration;
 import java.util.Properties;
-import java.util.UUID;
 
 /** Postgres Source Config */
 public class PostgresSourceConfig implements SourceConfig {
@@ -58,10 +57,7 @@ public class PostgresSourceConfig implements SourceConfig {
         // Slot names must conform to PostgreSQL replication slot naming rules,
         // which state: "Each replication slot has a name, which can contain lower-case letters,
         // numbers, and the underscore character."
-        props.setProperty(
-                "slot.name",
-                userProps.getOrCompute(
-                        ConnectorConfig.PG_SLOT_NAME, PostgresSourceConfig::generateReplicaSlot));
+        props.setProperty("slot.name", userProps.get(ConnectorConfig.PG_SLOT_NAME));
 
         // Sending heartbeat messages enables the connector to send the latest retrieved LSN to the
         // database, which allows the database to reclaim disk space being
@@ -112,10 +108,5 @@ public class PostgresSourceConfig implements SourceConfig {
     @Override
     public Properties getProperties() {
         return props;
-    }
-
-    private static String generateReplicaSlot() {
-        // Example: rw_cdc_f9a3567e6dd54bf5900444c8b1c03815
-        return "rw_cdc_" + UUID.randomUUID().toString().replace("-", "");
     }
 }
