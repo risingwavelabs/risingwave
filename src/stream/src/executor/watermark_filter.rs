@@ -265,12 +265,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .into_iter()
             .try_collect()?;
 
-        if !(watermarks.iter().all(|watermark| watermark.is_none())
-            || watermarks.iter().all(|watermark| watermark.is_some()))
-        {
-            bail!("Watermark for vnodes should be either all None or all Some()");
-        }
-
         // Return the minimal value if the remote max watermark is Null.
         let watermark = watermarks
             .into_iter()
