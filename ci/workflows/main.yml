@@ -20,9 +20,9 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
-  - label: "build (dev mode)"
+  - label: "main build (dev mode)"
     command: "ci/scripts/build.sh -t ci-dev -p ci-dev"
-    key: "build-dev"
+    key: "main-build-dev"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -32,9 +32,9 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "build (release mode)"
+  - label: "main build (release mode)"
     command: "ci/scripts/build.sh -t ci-release -p ci-release"
-    key: "build-release"
+    key: "main-build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -46,9 +46,9 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
-  - label: "build other components"
+  - label: "main build other components"
     command: "ci/scripts/build-other.sh"
-    key: "build-other"
+    key: "main-build-other"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -62,9 +62,9 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "build (deterministic simulation)"
+  - label: "main build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
-    key: "build-simulation"
+    key: "main-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -74,9 +74,9 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "docslt"
+  - label: "main docslt"
     command: "ci/scripts/docslt.sh"
-    key: "docslt"
+    key: "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -86,11 +86,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (dev mode)"
+  - label: "main end-to-end test (dev mode)"
     command: "ci/scripts/e2e-test.sh -p ci-dev"
     depends_on:
-      - "build-dev"
-      - "docslt"
+      - "main-build-dev"
+      - "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -107,11 +107,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (release mode)"
+  - label: "main end-to-end test (release mode)"
     command: "ci/scripts/e2e-test.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "docslt"
+      - "main-build-release"
+      - "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -128,11 +128,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel) (dev mode)"
+  - label: "main end-to-end test (parallel) (dev mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-dev"
     depends_on:
-      - "build-dev"
-      - "docslt"
+      - "main-build-dev"
+      - "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -149,11 +149,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel) (release mode)"
+  - label: "main end-to-end test (parallel) (release mode)"
     command: "ci/scripts/e2e-test-parallel.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "docslt"
+      - "main-build-release"
+      - "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - seek-oss/aws-sm#v2.3.1:
@@ -170,11 +170,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (parallel, in-memory) (release mode)"
+  - label: "main end-to-end test (parallel, in-memory) (release mode)"
     command: "ci/scripts/e2e-test-parallel-in-memory.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "docslt"
+      - "main-build-release"
+      - "main-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -185,11 +185,11 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end source test (release mode)"
+  - label: "main end-to-end source test (release mode)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "build-other"
+      - "main-build-release"
+      - "main-build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -200,7 +200,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "unit test"
+  - label: "main unit test"
     command: "ci/scripts/pr-unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
@@ -216,7 +216,7 @@ steps:
     timeout_in_minutes: 12
     retry: *auto-retry
 
-  - label: "unit test (deterministic simulation)"
+  - label: "main unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=50 timeout 10m ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -227,9 +227,9 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "scaling test (deterministic simulation)"
+  - label: "main scaling test (deterministic simulation)"
     command: "TEST_NUM=30 timeout 50m ci/scripts/deterministic-scale-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -239,9 +239,9 @@ steps:
     timeout_in_minutes: 55
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation)"
+  - label: "main end-to-end test (deterministic simulation)"
     command: "TEST_NUM=32 timeout 25m ci/scripts/deterministic-e2e-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -257,9 +257,9 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation)"
+  - label: "main recovery test (deterministic simulation)"
     command: "TEST_NUM=16 KILL_RATE=0.5 timeout 25m ci/scripts/deterministic-recovery-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       # - seek-oss/aws-sm#v2.3.1:
@@ -276,11 +276,11 @@ steps:
     timeout_in_minutes: 30
     retry: *auto-retry
 
-  - label: "end-to-end sink test (release mode)"
+  - label: "main end-to-end sink test (release mode)"
     command: "ci/scripts/e2e-sink-test.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "build-other"
+      - "main-build-release"
+      - "main-build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -291,11 +291,11 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "end-to-end iceberg sink test (release mode)"
+  - label: "main end-to-end iceberg sink test (release mode)"
     command: "ci/scripts/e2e-iceberg-sink-test.sh -p ci-release"
     depends_on:
-      - "build-release"
-      - "build-other"
+      - "main-build-release"
+      - "main-build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -306,9 +306,9 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "e2e java-binding test (at release)"
+  - label: "main e2e java-binding test (at release)"
     command: "ci/scripts/java-binding-test.sh -p ci-release"
-    depends_on: "build-release"
+    depends_on: "main-build-release"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -319,7 +319,7 @@ steps:
     timeout_in_minutes: 5
     retry: *auto-retry
 
-  - label: "release"
+  - label: "main release"
     command: "ci/scripts/release.sh"
     if: build.tag != null
     plugins:
@@ -338,9 +338,9 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "release docker image: amd64"
+  - label: "main release docker image: amd64"
     command: "ci/scripts/docker.sh"
-    key: "build-amd64"
+    key: "main-build-amd64"
     if: build.tag != null
     env:
       PUSH: true
@@ -354,9 +354,9 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "docker-build-push: aarch64"
+  - label: "main docker-build-push: aarch64"
     command: "ci/scripts/docker.sh"
-    key: "build-aarch64"
+    key: "main-build-aarch64"
     if: build.tag != null
     env:
       PUSH: true
@@ -372,12 +372,12 @@ steps:
     agents:
       queue: "linux-arm64"
 
-  - label: "multi arch image create push"
+  - label: "main multi arch image create push"
     command: "ci/scripts/multi-arch-docker.sh"
     if: build.tag != null
     depends_on:
-      - "build-amd64"
-      - "build-aarch64"
+      - "main-build-amd64"
+      - "main-build-aarch64"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
