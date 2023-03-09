@@ -44,14 +44,16 @@ pub struct Block {
 impl Block {
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
         // Verify checksum.
+
+        
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
-
+        let table_id = (&buf[buf.len() - 12..buf.len() - 8]).get_u32_le();
         // Decompress.
-        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
-        let compressed_data = &buf[..buf.len() - 9];
+        let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 13..buf.len() - 12])?;
+        let compressed_data = &buf[..buf.len() - 13];
         let buf = match compression {
-            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
+            CompressionAlgorithm::None => buf.slice(0..(buf.len() - 13)),
             CompressionAlgorithm::Lz4 => {
                 let mut decoder = lz4::Decoder::new(compressed_data.reader())
                     .map_err(HummockError::decode_error)?;
@@ -74,11 +76,11 @@ impl Block {
             }
         };
 
-        Ok(Self::decode_from_raw(buf))
+        Ok(Self::decode_from_raw(buf, table_id))
     }
 
-    pub fn decode_from_raw(buf: Bytes) -> Self {
-        let table_id = (&buf[..4]).get_u32_le();
+    pub fn decode_from_raw(buf: Bytes, table_id: u32) -> Self {
+        
         // Decode restart points.
         let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
         let data_len = buf.len() - 4 - n_restarts as usize * 4;
@@ -87,7 +89,8 @@ impl Block {
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
-
+        
+        
         Block {
             data: buf,
             data_len,
@@ -353,7 +356,6 @@ impl BlockBuilder {
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
-        self.buf.put_u32_le(self.table_id.unwrap());
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
@@ -391,8 +393,10 @@ impl BlockBuilder {
             }
         };
         self.compression_algorithm.encode(&mut self.buf);
+        self.buf.put_u32_le(self.table_id.unwrap());
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
+        
         self.buf.as_ref()
     }
 
