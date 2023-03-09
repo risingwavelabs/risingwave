@@ -13,21 +13,19 @@
 // limitations under the License.
 
 use std::fmt;
-use std::num::NonZeroUsize;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
 use risingwave_common::types::{DataType, IntervalUnit};
-use risingwave_expr::ExprError;
 
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -160,18 +158,6 @@ impl LogicalHopWindow {
 
     fn output2internal_col_mapping(&self) -> ColIndexMapping {
         self.core.output2internal_col_mapping()
-    }
-
-    fn internal2output_col_mapping(&self) -> ColIndexMapping {
-        self.core.internal2output_col_mapping()
-    }
-
-    fn input2internal_col_mapping(&self) -> ColIndexMapping {
-        self.core.input2internal_col_mapping()
-    }
-
-    fn internal2input_col_mapping(&self) -> ColIndexMapping {
-        self.core.internal2input_col_mapping()
     }
 
     fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
