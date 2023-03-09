@@ -157,7 +157,7 @@ export interface HummockVersionDelta {
    */
   safeEpoch: number;
   trivialMove: boolean;
-  gcSstIds: number[];
+  gcObjectIds: number[];
 }
 
 export interface HummockVersionDelta_GroupDeltas {
@@ -633,7 +633,7 @@ export interface TriggerManualCompactionResponse {
 }
 
 export interface ReportFullScanTaskRequest {
-  sstIds: number[];
+  objectIds: number[];
 }
 
 export interface ReportFullScanTaskResponse {
@@ -1431,7 +1431,7 @@ export const HummockVersion_LevelsEntry = {
 };
 
 function createBaseHummockVersionDelta(): HummockVersionDelta {
-  return { id: 0, prevId: 0, groupDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false, gcSstIds: [] };
+  return { id: 0, prevId: 0, groupDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false, gcObjectIds: [] };
 }
 
 export const HummockVersionDelta = {
@@ -1451,8 +1451,8 @@ export const HummockVersionDelta = {
       maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
       safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
       trivialMove: isSet(object.trivialMove) ? Boolean(object.trivialMove) : false,
-      gcSstIds: Array.isArray(object?.gcSstIds)
-        ? object.gcSstIds.map((e: any) => Number(e))
+      gcObjectIds: Array.isArray(object?.gcObjectIds)
+        ? object.gcObjectIds.map((e: any) => Number(e))
         : [],
     };
   },
@@ -1470,10 +1470,10 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     message.trivialMove !== undefined && (obj.trivialMove = message.trivialMove);
-    if (message.gcSstIds) {
-      obj.gcSstIds = message.gcSstIds.map((e) => Math.round(e));
+    if (message.gcObjectIds) {
+      obj.gcObjectIds = message.gcObjectIds.map((e) => Math.round(e));
     } else {
-      obj.gcSstIds = [];
+      obj.gcObjectIds = [];
     }
     return obj;
   },
@@ -1493,7 +1493,7 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
     message.safeEpoch = object.safeEpoch ?? 0;
     message.trivialMove = object.trivialMove ?? false;
-    message.gcSstIds = object.gcSstIds?.map((e) => e) || [];
+    message.gcObjectIds = object.gcObjectIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -3267,27 +3267,27 @@ export const TriggerManualCompactionResponse = {
 };
 
 function createBaseReportFullScanTaskRequest(): ReportFullScanTaskRequest {
-  return { sstIds: [] };
+  return { objectIds: [] };
 }
 
 export const ReportFullScanTaskRequest = {
   fromJSON(object: any): ReportFullScanTaskRequest {
-    return { sstIds: Array.isArray(object?.sstIds) ? object.sstIds.map((e: any) => Number(e)) : [] };
+    return { objectIds: Array.isArray(object?.objectIds) ? object.objectIds.map((e: any) => Number(e)) : [] };
   },
 
   toJSON(message: ReportFullScanTaskRequest): unknown {
     const obj: any = {};
-    if (message.sstIds) {
-      obj.sstIds = message.sstIds.map((e) => Math.round(e));
+    if (message.objectIds) {
+      obj.objectIds = message.objectIds.map((e) => Math.round(e));
     } else {
-      obj.sstIds = [];
+      obj.objectIds = [];
     }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportFullScanTaskRequest>, I>>(object: I): ReportFullScanTaskRequest {
     const message = createBaseReportFullScanTaskRequest();
-    message.sstIds = object.sstIds?.map((e) => e) || [];
+    message.objectIds = object.objectIds?.map((e) => e) || [];
     return message;
   },
 };
