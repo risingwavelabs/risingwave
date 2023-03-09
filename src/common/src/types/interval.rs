@@ -109,46 +109,6 @@ impl IntervalUnit {
         }
     }
 
-    #[must_use]
-    pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
-        let months = year * 12 + month;
-        let days = days;
-        let ms = 0;
-        IntervalUnit { months, days, ms }
-    }
-
-    #[must_use]
-    pub fn from_month(months: i32) -> Self {
-        IntervalUnit {
-            months,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_days(days: i32) -> Self {
-        Self {
-            days,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_millis(ms: i64) -> Self {
-        Self {
-            ms,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_minutes(minutes: i64) -> Self {
-        Self {
-            ms: 1000 * 60 * minutes,
-            ..Default::default()
-        }
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -431,6 +391,48 @@ impl IntervalUnit {
             months: self.months / 12 / 1000 * 12 * 1000,
             days: 0,
             ms: 0,
+        }
+    }
+}
+
+impl IntervalUnit {
+    #[must_use]
+    pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
+        let months = year * 12 + month;
+        let days = days;
+        let ms = 0;
+        IntervalUnit { months, days, ms }
+    }
+
+    #[must_use]
+    pub fn from_month(months: i32) -> Self {
+        IntervalUnit {
+            months,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_days(days: i32) -> Self {
+        Self {
+            days,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_millis(ms: i64) -> Self {
+        Self {
+            ms,
+            ..Default::default()
+        }
+    }
+
+    #[must_use]
+    pub fn from_minutes(minutes: i64) -> Self {
+        Self {
+            ms: 1000 * 60 * minutes,
+            ..Default::default()
         }
     }
 }
