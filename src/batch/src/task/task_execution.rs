@@ -36,7 +36,7 @@ use tokio_metrics::TaskMonitor;
 use tonic::Status;
 
 use crate::error::BatchError::{Aborted, SenderError};
-use crate::error::{BatchError, Result as BatchResult};
+use crate::error::{to_rw_error, BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
 use crate::rpc::service::task_service::{GetDataResponseResult, TaskInfoResponseResult};
@@ -237,14 +237,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.failure.lock().take();
-                    return if let Some(err) = possible_err {
-                        // Task error
-                        Err(err)
-                    } else {
-                        // Channel error
-                        Err(e)
-                    };
+                    return Err(to_rw_error(e));
                 }
             }
             cnt += 1;
@@ -271,7 +264,12 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
+        Ok(self
+            .receiver
+            .recv()
+            .await
+            .map_err(to_rw_error)?
+            .map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -401,8 +399,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = t_1
-                    .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
+                t_1.run(exec, sender, shutdown_rx, &mut state_tx)
                     .in_span({
                         let mut span = Span::enter_with_local_parent("batch_execute");
                         span.add_property(|| ("task_id", task_id.task_id.to_string()));
@@ -410,24 +407,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         span.add_property(|| ("query_id", task_id.query_id.to_string()));
                         span
                     })
-                    .await
-                {
-                    error!("Execution failed [{:?}]: {}", &task_id, e);
-                    let err_str = e.to_string();
-                    *failure.lock() = Some(e);
-                    if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
-                        .await
-                    {
-                        // It's possible to send fail. Same reason in `.try_execute`.
-                        warn!("send task execution error message fail!");
-                    }
-
-                    // There will be no more chunks, so send None.
-                    if let Err(_e) = sender.send(None).await {
-                        warn!("failed to send None to annotate end");
-                    }
-                }
+                    .await;
             };
 
             if let Some(task_metrics) = task_metrics {
@@ -509,23 +489,23 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         *self.state.lock() = task_status;
     }
 
-    pub async fn try_execute(
+    async fn run(
         &self,
         root: BoxedExecutor,
-        sender: &mut ChanSenderImpl,
+        mut sender: ChanSenderImpl,
         mut shutdown_rx: Receiver<String>,
         state_tx: &mut StateReporter,
-    ) -> Result<()> {
+    ) {
         let mut data_chunk_stream = root.execute();
-        let state;
+        let mut state;
         let mut error = None;
         loop {
             tokio::select! {
                 // We prioritize abort signal over normal data chunks.
                 biased;
-                err_resason = &mut shutdown_rx => {
+                err_reason = &mut shutdown_rx => {
                     state = TaskStatus::Aborted;
-                    error = Some(Aborted(err_reason.ok()));
+                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
                     break;
                 }
                 res = data_chunk_stream.next() => {
@@ -552,7 +532,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         },
                         Some(Err(e)) => {
                               error!("Batch task failed: {:?}", e);
-                              error = Some(e);
+                              error = Some(BatchError::from(e));
                               state = TaskStatus::Failed;
                               break;
                         },
@@ -566,6 +546,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
+        let error = error.map(|e| Arc::new(e));
+        *self.failure.lock() = error.clone().map(to_rw_error);
         let err_str = error.as_ref().map(|e| format!("{:?}", e));
         if let Err(e) = sender.close(error).await {
             match e {
@@ -582,15 +564,12 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             }
         }
 
-        *self.state.lock() = state;
         if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e
             );
         }
-
-        Ok(())
     }
 
     pub fn abort_task(&self, err_msg: String) {

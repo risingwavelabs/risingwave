@@ -14,19 +14,21 @@
 
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::Result;
 use tokio::sync::mpsc;
 
-use crate::error::BatchError::SenderError;
-use crate::error::{BatchError, Result as BatchResult};
+use crate::error::BatchError::{Internal, SenderError};
+use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]
 pub struct FifoSender {
-    sender: mpsc::Sender<BatchResult<Option<DataChunkInChannel>>>,
+    sender: mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl Debug for FifoSender {
@@ -36,40 +38,30 @@ impl Debug for FifoSender {
 }
 
 pub struct FifoReceiver {
-    receiver: mpsc::Receiver<BatchResult<Option<DataChunkInChannel>>>,
+    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl ChanSender for FifoSender {
-    type SendFuture<'a> = impl Future<Output = BatchResult<()>> + 'a;
-
-    fn send(&mut self, chunk: DataChunk) -> Self::SendFuture<'_> {
-        async move {
-            let data = DataChunkInChannel::new(chunk);
-            self.sender
-                .send(Ok(Some(data)))
-                .await
-                .map_err(|_| SenderError)
-        }
+    async fn send(&mut self, chunk: DataChunk) -> BatchResult<()> {
+        let data = DataChunkInChannel::new(chunk);
+        self.sender
+            .send(Ok(Some(data)))
+            .await
+            .map_err(|_| SenderError)
     }
 
-    fn close(self, error: Option<BatchError>) -> Self::SendFuture<'_> {
-        async move {
-            let result = error.as_ref().map(|e| Err(e.clone())).unwrap_or(Ok(None));
-            self.sender.send(result).await.map_err(|_| SenderError)
-        }
+    async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
+        let result = error.map(|e| Err(e)).unwrap_or(Ok(None));
+        self.sender.send(result).await.map_err(|_| SenderError)
     }
 }
 
 impl ChanReceiver for FifoReceiver {
-    type RecvFuture<'a> = impl Future<Output = BatchResult<Option<DataChunkInChannel>>> + 'a;
-
-    fn recv(&mut self) -> Self::RecvFuture<'_> {
-        async move {
-            match self.receiver.recv().await {
-                Some(data_chunk) => data_chunk,
-                // Early close should be treated as error.
-                None => Err(InternalError("broken fifo_channel".to_string()).into()),
-            }
+    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
+        match self.receiver.recv().await {
+            Some(data_chunk) => data_chunk,
+            // Early close should be treated as error.
+            None => Err(Arc::new(Internal(anyhow!("broken fifo_channel")))),
         }
     }
 }
