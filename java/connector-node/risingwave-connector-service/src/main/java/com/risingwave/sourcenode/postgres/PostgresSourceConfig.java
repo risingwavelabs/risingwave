@@ -32,9 +32,7 @@ public class PostgresSourceConfig implements SourceConfig {
         }
 
         String dbName = userProps.getNonNull(ConnectorConfig.DB_NAME);
-        String schema =
-                userProps.getOrDefault(
-                        ConnectorConfig.PG_SCHEMA_NAME, ConnectorConfig.PG_DEFAULT_SCHEMA);
+        String schema = userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME);
         String table = userProps.getNonNull(ConnectorConfig.TABLE_NAME);
 
         // Begin of connector configs
