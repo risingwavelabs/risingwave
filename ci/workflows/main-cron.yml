@@ -20,7 +20,7 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
-  - label: "build"
+  - label: "main-cron build"
     command: "ci/scripts/build.sh -t ci-release -p ci-release"
     key: "build"
     plugins:
@@ -32,7 +32,7 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
-  - label: "build other components"
+  - label: "main-cron build other components"
     command: "ci/scripts/build-other.sh"
     key: "build-other"
     plugins:
@@ -48,7 +48,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "build (deterministic simulation)"
+  - label: "main-cron build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
     key: "build-simulation"
     plugins:
@@ -60,7 +60,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
   
-  - label: "docslt"
+  - label: "main-cron docslt"
     command: "ci/scripts/docslt.sh"
     key: "docslt"
     plugins:
@@ -72,7 +72,7 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
-  - label: "end-to-end test (release)"
+  - label: "main-cron end-to-end test (release)"
     command: "ci/scripts/cron-e2e-test.sh -p ci-release"
     depends_on:
       - "build"
@@ -87,7 +87,7 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "end-to-end source test (release)"
+  - label: "main-cron end-to-end source test (release)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on:
       - "build"
@@ -102,7 +102,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "unit test"
+  - label: "main-cron unit test"
     command: "ci/scripts/unit-test.sh"
     plugins:
       - ./ci/plugins/swapfile
@@ -118,7 +118,7 @@ steps:
     timeout_in_minutes: 12
     retry: *auto-retry
 
-  - label: "unit test (deterministic simulation)"
+  - label: "main-cron unit test (deterministic simulation)"
     command: "MADSIM_TEST_NUM=100 timeout 15m ci/scripts/deterministic-unit-test.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
@@ -129,7 +129,7 @@ steps:
     timeout_in_minutes: 15
     retry: *auto-retry
 
-  - label: "scaling test (deterministic simulation)"
+  - label: "main-cron scaling test (deterministic simulation)"
     command: "TEST_NUM=60 timeout 110m ci/scripts/deterministic-scale-test.sh"
     depends_on: "build-simulation"
     plugins:
@@ -141,7 +141,7 @@ steps:
     timeout_in_minutes: 120
     retry: *auto-retry
 
-  - label: "end-to-end test (deterministic simulation)"
+  - label: "main-cron end-to-end test (deterministic simulation)"
     command: "TEST_NUM=64 timeout 55m ci/scripts/deterministic-e2e-test.sh"
     depends_on: "build-simulation"
     plugins:
@@ -159,7 +159,7 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "recovery test (deterministic simulation)"
+  - label: "main-cron recovery test (deterministic simulation)"
     command: "TEST_NUM=12 KILL_RATE=1.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
     depends_on: "build-simulation"
     plugins:
@@ -172,7 +172,7 @@ steps:
     timeout_in_minutes: 60
     retry: *auto-retry
 
-  - label: "misc check"
+  - label: "main-cron misc check"
     command: "ci/scripts/misc-check.sh"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
