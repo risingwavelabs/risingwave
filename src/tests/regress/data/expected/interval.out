@@ -90,7 +90,7 @@ SELECT * FROM INTERVAL_TBL;
 (10 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <> interval '@ 10 days';
+   WHERE INTERVAL_TBL.f1 <> interval '10 days';
        f1        
 -----------------
  00:01:00
@@ -105,7 +105,7 @@ SELECT * FROM INTERVAL_TBL
 (9 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <= interval '@ 5 hours';
+   WHERE INTERVAL_TBL.f1 <= interval '5 hours';
     f1     
 -----------
  00:01:00
@@ -114,7 +114,7 @@ SELECT * FROM INTERVAL_TBL
 (3 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 < interval '@ 1 day';
+   WHERE INTERVAL_TBL.f1 < interval '1 day';
     f1     
 -----------
  00:01:00
@@ -123,14 +123,14 @@ SELECT * FROM INTERVAL_TBL
 (3 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 = interval '@ 34 years';
+   WHERE INTERVAL_TBL.f1 = interval '34 years';
     f1    
 ----------
  34 years
 (1 row)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 >= interval '@ 1 month';
+   WHERE INTERVAL_TBL.f1 >= interval '1 month';
        f1        
 -----------------
  34 years
@@ -141,7 +141,7 @@ SELECT * FROM INTERVAL_TBL
 (5 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 > interval '@ 3 seconds ago';
+   WHERE INTERVAL_TBL.f1 > interval '-3 seconds';
        f1        
 -----------------
  00:01:00

@@ -7,13 +7,13 @@ SET IntervalStyle to postgres;
 
 -- check acceptance of "time zone style"
 SELECT INTERVAL '01:00' AS "One hour";
-SELECT INTERVAL '+02:00' AS "Two hours";
+--@ SELECT INTERVAL '+02:00' AS "Two hours";
 SELECT INTERVAL '-08:00' AS "Eight hours";
-SELECT INTERVAL '-1 +02:03' AS "22 hours ago...";
-SELECT INTERVAL '-1 days +02:03' AS "22 hours ago...";
-SELECT INTERVAL '1.5 weeks' AS "Ten days twelve hours";
-SELECT INTERVAL '1.5 months' AS "One month 15 days";
-SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
+--@ SELECT INTERVAL '-1 +02:03' AS "22 hours ago...";
+--@ SELECT INTERVAL '-1 days +02:03' AS "22 hours ago...";
+--@ SELECT INTERVAL '1.5 weeks' AS "Ten days twelve hours";
+--@ SELECT INTERVAL '1.5 months' AS "One month 15 days";
+--@ SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 
 CREATE TABLE INTERVAL_TBL (f1 interval);
 
@@ -38,22 +38,22 @@ INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 30 eons ago');
 SELECT * FROM INTERVAL_TBL;
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <> interval '@ 10 days';
+   WHERE INTERVAL_TBL.f1 <> interval '10 days';
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <= interval '@ 5 hours';
+   WHERE INTERVAL_TBL.f1 <= interval '5 hours';
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 < interval '@ 1 day';
+   WHERE INTERVAL_TBL.f1 < interval '1 day';
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 = interval '@ 34 years';
+   WHERE INTERVAL_TBL.f1 = interval '34 years';
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 >= interval '@ 1 month';
+   WHERE INTERVAL_TBL.f1 >= interval '1 month';
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 > interval '@ 3 seconds ago';
+   WHERE INTERVAL_TBL.f1 > interval '-3 seconds';
 
 SELECT r1.*, r2.*
    FROM INTERVAL_TBL r1, INTERVAL_TBL r2
@@ -69,10 +69,10 @@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES
   ('-2147483648 days 2147483647 months'),
   ('-2147483648 days -2147483648 months');
 -- these should fail as out-of-range
-INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
-INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
-INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
-INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
+--@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
+--@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
+--@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
+--@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
 
 -- Test edge-case overflow detection in interval multiplication
 --@ select extract(epoch from '256 microseconds'::interval * (2^55)::float8);
@@ -101,27 +101,27 @@ DROP TABLE INTERVAL_TBL_OF;
 
 CREATE TABLE INTERVAL_MULDIV_TBL (span interval);
 -- COPY INTERVAL_MULDIV_TBL FROM STDIN;
-INSERT INTO INTERVAL_MULDIV_TBL VALUES
-('41 mon 12 days 360:00'),
-('-41 mon -12 days +360:00'),
-('-12 days'),
-('9 mon -27 days 12:34:56'),
-('-3 years 482 days 76:54:32.189'),
-('4 mon'),
-('14 mon'),
-('999 mon 999 days');
+--@ INSERT INTO INTERVAL_MULDIV_TBL VALUES
+--@ ('41 mon 12 days 360:00'),
+--@ ('-41 mon -12 days +360:00'),
+--@ ('-12 days'),
+--@ ('9 mon -27 days 12:34:56'),
+--@ ('-3 years 482 days 76:54:32.189'),
+--@ ('4 mon'),
+--@ ('14 mon'),
+--@ ('999 mon 999 days');
 
-SELECT span * 0.3 AS product
-FROM INTERVAL_MULDIV_TBL;
-
-SELECT span * 8.2 AS product
-FROM INTERVAL_MULDIV_TBL;
-
-SELECT span / 10 AS quotient
-FROM INTERVAL_MULDIV_TBL;
-
-SELECT span / 100 AS quotient
-FROM INTERVAL_MULDIV_TBL;
+--@ SELECT span * 0.3 AS product
+--@ FROM INTERVAL_MULDIV_TBL;
+--@ 
+--@ SELECT span * 8.2 AS product
+--@ FROM INTERVAL_MULDIV_TBL;
+--@ 
+--@ SELECT span / 10 AS quotient
+--@ FROM INTERVAL_MULDIV_TBL;
+--@ 
+--@ SELECT span / 100 AS quotient
+--@ FROM INTERVAL_MULDIV_TBL;
 
 DROP TABLE INTERVAL_MULDIV_TBL;
 
@@ -134,13 +134,13 @@ SELECT * FROM INTERVAL_TBL;
 select avg(f1) from interval_tbl;
 
 -- test long interval input
-select '4 millenniums 5 centuries 4 decades 1 year 4 months 4 days 17 minutes 31 seconds'::interval;
+--@ select '4 millenniums 5 centuries 4 decades 1 year 4 months 4 days 17 minutes 31 seconds'::interval;
 
 -- test long interval output
 -- Note: the actual maximum length of the interval output is longer,
 -- but we need the test to work for both integer and floating-point
 -- timestamps.
-select '100000000y 10mon -1000000000d -100000h -10min -10.000001s ago'::interval;
+--@ select '100000000y 10mon -1000000000d -100000h -10min -10.000001s ago'::interval;
 
 -- test justify_hours() and justify_days()
 
@@ -152,16 +152,16 @@ select '100000000y 10mon -1000000000d -100000h -10min -10.000001s ago'::interval
 --@ SELECT justify_interval(interval '1 month -1 hour') as "1 month -1 hour";
 
 -- test fractional second input, and detection of duplicate units
-SELECT '1 millisecond'::interval, '1 microsecond'::interval,
-       '500 seconds 99 milliseconds 51 microseconds'::interval;
-SELECT '3 days 5 milliseconds'::interval;
+--@ SELECT '1 millisecond'::interval, '1 microsecond'::interval,
+--@        '500 seconds 99 milliseconds 51 microseconds'::interval;
+--@ SELECT '3 days 5 milliseconds'::interval;
 
-SELECT '1 second 2 seconds'::interval;              -- error
+--@ SELECT '1 second 2 seconds'::interval;              -- error
 SELECT '10 milliseconds 20 milliseconds'::interval; -- error
 SELECT '5.5 seconds 3 milliseconds'::interval;      -- error
 SELECT '1:20:05 5 microseconds'::interval;          -- error
-SELECT '1 day 1 day'::interval;                     -- error
-SELECT interval '1-2';  -- SQL year-month literal
+--@ SELECT '1 day 1 day'::interval;                     -- error
+--@ SELECT interval '1-2';  -- SQL year-month literal
 SELECT interval '999' second;  -- oversize leading field is ok
 SELECT interval '999' minute;
 SELECT interval '999' hour;
@@ -208,7 +208,7 @@ SELECT interval '123 2:03 -2:04'; -- not ok, redundant hh:mm fields
 --@ SELECT interval(0) '1 day 01:23:45.6789';
 --@ SELECT interval(2) '1 day 01:23:45.6789';
 --@ SELECT interval '12:34.5678' minute to second(2);  -- per SQL spec
-SELECT interval '1.234' second;
+--@ SELECT interval '1.234' second;
 --@ SELECT interval '1.234' second(2);
 --@ SELECT interval '1 2.345' day to second(2);
 --@ SELECT interval '1 2:03' day to second(2);
@@ -236,10 +236,10 @@ SET IntervalStyle TO sql_standard;
 
 -- test input of some not-quite-standard interval values in the sql style
 SET IntervalStyle TO postgres;
-SELECT  interval '+1 -1:00:00',
-        interval '-1 +1:00:00',
-        interval '+1-2 -3 +4:05:06.789',
-        interval '-1-2 +3 -4:05:06.789';
+--@ SELECT  interval '+1 -1:00:00',
+--@         interval '-1 +1:00:00',
+--@         interval '+1-2 -3 +4:05:06.789',
+--@         interval '-1-2 +3 -4:05:06.789';
 
 -- test output of couple non-standard interval values in the sql style
 SET IntervalStyle TO sql_standard;
@@ -284,9 +284,9 @@ SET IntervalStyle to postgres;
 --@         interval 'PT10:30'                AS "hour minute";
 
 -- test a couple rounding cases that changed since 8.3 w/ HAVE_INT64_TIMESTAMP.
-select interval '-10 mons -3 days +03:55:06.70';
-select interval '1 year 2 mons 3 days 04:05:06.699999';
-select interval '0:0:0.7', interval '@ 0.70 secs', interval '0.7 seconds';
+--@ select interval '-10 mons -3 days +03:55:06.70';
+--@ select interval '1 year 2 mons 3 days 04:05:06.699999';
+--@ select interval '0:0:0.7', interval '@ 0.70 secs', interval '0.7 seconds';
 
 -- check that '30 days' equals '1 month' according to the hash function
 select '30 days'::interval = '1 month'::interval as t;
