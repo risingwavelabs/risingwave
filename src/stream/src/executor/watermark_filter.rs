@@ -30,12 +30,11 @@ use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
-use super::filter::SimpleFilterExecutor;
+use super::filter::FilterExecutor;
 use super::{
     ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message, StreamExecutorResult,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::InfallibleExpression;
 use crate::executor::{expect_first_barrier, Watermark};
 
 /// The executor will generate a `Watermark` after each chunk.
@@ -146,7 +145,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let watermark_array = watermark_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
                             ctx.on_compute_error(err, &info.identity)
-                        });
+                        })
+                        .await;
 
                     // Build the expression to calculate watermark filter.
                     let watermark_filter_expr = Self::build_watermark_filter_expr(
@@ -167,9 +167,10 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let pred_output = watermark_filter_expr
                         .eval_infallible(chunk.data_chunk(), |err| {
                             ctx.on_compute_error(err, &info.identity)
-                        });
+                        })
+                        .await;
 
-                    if let Some(output_chunk) = SimpleFilterExecutor::filter(chunk, pred_output)? {
+                    if let Some(output_chunk) = FilterExecutor::filter(chunk, pred_output)? {
                         yield Message::Chunk(output_chunk);
                     };
 

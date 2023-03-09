@@ -68,7 +68,7 @@ pub mod test_utils;
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayRef, DataChunk};
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 
 pub use self::agg::AggKind;
@@ -77,7 +77,7 @@ pub use self::expr_binary_nonnull::new_binary_expr;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 pub use self::expr_unary::new_unary_expr;
-use super::Result;
+use super::{ExprError, Result};
 
 /// Instance of an expression
 #[async_trait::async_trait]
@@ -114,8 +114,52 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     }
 }
 
+impl dyn Expression {
+    pub async fn eval_infallible(&self, input: &DataChunk, on_err: impl Fn(ExprError)) -> ArrayRef {
+        assert!(!STRICT_MODE);
+
+        if let Ok(array) = self.eval(input).await {
+            return array;
+        }
+
+        // When eval failed, recompute in row-based execution
+        // and pad with NULL for each failed row.
+        let mut array_builder = self.return_type().create_array_builder(input.cardinality());
+        for row in input.rows_with_holes() {
+            if let Some(row) = row {
+                let datum = self
+                    .eval_row_infallible(&row.into_owned_row(), &on_err)
+                    .await;
+                array_builder.append_datum(&datum);
+            } else {
+                array_builder.append_null();
+            }
+        }
+        Arc::new(array_builder.finish())
+    }
+
+    pub async fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
+        assert!(!STRICT_MODE);
+
+        self.eval_row(input).await.unwrap_or_else(|err| {
+            on_err(err);
+            None
+        })
+    }
+}
+
 /// An owned dynamically typed [`Expression`].
 pub type BoxedExpression = Box<dyn Expression>;
 
 /// A reference to a dynamically typed [`Expression`].
 pub type ExpressionRef = Arc<dyn Expression>;
+
+/// Controls the behavior when a compute error happens.
+///
+/// - If set to `false`, `NULL` will be inserted.
+/// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
+///   still be used to serve outdated data without corruption.
+///
+/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
+#[expect(dead_code)]
+const STRICT_MODE: bool = false;

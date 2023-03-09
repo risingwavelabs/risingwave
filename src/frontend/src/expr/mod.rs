@@ -232,15 +232,15 @@ impl ExprImpl {
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
-        backend_expr.eval_row(input).map_err(Into::into)
+        Ok(backend_expr.eval_row(input).await?)
     }
 
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> RwResult<Datum> {
         assert!(self.is_const());
-        self.eval_row(&OwnedRow::empty())
+        tokio::runtime::Handle::current().block_on(self.eval_row(&OwnedRow::empty()))
     }
 }
 
