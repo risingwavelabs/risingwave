@@ -125,7 +125,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let source_builder = create_source_desc_builder(
         &schema,
         pk_column_ids,
-        Some(row_id_index as _),
+        Some(row_id_index),
         source_info,
         properties,
     );

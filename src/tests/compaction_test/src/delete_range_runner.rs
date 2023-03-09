@@ -49,7 +49,7 @@ use risingwave_storage::hummock::{
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -130,6 +130,7 @@ async fn compaction_test(
         row_id_index: None,
         version: None,
         watermark_indices: vec![],
+        dist_key_in_pk: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -385,13 +386,14 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                key,
+                Bytes::copy_from_slice(key),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -408,8 +410,8 @@ impl NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -417,6 +419,7 @@ impl NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -439,8 +442,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -448,6 +451,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await

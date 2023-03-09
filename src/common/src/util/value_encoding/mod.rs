@@ -15,11 +15,18 @@
 //! Value encoding is an encoding format which converts the data into a binary form (not
 //! memcomparable).
 
+use std::marker::{Send, Sync};
+use std::sync::Arc;
+
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
+use either::{for_both, Either};
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
 use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::catalog::ColumnId;
+use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
     DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
@@ -28,9 +35,135 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+
+use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
+
+/// The kind of all possible `ValueRowSerde`.
+#[derive(EnumAsInner)]
+pub enum ValueRowSerdeKind {
+    /// For `BasicSerde`, the value is encoded with value-encoding.
+    Basic,
+    /// For `ColumnAwareSerde`, the value is encoded with column-aware row encoding.
+    ColumnAware,
+}
+
+/// Part of `ValueRowSerde` that implements `serialize` a `Row` into bytes
+pub trait ValueRowSerializer: Clone {
+    fn serialize(&self, row: impl Row) -> Vec<u8>;
+}
+
+/// Part of `ValueRowSerde` that implements `deserialize` bytes into a `Row`
+pub trait ValueRowDeserializer: Clone {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>>;
+}
+
+/// Part of `ValueRowSerde` that implements `new` a serde given `column_ids` and `schema`
+pub trait ValueRowSerdeNew: Clone {
+    fn new(column_ids: &[ColumnId], schema: Arc<[DataType]>) -> Self;
+}
+
+/// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
+pub trait ValueRowSerde:
+    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
+{
+    fn kind(&self) -> ValueRowSerdeKind;
+}
+
+/// The type-erased `ValueRowSerde`, used for simplifying the code.
+#[derive(Clone)]
+pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+
+impl From<BasicSerde> for EitherSerde {
+    fn from(value: BasicSerde) -> Self {
+        Self(Either::Left(value))
+    }
+}
+impl From<ColumnAwareSerde> for EitherSerde {
+    fn from(value: ColumnAwareSerde) -> Self {
+        Self(Either::Right(value))
+    }
+}
+
+impl ValueRowSerializer for EitherSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        for_both!(&self.0, s => s.serialize(row))
+    }
+}
+
+impl ValueRowDeserializer for EitherSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        for_both!(&self.0, s => s.deserialize(encoded_bytes))
+    }
+}
+
+impl ValueRowSerdeNew for EitherSerde {
+    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
+        unreachable!("should construct manually")
+    }
+}
+
+impl ValueRowSerde for EitherSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        for_both!(&self.0, s => s.kind())
+    }
+}
+
+/// Wrap of the original `Row` serializing function
+#[derive(Clone)]
+pub struct BasicSerializer;
+
+impl ValueRowSerializer for BasicSerializer {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        let mut buf = vec![];
+        for datum in row.iter() {
+            serialize_datum_into(datum, &mut buf);
+        }
+        buf
+    }
+}
+
+impl ValueRowDeserializer for BasicDeserializer {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+/// Wrap of the original `Row` serializing and deserializing function
+#[derive(Clone)]
+pub struct BasicSerde {
+    serializer: BasicSerializer,
+    deserializer: BasicDeserializer,
+}
+
+impl ValueRowSerdeNew for BasicSerde {
+    fn new(_column_ids: &[ColumnId], schema: Arc<[DataType]>) -> BasicSerde {
+        BasicSerde {
+            serializer: BasicSerializer {},
+            deserializer: BasicDeserializer::new(schema.as_ref().to_owned()),
+        }
+    }
+}
+
+impl ValueRowSerializer for BasicSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        self.serializer.serialize(row)
+    }
+}
+
+impl ValueRowDeserializer for BasicSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        Ok(self.deserializer.deserialize(encoded_bytes)?.into_inner())
+    }
+}
+
+impl ValueRowSerde for BasicSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        ValueRowSerdeKind::Basic
+    }
+}
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {

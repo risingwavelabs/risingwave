@@ -23,12 +23,13 @@ use risingwave_common::array::{Op, StreamChunk, Vis};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::{get_dist_key_in_pk_indices, ColumnDesc, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
-use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::row::{self, CompactedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_hummock_sdk::key::{
     end_bound_of_prefix, prefixed_range, range_of_prefix, start_bound_of_excluded_prefix,
 };
@@ -39,7 +40,7 @@ use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
 };
 use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, ReadOptions, StateStoreIterItemStream,
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreIterItemStream,
 };
 use risingwave_storage::table::{compute_chunk_vnode, compute_vnode, Distribution};
 use risingwave_storage::StateStore;
@@ -51,13 +52,18 @@ use crate::executor::{StreamExecutorError, StreamExecutorResult};
 /// This num is arbitrary and we may want to improve this choice in the future.
 const STATE_CLEANING_PERIOD_EPOCH: usize = 5;
 
-/// `StateTable` is the interface accessing relational data in KV(`StateStore`) with
+/// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
 #[derive(Clone)]
-pub struct StateTable<
+pub struct StateTableInner<
+    S,
+    SD = BasicSerde,
+    W = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
+> where
     S: StateStore,
-    W: WatermarkBufferStrategy = WatermarkBufferByEpoch<STATE_CLEANING_PERIOD_EPOCH>,
-> {
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
     /// Id for this table.
     table_id: TableId,
 
@@ -68,7 +74,7 @@ pub struct StateTable<
     pk_serde: OrderedRowSerde,
 
     /// Row deserializer with value encoding
-    row_deserializer: RowDeserializer,
+    row_serde: SD,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
@@ -108,8 +114,16 @@ pub struct StateTable<
     watermark_buffer_strategy: W,
 }
 
+/// `StateTable` will use `BasicSerde` as default
+pub type StateTable<S> = StateTableInner<S, BasicSerde>;
+
 // initialize
-impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
+impl<S, SD, W> StateTableInner<S, SD, W>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
     /// Create state table from table catalog and store.
     pub async fn from_table_catalog(
         table_catalog: &Table,
@@ -145,9 +159,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             .pk
             .iter()
             .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
             })
             .collect();
         let dist_key_indices: Vec<usize> = table_catalog
@@ -159,10 +171,20 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         let pk_indices = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect_vec();
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        // FIXME(yuhao): only use `dist_key_in_pk` in the proto
+        let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+        } else {
+            table_catalog
+                .get_dist_key_in_pk()
+                .iter()
+                .map(|idx| *idx as usize)
+                .collect()
+        };
+
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let local_state_store = store
             .new_local(NewLocalOptions {
@@ -188,14 +210,10 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             },
             None => Distribution::fallback(),
         };
-        let vnode_col_idx_in_pk =
-            table_catalog
-                .vnode_col_index
-                .as_ref()
-                .and_then(|vnode_col_idx| {
-                    let vnode_col_idx = vnode_col_idx.index as usize;
-                    pk_indices.iter().position(|&i| vnode_col_idx == i)
-                });
+        let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
+            let vnode_col_idx = *idx as usize;
+            pk_indices.iter().position(|&i| vnode_col_idx == i)
+        });
         let input_value_indices = table_catalog
             .value_indices
             .iter()
@@ -205,7 +223,12 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         let data_types = input_value_indices
             .iter()
             .map(|idx| table_columns[*idx].data_type.clone())
-            .collect();
+            .collect_vec();
+
+        let column_ids = input_value_indices
+            .iter()
+            .map(|idx| table_columns[*idx].column_id)
+            .collect_vec();
 
         let no_shuffle_value_indices = (0..table_columns.len()).collect_vec();
 
@@ -217,11 +240,18 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             false => Some(input_value_indices),
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
+
+        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        assert_eq!(
+            row_serde.kind().is_column_aware(),
+            table_catalog.version.is_some()
+        );
+
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_deserializer: RowDeserializer::new(data_types),
+            row_serde,
             pk_indices: pk_indices.to_vec(),
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -403,15 +433,26 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             Some(value_indices) => value_indices
                 .iter()
                 .map(|idx| table_columns[*idx].data_type.clone())
-                .collect(),
-            None => table_columns.iter().map(|c| c.data_type.clone()).collect(),
+                .collect_vec(),
+            None => table_columns
+                .iter()
+                .map(|c| c.data_type.clone())
+                .collect_vec(),
+        };
+
+        let column_ids = match &value_indices {
+            Some(value_indices) => value_indices
+                .iter()
+                .map(|idx| table_columns[*idx].column_id)
+                .collect_vec(),
+            None => table_columns.iter().map(|c| c.column_id).collect_vec(),
         };
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_deserializer: RowDeserializer::new(data_types),
+            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
             pk_indices,
             dist_key_indices,
             dist_key_in_pk_indices,
@@ -499,26 +540,25 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
 }
 
 // point get
-impl<S: StateStore> StateTable<S> {
+impl<S, SD> StateTableInner<S, SD>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
-        match compacted_row {
-            Some(compacted_row) => {
-                let row = self
-                    .row_deserializer
-                    .deserialize(compacted_row.row.as_ref())?;
-                Ok(Some(row))
+        let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
+        match encoded_row {
+            Some(encoded_row) => {
+                let row = self.row_serde.deserialize(&encoded_row)?;
+                Ok(Some(OwnedRow::new(row)))
             }
             None => Ok(None),
         }
     }
 
-    /// Get a compacted row from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
+    /// Get a raw encoded row from state table.
+    pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         assert!(pk.len() <= self.pk_indices.len());
 
         if self.prefix_hint_len != 0 {
@@ -540,13 +580,31 @@ impl<S: StateStore> StateTable<S> {
             table_id: self.table_id,
             ignore_range_tombstone: false,
             read_version_from_backup: false,
+            prefetch_options: Default::default(),
         };
-        if let Some(storage_row_bytes) = self.local_store.get(&serialized_pk, read_options).await? {
-            Ok(Some(CompactedRow {
-                row: storage_row_bytes,
-            }))
+
+        self.local_store
+            .get(serialized_pk, read_options)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get a row in value-encoding format from state table.
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        if self.row_serde.kind().is_basic() {
+            // Basic serde is in value-encoding format, which is compatible with the compacted row.
+            self.get_encoded_row(pk)
+                .await
+                .map(|bytes| bytes.map(CompactedRow::new))
         } else {
-            Ok(None)
+            // For other encodings, we must first deserialize it into a `Row` first, then serialize
+            // it back into value-encoding format.
+            self.get_row(pk)
+                .await
+                .map(|row| row.map(CompactedRow::from))
         }
     }
 
@@ -572,7 +630,11 @@ impl<S: StateStore> StateTable<S> {
 }
 
 // write
-impl<S: StateStore> StateTable<S> {
+impl<S, SD> StateTableInner<S, SD>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+{
     fn handle_mem_table_error(&self, e: StorageError) {
         let e = match e {
             StorageError::MemTable(e) => e,
@@ -586,8 +648,8 @@ impl<S: StateStore> StateTable<S> {
                     self.table_id(),
                     vnode,
                     &key,
-                    prev.debug_fmt(&self.row_deserializer),
-                    new.debug_fmt(&self.row_deserializer),
+                    prev.debug_fmt(&self.row_serde),
+                    new.debug_fmt(&self.row_serde),
                 )
             }
         }
@@ -595,9 +657,11 @@ impl<S: StateStore> StateTable<S> {
 
     fn serialize_value(&self, value: impl Row) -> Bytes {
         if let Some(value_indices) = self.value_indices.as_ref() {
-            value.project(value_indices).value_serialize_bytes()
+            self.row_serde
+                .serialize(value.project(value_indices))
+                .into()
         } else {
-            value.value_serialize_bytes()
+            self.row_serde.serialize(value).into()
         }
     }
 
@@ -669,7 +733,7 @@ impl<S: StateStore> StateTable<S> {
         } else {
             chunk.clone()
         };
-        let values = value_chunk.serialize();
+        let values = value_chunk.serialize_with(&self.row_serde);
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
         let vnode_and_pks = key_chunk
@@ -794,18 +858,31 @@ fn get_second<T, U>(arg: StreamExecutorResult<(T, U)>) -> StreamExecutorResult<U
 }
 
 // Iterator functions
-impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
+impl<S, SD, W> StateTableInner<S, SD, W>
+where
+    S: StateStore,
+    SD: ValueRowSerde,
+    W: WatermarkBufferStrategy,
+{
     /// This function scans rows from the relational table.
-    pub async fn iter(&self) -> StreamExecutorResult<RowStream<'_, S>> {
-        self.iter_with_pk_prefix(row::empty()).await
+    pub async fn iter(
+        &self,
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+        self.iter_with_pk_prefix(row::empty(), prefetch_options)
+            .await
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
     pub async fn iter_with_pk_prefix(
         &self,
         pk_prefix: impl Row,
-    ) -> StreamExecutorResult<RowStream<'_, S>> {
-        Ok(self.iter_key_and_val(pk_prefix).await?.map(get_second))
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
+        Ok(self
+            .iter_key_and_val(pk_prefix, prefetch_options)
+            .await?
+            .map(get_second))
     }
 
     /// This function scans rows from the relational table with specific `pk_prefix`.
@@ -814,8 +891,9 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
+        prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
 
@@ -823,7 +901,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             prefixed_range(memcomparable_range, &vnode.to_be_bytes());
 
         // TODO: provide a trace of useful params.
-        self.iter_inner(memcomparable_range_with_vnode, None)
+        self.iter_inner(memcomparable_range_with_vnode, None, prefetch_options)
             .await
             .map_err(StreamExecutorError::from)
     }
@@ -833,11 +911,12 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
-    ) -> StreamExecutorResult<RowStream<'_, S>> {
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStream<'_, S, SD>> {
         Ok(self
-            .iter_key_and_val_with_pk_range(pk_range, vnode)
+            .iter_key_and_val_with_pk_range(pk_range, vnode, prefetch_options)
             .await?
             .map(get_second))
     }
@@ -847,12 +926,14 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
         pk_range: &(Bound<impl Row>, Bound<impl Row>),
         // Optional vnode that returns an iterator only over the given range under that vnode.
         // For now, we require this parameter, and will panic. In the future, when `None`, we can
-        // iterate over each vnode that the `StateTable` owns.
+        // iterate over each vnode that the `StateTableInner` owns.
         vnode: VirtualNode,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
-            self.iter_with_pk_range_inner(pk_range, vnode).await?,
-            self.row_deserializer.clone(),
+            self.iter_with_pk_range_inner(pk_range, vnode, prefetch_options)
+                .await?,
+            &self.row_serde,
         ))
     }
 
@@ -861,16 +942,19 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     pub async fn iter_key_and_val(
         &self,
         pk_prefix: impl Row,
-    ) -> StreamExecutorResult<RowStreamWithPk<'_, S>> {
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<RowStreamWithPk<'_, S, SD>> {
         Ok(deserialize_row_stream(
-            self.iter_with_pk_prefix_inner(pk_prefix).await?,
-            self.row_deserializer.clone(),
+            self.iter_with_pk_prefix_inner(pk_prefix, prefetch_options)
+                .await?,
+            &self.row_serde,
         ))
     }
 
     async fn iter_with_pk_prefix_inner(
         &self,
         pk_prefix: impl Row,
+        prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let prefix_serializer = self.pk_serde.prefix(pk_prefix.len());
         let encoded_prefix = serialize_pk(&pk_prefix, &prefix_serializer);
@@ -906,14 +990,15 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             "storage_iter_with_prefix"
         );
 
-        self.iter_inner(encoded_key_range_with_vnode, prefix_hint)
+        self.iter_inner(encoded_key_range_with_vnode, prefix_hint, prefetch_options)
             .await
     }
 
     async fn iter_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: (Bound<Bytes>, Bound<Bytes>),
         prefix_hint: Option<Bytes>,
+        prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<<S::Local as LocalStateStore>::IterStream<'_>> {
         let read_options = ReadOptions {
             prefix_hint,
@@ -921,6 +1006,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             retention_seconds: self.table_option.retention_seconds,
             table_id: self.table_id,
             read_version_from_backup: false,
+            prefetch_options,
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -966,6 +1052,7 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
             retention_seconds: None,
             table_id: self.table_id,
             read_version_from_backup: false,
+            prefetch_options: Default::default(),
         };
 
         self.local_store
@@ -975,20 +1062,22 @@ impl<S: StateStore, W: WatermarkBufferStrategy> StateTable<S, W> {
     }
 }
 
-pub type RowStream<'a, S: StateStore> = impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub type RowStreamWithPk<'a, S: StateStore> =
+pub type RowStream<'a, S: StateStore, SD: ValueRowSerde + 'a> =
+    impl Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
+pub type RowStreamWithPk<'a, S: StateStore, SD: ValueRowSerde + 'a> =
     impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a;
 
-fn deserialize_row_stream(
-    stream: impl StateStoreIterItemStream,
-    deserializer: RowDeserializer,
-) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> {
+fn deserialize_row_stream<'a>(
+    stream: impl StateStoreIterItemStream + 'a,
+    deserializer: &'a impl ValueRowSerde,
+) -> impl Stream<Item = StreamExecutorResult<(Bytes, OwnedRow)>> + 'a {
     stream.map(move |result| {
         result
             .map_err(StreamExecutorError::from)
             .and_then(|(key, value)| {
                 Ok(deserializer
-                    .deserialize(value)
+                    .deserialize(&value)
+                    .map(OwnedRow::new)
                     .map(move |row| (key.user_key.table_key.0, row))?)
             })
     })
@@ -997,7 +1086,7 @@ fn deserialize_row_stream(
 pub fn prefix_range_to_memcomparable(
     pk_serde: &OrderedRowSerde,
     range: &(Bound<impl Row>, Bound<impl Row>),
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+) -> (Bound<Bytes>, Bound<Bytes>) {
     (
         to_memcomparable(pk_serde, &range.0, false),
         to_memcomparable(pk_serde, &range.1, true),
@@ -1008,7 +1097,7 @@ fn to_memcomparable<R: Row>(
     pk_serde: &OrderedRowSerde,
     bound: &Bound<R>,
     is_upper: bool,
-) -> Bound<Vec<u8>> {
+) -> Bound<Bytes> {
     let serialize_pk_prefix = |pk_prefix: &R| {
         let prefix_serializer = pk_serde.prefix(pk_prefix.len());
         serialize_pk(pk_prefix, &prefix_serializer)
