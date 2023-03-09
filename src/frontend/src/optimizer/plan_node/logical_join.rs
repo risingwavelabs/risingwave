@@ -29,11 +29,12 @@ use super::{
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, ToStreamContext,
+    StreamDynamicFilter, StreamFilter, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -546,25 +547,7 @@ impl LogicalJoin {
         };
         let left_schema_len = logical_join.left().schema().len();
 
-        // Rewrite the join predicate and all columns referred to the scan side need to rewrite.
-        struct JoinPredicateRewriter {
-            offset: usize,
-            mapping: Vec<usize>,
-        }
-        impl ExprRewriter for JoinPredicateRewriter {
-            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-                if input_ref.index() < self.offset {
-                    input_ref.into()
-                } else {
-                    InputRef::new(
-                        self.mapping[input_ref.index() - self.offset] + self.offset,
-                        input_ref.return_type(),
-                    )
-                    .into()
-                }
-            }
-        }
-        let mut join_predicate_rewriter = JoinPredicateRewriter {
+        let mut join_predicate_rewriter = LookupJoinPredicateRewriter {
             offset: left_schema_len,
             mapping: o2r.clone(),
         };
@@ -573,16 +556,7 @@ impl LogicalJoin {
             .eq_cond()
             .rewrite_expr(&mut join_predicate_rewriter);
 
-        // Rewrite the scan predicate so we can add it to the join predicate.
-        struct ScanPredicateRewriter {
-            offset: usize,
-        }
-        impl ExprRewriter for ScanPredicateRewriter {
-            fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-                InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
-            }
-        }
-        let mut scan_predicate_rewriter = ScanPredicateRewriter {
+        let mut scan_predicate_rewriter = LookupJoinScanPredicateRewriter {
             offset: left_schema_len,
         };
 
@@ -883,6 +857,35 @@ fn derive_predicate_from_eq_condition(
     )
 }
 
+/// Rewrite the join predicate and all columns referred to the scan side need to rewrite.
+struct LookupJoinPredicateRewriter {
+    offset: usize,
+    mapping: Vec<usize>,
+}
+impl ExprRewriter for LookupJoinPredicateRewriter {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        if input_ref.index() < self.offset {
+            input_ref.into()
+        } else {
+            InputRef::new(
+                self.mapping[input_ref.index() - self.offset] + self.offset,
+                input_ref.return_type(),
+            )
+            .into()
+        }
+    }
+}
+
+/// Rewrite the scan predicate so we can add it to the join predicate.
+struct LookupJoinScanPredicateRewriter {
+    offset: usize,
+}
+impl ExprRewriter for LookupJoinScanPredicateRewriter {
+    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
+        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
+    }
+}
+
 impl PredicatePushdown for LogicalJoin {
     /// Pushes predicates above and within a join node into the join node and/or its children nodes.
     ///
@@ -1097,6 +1100,149 @@ impl LogicalJoin {
         } else {
             Ok(StreamHashJoin::new(logical_join, predicate).into())
         }
+    }
+
+    fn to_stream_temporal_join(
+        &self,
+        predicate: EqJoinPredicate,
+        ctx: &mut ToStreamContext,
+    ) -> Result<PlanRef> {
+        assert!(predicate.has_eq());
+        if predicate.has_non_eq() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join doesn't support non-equal condition".into(),
+                "Please remove the non-equal condition".into(),
+            )));
+        }
+
+        let left = self.left().to_stream_with_dist_required(
+            &RequiredDist::shard_by_key(self.left().schema().len(), &predicate.left_eq_indexes()),
+            ctx,
+        )?;
+
+        if !left.append_only() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join needs a append-only left input".into(),
+                "Please ensure your left input is append-only".into(),
+            )));
+        }
+
+        let right = self.right();
+        let Some(logical_scan) = right.as_logical_scan() else {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join needs a table scan as its lookup table".into(),
+                "Please provide a table scan".into(),
+            )));
+        };
+
+        let logical_scan: &LogicalScan = logical_scan;
+        if !logical_scan.predicate().always_true() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join needs a lookup table without predicates".into(),
+                "Please remove the predicate of the lookup table".into(),
+            )));
+        }
+
+        let table_desc = logical_scan.table_desc();
+
+        // Verify that right join key columns are the primary key of the lookup table.
+        let order_col_ids = table_desc.order_column_ids();
+        let order_col_ids_len = order_col_ids.len();
+        let output_column_ids = logical_scan.output_column_ids();
+
+        // Reorder the join equal predicate to match the order key.
+        let mut reorder_idx = vec![];
+        for order_col_id in order_col_ids {
+            for (i, eq_idx) in predicate.right_eq_indexes().into_iter().enumerate() {
+                if order_col_id == output_column_ids[eq_idx] {
+                    reorder_idx.push(i);
+                    break;
+                }
+            }
+        }
+        if order_col_ids_len != predicate.eq_keys().len() || reorder_idx.len() < order_col_ids_len {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
+                "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
+            )));
+        }
+        let predicate = predicate.reorder(&reorder_idx);
+
+        // Extract the predicate from logical scan. Only pure scan is supported.
+        let (new_scan, scan_predicate, project_expr) = logical_scan.predicate_pull_up();
+        // Construct output column to require column mapping
+        let o2r = if let Some(project_expr) = project_expr {
+            project_expr
+                .into_iter()
+                .map(|x| x.as_input_ref().unwrap().index)
+                .collect_vec()
+        } else {
+            (0..logical_scan.output_col_idx().len()).collect_vec()
+        };
+        let left_schema_len = self.left().schema().len();
+        let mut join_predicate_rewriter = LookupJoinPredicateRewriter {
+            offset: left_schema_len,
+            mapping: o2r.clone(),
+        };
+
+        let new_eq_cond = predicate
+            .eq_cond()
+            .rewrite_expr(&mut join_predicate_rewriter);
+
+        let mut scan_predicate_rewriter = LookupJoinScanPredicateRewriter {
+            offset: left_schema_len,
+        };
+
+        let new_other_cond = predicate
+            .other_cond()
+            .clone()
+            .rewrite_expr(&mut join_predicate_rewriter)
+            .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
+
+        let new_join_on = new_eq_cond.and(new_other_cond);
+        let new_predicate = EqJoinPredicate::create(
+            left_schema_len,
+            new_scan.base.schema().len(),
+            new_join_on.clone(),
+        );
+
+        // We discovered that we cannot use a lookup join after pulling up the predicate
+        // from one side and simplifying the condition. Let's use some other join instead.
+        if !new_predicate.has_eq() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires a non trivial join condition".into(),
+                "Please remove the false condition of the join".into(),
+            )));
+        }
+
+        // Rewrite the join output indices and all output indices referred to the old scan need to
+        // rewrite.
+        let new_join_output_indices = self
+            .output_indices()
+            .clone()
+            .into_iter()
+            .map(|x| {
+                if x < left_schema_len {
+                    x
+                } else {
+                    o2r[x - left_schema_len] + left_schema_len
+                }
+            })
+            .collect_vec();
+
+        let new_scan_ref: PlanRef = new_scan.into();
+        let right = RequiredDist::no_shuffle(new_scan_ref.to_stream(ctx)?);
+
+        // Construct a new logical join, because we have change its RHS.
+        let new_logical_join = LogicalJoin::with_output_indices(
+            left,
+            right,
+            self.join_type(),
+            new_join_on,
+            new_join_output_indices,
+        );
+
+        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate).into())
     }
 
     fn to_stream_dynamic_filter(

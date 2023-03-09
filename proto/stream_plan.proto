@@ -289,6 +289,17 @@ message HashJoinNode {
   bool is_append_only = 14;
 }
 
+message TemporalJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  repeated bool null_safe = 4;
+  // The output indices of current node
+  repeated uint32 output_indices = 5;
+  // The table desc of the lookup side table.
+  plan_common.StorageTableDesc table_desc = 6;
+}
+
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
@@ -531,6 +542,7 @@ message StreamNode {
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
+    TemporalJoinNode temporal_join = 131;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

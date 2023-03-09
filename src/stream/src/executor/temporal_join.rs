@@ -166,7 +166,6 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
-    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
