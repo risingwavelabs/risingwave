@@ -68,10 +68,6 @@ impl IntervalUnit {
         self.months
     }
 
-    pub fn get_years(&self) -> i32 {
-        self.months / 12
-    }
-
     pub fn get_ms(&self) -> i64 {
         self.ms
     }
