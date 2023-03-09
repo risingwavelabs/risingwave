@@ -133,7 +133,7 @@ impl UpdateExecutor {
 
             let updated_data_chunk = {
                 let mut columns = Vec::with_capacity(self.exprs.len());
-                for expr in self.exprs.iter_mut() {
+                for expr in &mut self.exprs {
                     let column = Column::new(expr.eval(&data_chunk).await?);
                     columns.push(column);
                 }

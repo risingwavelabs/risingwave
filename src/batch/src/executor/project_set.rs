@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use either::{for_both, Either};
-use futures::stream::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::column::Column;

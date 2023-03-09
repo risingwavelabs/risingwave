@@ -6098,6 +6098,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_udf",
  "speedate",
+ "static_assertions",
  "thiserror",
  "workspace-hack",
 ]

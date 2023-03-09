@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::buffer::{Bitmap, BitmapBuilder};
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ScalarImpl};
 

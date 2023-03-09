@@ -42,7 +42,7 @@ impl Expression for NestedConstructExpression {
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut columns = Vec::with_capacity(self.elements.len());
-        for e in self.elements.iter() {
+        for e in &self.elements {
             columns.push(e.eval_checked(input).await?);
         }
 
@@ -82,7 +82,7 @@ impl Expression for NestedConstructExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let mut datums = Vec::with_capacity(self.elements.len());
-        for e in self.elements.iter() {
+        for e in &self.elements {
             datums.push(e.eval_row(input).await?);
         }
         if let DataType::Struct { .. } = &self.data_type {

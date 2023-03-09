@@ -365,7 +365,7 @@ mod tests {
             let actual = actual.iter().collect::<Vec<_>>();
             assert_eq!(actual, expected);
             Ok(())
-        };
+        }
         let input = I32Array::from_iter([1, 2, 3]);
         let expected = &[Some(3)];
         test_case(input.into(), expected).await?;

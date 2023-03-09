@@ -70,6 +70,7 @@ use std::sync::Arc;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
+use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
 pub use self::build_expr_from_prost::build_from_prost;
@@ -116,7 +117,7 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 
 impl dyn Expression {
     pub async fn eval_infallible(&self, input: &DataChunk, on_err: impl Fn(ExprError)) -> ArrayRef {
-        assert!(!STRICT_MODE);
+        const_assert!(!STRICT_MODE);
 
         if let Ok(array) = self.eval(input).await {
             return array;
@@ -139,7 +140,7 @@ impl dyn Expression {
     }
 
     pub async fn eval_row_infallible(&self, input: &OwnedRow, on_err: impl Fn(ExprError)) -> Datum {
-        assert!(!STRICT_MODE);
+        const_assert!(!STRICT_MODE);
 
         self.eval_row(input).await.unwrap_or_else(|err| {
             on_err(err);
@@ -161,5 +162,5 @@ pub type ExpressionRef = Arc<dyn Expression>;
 ///   still be used to serve outdated data without corruption.
 ///
 /// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
-#[expect(dead_code)]
+#[allow(dead_code)]
 const STRICT_MODE: bool = false;
