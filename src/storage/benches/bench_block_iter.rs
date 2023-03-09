@@ -18,8 +18,8 @@ use risingwave_storage::hummock::{
     Block, BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
 };
 
-const TABLES_PER_SSTABLE: u32 = 10;
-const KEYS_PER_TABLE: u64 = 100;
+const TABLES_PER_SSTABLE: u32 = 100;
+const KEYS_PER_TABLE: u64 = 1000;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
 

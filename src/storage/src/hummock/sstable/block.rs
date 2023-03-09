@@ -36,7 +36,6 @@ pub enum LenType {
     U8 = 1,
     U16 = 2,
     U32 = 3,
-    U64 = 4,
 }
 
 impl From<u8> for LenType {
@@ -45,7 +44,6 @@ impl From<u8> for LenType {
             1 => LenType::U8,
             2 => LenType::U16,
             3 => LenType::U32,
-            4 => LenType::U64,
             _ => {
                 println!("error LenType {}", value);
                 panic!("unexpected")
@@ -56,58 +54,112 @@ impl From<u8> for LenType {
 
 impl LenType {
     fn new(len: usize) -> Self {
+        // if len <= u8::MAX as usize {
+        //     LenType::U8
+        // } else if len <= u16::MAX as usize {
+        //     LenType::U16
+        // } else {
+        //     unreachable!()
+        // }
+
         if len <= u8::MAX as usize {
             LenType::U8
         } else if len <= u16::MAX as usize {
             LenType::U16
-        } else if len <= u32::MAX as usize {
-            LenType::U32
         } else {
-            LenType::U64
-        }
-    }
-
-    fn put(&self, buf: &mut impl BufMut, value: usize) {
-        match *self {
-            Self::U8 => {
-                buf.put_u8(value as u8);
-            }
-
-            Self::U16 => {
-                buf.put_u16(value as u16);
-            }
-
-            Self::U32 => {
-                buf.put_u32(value as u32);
-            }
-
-            Self::U64 => {
-                buf.put_u64(value as u64);
-            }
-        }
-    }
-
-    fn get(&self, buf: &mut impl Buf) -> usize {
-        match *self {
-            Self::U8 => buf.get_u8() as usize,
-
-            Self::U16 => buf.get_u16() as usize,
-
-            Self::U32 => buf.get_u32() as usize,
-
-            Self::U64 => buf.get_u64() as usize,
+            LenType::U32
         }
     }
 
     fn len(&self) -> usize {
         match *self {
             Self::U8 => size_of::<u8>(),
-
             Self::U16 => size_of::<u16>(),
-
             Self::U32 => size_of::<u32>(),
+        }
+    }
+}
 
-            Self::U64 => size_of::<u64>(),
+pub struct LenTypeWrapper {
+    kt: LenType,
+    vt: LenType,
+}
+
+impl LenTypeWrapper {
+    fn put(&self, buf: &mut impl BufMut, overlap: usize, diff: usize, value: usize) {
+        match (&self.kt, &self.vt) {
+            (LenType::U8, LenType::U8) => {
+                buf.put_u8(overlap as u8);
+                buf.put_u8(diff as u8);
+                buf.put_u8(value as u8);
+            }
+            (LenType::U8, LenType::U16) => {
+                buf.put_u8(overlap as u8);
+                buf.put_u8(diff as u8);
+                buf.put_u16(value as u16);
+            }
+            (LenType::U8, LenType::U32) => {
+                buf.put_u8(overlap as u8);
+                buf.put_u8(diff as u8);
+                buf.put_u32(value as u32);
+            }
+
+            (LenType::U16, LenType::U8) => {
+                buf.put_u16(overlap as u16);
+                buf.put_u16(diff as u16);
+                buf.put_u8(value as u8);
+            }
+            (LenType::U16, LenType::U16) => {
+                buf.put_u16(overlap as u16);
+                buf.put_u16(diff as u16);
+                buf.put_u16(value as u16);
+            }
+            (LenType::U16, LenType::U32) => {
+                buf.put_u16(overlap as u16);
+                buf.put_u16(diff as u16);
+                buf.put_u32(value as u32);
+            }
+            _ => {
+                unreachable!()
+            }
+        }
+    }
+
+    fn get(&self, buf: &mut impl Buf) -> (usize, usize, usize) {
+        match (self.kt, self.vt) {
+            (LenType::U8, LenType::U8) => (
+                buf.get_u8() as usize,
+                buf.get_u8() as usize,
+                buf.get_u8() as usize,
+            ),
+            (LenType::U8, LenType::U16) => (
+                buf.get_u8() as usize,
+                buf.get_u8() as usize,
+                buf.get_u16() as usize,
+            ),
+            (LenType::U8, LenType::U32) => (
+                buf.get_u8() as usize,
+                buf.get_u8() as usize,
+                buf.get_u32() as usize,
+            ),
+            (LenType::U16, LenType::U8) => (
+                buf.get_u16() as usize,
+                buf.get_u16() as usize,
+                buf.get_u8() as usize,
+            ),
+            (LenType::U16, LenType::U16) => (
+                buf.get_u16() as usize,
+                buf.get_u16() as usize,
+                buf.get_u16() as usize,
+            ),
+            (LenType::U16, LenType::U32) => (
+                buf.get_u16() as usize,
+                buf.get_u16() as usize,
+                buf.get_u32() as usize,
+            ),
+            _ => {
+                unreachable!()
+            }
         }
     }
 }
@@ -247,7 +299,11 @@ impl Block {
     }
 
     pub fn restart_points_type_index(&self, index: u32) -> (LenType, LenType) {
-        *self.restart_points_type_index.get(&index).unwrap()
+        let iter = self
+            .restart_points_type_index
+            .range(..=index)
+            .take_while(|(offset, _)| **offset <= index);
+        iter.last().unwrap().1.clone()
     }
 }
 
@@ -260,15 +316,16 @@ pub struct KeyPrefix {
     /// Used for calculating range, won't be encoded.
     offset: usize,
 
-    key_len_type: LenType,
-    value_len_type: LenType,
+    len: usize,
 }
 
 impl KeyPrefix {
     pub fn encode(&self, buf: &mut impl BufMut, key_len_type: LenType, value_len_type: LenType) {
-        key_len_type.put(buf, self.overlap);
-        key_len_type.put(buf, self.diff);
-        value_len_type.put(buf, self.value);
+        LenTypeWrapper {
+            kt: key_len_type,
+            vt: value_len_type,
+        }
+        .put(buf, self.overlap, self.diff, self.value)
     }
 
     pub fn decode(
@@ -277,29 +334,30 @@ impl KeyPrefix {
         key_len_type: LenType,
         value_len_type: LenType,
     ) -> Self {
-        let overlap = key_len_type.get(buf);
-        let diff = key_len_type.get(buf);
-        let value = value_len_type.get(buf);
+        // let overlap = key_len_type.get(buf);
+        // let diff = key_len_type.get(buf);
+        // let value = value_len_type.get(buf);
 
+        let (overlap, diff, value) = LenTypeWrapper {
+            kt: key_len_type,
+            vt: value_len_type,
+        }
+        .get(buf);
+
+        let len = key_len_type.len() * 2 + value_len_type.len();
         Self {
             overlap,
             diff,
             value,
             offset,
-            key_len_type,
-            value_len_type,
+            len,
         }
     }
 
     /// Encoded length.
     fn len(&self) -> usize {
-        // if self.diff >= MAX_KEY_LEN {
-        //     12 // 2 + 2 + 4 + 4
-        // } else {
-        //     8 // 2 + 2 + 4
-        // }
-
-        self.key_len_type.len() * 2 + self.value_len_type.len()
+        // self.key_len_type.len() * 2 + self.value_len_type.len()
+        self.len
     }
 
     /// Gets overlap len.
@@ -416,21 +474,24 @@ impl BlockBuilder {
             let offset = self.buf.len() as u32;
 
             self.restart_points.push(offset);
-            self.restart_points_type_index
-                .insert(offset, (key_len_type, value_len_type));
+
+            if type_mismatch || self.restart_points_type_index.is_empty() {
+                self.restart_points_type_index
+                    .insert(offset, (key_len_type, value_len_type));
+            }
 
             key
         } else {
             bytes_diff_below_max_key_length(&self.last_key, key)
         };
 
+        let len = key_len_type.len() * 2 + value_len_type.len();
         let prefix = KeyPrefix {
             overlap: key.len() - diff_key.len(),
             diff: diff_key.len(),
             value: value.len(),
             offset: self.buf.len(),
-            key_len_type,
-            value_len_type,
+            len,
         };
 
         prefix.encode(&mut self.buf, key_len_type, value_len_type);
@@ -549,18 +610,6 @@ impl BlockBuilder {
             + 8
             + (4 + 2) * self.restart_points_type_index.len()
     }
-
-    // fn get_len_type(len: usize) -> LenType {
-    //     if len <= u8::MAX as usize {
-    //         LenType::U8
-    //     } else if len <= u16::MAX as usize {
-    //         LenType::U16
-    //     } else if len <= u32::MAX as usize {
-    //         LenType::U32
-    //     } else {
-    //         LenType::U64
-    //     }
-    // }
 }
 
 #[cfg(test)]
