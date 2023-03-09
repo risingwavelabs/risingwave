@@ -53,12 +53,13 @@ SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 (1 row)
 
 CREATE TABLE INTERVAL_TBL (f1 interval);
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 1 minute');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 5 hour');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 10 day');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 34 year');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 3 months');
-INSERT INTO INTERVAL_TBL (f1) VALUES ('@ 14 seconds ago');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('1 minute');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('5 hour');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('10 day');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('34 year');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('3 months');
+-- INSERT INTO INTERVAL_TBL (f1) VALUES ('14 seconds ago');
+INSERT INTO INTERVAL_TBL (f1) VALUES ('-14 seconds');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('1 day 2 hours 3 minutes 4 seconds');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('6 years');
 INSERT INTO INTERVAL_TBL (f1) VALUES ('5 months');
@@ -89,7 +90,7 @@ SELECT * FROM INTERVAL_TBL;
 (10 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <> interval '@ 10 days';
+   WHERE INTERVAL_TBL.f1 <> interval '10 days';
        f1        
 -----------------
  00:01:00
@@ -104,7 +105,7 @@ SELECT * FROM INTERVAL_TBL
 (9 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 <= interval '@ 5 hours';
+   WHERE INTERVAL_TBL.f1 <= interval '5 hours';
     f1     
 -----------
  00:01:00
@@ -113,7 +114,7 @@ SELECT * FROM INTERVAL_TBL
 (3 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 < interval '@ 1 day';
+   WHERE INTERVAL_TBL.f1 < interval '1 day';
     f1     
 -----------
  00:01:00
@@ -122,14 +123,14 @@ SELECT * FROM INTERVAL_TBL
 (3 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 = interval '@ 34 years';
+   WHERE INTERVAL_TBL.f1 = interval '34 years';
     f1    
 ----------
  34 years
 (1 row)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 >= interval '@ 1 month';
+   WHERE INTERVAL_TBL.f1 >= interval '1 month';
        f1        
 -----------------
  34 years
@@ -140,7 +141,7 @@ SELECT * FROM INTERVAL_TBL
 (5 rows)
 
 SELECT * FROM INTERVAL_TBL
-   WHERE INTERVAL_TBL.f1 > interval '@ 3 seconds ago';
+   WHERE INTERVAL_TBL.f1 > interval '-3 seconds';
        f1        
 -----------------
  00:01:00
@@ -208,7 +209,7 @@ SELECT r1.*, r2.*
 (45 rows)
 
 -- Test intervals that are large enough to overflow 64 bits in comparisons
-CREATE TEMP TABLE INTERVAL_TBL_OF (f1 interval);
+CREATE TABLE INTERVAL_TBL_OF (f1 interval);
 INSERT INTO INTERVAL_TBL_OF (f1) VALUES
   ('2147483647 days 2147483647 months'),
   ('2147483647 days -2147483648 months'),
@@ -282,7 +283,16 @@ DROP TABLE INTERVAL_TBL_OF;
 -- some time components be greater than 23:59:59 due to how intervals are
 -- stored internally.
 CREATE TABLE INTERVAL_MULDIV_TBL (span interval);
-COPY INTERVAL_MULDIV_TBL FROM STDIN;
+-- COPY INTERVAL_MULDIV_TBL FROM STDIN;
+INSERT INTO INTERVAL_MULDIV_TBL VALUES
+('41 mon 12 days 360:00'),
+('-41 mon -12 days +360:00'),
+('-12 days'),
+('9 mon -27 days 12:34:56'),
+('-3 years 482 days 76:54:32.189'),
+('4 mon'),
+('14 mon'),
+('999 mon 999 days');
 SELECT span * 0.3 AS product
 FROM INTERVAL_MULDIV_TBL;
               product               
