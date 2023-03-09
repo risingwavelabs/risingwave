@@ -83,7 +83,7 @@ message InsertNode {
   // An optional field and will be `None` for tables without user-defined pk.
   // The `BatchInsertExecutor` should add a column with NULL value which will
   // be filled in streaming.
-  catalog.ColumnIndex row_id_index = 3;
+  optional uint32 row_id_index = 3;
   bool returning = 4;
 }
 
@@ -113,18 +113,18 @@ message ValuesNode {
 }
 
 message SortNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
 }
 
 message TopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
   bool with_ties = 4;
 }
 
 message GroupTopNNode {
-  repeated plan_common.ColumnOrder column_orders = 1;
+  repeated common.ColumnOrder column_orders = 1;
   uint64 limit = 2;
   uint64 offset = 3;
   repeated uint32 group_key = 4;
@@ -178,15 +178,17 @@ message SortMergeJoinNode {
   plan_common.JoinType join_type = 1;
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
-  plan_common.OrderType direction = 4;
+  common.Direction direction = 4;
   repeated uint32 output_indices = 5;
 }
 
 message HopWindowNode {
-  expr.InputRefExpr time_col = 1;
+  uint32 time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message TableFunctionNode {
@@ -229,7 +231,7 @@ message ExchangeNode {
 
 message MergeSortExchangeNode {
   ExchangeNode exchange = 1;
-  repeated plan_common.ColumnOrder column_orders = 2;
+  repeated common.ColumnOrder column_orders = 2;
 }
 
 message LocalLookupJoinNode {

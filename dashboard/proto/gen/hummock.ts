@@ -303,6 +303,7 @@ export interface CompactTask {
   targetSubLevelId: number;
   /** Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum */
   taskType: CompactTask_TaskType;
+  splitByStateTable: boolean;
 }
 
 export const CompactTask_TaskStatus = {
@@ -797,6 +798,7 @@ export interface CompactionConfig {
   compactionFilterMask: number;
   maxSubCompaction: number;
   maxSpaceReclaimBytes: number;
+  splitByStateTable: boolean;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -2164,6 +2166,7 @@ function createBaseCompactTask(): CompactTask {
     currentEpochTime: 0,
     targetSubLevelId: 0,
     taskType: CompactTask_TaskType.TYPE_UNSPECIFIED,
+    splitByStateTable: false,
   };
 }
 
@@ -2200,6 +2203,7 @@ export const CompactTask = {
       taskType: isSet(object.taskType)
         ? compactTask_TaskTypeFromJSON(object.taskType)
         : CompactTask_TaskType.TYPE_UNSPECIFIED,
+      splitByStateTable: isSet(object.splitByStateTable) ? Boolean(object.splitByStateTable) : false,
     };
   },
 
@@ -2243,6 +2247,7 @@ export const CompactTask = {
     message.currentEpochTime !== undefined && (obj.currentEpochTime = Math.round(message.currentEpochTime));
     message.targetSubLevelId !== undefined && (obj.targetSubLevelId = Math.round(message.targetSubLevelId));
     message.taskType !== undefined && (obj.taskType = compactTask_TaskTypeToJSON(message.taskType));
+    message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     return obj;
   },
 
@@ -2273,6 +2278,7 @@ export const CompactTask = {
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
     message.taskType = object.taskType ?? CompactTask_TaskType.TYPE_UNSPECIFIED;
+    message.splitByStateTable = object.splitByStateTable ?? false;
     return message;
   },
 };
@@ -4353,6 +4359,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     compactionFilterMask: 0,
     maxSubCompaction: 0,
     maxSpaceReclaimBytes: 0,
+    splitByStateTable: false,
   };
 }
 
@@ -4381,6 +4388,7 @@ export const CompactionConfig = {
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
       maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
+      splitByStateTable: isSet(object.splitByStateTable) ? Boolean(object.splitByStateTable) : false,
     };
   },
 
@@ -4406,6 +4414,7 @@ export const CompactionConfig = {
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
     message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
+    message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     return obj;
   },
 
@@ -4423,6 +4432,7 @@ export const CompactionConfig = {
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
+    message.splitByStateTable = object.splitByStateTable ?? false;
     return message;
   },
 };

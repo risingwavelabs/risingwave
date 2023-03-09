@@ -36,6 +36,7 @@ use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServ
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::user_service_server::UserServiceServer;
+use risingwave_rpc_client::ComputeClientPool;
 use tokio::sync::oneshot::{channel as OneChannel, Receiver as OneReceiver};
 use tokio::sync::watch;
 use tokio::sync::watch::{Receiver as WatchReceiver, Sender as WatchSender};
@@ -51,6 +52,7 @@ use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
 use crate::hummock::{CompactionScheduler, HummockManager};
 use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
+    SystemParamsManager,
 };
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
@@ -116,19 +118,18 @@ pub async fn rpc_serve(
             if let Some((username, password)) = &credentials {
                 options = options.with_user(username, password)
             }
-            let client = EtcdClient::connect(
-                endpoints.clone(),
-                Some(options.clone()),
-                credentials.is_some(),
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
+            let auth_enabled = credentials.is_some();
+            let client =
+                EtcdClient::connect(endpoints.clone(), Some(options.clone()), auth_enabled)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
             let election_client = Arc::new(
                 EtcdElectionClient::new(
                     endpoints,
                     Some(options),
+                    auth_enabled,
                     address_info.advertise_addr.clone(),
                 )
                 .await?,
@@ -322,7 +323,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     let registry = meta_metrics.registry();
     monitor_process(registry).unwrap();
 
-    let system_params_manager = env.system_param_manager_ref();
+    let system_params_manager = env.system_params_manager_ref();
     let system_params_reader = system_params_manager.get_params().await;
 
     let cluster_manager = Arc::new(
@@ -358,14 +359,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     if let Some(ref dashboard_addr) = address_info.dashboard_addr {
         let dashboard_service = crate::dashboard::DashboardService {
             dashboard_addr: *dashboard_addr,
-            cluster_manager: cluster_manager.clone(),
-            fragment_manager: fragment_manager.clone(),
-            meta_store: env.meta_store_ref(),
             prometheus_endpoint: prometheus_endpoint.clone(),
             prometheus_client: prometheus_endpoint.as_ref().map(|x| {
                 use std::str::FromStr;
                 prometheus_http_query::Client::from_str(x).unwrap()
             }),
+            cluster_manager: cluster_manager.clone(),
+            fragment_manager: fragment_manager.clone(),
+            compute_clients: ComputeClientPool::default(),
+            meta_store: env.meta_store_ref(),
         };
         // TODO: join dashboard service back to local thread.
         tokio::spawn(dashboard_service.serve(address_info.ui_path));
@@ -528,6 +530,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         )
         .await,
     );
+    sub_tasks.push(SystemParamsManager::start_params_notifier(system_params_manager.clone()).await);
     sub_tasks.push(HummockManager::start_compaction_heartbeat(hummock_manager.clone()).await);
     sub_tasks.push(HummockManager::start_lsm_stat_report(hummock_manager).await);
 

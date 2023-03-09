@@ -100,10 +100,8 @@ message Barrier {
 }
 
 message Watermark {
-  // The watermark column's index in the stream's schema.
-  uint32 col_idx = 1;
-  // The watermark type, used for deserialization of the watermark value.
-  data.DataType data_type = 2;
+  // The reference to the watermark column in the stream's schema.
+  expr.InputRef column = 1;
   // The watermark value, there will be no record having a greater value in the watermark column.
   data.Datum val = 3;
 }
@@ -125,7 +123,7 @@ message ActorMapping {
 message StreamSource {
   uint32 source_id = 1;
   catalog.Table state_table = 2;
-  catalog.ColumnIndex row_id_index = 3;
+  optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
@@ -144,7 +142,7 @@ message SinkDesc {
   string name = 2;
   string definition = 3;
   repeated plan_common.ColumnDesc columns = 4;
-  repeated plan_common.ColumnOrder pk = 5;
+  repeated common.ColumnOrder pk = 5;
   repeated uint32 stream_key = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
@@ -178,7 +176,7 @@ message FilterNode {
 message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
-  repeated plan_common.ColumnOrder column_orders = 2;
+  repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to handle pk conflict, open it when upstream executor is source executor.
@@ -245,7 +243,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  repeated plan_common.ColumnOrder order_by = 4;
+  repeated common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -255,7 +253,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  repeated plan_common.ColumnOrder order_by = 5;
+  repeated common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -326,10 +324,12 @@ message DeltaIndexJoinNode {
 }
 
 message HopWindowNode {
-  expr.InputRefExpr time_col = 1;
+  uint32 time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message MergeNode {
@@ -402,7 +402,7 @@ message BatchPlanNode {
 message ArrangementInfo {
   // Order key of the arrangement, including order by columns and pk from the materialize
   // executor.
-  repeated plan_common.ColumnOrder arrange_key_orders = 1;
+  repeated common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
   // Used to build storage table by stream lookup join of delta join.

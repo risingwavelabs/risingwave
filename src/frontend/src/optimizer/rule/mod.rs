@@ -93,6 +93,8 @@ mod rewrite_like_expr_rule;
 pub use rewrite_like_expr_rule::*;
 mod avoid_exchange_share_rule;
 pub use avoid_exchange_share_rule::*;
+mod min_max_on_index_rule;
+pub use min_max_on_index_rule::*;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -130,6 +132,7 @@ macro_rules! for_all_rules {
             , { UnionInputValuesMergeRule }
             , { RewriteLikeExprRule }
             , { AvoidExchangeShareRule }
+            , { MinMaxOnIndexRule }
         }
     };
 }

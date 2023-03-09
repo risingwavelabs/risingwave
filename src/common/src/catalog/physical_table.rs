@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
+use risingwave_pb::common::PbColumnOrder;
+use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::util::sort_util::OrderPair;
@@ -50,10 +51,16 @@ pub struct TableDesc {
 
     /// the column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    /// Whether the table is versioned. If `true`, column-aware row encoding will be used
+    /// to be compatible with schema changes.
+    ///
+    /// See `version` field in `TableCatalog` for more details.
+    pub versioned: bool,
 }
 
 impl TableDesc {
-    pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
+    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
         // Set materialize key as arrange key + pk
         self.pk.iter().map(|x| x.to_protobuf()).collect()
     }
@@ -78,6 +85,7 @@ impl TableDesc {
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            versioned: self.versioned,
         }
     }
 

@@ -34,9 +34,7 @@ use risingwave_connector::source::{
     GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
     PULSAR_CONNECTOR,
 };
-use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, WatermarkDesc,
-};
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
@@ -622,7 +620,7 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();

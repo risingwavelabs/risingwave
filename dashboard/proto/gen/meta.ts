@@ -23,6 +23,7 @@ export const SubscribeType = {
   FRONTEND: "FRONTEND",
   HUMMOCK: "HUMMOCK",
   COMPACTOR: "COMPACTOR",
+  COMPUTE: "COMPUTE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -42,6 +43,9 @@ export function subscribeTypeFromJSON(object: any): SubscribeType {
     case 3:
     case "COMPACTOR":
       return SubscribeType.COMPACTOR;
+    case 4:
+    case "COMPUTE":
+      return SubscribeType.COMPUTE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -59,6 +63,8 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
       return "HUMMOCK";
     case SubscribeType.COMPACTOR:
       return "COMPACTOR";
+    case SubscribeType.COMPUTE:
+      return "COMPUTE";
     case SubscribeType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -431,7 +437,8 @@ export interface SubscribeResponse {
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
     | { $case: "snapshot"; snapshot: MetaSnapshot }
-    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId }
+    | { $case: "systemParams"; systemParams: SystemParams };
 }
 
 export const SubscribeResponse_Operation = {
@@ -553,8 +560,9 @@ export interface MembersResponse {
 /**
  * The schema for persisted system parameters.
  * Note on backward compatibility:
- * - Do not remove deprecated fields.
- * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ * - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+ * - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
+ * - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
  */
 export interface SystemParams {
   barrierIntervalMs?: number | undefined;
@@ -1868,6 +1876,8 @@ export const SubscribeResponse = {
           $case: "metaBackupManifestId",
           metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
         }
+        : isSet(object.systemParams)
+        ? { $case: "systemParams", systemParams: SystemParams.fromJSON(object.systemParams) }
         : undefined,
     };
   },
@@ -1908,6 +1918,8 @@ export const SubscribeResponse = {
     message.info?.$case === "metaBackupManifestId" && (obj.metaBackupManifestId = message.info?.metaBackupManifestId
       ? MetaBackupManifestId.toJSON(message.info?.metaBackupManifestId)
       : undefined);
+    message.info?.$case === "systemParams" &&
+      (obj.systemParams = message.info?.systemParams ? SystemParams.toJSON(message.info?.systemParams) : undefined);
     return obj;
   },
 
@@ -1990,6 +2002,13 @@ export const SubscribeResponse = {
         $case: "metaBackupManifestId",
         metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
       };
+    }
+    if (
+      object.info?.$case === "systemParams" &&
+      object.info?.systemParams !== undefined &&
+      object.info?.systemParams !== null
+    ) {
+      message.info = { $case: "systemParams", systemParams: SystemParams.fromPartial(object.info.systemParams) };
     }
     return message;
   },

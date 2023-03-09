@@ -34,6 +34,7 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
@@ -182,7 +183,7 @@ impl FrontendEnv {
         info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let (meta_client, _) = MetaClient::register_new(
+        let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
@@ -232,6 +233,7 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
+        let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -239,6 +241,7 @@ impl FrontendEnv {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
+            system_params_manager,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)

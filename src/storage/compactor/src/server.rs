@@ -18,6 +18,7 @@ use std::time::Duration;
 
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -61,7 +62,7 @@ pub async fn compactor_serve(
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
 
     // Register to the cluster.
-    let (meta_client, system_params) = MetaClient::register_new(
+    let (meta_client, system_params_reader) = MetaClient::register_new(
         &opts.meta_address,
         WorkerType::Compactor,
         &advertise_addr,
@@ -86,10 +87,10 @@ pub async fn compactor_serve(
 
     let state_store_url = {
         let from_local = opts.state_store.unwrap_or("".to_string());
-        system_params.state_store(from_local)
+        system_params_reader.state_store(from_local)
     };
 
-    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params_reader)));
     let object_store = Arc::new(
         parse_remote_object_store(
             state_store_url
@@ -108,7 +109,9 @@ pub async fn compactor_serve(
     ));
 
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
-    let compactor_observer_node = CompactorObserverNode::new(filter_key_extractor_manager.clone());
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
+    let compactor_observer_node =
+        CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_params_manager);
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 

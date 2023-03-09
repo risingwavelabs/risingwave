@@ -17,7 +17,7 @@ use std::cmp;
 use bytes::Bytes;
 
 use super::key_cmp::KeyComparator;
-use crate::user_key;
+use crate::key::{FullKey, UserKey};
 
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub struct KeyRange {
@@ -59,9 +59,9 @@ pub trait KeyRangeCommon {
     fn full_key_extend(&mut self, other: &Self);
     fn sstable_overlap(&self, other: &Self) -> bool;
     fn compare_right_with(&self, full_key: &[u8]) -> std::cmp::Ordering {
-        self.compare_right_with_user_key(user_key(full_key))
+        self.compare_right_with_user_key(FullKey::decode(full_key).user_key)
     }
-    fn compare_right_with_user_key(&self, ukey: &[u8]) -> std::cmp::Ordering;
+    fn compare_right_with_user_key(&self, ukey: UserKey<&[u8]>) -> std::cmp::Ordering;
 }
 
 #[macro_export]
@@ -106,8 +106,12 @@ macro_rules! impl_key_range_common {
                         || other.compare_right_with(&self.left) != std::cmp::Ordering::Less)
             }
 
-            fn compare_right_with_user_key(&self, ukey: &[u8]) -> std::cmp::Ordering {
-                let ret = user_key(&self.right).cmp(ukey);
+            fn compare_right_with_user_key(
+                &self,
+                ukey: $crate::key::UserKey<&[u8]>,
+            ) -> std::cmp::Ordering {
+                use $crate::key::FullKey;
+                let ret = FullKey::decode(&self.right).user_key.cmp(&ukey);
                 if ret == cmp::Ordering::Equal && self.right_exclusive {
                     cmp::Ordering::Less
                 } else {

@@ -16,7 +16,6 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{SourceNode, StreamSource as ProstStreamSource};
 
@@ -93,9 +92,7 @@ impl StreamNode for StreamSource {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: source_catalog
-                .row_id_index
-                .map(|index| ColumnIndex { index: index as _ }),
+            row_id_index: source_catalog.row_id_index.map(|index| index as _),
             columns: source_catalog
                 .columns
                 .iter()

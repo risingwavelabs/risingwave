@@ -17,7 +17,7 @@ message TaskId {
   uint32 task_id = 3;
 }
 
-message TaskInfo {
+message TaskInfoResponse {
   enum TaskStatus {
     // Note: Requirement of proto3: first enum must be 0.
     UNSPECIFIED = 0;
@@ -29,6 +29,8 @@ message TaskInfo {
   }
   batch_plan.TaskId task_id = 1;
   TaskStatus task_status = 2;
+  // Optional error message for failed task.
+  string error_message = 3;
 }
 
 message CreateTaskRequest {
@@ -49,13 +51,7 @@ message GetTaskInfoRequest {
   batch_plan.TaskId task_id = 1;
 }
 
-message TaskInfoResponse {
-  common.Status status = 1;
-  TaskInfo task_info = 2;
-}
-
 message GetDataResponse {
-  common.Status status = 1;
   data.DataChunk record_batch = 2;
 }
 
