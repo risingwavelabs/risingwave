@@ -19,7 +19,6 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 
-use anyhow::anyhow;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
@@ -69,10 +68,6 @@ impl IntervalUnit {
         self.months
     }
 
-    pub fn get_years(&self) -> i32 {
-        self.months / 12
-    }
-
     pub fn get_ms(&self) -> i64 {
         self.ms
     }
@@ -81,40 +76,12 @@ impl IntervalUnit {
         self.ms.rem_euclid(DAY_MS) as u64
     }
 
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
-        // TODO: remove IntervalType later.
-        match ty {
-            // the unit is months
-            Year | YearToMonth | Month => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i32: {:?}", e))?;
-                let mouths = i32::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_month(mouths))
-            }
-            // the unit is ms
-            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
-            | Minute | MinuteToSecond | Second => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64: {:?}", e))?;
-                let ms = i64::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_millis(ms))
-            }
-            Unspecified => {
-                // Invalid means the interval is from the new frontend.
-                // TODO: make this default path later.
-                let mut cursor = Cursor::new(bytes);
-                read_interval_unit(&mut cursor)
-            }
-        }
-    }
-
     /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
     /// If day is positive, complement the ms negative value.
     /// These rules only use in interval comparison.
     pub fn justify_interval(&mut self) {
-        let total_ms = self.total_ms();
+        #[expect(deprecated)]
+        let total_ms = self.as_ms_i64();
         *self = Self {
             months: 0,
             days: (total_ms / DAY_MS) as i32,
@@ -128,8 +95,8 @@ impl IntervalUnit {
         interval
     }
 
-    #[must_use]
-    pub fn from_total_ms(ms: i64) -> Self {
+    #[deprecated]
+    fn from_total_ms(ms: i64) -> Self {
         let mut remaining_ms = ms;
         let months = remaining_ms / MONTH_MS;
         remaining_ms -= months * MONTH_MS;
@@ -140,10 +107,6 @@ impl IntervalUnit {
             days: (days as i32),
             ms: remaining_ms,
         }
-    }
-
-    pub fn total_ms(&self) -> i64 {
-        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
 
     #[must_use]
@@ -186,13 +149,6 @@ impl IntervalUnit {
         }
     }
 
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let buf = BytesMut::with_capacity(16);
-        let mut writer = buf.writer();
-        self.to_protobuf(&mut writer).unwrap();
-        writer.into_inner().to_vec()
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -225,10 +181,13 @@ impl IntervalUnit {
             return None;
         }
 
+        #[expect(deprecated)]
         let ms = self.as_ms_i64();
+        #[expect(deprecated)]
         Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
     }
 
+    #[deprecated]
     fn as_ms_i64(&self) -> i64 {
         self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
     }
@@ -241,7 +200,9 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
 
+        #[expect(deprecated)]
         let ms = self.as_ms_i64();
+        #[expect(deprecated)]
         Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
     }
 
@@ -474,6 +435,27 @@ impl IntervalUnit {
     }
 }
 
+/// Wrapper so that `Debug for IntervalUnitDisplay` would use the concise format of `Display for
+/// IntervalUnit`.
+#[derive(Clone, Copy)]
+pub struct IntervalUnitDisplay<'a> {
+    pub core: &'a IntervalUnit,
+}
+
+impl std::fmt::Display for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
+    }
+}
+
+impl std::fmt::Debug for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.core)
+    }
+}
+
+/// Loss of information during the process due to `justify`. Only intended for memcomparable
+/// encoding.
 impl Serialize for IntervalUnit {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -495,6 +477,7 @@ impl<'de> Deserialize<'de> for IntervalUnit {
     }
 }
 
+/// Duplicated logic only used by `HopWindow`. See #8452.
 #[expect(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {

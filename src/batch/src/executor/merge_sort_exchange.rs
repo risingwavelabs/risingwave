@@ -194,7 +194,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
         let order_pairs = sort_merge_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
         let order_pairs = Arc::new(order_pairs);
 
