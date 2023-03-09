@@ -36,6 +36,8 @@ public class ConnectorConfig extends HashMap<String, String> {
     public static final String PG_SLOT_NAME = "slot.name";
     public static final String PG_SCHEMA_NAME = "schema.name";
 
+    public static final String PG_DEFAULT_SCHEMA = "public";
+
     public static Map<String, String> extractDebeziumProperties(Map<String, String> properties) {
         // retain only debezium properties if any
         var userProps = new HashMap<>(properties);

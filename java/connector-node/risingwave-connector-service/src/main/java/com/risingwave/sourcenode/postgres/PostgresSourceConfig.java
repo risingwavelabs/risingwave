@@ -32,12 +32,16 @@ public class PostgresSourceConfig implements SourceConfig {
             props.setProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
         }
 
+        String dbName = userProps.getNonNull(ConnectorConfig.DB_NAME);
+        String schema = userProps.getOrDefault(ConnectorConfig.PG_SCHEMA_NAME, ConnectorConfig.PG_DEFAULT_SCHEMA);
+        String table = userProps.getNonNull(ConnectorConfig.TABLE_NAME);
+
         // Begin of connector configs
         props.setProperty("database.hostname", userProps.get(ConnectorConfig.HOST));
         props.setProperty("database.port", userProps.get(ConnectorConfig.PORT));
         props.setProperty("database.user", userProps.get(ConnectorConfig.USER));
         props.setProperty("database.password", userProps.get(ConnectorConfig.PASSWORD));
-        props.setProperty("database.dbname", userProps.get(ConnectorConfig.DB_NAME));
+        props.setProperty("database.dbname", dbName);
         // The name of the PostgreSQL logical decoding plug-in installed on the PostgreSQL server.
         // Supported values are decoderbufs, and pgoutput.
         // The wal2json plug-in is deprecated and scheduled for removal.
@@ -63,10 +67,8 @@ public class PostgresSourceConfig implements SourceConfig {
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.name(),
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.defaultValueAsString());
 
-        String tableFilter =
-                userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME)
-                        + "."
-                        + userProps.getNonNull(ConnectorConfig.TABLE_NAME);
+
+        String tableFilter = schema + "." + table;
         props.setProperty("table.include.list", tableFilter);
         props.setProperty("database.server.name", DB_SERVER_NAME_PREFIX + tableFilter);
 
@@ -76,11 +78,7 @@ public class PostgresSourceConfig implements SourceConfig {
                         + ":"
                         + userProps.getNonNull(ConnectorConfig.PORT)
                         + ":"
-                        + userProps.getNonNull(ConnectorConfig.DB_NAME)
-                        + "."
-                        + userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME)
-                        + "."
-                        + userProps.getNonNull(ConnectorConfig.TABLE_NAME);
+                        + dbName + "." + schema + "." + table;
         props.setProperty("name", sourceName);
 
         // pass through debezium properties if any
