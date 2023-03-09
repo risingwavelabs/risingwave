@@ -19,7 +19,6 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 
-use anyhow::anyhow;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
@@ -79,35 +78,6 @@ impl IntervalUnit {
 
     pub fn get_ms_of_day(&self) -> u64 {
         self.ms.rem_euclid(DAY_MS) as u64
-    }
-
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
-        // TODO: remove IntervalType later.
-        match ty {
-            // the unit is months
-            Year | YearToMonth | Month => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i32: {:?}", e))?;
-                let mouths = i32::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_month(mouths))
-            }
-            // the unit is ms
-            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
-            | Minute | MinuteToSecond | Second => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64: {:?}", e))?;
-                let ms = i64::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_millis(ms))
-            }
-            Unspecified => {
-                // Invalid means the interval is from the new frontend.
-                // TODO: make this default path later.
-                let mut cursor = Cursor::new(bytes);
-                read_interval_unit(&mut cursor)
-            }
-        }
     }
 
     /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
@@ -184,13 +154,6 @@ impl IntervalUnit {
             ms: 1000 * 60 * minutes,
             ..Default::default()
         }
-    }
-
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let buf = BytesMut::with_capacity(16);
-        let mut writer = buf.writer();
-        self.to_protobuf(&mut writer).unwrap();
-        writer.into_inner().to_vec()
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
