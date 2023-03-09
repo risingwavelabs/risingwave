@@ -14,7 +14,7 @@
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::util::sort_util::{OrderPair, OrderType};
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -42,7 +42,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .get_arrangement_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(OrderPair::from_protobuf)
             .collect();
 
         let arrangement_col_descs = lookup
@@ -65,7 +65,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let order_types = table_desc
             .pk
             .iter()
-            .map(|desc| OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap()))
+            .map(|desc| OrderType::from_protobuf(&desc.get_order_type().unwrap().direction()))
             .collect_vec();
 
         let column_descs = table_desc
@@ -76,7 +76,11 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
 
         // Use indices based on full table instead of streaming executor output.
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices

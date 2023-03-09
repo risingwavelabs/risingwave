@@ -14,21 +14,17 @@
 
 use std::num::NonZeroUsize;
 
-use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use num_traits::CheckedSub;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
-use risingwave_expr::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
+use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_expr::ExprError;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::expr::expr_node;
 
-use crate::error::BatchError;
 use crate::executor::{
     BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder,
 };
@@ -40,6 +36,8 @@ pub struct HopWindowExecutor {
     time_col_idx: usize,
     window_slide: IntervalUnit,
     window_size: IntervalUnit,
+    window_start_exprs: Vec<BoxedExpression>,
+    window_end_exprs: Vec<BoxedExpression>,
     output_indices: Vec<usize>,
 }
 
@@ -61,9 +59,21 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         let output_indices = hop_window_node
             .get_output_indices()
             .iter()
-            .copied()
+            .cloned()
             .map(|x| x as usize)
             .collect_vec();
+
+        let window_start_exprs: Vec<_> = hop_window_node
+            .get_window_start_exprs()
+            .iter()
+            .map(build_from_prost)
+            .try_collect()?;
+        let window_end_exprs: Vec<_> = hop_window_node
+            .get_window_end_exprs()
+            .iter()
+            .map(build_from_prost)
+            .try_collect()?;
+        assert_eq!(window_start_exprs.len(), window_end_exprs.len());
 
         let time_col_data_type = child.schema().fields()[time_col].data_type();
         let output_type = DataType::window_of(&time_col_data_type).unwrap();
@@ -88,12 +98,15 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             window_slide,
             window_size,
             source.plan_node().get_identity().clone(),
+            window_start_exprs,
+            window_end_exprs,
             output_indices,
         )))
     }
 }
 
 impl HopWindowExecutor {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         child: BoxedExecutor,
         schema: Schema,
@@ -101,6 +114,8 @@ impl HopWindowExecutor {
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
         identity: String,
+        window_start_exprs: Vec<BoxedExpression>,
+        window_end_exprs: Vec<BoxedExpression>,
         output_indices: Vec<usize>,
     ) -> Self {
         Self {
@@ -110,6 +125,8 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            window_start_exprs,
+            window_end_exprs,
             output_indices,
         }
     }
@@ -134,7 +151,7 @@ impl HopWindowExecutor {
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
-            time_col_idx,
+
             window_slide,
             window_size,
             output_indices,
@@ -152,109 +169,21 @@ impl HopWindowExecutor {
             })?
             .get();
 
-        let time_col_data_type = child.schema().fields()[time_col_idx].data_type();
-        let output_type = DataType::window_of(&time_col_data_type).unwrap();
-        let time_col_ref = InputRefExpression::new(time_col_data_type, self.time_col_idx).boxed();
-
-        let window_slide_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
-                .boxed();
-
-        // The first window_start of hop window should be:
-        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
-        // Let's pre calculate (`window_size` - `window_slide`).
-        let window_size_sub_slide = window_size.checked_sub(&window_slide).ok_or_else(|| {
-            BatchError::Internal(anyhow!(format!(
-                "window_size {} cannot be subtracted by window_slide {}",
-                window_size, window_slide
-            )))
-        })?;
-        let window_size_sub_slide_expr = LiteralExpression::new(
-            DataType::Interval,
-            Some(ScalarImpl::Interval(window_size_sub_slide)),
-        )
-        .boxed();
-        let hop_expr = new_binary_expr(
-            expr_node::Type::TumbleStart,
-            output_type.clone(),
-            new_binary_expr(
-                expr_node::Type::Subtract,
-                output_type.clone(),
-                time_col_ref,
-                window_size_sub_slide_expr,
-            )?,
-            window_slide_expr,
-        )?;
-
-        let mut window_start_exprs = Vec::with_capacity(units);
-        let mut window_end_exprs = Vec::with_capacity(units);
-
-        for i in 0..units {
-            let window_start_offset = window_slide.checked_mul_int(i).ok_or_else(|| {
-                BatchError::Internal(anyhow!(format!(
-                    "window_slide {} cannot be multiplied by {}",
-                    window_slide, i
-                )))
-            })?;
-            let window_start_offset_expr = LiteralExpression::new(
-                DataType::Interval,
-                Some(ScalarImpl::Interval(window_start_offset)),
-            )
-            .boxed();
-            let window_end_offset = window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                BatchError::Internal(anyhow!(format!(
-                    "window_slide {} cannot be multiplied by {}",
-                    window_slide, i
-                )))
-            })?;
-            let window_end_offset_expr = LiteralExpression::new(
-                DataType::Interval,
-                Some(ScalarImpl::Interval(window_end_offset)),
-            )
-            .boxed();
-            let window_start_expr = new_binary_expr(
-                expr_node::Type::Add,
-                output_type.clone(),
-                InputRefExpression::new(output_type.clone(), 0).boxed(),
-                window_start_offset_expr,
-            )?;
-            window_start_exprs.push(window_start_expr);
-            let window_end_expr = new_binary_expr(
-                expr_node::Type::Add,
-                output_type.clone(),
-                InputRefExpression::new(output_type.clone(), 0).boxed(),
-                window_end_offset_expr,
-            )?;
-            window_end_exprs.push(window_end_expr);
-        }
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
-        let contains_window_start = output_indices.contains(&window_start_col_index);
-        let contains_window_end = output_indices.contains(&window_end_col_index);
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            let hop_start = hop_expr.eval(&data_chunk)?;
-            let len = hop_start.len();
-            let hop_start_chunk = DataChunk::new(vec![Column::new(hop_start)], len);
-            let (origin_cols, visibility) = data_chunk.into_parts();
-            let len = match visibility {
-                Vis::Compact(len) => len,
-                Vis::Bitmap(_) => {
-                    return Err(BatchError::Internal(anyhow!(
-                        "Input array should already been compacted!"
-                    ))
-                    .into());
-                }
-            };
+            assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+            let len = data_chunk.cardinality();
             for i in 0..units {
-                let window_start_col = if contains_window_start {
-                    Some(window_start_exprs[i].eval(&hop_start_chunk)?)
+                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                    Some(self.window_start_exprs[i].eval(&data_chunk)?)
                 } else {
                     None
                 };
-                let window_end_col = if contains_window_end {
-                    Some(window_end_exprs[i].eval(&hop_start_chunk)?)
+                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                    Some(self.window_end_exprs[i].eval(&data_chunk)?)
                 } else {
                     None
                 };
@@ -262,7 +191,7 @@ impl HopWindowExecutor {
                     .iter()
                     .filter_map(|&idx| {
                         if idx < window_start_col_index {
-                            Some(origin_cols[idx].clone())
+                            Some(data_chunk.column_at(idx).clone())
                         } else if idx == window_start_col_index {
                             Some(Column::new(window_start_col.clone().unwrap()))
                         } else if idx == window_end_col_index {
@@ -284,12 +213,12 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    #[tokio::test]
-    async fn test_execute() {
+    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -313,16 +242,26 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-        let default_indices = (0..schema.len() + 2).collect_vec();
-        let executor = Box::new(HopWindowExecutor::new(
+        let (window_start_exprs, window_end_exprs) =
+            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+
+        Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
             schema,
             2,
             window_slide,
             window_size,
             "test".to_string(),
-            default_indices,
-        ));
+            window_start_exprs,
+            window_end_exprs,
+            output_indices,
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_execute() {
+        let default_indices = (0..3 + 2).collect_vec();
+        let executor = create_executor(default_indices);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
@@ -363,38 +302,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let field1 = Field::unnamed(DataType::Int64);
-        let field2 = Field::unnamed(DataType::Int64);
-        let field3 = Field::with_name(DataType::Timestamp, "created_at");
-        let schema = Schema::new(vec![field1, field2, field3]);
-
-        let chunk = DataChunk::from_pretty(
-            &"I I TS
-            1 1 ^10:00:00
-            2 3 ^10:05:00
-            3 2 ^10:14:00
-            4 1 ^10:22:00
-            5 3 ^10:33:00
-            6 2 ^10:42:00
-            7 1 ^10:51:00
-            8 3 ^11:02:00"
-                .replace('^', "2022-2-2T"),
-        );
-
-        let mut mock_executor = MockExecutor::new(schema.clone());
-        mock_executor.add(chunk);
-
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let executor = Box::new(HopWindowExecutor::new(
-            Box::new(mock_executor),
-            schema,
-            2,
-            window_slide,
-            window_size,
-            "test".to_string(),
-            vec![1, 3, 4, 2],
-        ));
+        let executor = create_executor(vec![1, 3, 4, 2]);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.

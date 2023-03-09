@@ -159,9 +159,7 @@ where
             .pk
             .iter()
             .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
+                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
             })
             .collect();
         let dist_key_indices: Vec<usize> = table_catalog
@@ -173,10 +171,20 @@ where
         let pk_indices = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect_vec();
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        // FIXME(yuhao): only use `dist_key_in_pk` in the proto
+        let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+        } else {
+            table_catalog
+                .get_dist_key_in_pk()
+                .iter()
+                .map(|idx| *idx as usize)
+                .collect()
+        };
+
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let local_state_store = store
             .new_local(NewLocalOptions {

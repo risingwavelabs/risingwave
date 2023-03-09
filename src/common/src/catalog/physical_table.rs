@@ -15,7 +15,8 @@
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
+use risingwave_pb::common::PbColumnOrder;
+use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
 use crate::util::sort_util::OrderPair;
@@ -53,7 +54,7 @@ pub struct TableDesc {
 }
 
 impl TableDesc {
-    pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
+    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
         // Set materialize key as arrange key + pk
         self.pk.iter().map(|x| x.to_protobuf()).collect()
     }
