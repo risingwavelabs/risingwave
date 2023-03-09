@@ -24,6 +24,8 @@ use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
+// TODO(rc): to support `NULLS FIRST | LAST`, we may need to hide this enum, forcing developers use
+// `OrderType` instead.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 pub enum Direction {
     #[default]
@@ -48,6 +50,16 @@ impl Direction {
             Direction::Descending => PbDirection::Descending,
         }
     }
+}
+
+#[allow(dead_code)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
+pub enum NullsAre {
+    #[default]
+    #[display("LARGEST")]
+    Largest,
+    #[display("SMALLEST")]
+    Smallest,
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
