@@ -1490,7 +1490,7 @@ impl Parser {
             }
         }
         parser_err!(format!(
-            "Near \"{}\", Expected {}, found: {}",
+            "Near \"{}\", expected {}, found: {}",
             TokensDisplay(near_tokens), expected, found
         ))
     }
