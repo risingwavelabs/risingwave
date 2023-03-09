@@ -63,7 +63,6 @@ pub struct KafkaConfig {
 
     pub format: String, // accept "append_only", "debezium", or "upsert"
 
-    #[serde(default)]
     pub identifier: String,
 
     #[serde(

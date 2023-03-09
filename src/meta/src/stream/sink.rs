@@ -24,8 +24,12 @@ pub async fn validate_sink(
     connector_rpc_endpoint: Option<String>,
 ) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
-    let sink_config = SinkConfig::from_hashmap(sink_catalog.properties.clone())
+    let mut properties = sink_catalog.properties.clone();
+    // Insert a value as the `identifier` field to get parsed by serde.
+    properties.insert("identifier".to_string(), u64::MAX.to_string());
+    let sink_config = SinkConfig::from_hashmap(properties)
         .map_err(|err| MetaError::from(anyhow!(err.to_string())))?;
+
     SinkImpl::validate(sink_config, sink_catalog, connector_rpc_endpoint)
         .await
         .map_err(|err| MetaError::from(anyhow!(err.to_string())))
