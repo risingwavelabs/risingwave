@@ -186,7 +186,7 @@ steps:
 
   - label: "S3 source check on AWS"
     command: "ci/scripts/s3-source-test.sh -p ci-release"
-    depends_on: build
+    depends_on: main-cron-build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -202,7 +202,7 @@ steps:
     
   - label: "S3 source check on lyvecloud.seagate.com"
     command: "ci/scripts/s3-source-test.sh -p ci-release"
-    depends_on: build
+    depends_on: main-cron-build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
