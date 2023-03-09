@@ -237,13 +237,18 @@ where
 
             internal_tables = ctx.internal_tables();
 
-            if let Some(source) = stream_job.source() {
-                // Register the source on the connector node.
-                self.source_manager.register_source(source).await?;
-            } else if let Some(sink) = stream_job.sink() {
-                // Validate the sink on the connector node.
-                validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+            match &stream_job {
+                StreamingJob::Table(Some(source), _) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
+                }
+                StreamingJob::Sink(sink) => {
+                    // Validate the sink on the connector node.
+                    validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+                }
+                _ => {}
             }
+
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;

@@ -169,7 +169,12 @@ impl ConnectorClient {
             .into_inner();
         response.error.map_or_else(
             || Ok(()), // If there is no error message, return Ok here.
-            |err| Err(RpcError::Internal(anyhow!(err.error_message))),
+            |err| {
+                Err(RpcError::Internal(anyhow!(format!(
+                    "sink cannot pass validation: {}",
+                    err.error_message
+                ))))
+            },
         )
     }
 }
