@@ -16,16 +16,21 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, RowDeserializer};
-use risingwave_common::types::ScalarImpl;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::select_all;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::{
+    BasicSerde, EitherSerde, ValueRowDeserializer, ValueRowSerdeNew,
+};
 use risingwave_hummock_sdk::key::{map_table_key_range, prefixed_range, TableKeyRange};
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::java_binding::key_range::Bound;
 use risingwave_pb::java_binding::{KeyRange, ReadPlan};
-use risingwave_storage::error::StorageResult;
+use risingwave_storage::error::{StorageError, StorageResult};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::store::state_store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
@@ -43,7 +48,7 @@ fn select_all_vnode_stream(
 }
 
 pub struct Iterator {
-    row_serializer: RowDeserializer,
+    row_serde: EitherSerde,
     stream: SelectAllIterStream,
 }
 
@@ -113,6 +118,7 @@ impl KeyedRow {
 
 impl Iterator {
     pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
+        // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(
             parse_remote_object_store(
                 &read_plan.object_store_url,
@@ -159,18 +165,28 @@ impl Iterator {
 
         let stream = select_all_vnode_stream(streams);
 
-        Ok(Self {
-            row_serializer: RowDeserializer::new(
-                read_plan
-                    .table_catalog
-                    .unwrap()
-                    .columns
-                    .into_iter()
-                    .map(|c| (&c.column_desc.unwrap().column_type.unwrap()).into())
-                    .collect(),
-            ),
-            stream,
-        })
+        let table = read_plan.table_catalog.unwrap();
+        let versioned = table.version.is_some();
+        let (column_ids, schema): (Vec<_>, Vec<_>) = table
+            .columns
+            .into_iter()
+            .map(|c| c.column_desc.unwrap())
+            .map(|c| {
+                (
+                    ColumnId::new(c.column_id),
+                    DataType::from(&c.column_type.unwrap()),
+                )
+            })
+            .unzip();
+
+        // Decide which serializer to use based on whether the table is versioned or not.
+        let row_serde = if versioned {
+            ColumnAwareSerde::new(&column_ids, schema.into()).into()
+        } else {
+            BasicSerde::new(&column_ids, schema.into()).into()
+        };
+
+        Ok(Self { row_serde, stream })
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {
@@ -178,7 +194,11 @@ impl Iterator {
         Ok(match item {
             Some((key, value)) => Some(KeyedRow {
                 key: key.user_key.table_key.0,
-                row: self.row_serializer.deserialize(value)?,
+                row: OwnedRow::new(
+                    self.row_serde
+                        .deserialize(&value)
+                        .map_err(StorageError::DeserializeRow)?,
+                ),
             }),
             None => None,
         })
