@@ -195,23 +195,13 @@ pub async fn handle_alter_table_column(
             .collect(),
     );
 
-    if cfg!(debug_assertions) {
-        let catalog_writer = session.env().catalog_writer();
+    let catalog_writer = session.env().catalog_writer();
 
-        catalog_writer
-            .replace_table(table, graph, col_index_mapping)
-            .await?;
+    catalog_writer
+        .replace_table(table, graph, col_index_mapping)
+        .await?;
 
-        Ok(PgResponse::empty_result_with_notice(
-            StatementType::ALTER_TABLE,
-            "The `ALTER TABLE` feature is incomplete and data will be corrupted! This feature is not available in production.".to_owned(),
-        ))
-    } else {
-        Err(ErrorCode::NotImplemented(
-            "ADD COLUMN".to_owned(),
-            6903.into(),
-        ))?
-    }
+    Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
 #[cfg(test)]
