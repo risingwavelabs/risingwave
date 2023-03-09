@@ -217,7 +217,7 @@ pub enum ConnectorProperties {
 impl ConnectorProperties {
     fn new_cdc_properties(
         connector_name: &str,
-        properties: HashMap<String, String>,
+        mut properties: HashMap<String, String>,
     ) -> Result<Self> {
         match connector_name {
             MYSQL_CDC_CONNECTOR => Ok(Self::MySqlCdc(Box::new(CdcProperties {
@@ -225,11 +225,23 @@ impl ConnectorProperties {
                 source_type: "mysql".to_string(),
                 ..Default::default()
             }))),
-            POSTGRES_CDC_CONNECTOR => Ok(Self::PostgresCdc(Box::new(CdcProperties {
-                props: properties,
-                source_type: "postgres".to_string(),
-                ..Default::default()
-            }))),
+            POSTGRES_CDC_CONNECTOR => {
+                if !properties.contains_key("slot.name") {
+                    // Build a random slot name with UUID
+                    // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+                    let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");
+                    properties.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+                }
+                if !properties.contains_key("schema.name") {
+                    // Default schema name is "public"
+                    properties.insert("schema.name".into(), "public".into());
+                }
+                Ok(Self::PostgresCdc(Box::new(CdcProperties {
+                    props: properties,
+                    source_type: "postgres".to_string(),
+                    ..Default::default()
+                })))
+            }
             _ => Err(anyhow!("unexpected cdc connector '{}'", connector_name,)),
         }
     }
