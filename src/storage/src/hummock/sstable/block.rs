@@ -33,19 +33,27 @@ pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + 
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LenType {
-    U8 = 1,
-    U16 = 2,
-    U32 = 3,
+    // U8 = 1,
+    // U16 = 2,
+    // U32 = 3,
+    U8U8 = 1,
+    U8U16 = 2,
+    U8U32 = 3,
+    U16U8 = 4,
+    U16U16 = 5,
+    U16U32 = 6,
 }
 
 impl From<u8> for LenType {
     fn from(value: u8) -> Self {
         match value {
-            1 => LenType::U8,
-            2 => LenType::U16,
-            3 => LenType::U32,
+            1 => LenType::U8U8,
+            2 => LenType::U8U16,
+            3 => LenType::U8U32,
+            4 => LenType::U16U8,
+            5 => LenType::U16U16,
+            6 => LenType::U16U32,
             _ => {
-                println!("error LenType {}", value);
                 panic!("unexpected")
             }
         }
@@ -53,113 +61,107 @@ impl From<u8> for LenType {
 }
 
 impl LenType {
-    fn new(len: usize) -> Self {
-        // if len <= u8::MAX as usize {
-        //     LenType::U8
-        // } else if len <= u16::MAX as usize {
-        //     LenType::U16
-        // } else {
-        //     unreachable!()
-        // }
+    fn new(klen: usize, vlen: usize) -> Self {
+        const U8_MAX: usize = u8::MAX as usize;
+        const U16_MAX: usize = u16::MAX as usize;
+        const U32_MAX: usize = u32::MAX as usize;
 
-        if len <= u8::MAX as usize {
-            LenType::U8
-        } else if len <= u16::MAX as usize {
-            LenType::U16
-        } else {
-            LenType::U32
+        match (klen, vlen) {
+            (0..=U8_MAX, 0..=U8_MAX) => LenType::U8U8,
+            (0..=U8_MAX, 0..=U16_MAX) => LenType::U8U16,
+            (0..=U8_MAX, 0..=U32_MAX) => LenType::U8U32,
+            (0..=U16_MAX, 0..=U8_MAX) => LenType::U16U8,
+            (0..=U16_MAX, 0..=U16_MAX) => LenType::U16U16,
+            (0..=U16_MAX, 0..=U32_MAX) => LenType::U16U32,
+
+            _ => unreachable!(),
         }
     }
 
-    fn len(&self) -> usize {
+    fn len(&self) -> (usize, usize) {
         match *self {
-            Self::U8 => size_of::<u8>(),
-            Self::U16 => size_of::<u16>(),
-            Self::U32 => size_of::<u32>(),
+            Self::U8U8 => (size_of::<u8>(), size_of::<u8>()),
+            Self::U8U16 => (size_of::<u8>(), size_of::<u16>()),
+            Self::U8U32 => (size_of::<u8>(), size_of::<u32>()),
+
+            Self::U16U8 => (size_of::<u16>(), size_of::<u8>()),
+            Self::U16U16 => (size_of::<u16>(), size_of::<u16>()),
+            Self::U16U32 => (size_of::<u16>(), size_of::<u32>()),
         }
     }
-}
 
-pub struct LenTypeWrapper {
-    kt: LenType,
-    vt: LenType,
-}
-
-impl LenTypeWrapper {
     fn put(&self, buf: &mut impl BufMut, overlap: usize, diff: usize, value: usize) {
-        match (&self.kt, &self.vt) {
-            (LenType::U8, LenType::U8) => {
+        match *self {
+            Self::U8U8 => {
                 buf.put_u8(overlap as u8);
                 buf.put_u8(diff as u8);
                 buf.put_u8(value as u8);
             }
-            (LenType::U8, LenType::U16) => {
+            Self::U8U16 => {
                 buf.put_u8(overlap as u8);
                 buf.put_u8(diff as u8);
                 buf.put_u16(value as u16);
             }
-            (LenType::U8, LenType::U32) => {
+            Self::U8U32 => {
                 buf.put_u8(overlap as u8);
                 buf.put_u8(diff as u8);
                 buf.put_u32(value as u32);
             }
 
-            (LenType::U16, LenType::U8) => {
+            Self::U16U8 => {
                 buf.put_u16(overlap as u16);
                 buf.put_u16(diff as u16);
                 buf.put_u8(value as u8);
             }
-            (LenType::U16, LenType::U16) => {
+            Self::U16U16 => {
                 buf.put_u16(overlap as u16);
                 buf.put_u16(diff as u16);
                 buf.put_u16(value as u16);
             }
-            (LenType::U16, LenType::U32) => {
+            Self::U16U32 => {
                 buf.put_u16(overlap as u16);
                 buf.put_u16(diff as u16);
                 buf.put_u32(value as u32);
-            }
-            _ => {
-                unreachable!()
             }
         }
     }
 
     fn get(&self, buf: &mut impl Buf) -> (usize, usize, usize) {
-        match (self.kt, self.vt) {
-            (LenType::U8, LenType::U8) => (
+        match *self {
+            Self::U8U8 => (
                 buf.get_u8() as usize,
                 buf.get_u8() as usize,
                 buf.get_u8() as usize,
             ),
-            (LenType::U8, LenType::U16) => (
+
+            Self::U8U16 => (
                 buf.get_u8() as usize,
                 buf.get_u8() as usize,
                 buf.get_u16() as usize,
             ),
-            (LenType::U8, LenType::U32) => (
+            Self::U8U32 => (
                 buf.get_u8() as usize,
                 buf.get_u8() as usize,
                 buf.get_u32() as usize,
             ),
-            (LenType::U16, LenType::U8) => (
+
+            Self::U16U8 => (
                 buf.get_u16() as usize,
                 buf.get_u16() as usize,
                 buf.get_u8() as usize,
             ),
-            (LenType::U16, LenType::U16) => (
+
+            Self::U16U16 => (
                 buf.get_u16() as usize,
                 buf.get_u16() as usize,
                 buf.get_u16() as usize,
             ),
-            (LenType::U16, LenType::U32) => (
+
+            Self::U16U32 => (
                 buf.get_u16() as usize,
                 buf.get_u16() as usize,
                 buf.get_u32() as usize,
             ),
-            _ => {
-                unreachable!()
-            }
         }
     }
 }
@@ -173,7 +175,7 @@ pub struct Block {
     /// Restart points.
     restart_points: Vec<u32>,
 
-    restart_points_type_index: BTreeMap<u32, (LenType, LenType)>,
+    restart_points_type_index: BTreeMap<u32, LenType>,
 }
 
 impl Block {
@@ -229,9 +231,7 @@ impl Block {
 
         for _ in 0..n_index {
             let value = restart_points_type_index_buf.get_u8();
-            let v_type = LenType::from(value & 0x0F);
-            let k_type = LenType::from(value >> 4);
-            value_vec.push((k_type, v_type));
+            value_vec.push(LenType::from(value));
         }
 
         let restart_points_type_index: BTreeMap<_, _> = key_vec
@@ -298,12 +298,12 @@ impl Block {
         &self.data[..]
     }
 
-    pub fn restart_points_type_index(&self, index: u32) -> (LenType, LenType) {
+    pub fn restart_points_type_index(&self, index: u32) -> LenType {
         let iter = self
             .restart_points_type_index
             .range(..=index)
             .take_while(|(offset, _)| **offset <= index);
-        iter.last().unwrap().1.clone()
+        *iter.last().unwrap().1
     }
 }
 
@@ -320,31 +320,15 @@ pub struct KeyPrefix {
 }
 
 impl KeyPrefix {
-    pub fn encode(&self, buf: &mut impl BufMut, key_len_type: LenType, value_len_type: LenType) {
-        LenTypeWrapper {
-            kt: key_len_type,
-            vt: value_len_type,
-        }
-        .put(buf, self.overlap, self.diff, self.value)
+    pub fn encode(&self, buf: &mut impl BufMut, encoder: LenType) {
+        encoder.put(buf, self.overlap, self.diff, self.value)
     }
 
-    pub fn decode(
-        buf: &mut impl Buf,
-        offset: usize,
-        key_len_type: LenType,
-        value_len_type: LenType,
-    ) -> Self {
-        // let overlap = key_len_type.get(buf);
-        // let diff = key_len_type.get(buf);
-        // let value = value_len_type.get(buf);
+    pub fn decode(buf: &mut impl Buf, offset: usize, decoder: LenType) -> Self {
+        let (overlap, diff, value) = decoder.get(buf);
+        let (k_len, v_len) = decoder.len();
+        let len = k_len * 2 + v_len;
 
-        let (overlap, diff, value) = LenTypeWrapper {
-            kt: key_len_type,
-            vt: value_len_type,
-        }
-        .get(buf);
-
-        let len = key_len_type.len() * 2 + value_len_type.len();
         Self {
             overlap,
             diff,
@@ -356,7 +340,6 @@ impl KeyPrefix {
 
     /// Encoded length.
     fn len(&self) -> usize {
-        // self.key_len_type.len() * 2 + self.value_len_type.len()
         self.len
     }
 
@@ -416,7 +399,7 @@ pub struct BlockBuilder {
     compression_algorithm: CompressionAlgorithm,
 
     // restart_points_type_index: BTreeMap<u32, u8>,
-    restart_points_type_index: BTreeMap<u32, (LenType, LenType)>,
+    restart_points_type_index: BTreeMap<u32, LenType>,
 }
 
 impl BlockBuilder {
@@ -442,10 +425,7 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// For diff len < MAX_KEY_LEN (65536)
-    ///    entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
-    /// For diff len >= MAX_KEY_LEN (65536)
-    ///    entry (kv pair): | overlap len (2B) | MAX_KEY_LEN (2B) | diff len (4B) | value len(4B) | diff key | value |
+    /// entry (kv pair): | overlap len (len_type) | diff len (len_type) | value len(len_type) | diff key | value |
     /// ```
     ///
     /// # Panics
@@ -460,12 +440,11 @@ impl BlockBuilder {
             );
         }
         // Update restart point if needed and calculate diff key.
-        let key_len_type = LenType::new(key.len());
-        let value_len_type = LenType::new(value.len());
+        let len_type = LenType::new(key.len(), value.len());
 
         let type_mismatch =
             if let Some((_, last_type)) = self.restart_points_type_index.last_key_value() {
-                key_len_type != last_type.0 || value_len_type != last_type.1
+                len_type != *last_type
             } else {
                 false
             };
@@ -476,8 +455,7 @@ impl BlockBuilder {
             self.restart_points.push(offset);
 
             if type_mismatch || self.restart_points_type_index.is_empty() {
-                self.restart_points_type_index
-                    .insert(offset, (key_len_type, value_len_type));
+                self.restart_points_type_index.insert(offset, len_type);
             }
 
             key
@@ -485,16 +463,15 @@ impl BlockBuilder {
             bytes_diff_below_max_key_length(&self.last_key, key)
         };
 
-        let len = key_len_type.len() * 2 + value_len_type.len();
         let prefix = KeyPrefix {
             overlap: key.len() - diff_key.len(),
             diff: diff_key.len(),
             value: value.len(),
             offset: self.buf.len(),
-            len,
+            len: 0, // not used when encode
         };
 
-        prefix.encode(&mut self.buf, key_len_type, value_len_type);
+        prefix.encode(&mut self.buf, len_type);
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
@@ -531,7 +508,7 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) |
+    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B)
     /// uncompressed: | compression method (1B) | crc32sum (4B) |
     /// ```
     ///
@@ -550,12 +527,8 @@ impl BlockBuilder {
             self.buf.put_u32_le(*restart_point);
         }
 
-        for (k_type, v_type) in self.restart_points_type_index.values() {
-            let mut value: u8 = 0;
-            value |= *k_type as u8;
-            value <<= 4;
-            value |= *v_type as u8;
-            self.buf.put_u8(value);
+        for len_type in self.restart_points_type_index.values() {
+            self.buf.put_u8(*len_type as u8);
         }
 
         self.buf
