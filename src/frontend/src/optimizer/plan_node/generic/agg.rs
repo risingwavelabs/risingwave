@@ -18,9 +18,8 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::common::{PbColumnOrder, PbOrderType};
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
@@ -279,7 +278,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                     .order_by
                                     .iter()
-                                    .map(|o| (OrderType::new(o.direction), o.input.index))
+                                    .map(|o| (o.order_type, o.column_index))
                                     .collect(),
                                 _ => unreachable!(),
                             }
@@ -463,65 +462,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     }
 }
 
-/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-///
-/// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PlanAggOrderByField {
-    pub input: InputRef,
-    pub direction: Direction,
-    pub nulls_first: bool,
-}
-
-impl fmt::Debug for PlanAggOrderByField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:?} {} NULLS {}",
-            self.input,
-            self.direction,
-            if self.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PlanAggOrderByFieldDisplay<'a> {
-    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
-    pub input_schema: &'a Schema,
-}
-
-impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.plan_agg_order_by_field;
-        InputRefDisplay {
-            input_ref: &that.input,
-            input_schema: self.input_schema,
-        }
-        .fmt(f)?;
-        write!(
-            f,
-            " {} NULLS {}",
-            that.direction,
-            if that.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-impl PlanAggOrderByField {
-    fn to_protobuf(&self) -> PbColumnOrder {
-        PbColumnOrder {
-            column_index: self.input.index() as _,
-            order_type: Some(PbOrderType {
-                direction: self.direction.to_protobuf() as _,
-            }),
-        }
-    }
-}
-
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -543,7 +483,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
-    pub order_by: Vec<PlanAggOrderByField>,
+    pub order_by: Vec<ColumnOrder>,
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
@@ -589,7 +529,7 @@ impl PlanAggCall {
 
         // modify order_by exprs
         self.order_by.iter_mut().for_each(|x| {
-            x.input.index = mapping.map(x.input.index);
+            x.column_index = mapping.map(x.column_index);
         });
 
         // modify filter
@@ -605,11 +545,7 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
-            order_by: self
-                .order_by
-                .iter()
-                .map(PlanAggOrderByField::to_protobuf)
-                .collect(),
+            order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
@@ -690,9 +626,9 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                 write!(
                     f,
                     " order_by({})",
-                    that.order_by.iter().format_with(", ", |e, f| {
-                        f(&PlanAggOrderByFieldDisplay {
-                            plan_agg_order_by_field: e,
+                    that.order_by.iter().format_with(", ", |o, f| {
+                        f(&ColumnOrderDisplay {
+                            column_order: o,
                             input_schema: self.input_schema,
                         })
                     })

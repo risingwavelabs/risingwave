@@ -132,6 +132,13 @@ impl ColumnOrder {
         }
     }
 
+    /// Shift the column index with offset.
+    pub fn shift_with_offset(&mut self, offset: isize) {
+        self.column_index = (self.column_index as isize + offset) as usize;
+    }
+}
+
+impl ColumnOrder {
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
         ColumnOrder {
             column_index: column_order.column_index as _,

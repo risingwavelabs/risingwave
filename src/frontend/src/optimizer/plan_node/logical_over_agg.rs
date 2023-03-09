@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 
-use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -37,9 +37,7 @@ pub struct PlanWindowFunction {
     pub function_type: WindowFunctionType,
     pub return_type: DataType,
     pub partition_by: Vec<InputRef>,
-    /// TODO: rename & move `PlanAggOrderByField` so that it can be better shared like
-    /// [`crate::expr::OrderByExpr`]
-    pub order_by: Vec<PlanAggOrderByField>,
+    pub order_by: Vec<ColumnOrder>,
 }
 
 struct PlanWindowFunctionDisplay<'a> {
@@ -81,9 +79,9 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 write!(
                     f,
                     "{delim}ORDER BY {}",
-                    window_function.order_by.iter().format_with(", ", |e, f| {
-                        f(&PlanAggOrderByFieldDisplay {
-                            plan_agg_order_by_field: e,
+                    window_function.order_by.iter().format_with(", ", |o, f| {
+                        f(&ColumnOrderDisplay {
+                            column_order: o,
                             input_schema: self.input_schema,
                         })
                     })
@@ -194,11 +192,7 @@ impl LogicalOverAgg {
             .sort_exprs
             .into_iter()
             .map(|e| match e.expr.as_input_ref() {
-                Some(i) => Ok(PlanAggOrderByField {
-                    input: *i.clone(),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                }),
+                Some(i) => Ok(ColumnOrder::new(i.index(), OrderType::new(e.direction))),
                 None => Err(ErrorCode::NotImplemented(
                     "ORDER BY expression in window function".to_string(),
                     None.into(),

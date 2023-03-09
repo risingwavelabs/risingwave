@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::Rule;
 use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
@@ -94,10 +93,7 @@ impl Rule for OverAggToTopNRule {
             offset,
             with_ties,
             Order {
-                column_orders: order_by
-                    .iter()
-                    .map(|f| ColumnOrder::new(f.input.index, OrderType::new(f.direction)))
-                    .collect(),
+                column_orders: order_by.to_vec(),
             },
             partition_by.iter().map(|i| i.index).collect(),
         )

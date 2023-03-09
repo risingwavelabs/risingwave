@@ -23,6 +23,7 @@ use risingwave_pb::common::PbColumnOrder;
 use super::super::plan_node::*;
 use crate::optimizer::PlanRef;
 
+// TODO(rc): use this type to replace all `Vec<ColumnOrder>`
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct Order {
     pub column_orders: Vec<ColumnOrder>,
