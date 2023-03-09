@@ -9,6 +9,7 @@ echo "--- Download artifacts"
 buildkite-agent artifact download scale-test.tar.zst .
 
 echo "--- Extract artifacts"
+apt install zstd
 tar -xvf scale-test.tar.zst
 mkdir target/sim
 mv target/ci-sim target/sim
