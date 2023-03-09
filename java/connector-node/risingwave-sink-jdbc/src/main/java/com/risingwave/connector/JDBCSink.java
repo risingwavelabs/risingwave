@@ -37,13 +37,13 @@ public class JDBCSink extends SinkBase {
         try {
             this.conn = DriverManager.getConnection(jdbcUrl);
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = GetPkColumnNames(conn, tableName);
+            this.pkColumnNames = getPkColumnNames(conn, tableName);
         } catch (SQLException e) {
             throw Status.INTERNAL.withCause(e).asRuntimeException();
         }
     }
 
-    private List<String> GetPkColumnNames(Connection conn, String tableName) {
+    private List<String> getPkColumnNames(Connection conn, String tableName) {
         try {
             var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
             while (pks.next()) {
@@ -61,7 +61,7 @@ public class JDBCSink extends SinkBase {
         this.tableName = tableName;
         this.jdbcUrl = null;
         this.conn = conn;
-        this.pkColumnNames = GetPkColumnNames(conn, tableName);
+        this.pkColumnNames = getPkColumnNames(conn, tableName);
     }
 
     private PreparedStatement prepareStatement(SinkRow row) {
