@@ -219,7 +219,6 @@ impl BlockIterator {
 
     /// Decodes [`KeyPrefix`] at given offset.
     fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
-        println!("block.data() = {:?}", self.block.data().len());
         KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
     }
 
