@@ -6108,11 +6108,22 @@ dependencies = [
  "paste",
  "regex",
  "risingwave_common",
+ "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
  "speedate",
  "thiserror",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_expr_macro"
+version = "0.1.0"
+dependencies = [
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

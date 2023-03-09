@@ -118,3 +118,10 @@ pub type BoxedExpression = Box<dyn Expression>;
 
 /// A reference to a dynamically typed [`Expression`].
 pub type ExpressionRef = Arc<dyn Expression>;
+
+struct FunctionDescriptor {
+    name: &'static str,
+    args: Vec<DataType>,
+    ret: DataType,
+    build: fn(&[BoxedExpression]) -> BoxedExpression,
+}

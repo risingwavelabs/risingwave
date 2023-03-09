@@ -31,6 +31,7 @@ parse-display = "0.6"
 paste = "1"
 regex = "1"
 risingwave_common = { path = "../common" }
+risingwave_expr_macro = { path = "macro" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 speedate = "0.7.0"
