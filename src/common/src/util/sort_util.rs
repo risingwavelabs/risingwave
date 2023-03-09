@@ -88,7 +88,7 @@ impl OrderType {
         Self { direction }
     }
 
-    // Create an ascending order type, with other options set to default.
+    /// Create an ascending order type, with other options set to default.
     pub const fn ascending() -> Self {
         Self {
             direction: Direction::Ascending,
