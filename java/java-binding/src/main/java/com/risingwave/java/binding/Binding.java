@@ -1,5 +1,8 @@
 package com.risingwave.java.binding;
 
+import java.util.Iterator;
+import com.risingwave.connector.api.sink.SinkRow;
+
 public class Binding {
     static {
         System.loadLibrary("risingwave_java_binding");
@@ -10,6 +13,8 @@ public class Binding {
     // iterator method
     // Return a pointer to the iterator
     static native long iteratorNew(byte[] readPlan);
+
+    static native Iterator<SinkRow> streamChunkFromProtobuf(byte[] streamChunk);
 
     // return a pointer to the next row
     static native long iteratorNext(long pointer);

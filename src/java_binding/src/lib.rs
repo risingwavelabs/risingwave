@@ -31,6 +31,8 @@ use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::array::{ArrayResult, StreamChunk};
+use risingwave_pb::data;
 use risingwave_common::hash::VirtualNode;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
@@ -239,6 +241,16 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
             Some(row) => Ok(row.into()),
         }
     })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkFromProtobuf<'a>(
+    env: EnvParam<'a>,
+    stream_chunk: data::StreamChunk,
+// ) -> ArrayResult<StreamChunk> {
+    ) -> jobjectArray<StreamChunk> {
+    
+    execute_and_catch(env, move || Ok(StreamChunk::from_protobuf(&stream_chunk)))
 }
 
 #[no_mangle]

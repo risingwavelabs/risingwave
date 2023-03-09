@@ -124,6 +124,19 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                                     .asRuntimeException();
                         }
                         break;
+                    case STREAM_CHUNK_PAYLOAD:
+                        if (deserializer == null){
+                            deserializer = new StreamChunkDeserializer();
+                        }
+
+                        if (deserializer instanceof StreamChunkDeserializer){
+                            rows = deserializer.deserialize(sinkTask.getWrite().getStreamChunkPayload());
+                        } else {
+                            throw INTERNAL.withDescription(
+                                            "invalid payload type: expected StreamChunk, got "
+                                                    + deserializer.getClass().getName())
+                                    .asRuntimeException();
+                        }
                     default:
                         throw INVALID_ARGUMENT
                                 .withDescription("invalid payload type")

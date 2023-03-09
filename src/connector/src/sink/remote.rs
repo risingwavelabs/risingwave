@@ -236,23 +236,23 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
 #[async_trait]
 impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut row_ops = vec![];
-        for (op, row_ref) in chunk.rows() {
-            let mut map = serde_json::Map::new();
-            row_ref
-                .iter()
-                .zip_eq_fast(self.schema.fields.iter())
-                .for_each(|(v, f)| {
-                    map.insert(f.name.clone(), parse_datum(v));
-                });
-            let row_op = RowOp {
-                op_type: op.to_protobuf() as i32,
-                line: serde_json::to_string(&map)
-                    .map_err(|e| SinkError::Remote(format!("{:?}", e)))?,
-            };
+        // let mut row_ops = vec![];
+        // for (op, row_ref) in chunk.rows() {
+        //     let mut map = serde_json::Map::new();
+        //     row_ref
+        //         .iter()
+        //         .zip_eq_fast(self.schema.fields.iter())
+        //         .for_each(|(v, f)| {
+        //             map.insert(f.name.clone(), parse_datum(v));
+        //         });
+        //     let row_op = RowOp {
+        //         op_type: op.to_protobuf() as i32,
+        //         line: serde_json::to_string(&map)
+        //             .map_err(|e| SinkError::Remote(format!("{:?}", e)))?,
+        //     };
 
-            row_ops.push(row_op);
-        }
+        //     row_ops.push(row_op);
+        // }
 
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
@@ -263,7 +263,8 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
                 request: Some(SinkRequest::Write(WriteBatch {
                     epoch,
                     batch_id,
-                    payload: Some(Payload::JsonPayload(JsonPayload { row_ops })),
+                    // payload: Some(Payload::JsonPayload(JsonPayload { row_ops })),
+                    payload: Some(Payload::StreamChunkPayload(chunk.to_protobuf())),
                 })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
