@@ -24,7 +24,6 @@ use lru::DefaultHasher;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -167,6 +166,7 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
+    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
