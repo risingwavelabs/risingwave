@@ -3,7 +3,23 @@ package com.risingwave.connector.api.source;
 import java.util.HashMap;
 import java.util.Map;
 
-public class ConnectorConfig {
+public class ConnectorConfig extends HashMap<String, String> {
+
+    public ConnectorConfig() {
+    }
+
+    public ConnectorConfig(Map<? extends String, ? extends String> m) {
+        super(m);
+    }
+
+    public String getNonNull(String key) {
+        String value = super.get(key);
+        if (value == null) {
+            throw new RuntimeException(key + "cannot be null");
+        }
+        return value;
+    }
+
     /* Common configs */
     public static final String HOST = "hostname";
     public static final String PORT = "port";

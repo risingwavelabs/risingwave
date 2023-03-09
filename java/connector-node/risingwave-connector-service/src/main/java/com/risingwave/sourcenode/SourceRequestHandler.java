@@ -37,7 +37,7 @@ public class SourceRequestHandler {
                                 SourceTypeE.valueOf(startRequest.getSourceType()),
                                 startRequest.getSourceId(),
                                 startRequest.getStartOffset(),
-                                startRequest.getPropertiesMap());
+                                new ConnectorConfig(startRequest.getPropertiesMap()));
                 if (handler == null) {
                     LOG.error("failed to create source handler");
                     responseObserver.onCompleted();

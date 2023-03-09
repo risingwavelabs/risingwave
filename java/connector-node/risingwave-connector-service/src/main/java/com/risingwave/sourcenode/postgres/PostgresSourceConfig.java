@@ -18,7 +18,7 @@ public class PostgresSourceConfig implements SourceConfig {
     private final String sourceName;
     private static final long DEFAULT_HEARTBEAT_MS = Duration.ofMinutes(5).toMillis();
 
-    public PostgresSourceConfig(long sourceId, String startOffset, Map<String, String> userProps) {
+    public PostgresSourceConfig(long sourceId, String startOffset, ConnectorConfig userProps) {
         id = sourceId;
         props.setProperty("connector.class", "io.debezium.connector.postgresql.PostgresConnector");
         props.setProperty(
@@ -64,23 +64,23 @@ public class PostgresSourceConfig implements SourceConfig {
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.defaultValueAsString());
 
         String tableFilter =
-                userProps.get(ConnectorConfig.PG_SCHEMA_NAME)
+                userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME)
                         + "."
-                        + userProps.get(ConnectorConfig.TABLE_NAME);
+                        + userProps.getNonNull(ConnectorConfig.TABLE_NAME);
         props.setProperty("table.include.list", tableFilter);
         props.setProperty("database.server.name", DB_SERVER_NAME_PREFIX + tableFilter);
 
         // host:port:database.schema.table
         sourceName =
-                userProps.get(ConnectorConfig.HOST)
+                userProps.getNonNull(ConnectorConfig.HOST)
                         + ":"
-                        + userProps.get(ConnectorConfig.PORT)
+                        + userProps.getNonNull(ConnectorConfig.PORT)
                         + ":"
-                        + userProps.get(ConnectorConfig.DB_NAME)
+                        + userProps.getNonNull(ConnectorConfig.DB_NAME)
                         + "."
-                        + userProps.get(ConnectorConfig.PG_SCHEMA_NAME)
+                        + userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME)
                         + "."
-                        + userProps.get(ConnectorConfig.TABLE_NAME);
+                        + userProps.getNonNull(ConnectorConfig.TABLE_NAME);
         props.setProperty("name", sourceName);
 
         // pass through debezium properties if any
