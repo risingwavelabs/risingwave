@@ -20,8 +20,9 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
+  # Docs: https://buildkite.com/docs/agent/v3/cli-pipeline
   - label: ":pipeline: Pipeline upload"
-    command: buildkite-agent main-cron upload
+    command: buildkite-agent pipeline upload main-cron.yml
 
   - label: "check ci image rebuild"
     plugins:
