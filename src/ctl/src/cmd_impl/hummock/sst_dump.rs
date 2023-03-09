@@ -42,8 +42,8 @@ type TableData = HashMap<u32, TableCatalog>;
 
 #[derive(Args, Debug)]
 pub struct SstDumpArgs {
-    #[clap(short, long = "sst-id")]
-    sst_id: Option<u64>,
+    #[clap(short, long = "object-id")]
+    object_id: Option<u64>,
     #[clap(short, long = "block-id")]
     block_id: Option<u64>,
     #[clap(short = 'p', long = "print-entries")]
@@ -73,8 +73,8 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     // TODO: We can avoid reading meta if `print_level` is false with the new block format.
     for level in version.get_combined_levels() {
         for sstable_info in &level.table_infos {
-            if let Some(sst_id) = &args.sst_id {
-                if *sst_id == sstable_info.get_object_id() {
+            if let Some(object_id) = &args.object_id {
+                if *object_id == sstable_info.get_object_id() {
                     if args.print_level {
                         print_level(level);
                     }

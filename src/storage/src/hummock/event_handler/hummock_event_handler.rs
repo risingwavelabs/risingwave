@@ -117,7 +117,7 @@ async fn flush_imms(
     for epoch in &task_info.epochs {
         let _ = compactor_context
             .sstable_id_manager
-            .add_watermark_sst_id(Some(*epoch))
+            .add_watermark_object_id(Some(*epoch))
             .await
             .inspect_err(|e| {
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
@@ -360,7 +360,7 @@ impl HummockEventHandler {
         }
 
         self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
+            .remove_watermark_object_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         let _ = notifier.send(()).inspect_err(|e| {
@@ -413,7 +413,7 @@ impl HummockEventHandler {
             conflict_detector.set_watermark(max_committed_epoch);
         }
         self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(
+            .remove_watermark_object_id(TrackerId::Epoch(
                 self.pinned_version.load().max_committed_epoch(),
             ));
 

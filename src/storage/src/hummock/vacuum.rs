@@ -59,11 +59,11 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
-        let sst_ids = vacuum_task.sstable_ids;
-        sstable_store.delete_list(&sst_ids).await?;
+        let object_ids = vacuum_task.sstable_ids;
+        sstable_store.delete_list(&object_ids).await?;
         hummock_meta_client
             .report_vacuum_task(VacuumTask {
-                sstable_ids: sst_ids,
+                sstable_ids: object_ids,
             })
             .await
             .map_err(|e| {
@@ -93,9 +93,9 @@ impl Vacuum {
             }
         };
 
-        let sst_ids =
+        let object_ids =
             Vacuum::full_scan_inner(full_scan_task, object_metadata, sstable_store.clone());
-        match hummock_meta_client.report_full_scan_task(sst_ids).await {
+        match hummock_meta_client.report_full_scan_task(object_ids).await {
             Ok(_) => {
                 tracing::info!("Finished full scan SSTs");
             }
@@ -120,7 +120,7 @@ impl Vacuum {
         object_metadata
             .into_iter()
             .filter(|o| o.last_modified < timestamp_watermark)
-            .map(|o| sstable_store.get_sst_id_from_path(&o.key))
+            .map(|o| sstable_store.get_object_id_from_path(&o.key))
             .dedup()
             .collect_vec()
     }

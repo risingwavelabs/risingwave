@@ -117,7 +117,7 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
-  repeated uint64 gc_sst_ids = 7;
+  repeated uint64 gc_object_ids = 7;
 }
 
 message HummockVersionDeltas {
@@ -425,7 +425,7 @@ message TriggerManualCompactionResponse {
 }
 
 message ReportFullScanTaskRequest {
-  repeated uint64 sst_ids = 1;
+  repeated uint64 object_ids = 1;
 }
 
 message ReportFullScanTaskResponse {

@@ -40,8 +40,8 @@ pub struct VacuumManager<S: MetaStore> {
     backup_manager: BackupManagerRef<S>,
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: CompactorManagerRef,
-    /// SST ids which have been dispatched to vacuum nodes but are not replied yet.
-    pending_sst_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
+    /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
+    pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
 }
 
 impl<S> VacuumManager<S>
@@ -59,7 +59,7 @@ where
             hummock_manager,
             backup_manager,
             compactor_manager,
-            pending_sst_ids: Default::default(),
+            pending_object_ids: Default::default(),
         }
     }
 
@@ -93,9 +93,9 @@ where
             // It is possible some vacuum workers have been asked to vacuum these SSTs previously,
             // but they don't report the results yet due to either latency or failure.
             // This is OK since trying to delete the same SST multiple times is safe.
-            let pending_sst_ids = self.pending_sst_ids.read().iter().cloned().collect_vec();
-            if !pending_sst_ids.is_empty() {
-                pending_sst_ids
+            let pending_object_ids = self.pending_object_ids.read().iter().cloned().collect_vec();
+            if !pending_object_ids.is_empty() {
+                pending_object_ids
             } else {
                 // 2. If no pending SSTs, then fetch new ones.
                 let mut ssts_to_delete = self.hummock_manager.get_ssts_to_delete().await;
@@ -104,7 +104,9 @@ where
                     return Ok(vec![]);
                 }
                 // Track these SST ids, so that we can remove them from metadata later.
-                self.pending_sst_ids.write().extend(ssts_to_delete.clone());
+                self.pending_object_ids
+                    .write()
+                    .extend(ssts_to_delete.clone());
                 ssts_to_delete
             }
         };
@@ -184,20 +186,20 @@ where
 
     /// Acknowledges deletion of SSTs and deletes corresponding metadata.
     pub async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> MetaResult<()> {
-        let deleted_sst_ids = self
-            .pending_sst_ids
+        let deleted_object_ids = self
+            .pending_object_ids
             .read()
             .iter()
             .filter(|p| vacuum_task.sstable_ids.contains(p))
             .cloned()
             .collect_vec();
-        if !deleted_sst_ids.is_empty() {
+        if !deleted_object_ids.is_empty() {
             self.hummock_manager
-                .ack_deleted_ssts(&deleted_sst_ids)
+                .ack_deleted_ssts(&deleted_object_ids)
                 .await?;
-            self.pending_sst_ids
+            self.pending_object_ids
                 .write()
-                .retain(|p| !deleted_sst_ids.contains(p));
+                .retain(|p| !deleted_object_ids.contains(p));
         }
         tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
         Ok(())
@@ -238,8 +240,8 @@ where
 
     /// Given candidate SSTs to GC, filter out false positive.
     /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(&self, sst_ids: Vec<HummockSstableId>) -> Result<usize> {
-        if sst_ids.is_empty() {
+    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableId>) -> Result<usize> {
+        if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
         }
@@ -250,16 +252,19 @@ where
             spin_interval,
         )
         .await?;
-        let sst_number = sst_ids.len();
+        let sst_number = object_ids.len();
         // 1. filter by watermark
-        let sst_ids = sst_ids.into_iter().filter(|s| *s < watermark).collect_vec();
+        let object_ids = object_ids
+            .into_iter()
+            .filter(|s| *s < watermark)
+            .collect_vec();
         // 2. filter by version
         let number = self
             .hummock_manager
-            .extend_ssts_to_delete_from_scan(&sst_ids)
+            .extend_ssts_to_delete_from_scan(&object_ids)
             .await;
         tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
-            watermark, sst_number, sst_ids.len(), number);
+            watermark, sst_number, object_ids.len(), number);
         Ok(number)
     }
 }
@@ -509,18 +514,20 @@ mod tests {
 
         // All committed SST ids should be excluded from GC.
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        let committed_sst_ids = sst_infos
+        let committed_object_ids = sst_infos
             .into_iter()
             .flatten()
             .map(|s| s.get_object_id())
             .sorted()
             .collect_vec();
-        assert!(!committed_sst_ids.is_empty());
-        let max_committed_sst_id = *committed_sst_ids.iter().max().unwrap();
+        assert!(!committed_object_ids.is_empty());
+        let max_committed_object_id = *committed_object_ids.iter().max().unwrap();
         assert_eq!(
             1,
             vacuum
-                .complete_full_gc([committed_sst_ids, vec![max_committed_sst_id + 1]].concat())
+                .complete_full_gc(
+                    [committed_object_ids, vec![max_committed_object_id + 1]].concat()
+                )
                 .await
                 .unwrap()
         );

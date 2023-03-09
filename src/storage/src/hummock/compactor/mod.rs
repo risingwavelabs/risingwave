@@ -90,7 +90,11 @@ impl Compactor {
         let context = compactor_context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
-        let tracker_id = match context.sstable_id_manager.add_watermark_sst_id(None).await {
+        let tracker_id = match context
+            .sstable_id_manager
+            .add_watermark_object_id(None)
+            .await
+        {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
                 tracing::warn!("Failed to track pending SST id. {:#?}", err);
@@ -101,7 +105,7 @@ impl Compactor {
         let _guard = scopeguard::guard(
             (tracker_id, sstable_id_manager_clone),
             |(tracker_id, sstable_id_manager)| {
-                sstable_id_manager.remove_watermark_sst_id(tracker_id);
+                sstable_id_manager.remove_watermark_object_id(tracker_id);
             },
         );
         let group_label = compact_task.compaction_group_id.to_string();

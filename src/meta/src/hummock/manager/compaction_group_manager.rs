@@ -327,7 +327,7 @@ impl<S: MetaStore> HummockManager<S> {
             // However, we need to take care of SST GC for the removed group.
             for object_id in get_compaction_group_object_ids(current_version, *group_id) {
                 if drop_sst(&mut branched_ssts, *group_id, object_id) {
-                    new_version_delta.gc_sst_ids.push(object_id);
+                    new_version_delta.gc_object_ids.push(object_id);
                 }
             }
             let group_deltas = &mut new_version_delta

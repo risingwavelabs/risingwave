@@ -59,9 +59,9 @@ impl TieredCacheKey for (HummockSstableId, u64) {
     }
 
     fn decode(mut buf: &[u8]) -> Self {
-        let sst_id = buf.get_u64();
+        let object_id = buf.get_u64();
         let block_idx = buf.get_u64();
-        (sst_id, block_idx)
+        (object_id, block_idx)
     }
 }
 
@@ -169,39 +169,39 @@ impl SstableStore {
         }
     }
 
-    pub async fn delete(&self, sst_id: HummockSstableId) -> HummockResult<()> {
+    pub async fn delete(&self, object_id: HummockSstableId) -> HummockResult<()> {
         // Data
         self.store
-            .delete(self.get_sst_data_path(sst_id).as_str())
+            .delete(self.get_sst_data_path(object_id).as_str())
             .await?;
-        self.meta_cache.erase(sst_id, &sst_id);
+        self.meta_cache.erase(object_id, &object_id);
         Ok(())
     }
 
     /// Deletes all SSTs specified in the given list of IDs from storage and cache.
-    pub async fn delete_list(&self, sst_id_list: &[HummockSstableId]) -> HummockResult<()> {
-        let mut paths = Vec::with_capacity(sst_id_list.len() * 2);
+    pub async fn delete_list(&self, object_id_list: &[HummockSstableId]) -> HummockResult<()> {
+        let mut paths = Vec::with_capacity(object_id_list.len() * 2);
 
-        for &sst_id in sst_id_list {
-            paths.push(self.get_sst_data_path(sst_id));
+        for &object_id in object_id_list {
+            paths.push(self.get_sst_data_path(object_id));
         }
         // Delete from storage.
         self.store.delete_objects(&paths).await?;
 
         // Delete from cache.
-        for &sst_id in sst_id_list {
-            self.meta_cache.erase(sst_id, &sst_id);
+        for &object_id in object_id_list {
+            self.meta_cache.erase(object_id, &object_id);
         }
 
         Ok(())
     }
 
-    pub fn delete_cache(&self, sst_id: HummockSstableId) {
-        self.meta_cache.erase(sst_id, &sst_id);
+    pub fn delete_cache(&self, object_id: HummockSstableId) {
+        self.meta_cache.erase(object_id, &object_id);
     }
 
-    async fn put_sst_data(&self, sst_id: HummockSstableId, data: Bytes) -> HummockResult<()> {
-        let data_path = self.get_sst_data_path(sst_id);
+    async fn put_sst_data(&self, object_id: HummockSstableId, data: Bytes) -> HummockResult<()> {
+        let data_path = self.get_sst_data_path(object_id);
         self.store
             .upload(&data_path, data)
             .await
@@ -215,20 +215,20 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockResponse> {
-        let sst_id = sst.id;
+        let object_id = sst.id;
         let (block_loc, uncompressed_capacity) = sst.calculate_block_info(block_index);
 
         stats.cache_data_block_total += 1;
         let mut fetch_block = || {
             let tiered_cache = self.tiered_cache.clone();
             stats.cache_data_block_miss += 1;
-            let data_path = self.get_sst_data_path(sst_id);
+            let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
-                    .get(&(sst_id, block_index as u64))
+                    .get(&(object_id, block_index as u64))
                     .await
                     .map_err(HummockError::tiered_cache)?
                 {
@@ -257,13 +257,13 @@ impl SstableStore {
             CachePolicy::Fill => {
                 Ok(self
                     .block_cache
-                    .get_or_insert_with(sst_id, block_index as u64, fetch_block))
+                    .get_or_insert_with(object_id, block_index as u64, fetch_block))
             }
-            CachePolicy::NotFill => match self.block_cache.get(sst_id, block_index as u64) {
+            CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
                 None => match self
                     .tiered_cache
-                    .get(&(sst_id, block_index as u64))
+                    .get(&(object_id, block_index as u64))
                     .await
                     .map_err(HummockError::tiered_cache)?
                 {
@@ -299,12 +299,12 @@ impl SstableStore {
         }
     }
 
-    pub fn get_sst_data_path(&self, sst_id: HummockSstableId) -> String {
-        let obj_prefix = self.store.get_object_prefix(sst_id, true);
-        format!("{}/{}{}.data", self.path, obj_prefix, sst_id)
+    pub fn get_sst_data_path(&self, object_id: HummockSstableId) -> String {
+        let obj_prefix = self.store.get_object_prefix(object_id, true);
+        format!("{}/{}{}.data", self.path, obj_prefix, object_id)
     }
 
-    pub fn get_sst_id_from_path(&self, path: &str) -> HummockSstableId {
+    pub fn get_object_id_from_path(&self, path: &str) -> HummockSstableId {
         let split = path.split(&['/', '.']).collect_vec();
         debug_assert!(split.len() > 2);
         debug_assert!(split[split.len() - 1] == "meta" || split[split.len() - 1] == "data");
@@ -341,12 +341,12 @@ impl SstableStore {
         stats: &StoreLocalStatistic,
     ) -> HummockResult<(TableHolder, u64)> {
         let mut local_cache_meta_block_miss = 0;
-        let sst_id = sst.get_object_id();
+        let object_id = sst.get_object_id();
         let result = self
             .meta_cache
-            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+            .lookup_with_request_dedup::<_, HummockError, _>(object_id, object_id, || {
                 let store = self.store.clone();
-                let meta_path = self.get_sst_data_path(sst_id);
+                let meta_path = self.get_sst_data_path(object_id);
                 local_cache_meta_block_miss += 1;
                 let stats_ptr = stats.remote_io_time.clone();
                 let loc = BlockLocation {
@@ -360,7 +360,7 @@ impl SstableStore {
                         .await
                         .map_err(HummockError::object_io_error)?;
                     let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let sst = Sstable::new(sst_id, meta);
+                    let sst = Sstable::new(object_id, meta);
                     let charge = sst.estimate_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
@@ -394,26 +394,26 @@ impl SstableStore {
 
     pub fn create_sst_writer(
         self: Arc<Self>,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> BatchUploadWriter {
-        BatchUploadWriter::new(sst_id, self, options)
+        BatchUploadWriter::new(object_id, self, options)
     }
 
-    pub fn insert_meta_cache(&self, sst_id: HummockSstableId, meta: SstableMeta) {
-        let sst = Sstable::new(sst_id, meta);
+    pub fn insert_meta_cache(&self, object_id: HummockSstableId, meta: SstableMeta) {
+        let sst = Sstable::new(object_id, meta);
         let charge = sst.estimate_size();
         self.meta_cache
-            .insert(sst_id, sst_id, charge, Box::new(sst));
+            .insert(object_id, object_id, charge, Box::new(sst));
     }
 
     pub fn insert_block_cache(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         block_index: u64,
         block: Box<Block>,
     ) {
-        self.block_cache.insert(sst_id, block_index, block);
+        self.block_cache.insert(object_id, block_index, block);
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {
@@ -494,7 +494,7 @@ pub trait SstableWriterFactory: Send + Sync {
 
     fn create_sst_writer(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer>;
 }
@@ -514,11 +514,11 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
 
     fn create_sst_writer(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
         Ok(BatchUploadWriter::new(
-            sst_id,
+            object_id,
             self.sstable_store.clone(),
             options,
         ))
@@ -528,7 +528,7 @@ impl SstableWriterFactory for BatchSstableWriterFactory {
 /// Buffer SST data and upload it as a whole on `finish`.
 /// The upload is finished when the returned `JoinHandle` is joined.
 pub struct BatchUploadWriter {
-    sst_id: HummockSstableId,
+    object_id: HummockSstableId,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     buf: Vec<u8>,
@@ -538,12 +538,12 @@ pub struct BatchUploadWriter {
 
 impl BatchUploadWriter {
     pub fn new(
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         sstable_store: Arc<SstableStore>,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
-            sst_id,
+            object_id,
             sstable_store,
             policy: options.policy,
             buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
@@ -575,8 +575,8 @@ impl SstableWriter for BatchUploadWriter {
             let data = Bytes::from(self.buf);
             let _tracker = self.tracker.map(|mut t| {
                 if !t.try_increase_memory(data.capacity() as u64) {
-                    tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
-                                    self.sst_id, data.capacity());
+                    tracing::debug!("failed to allocate increase memory for data file, sst object id: {}, file size: {}",
+                                    self.object_id, data.capacity());
                 }
                 t
             });
@@ -584,9 +584,9 @@ impl SstableWriter for BatchUploadWriter {
             // Upload data to object store.
             self.sstable_store
                 .clone()
-                .put_sst_data(self.sst_id, data)
+                .put_sst_data(self.object_id, data)
                 .await?;
-            self.sstable_store.insert_meta_cache(self.sst_id, meta);
+            self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Add block cache.
             if CachePolicy::Fill == self.policy {
@@ -594,7 +594,7 @@ impl SstableWriter for BatchUploadWriter {
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
-                        self.sst_id,
+                        self.object_id,
                         block_idx as u64,
                         Box::new(block),
                     );
@@ -611,7 +611,7 @@ impl SstableWriter for BatchUploadWriter {
 }
 
 pub struct StreamingUploadWriter {
-    sst_id: HummockSstableId,
+    object_id: HummockSstableId,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
     /// Data are uploaded block by block, except for the size footer.
@@ -624,13 +624,13 @@ pub struct StreamingUploadWriter {
 
 impl StreamingUploadWriter {
     pub fn new(
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         sstable_store: SstableStoreRef,
         object_uploader: ObjectStreamingUploader,
         options: SstableWriterOptions,
     ) -> Self {
         Self {
-            sst_id,
+            object_id,
             sstable_store,
             policy: options.policy,
             object_uploader,
@@ -669,8 +669,8 @@ impl SstableWriter for StreamingUploadWriter {
             let uploader_memory_usage = self.object_uploader.get_memory_usage();
             let _tracker = self.tracker.map(|mut t| {
                     if !t.try_increase_memory(uploader_memory_usage) {
-                        tracing::debug!("failed to allocate increase memory for data file, sst id: {}, file size: {}",
-                                        self.sst_id, uploader_memory_usage);
+                        tracing::debug!("failed to allocate increase memory for data file, sst object id: {}, file size: {}",
+                                        self.object_id, uploader_memory_usage);
                     }
                     t
                 });
@@ -680,14 +680,14 @@ impl SstableWriter for StreamingUploadWriter {
                 .finish()
                 .await
                 .map_err(HummockError::object_io_error)?;
-            self.sstable_store.insert_meta_cache(self.sst_id, meta);
+            self.sstable_store.insert_meta_cache(self.object_id, meta);
 
             // Add block cache.
             if let CachePolicy::Fill = self.policy {
                 debug_assert!(!self.blocks.is_empty());
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
-                        self.sst_id,
+                        self.object_id,
                         block_idx as u64,
                         Box::new(block),
                     );
@@ -718,13 +718,13 @@ impl SstableWriterFactory for StreamingSstableWriterFactory {
 
     fn create_sst_writer(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         options: SstableWriterOptions,
     ) -> HummockResult<Self::Writer> {
-        let path = self.sstable_store.get_sst_data_path(sst_id);
+        let path = self.sstable_store.get_sst_data_path(object_id);
         let uploader = self.sstable_store.store.streaming_upload(&path)?;
         Ok(StreamingUploadWriter::new(
-            sst_id,
+            object_id,
             self.sstable_store.clone(),
             uploader,
             options,
@@ -967,9 +967,9 @@ mod tests {
     #[test]
     fn test_basic() {
         let sstable_store = mock_sstable_store();
-        let sst_id = 123;
-        let data_path = sstable_store.get_sst_data_path(sst_id);
+        let object_id = 123;
+        let data_path = sstable_store.get_sst_data_path(object_id);
         assert_eq!(data_path, "test/123.data");
-        assert_eq!(sstable_store.get_sst_id_from_path(&data_path), sst_id);
+        assert_eq!(sstable_store.get_object_id_from_path(&data_path), object_id);
     }
 }

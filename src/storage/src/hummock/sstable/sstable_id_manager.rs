@@ -42,7 +42,7 @@ pub struct SstableIdManager {
     available_sst_ids: Mutex<SstIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    sst_id_tracker: SstIdTracker,
+    object_id_tracker: SstIdTracker,
 }
 
 impl SstableIdManager {
@@ -55,7 +55,7 @@ impl SstableIdManager {
             )),
             remote_fetch_number,
             hummock_meta_client,
-            sst_id_tracker: SstIdTracker::new(),
+            object_id_tracker: SstIdTracker::new(),
         }
     }
 
@@ -144,31 +144,31 @@ impl SstableIdManager {
     /// Returns a tracker id. It's used to remove the watermark later.
     /// - Uses given 'epoch' as tracker id if provided.
     /// - Uses a generated tracker id otherwise.
-    pub async fn add_watermark_sst_id(
+    pub async fn add_watermark_object_id(
         self: &Arc<Self>,
         epoch: Option<HummockEpoch>,
     ) -> HummockResult<TrackerId> {
         let tracker_id = match epoch {
-            None => self.sst_id_tracker.get_next_auto_tracker_id(),
+            None => self.object_id_tracker.get_next_auto_tracker_id(),
             Some(epoch) => TrackerId::Epoch(epoch),
         };
         let next_sst_id = self
             .map_next_sst_id(|available_sst_ids| available_sst_ids.peek_next_sst_id())
             .await?;
-        self.sst_id_tracker.add_tracker(tracker_id, next_sst_id);
+        self.object_id_tracker.add_tracker(tracker_id, next_sst_id);
         Ok(tracker_id)
     }
 
-    pub fn remove_watermark_sst_id(&self, tracker_id: TrackerId) {
-        self.sst_id_tracker.remove_tracker(tracker_id);
+    pub fn remove_watermark_object_id(&self, tracker_id: TrackerId) {
+        self.object_id_tracker.remove_tracker(tracker_id);
     }
 
     /// Returns GC watermark. It equals
     /// - min(effective watermarks), if number of effective watermarks > 0.
     /// - `HummockSstableId::MAX`, if no effective watermark.
-    pub fn global_watermark_sst_id(&self) -> HummockSstableId {
-        self.sst_id_tracker
-            .tracking_sst_ids()
+    pub fn global_watermark_object_id(&self) -> HummockSstableId {
+        self.object_id_tracker
+            .tracking_object_ids()
             .into_iter()
             .min()
             .unwrap_or(HummockSstableId::MAX)
@@ -186,7 +186,7 @@ impl SstableIdManager {
 #[async_trait::async_trait]
 impl ExtraInfoSource for SstableIdManager {
     async fn get_extra_info(&self) -> Option<Info> {
-        Some(Info::HummockGcWatermark(self.global_watermark_sst_id()))
+        Some(Info::HummockGcWatermark(self.global_watermark_object_id()))
     }
 }
 
@@ -212,10 +212,10 @@ impl SstIdTracker {
         }
     }
 
-    /// Adds a tracker to track `sst_id`. If a tracker with `tracker_id` already exists, it will
-    /// track the smallest `sst_id` ever given.
-    fn add_tracker(&self, tracker_id: TrackerId, sst_id: HummockSstableId) {
-        self.inner.write().add_tracker(tracker_id, sst_id);
+    /// Adds a tracker to track `object_id`. If a tracker with `tracker_id` already exists, it will
+    /// track the smallest `object_id` ever given.
+    fn add_tracker(&self, tracker_id: TrackerId, object_id: HummockSstableId) {
+        self.inner.write().add_tracker(tracker_id, object_id);
     }
 
     /// Removes given `tracker_id`.
@@ -227,29 +227,29 @@ impl SstIdTracker {
         TrackerId::Auto(self.auto_id.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
-    fn tracking_sst_ids(&self) -> Vec<HummockSstableId> {
-        self.inner.read().tracking_sst_ids()
+    fn tracking_object_ids(&self) -> Vec<HummockSstableId> {
+        self.inner.read().tracking_object_ids()
     }
 }
 
 struct SstIdTrackerInner {
-    tracking_sst_ids: HashMap<TrackerId, HummockSstableId>,
+    tracking_object_ids: HashMap<TrackerId, HummockSstableId>,
 }
 
 impl SstIdTrackerInner {
     fn new() -> Self {
         Self {
-            tracking_sst_ids: Default::default(),
+            tracking_object_ids: Default::default(),
         }
     }
 
-    fn add_tracker(&mut self, tracker_id: TrackerId, sst_id: HummockSstableId) {
-        match self.tracking_sst_ids.entry(tracker_id) {
+    fn add_tracker(&mut self, tracker_id: TrackerId, object_id: HummockSstableId) {
+        match self.tracking_object_ids.entry(tracker_id) {
             Entry::Occupied(mut o) => {
-                *o.get_mut() = cmp::min(*o.get_mut(), sst_id);
+                *o.get_mut() = cmp::min(*o.get_mut(), object_id);
             }
             Entry::Vacant(v) => {
-                v.insert(sst_id);
+                v.insert(object_id);
             }
         }
     }
@@ -257,17 +257,17 @@ impl SstIdTrackerInner {
     fn remove_tracker(&mut self, tracker_id: TrackerId) {
         match &tracker_id {
             TrackerId::Auto(_) => {
-                self.tracking_sst_ids.remove(&tracker_id);
+                self.tracking_object_ids.remove(&tracker_id);
             }
-            TrackerId::Epoch(max_epoch) => self.tracking_sst_ids.retain(|id, _| match id {
+            TrackerId::Epoch(max_epoch) => self.tracking_object_ids.retain(|id, _| match id {
                 TrackerId::Auto(_) => true,
                 TrackerId::Epoch(epoch) => *epoch > *max_epoch,
             }),
         }
     }
 
-    fn tracking_sst_ids(&self) -> Vec<HummockSstableId> {
-        self.tracking_sst_ids.values().cloned().collect_vec()
+    fn tracking_object_ids(&self) -> Vec<HummockSstableId> {
+        self.tracking_object_ids.values().cloned().collect_vec()
     }
 }
 
@@ -280,54 +280,71 @@ mod test {
     use crate::hummock::{SstIdTracker, TrackerId};
 
     #[tokio::test]
-    async fn test_sst_id_tracker_basic() {
-        let sst_id_tacker = SstIdTracker::new();
-        assert!(sst_id_tacker.tracking_sst_ids().is_empty());
+    async fn test_object_id_tracker_basic() {
+        let object_id_tacker = SstIdTracker::new();
+        assert!(object_id_tacker.tracking_object_ids().is_empty());
         let auto_id =
-            try_match_expand!(sst_id_tacker.get_next_auto_tracker_id(), TrackerId::Auto).unwrap();
+            try_match_expand!(object_id_tacker.get_next_auto_tracker_id(), TrackerId::Auto)
+                .unwrap();
         assert_eq!(auto_id, AutoTrackerId::MIN + 1);
 
-        let auto_id_1 = sst_id_tacker.get_next_auto_tracker_id();
-        let auto_id_2 = sst_id_tacker.get_next_auto_tracker_id();
-        let auto_id_3 = sst_id_tacker.get_next_auto_tracker_id();
+        let auto_id_1 = object_id_tacker.get_next_auto_tracker_id();
+        let auto_id_2 = object_id_tacker.get_next_auto_tracker_id();
+        let auto_id_3 = object_id_tacker.get_next_auto_tracker_id();
 
-        sst_id_tacker.add_tracker(auto_id_1, 10);
+        object_id_tacker.add_tracker(auto_id_1, 10);
         assert_eq!(
-            sst_id_tacker.tracking_sst_ids().into_iter().min().unwrap(),
+            object_id_tacker
+                .tracking_object_ids()
+                .into_iter()
+                .min()
+                .unwrap(),
             10
         );
 
         // OK to move SST id backwards.
-        sst_id_tacker.add_tracker(auto_id_1, 9);
-        sst_id_tacker.add_tracker(auto_id_2, 9);
+        object_id_tacker.add_tracker(auto_id_1, 9);
+        object_id_tacker.add_tracker(auto_id_2, 9);
 
         // OK to add same id to the same tracker
-        sst_id_tacker.add_tracker(auto_id_1, 10);
+        object_id_tacker.add_tracker(auto_id_1, 10);
         // OK to add same id to another tracker
-        sst_id_tacker.add_tracker(auto_id_2, 10);
+        object_id_tacker.add_tracker(auto_id_2, 10);
 
-        sst_id_tacker.add_tracker(auto_id_3, 20);
-        sst_id_tacker.add_tracker(auto_id_2, 30);
+        object_id_tacker.add_tracker(auto_id_3, 20);
+        object_id_tacker.add_tracker(auto_id_2, 30);
         // Tracker 1 and 2 both hold id 9.
         assert_eq!(
-            sst_id_tacker.tracking_sst_ids().into_iter().min().unwrap(),
+            object_id_tacker
+                .tracking_object_ids()
+                .into_iter()
+                .min()
+                .unwrap(),
             9
         );
 
-        sst_id_tacker.remove_tracker(auto_id_1);
+        object_id_tacker.remove_tracker(auto_id_1);
         // Tracker 2 still holds 9.
         assert_eq!(
-            sst_id_tacker.tracking_sst_ids().into_iter().min().unwrap(),
+            object_id_tacker
+                .tracking_object_ids()
+                .into_iter()
+                .min()
+                .unwrap(),
             9
         );
 
-        sst_id_tacker.remove_tracker(auto_id_2);
+        object_id_tacker.remove_tracker(auto_id_2);
         assert_eq!(
-            sst_id_tacker.tracking_sst_ids().into_iter().min().unwrap(),
+            object_id_tacker
+                .tracking_object_ids()
+                .into_iter()
+                .min()
+                .unwrap(),
             20
         );
 
-        sst_id_tacker.remove_tracker(auto_id_3);
-        assert!(sst_id_tacker.tracking_sst_ids().is_empty());
+        object_id_tacker.remove_tracker(auto_id_3);
+        assert!(object_id_tacker.tracking_object_ids().is_empty());
     }
 }

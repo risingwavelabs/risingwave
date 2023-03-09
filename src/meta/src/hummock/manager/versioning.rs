@@ -132,13 +132,13 @@ impl Versioning {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            let removed_sst_ids = delta.get_gc_sst_ids().clone();
-            for sst_id in &removed_sst_ids {
-                let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+            let removed_object_ids = delta.get_gc_object_ids().clone();
+            for object_id in &removed_object_ids {
+                let duplicate_insert = self.ssts_to_delete.insert(*object_id, delta.id);
                 debug_assert!(duplicate_insert.is_none());
             }
             // If no_sst_to_delete, the delta is qualified for deletion now.
-            if removed_sst_ids.is_empty() {
+            if removed_object_ids.is_empty() {
                 self.deltas_to_delete.push(delta.id);
             }
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is

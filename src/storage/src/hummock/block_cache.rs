@@ -150,21 +150,21 @@ impl BlockCache {
         }
     }
 
-    pub fn get(&self, sst_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
+    pub fn get(&self, object_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .lookup(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
             .map(BlockHolder::from_cached_block)
     }
 
     pub fn insert(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         block_idx: u64,
         block: Box<Block>,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
-            (sst_id, block_idx),
-            Self::hash(sst_id, block_idx),
+            (object_id, block_idx),
+            Self::hash(object_id, block_idx),
             block.capacity(),
             block,
         ))
@@ -172,7 +172,7 @@ impl BlockCache {
 
     pub fn get_or_insert_with<F, Fut>(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableId,
         block_idx: u64,
         mut fetch_block: F,
     ) -> BlockResponse
@@ -180,8 +180,8 @@ impl BlockCache {
         F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
-        let h = Self::hash(sst_id, block_idx);
-        let key = (sst_id, block_idx);
+        let h = Self::hash(object_id, block_idx);
+        let key = (object_id, block_idx);
         match self
             .inner
             .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
@@ -203,9 +203,9 @@ impl BlockCache {
         }
     }
 
-    fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {
+    fn hash(object_id: HummockSstableId, block_idx: u64) -> u64 {
         let mut hasher = DefaultHasher::default();
-        sst_id.hash(&mut hasher);
+        object_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         hasher.finish()
     }

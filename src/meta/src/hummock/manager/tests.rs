@@ -1127,7 +1127,7 @@ async fn test_extend_ssts_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-    let max_committed_sst_id = sst_infos
+    let max_committed_object_id = sst_infos
         .iter()
         .map(|ssts| {
             ssts.iter()
@@ -1138,16 +1138,16 @@ async fn test_extend_ssts_to_delete() {
         .max()
         .unwrap();
     let orphan_sst_num = 10;
-    let orphan_sst_ids = sst_infos
+    let orphan_object_ids = sst_infos
         .iter()
         .flatten()
         .map(|s| s.get_object_id())
-        .chain(max_committed_sst_id + 1..=max_committed_sst_id + orphan_sst_num)
+        .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
         .collect_vec();
     assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
-            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .extend_ssts_to_delete_from_scan(&orphan_object_ids)
             .await,
         orphan_sst_num as usize
     );
@@ -1163,7 +1163,7 @@ async fn test_extend_ssts_to_delete() {
     );
     assert_eq!(
         hummock_manager
-            .extend_ssts_to_delete_from_scan(&orphan_sst_ids)
+            .extend_ssts_to_delete_from_scan(&orphan_object_ids)
             .await,
         orphan_sst_num as usize
     );

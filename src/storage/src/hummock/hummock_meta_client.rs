@@ -152,8 +152,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        self.meta_client.report_full_scan_task(sst_ids).await
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableId>) -> Result<()> {
+        self.meta_client.report_full_scan_task(object_ids).await
     }
 
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {

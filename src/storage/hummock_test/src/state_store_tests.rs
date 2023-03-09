@@ -1296,7 +1296,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 
@@ -1318,7 +1318,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 
@@ -1332,10 +1332,10 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
-    let min_sst_id = |sync_result: &SyncResult| {
+    let min_object_id = |sync_result: &SyncResult| {
         sync_result
             .uncommitted_ssts
             .iter()
@@ -1345,20 +1345,20 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     };
     local_hummock_storage.seal_current_epoch(u64::MAX);
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
-    let min_sst_id_epoch1 = min_sst_id(&sync_result1);
+    let min_object_id_epoch1 = min_object_id(&sync_result1);
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch1,
+            .global_watermark_object_id(),
+        min_object_id_epoch1,
     );
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
-    let min_sst_id_epoch2 = min_sst_id(&sync_result2);
+    let min_object_id_epoch2 = min_object_id(&sync_result2);
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch1,
+            .global_watermark_object_id(),
+        min_object_id_epoch1,
     );
     meta_client
         .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
@@ -1372,8 +1372,8 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch2,
+            .global_watermark_object_id(),
+        min_object_id_epoch2,
     );
 
     hummock_storage.clear_shared_buffer().await.unwrap();
@@ -1387,7 +1387,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(
         hummock_storage
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 }

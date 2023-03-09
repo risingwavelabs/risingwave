@@ -460,7 +460,7 @@ async fn test_clear_shared_buffer() {
     assert_eq!(
         local_version_manager
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 }
@@ -483,7 +483,7 @@ async fn test_sst_gc_watermark() {
     assert_eq!(
         local_version_manager
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 
@@ -497,7 +497,7 @@ async fn test_sst_gc_watermark() {
     assert_eq!(
         local_version_manager
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 
@@ -511,7 +511,7 @@ async fn test_sst_gc_watermark() {
         assert_eq!(
             local_version_manager
                 .sstable_id_manager()
-                .global_watermark_sst_id(),
+                .global_watermark_object_id(),
             1
         );
     }
@@ -527,7 +527,7 @@ async fn test_sst_gc_watermark() {
     assert_eq!(
         local_version_manager
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         2
     );
 
@@ -540,7 +540,7 @@ async fn test_sst_gc_watermark() {
     assert_eq!(
         local_version_manager
             .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .global_watermark_object_id(),
         HummockSstableId::MAX
     );
 }

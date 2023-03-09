@@ -663,7 +663,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
         trivial_move: false,
         max_committed_epoch: version.max_committed_epoch,
         group_deltas: Default::default(),
-        gc_sst_ids: vec![],
+        gc_object_ids: vec![],
     }
 }
 

@@ -47,11 +47,11 @@ where
     ///
     /// Possibly extends deltas_to_delete.
     #[named]
-    pub async fn ack_deleted_ssts(&self, sst_ids: &[HummockSstableId]) -> Result<()> {
+    pub async fn ack_deleted_ssts(&self, object_ids: &[HummockSstableId]) -> Result<()> {
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
-        for sst_id in sst_ids {
-            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(sst_id) && version_id != INVALID_VERSION_ID{
+        for object_id in object_ids {
+            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(object_id) && version_id != INVALID_VERSION_ID{
                 // Orphan SST is mapped to INVALID_VERSION_ID
                 deltas_to_delete.insert(version_id);
             }
@@ -92,29 +92,29 @@ where
     }
 
     /// Extends `ssts_to_delete` according to object store full scan result.
-    /// Caller should ensure `sst_ids` doesn't include any SSTs belong to a on-going version write.
-    /// That's to say, these sst_ids won't appear in either `commit_epoch` or
+    /// Caller should ensure `object_ids` doesn't include any SSTs belong to a on-going version
+    /// write. That's to say, these object_ids won't appear in either `commit_epoch` or
     /// `report_compact_task`.
     #[named]
-    pub async fn extend_ssts_to_delete_from_scan(&self, sst_ids: &[HummockSstableId]) -> usize {
-        let tracked_sst_ids: HashSet<HummockSstableId> = {
+    pub async fn extend_ssts_to_delete_from_scan(&self, object_ids: &[HummockSstableId]) -> usize {
+        let tracked_object_ids: HashSet<HummockSstableId> = {
             let versioning_guard = read_lock!(self, versioning).await;
-            let mut tracked_sst_ids =
+            let mut tracked_object_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_object_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
-                tracked_sst_ids.extend(delta.get_gc_sst_ids());
+                tracked_object_ids.extend(delta.get_gc_object_ids());
             }
-            tracked_sst_ids
+            tracked_object_ids
         };
-        let to_delete = sst_ids
+        let to_delete = object_ids
             .iter()
-            .filter(|sst_id| !tracked_sst_ids.contains(sst_id))
+            .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
         versioning_guard.ssts_to_delete.extend(
             to_delete
                 .iter()
-                .map(|sst_id| (**sst_id, INVALID_VERSION_ID)),
+                .map(|object_id| (**object_id, INVALID_VERSION_ID)),
         );
         trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
         to_delete.len()
