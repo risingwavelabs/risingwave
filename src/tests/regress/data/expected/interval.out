@@ -340,37 +340,35 @@ FROM INTERVAL_MULDIV_TBL;
 (8 rows)
 
 DROP TABLE INTERVAL_MULDIV_TBL;
-SET DATESTYLE = 'postgres';
-SET IntervalStyle to postgres_verbose;
 SELECT * FROM INTERVAL_TBL;
-              f1               
--------------------------------
- @ 1 min
- @ 5 hours
- @ 10 days
- @ 34 years
- @ 3 mons
- @ 14 secs ago
- @ 1 day 2 hours 3 mins 4 secs
- @ 6 years
- @ 5 mons
- @ 5 mons 12 hours
+       f1        
+-----------------
+ 00:01:00
+ 05:00:00
+ 10 days
+ 34 years
+ 3 mons
+ -00:00:14
+ 1 day 02:03:04
+ 6 years
+ 5 mons
+ 5 mons 12:00:00
 (10 rows)
 
 -- test avg(interval), which is somewhat fragile since people have been
 -- known to change the allowed input syntax for type interval without
 -- updating pg_aggregate.agginitval
 select avg(f1) from interval_tbl;
-                       avg                       
--------------------------------------------------
- @ 4 years 1 mon 10 days 4 hours 18 mins 23 secs
+              avg               
+--------------------------------
+ 4 years 1 mon 10 days 04:18:23
 (1 row)
 
 -- test long interval input
 select '4 millenniums 5 centuries 4 decades 1 year 4 months 4 days 17 minutes 31 seconds'::interval;
-                  interval                  
---------------------------------------------
- @ 4541 years 4 mons 4 days 17 mins 31 secs
+             interval              
+-----------------------------------
+ 4541 years 4 mons 4 days 00:17:31
 (1 row)
 
 -- test long interval output
@@ -378,34 +376,32 @@ select '4 millenniums 5 centuries 4 decades 1 year 4 months 4 days 17 minutes 31
 -- but we need the test to work for both integer and floating-point
 -- timestamps.
 select '100000000y 10mon -1000000000d -100000h -10min -10.000001s ago'::interval;
-                                       interval                                        
----------------------------------------------------------------------------------------
- @ 100000000 years 10 mons -1000000000 days -100000 hours -10 mins -10.000001 secs ago
+                            interval                            
+----------------------------------------------------------------
+ -100000000 years -10 mons +1000000000 days 100000:10:10.000001
 (1 row)
 
 -- test justify_hours() and justify_days()
 SELECT justify_hours(interval '6 months 3 days 52 hours 3 minutes 2 seconds') as "6 mons 5 days 4 hours 3 mins 2 seconds";
  6 mons 5 days 4 hours 3 mins 2 seconds 
 ----------------------------------------
- @ 6 mons 5 days 4 hours 3 mins 2 secs
+ 6 mons 5 days 04:03:02
 (1 row)
 
 SELECT justify_days(interval '6 months 36 days 5 hours 4 minutes 3 seconds') as "7 mons 6 days 5 hours 4 mins 3 seconds";
  7 mons 6 days 5 hours 4 mins 3 seconds 
 ----------------------------------------
- @ 7 mons 6 days 5 hours 4 mins 3 secs
+ 7 mons 6 days 05:04:03
 (1 row)
 
 -- test justify_interval()
 SELECT justify_interval(interval '1 month -1 hour') as "1 month -1 hour";
-  1 month -1 hour   
---------------------
- @ 29 days 23 hours
+ 1 month -1 hour  
+------------------
+ 29 days 23:00:00
 (1 row)
 
 -- test fractional second input, and detection of duplicate units
-SET DATESTYLE = 'ISO';
-SET IntervalStyle TO postgres;
 SELECT '1 millisecond'::interval, '1 microsecond'::interval,
        '500 seconds 99 milliseconds 51 microseconds'::interval;
    interval   |    interval     |    interval     
@@ -853,23 +849,22 @@ select  interval 'P0002'                  AS "year only",
 (1 row)
 
 -- test a couple rounding cases that changed since 8.3 w/ HAVE_INT64_TIMESTAMP.
-SET IntervalStyle to postgres_verbose;
 select interval '-10 mons -3 days +03:55:06.70';
-                     interval                     
---------------------------------------------------
- @ 10 mons 3 days -3 hours -55 mins -6.7 secs ago
+           interval           
+------------------------------
+ -10 mons -3 days +03:55:06.7
 (1 row)
 
 select interval '1 year 2 mons 3 days 04:05:06.699999';
-                      interval                       
------------------------------------------------------
- @ 1 year 2 mons 3 days 4 hours 5 mins 6.699999 secs
+               interval               
+--------------------------------------
+ 1 year 2 mons 3 days 04:05:06.699999
 (1 row)
 
 select interval '0:0:0.7', interval '@ 0.70 secs', interval '0.7 seconds';
   interval  |  interval  |  interval  
 ------------+------------+------------
- @ 0.7 secs | @ 0.7 secs | @ 0.7 secs
+ 00:00:00.7 | 00:00:00.7 | 00:00:00.7
 (1 row)
 
 -- check that '30 days' equals '1 month' according to the hash function
@@ -889,19 +884,19 @@ select interval_hash('30 days'::interval) = interval_hash('1 month'::interval) a
 select make_interval(years := 2);
  make_interval 
 ---------------
- @ 2 years
+ 2 years
 (1 row)
 
 select make_interval(years := 1, months := 6);
-  make_interval  
------------------
- @ 1 year 6 mons
+ make_interval 
+---------------
+ 1 year 6 mons
 (1 row)
 
 select make_interval(years := 1, months := -1, weeks := 5, days := -7, hours := 25, mins := -180);
-       make_interval        
-----------------------------
- @ 11 mons 28 days 22 hours
+      make_interval       
+--------------------------
+ 11 mons 28 days 22:00:00
 (1 row)
 
 select make_interval() = make_interval(years := 0, months := 0, weeks := 0, days := 0, mins := 0, secs := 0.0);
@@ -911,9 +906,9 @@ select make_interval() = make_interval(years := 0, months := 0, weeks := 0, days
 (1 row)
 
 select make_interval(hours := -2, mins := -10, secs := -25.3);
-          make_interval          
----------------------------------
- @ 2 hours 10 mins 25.3 secs ago
+ make_interval 
+---------------
+ -02:10:25.3
 (1 row)
 
 select make_interval(years := 'inf'::float::int);
@@ -925,9 +920,9 @@ ERROR:  interval out of range
 select make_interval(secs := 'NaN');
 ERROR:  interval out of range
 select make_interval(secs := 7e12);
-           make_interval            
-------------------------------------
- @ 1944444444 hours 26 mins 40 secs
+  make_interval   
+------------------
+ 1944444444:26:40
 (1 row)
 
 --
@@ -948,18 +943,18 @@ SELECT f1,
     EXTRACT(MILLENNIUM FROM f1) AS MILLENNIUM,
     EXTRACT(EPOCH FROM f1) AS EPOCH
     FROM INTERVAL_TBL;
-              f1               | microsecond | millisecond |   second   | minute | hour | day | month | quarter | year | decade | century | millennium |       epoch       
--------------------------------+-------------+-------------+------------+--------+------+-----+-------+---------+------+--------+---------+------------+-------------------
- @ 1 min                       |           0 |       0.000 |   0.000000 |      1 |    0 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |         60.000000
- @ 5 hours                     |           0 |       0.000 |   0.000000 |      0 |    5 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |      18000.000000
- @ 10 days                     |           0 |       0.000 |   0.000000 |      0 |    0 |  10 |     0 |       1 |    0 |      0 |       0 |          0 |     864000.000000
- @ 34 years                    |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     0 |       1 |   34 |      3 |       0 |          0 | 1072224000.000000
- @ 3 mons                      |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     3 |       2 |    0 |      0 |       0 |          0 |    7776000.000000
- @ 14 secs ago                 |   -14000000 |  -14000.000 | -14.000000 |      0 |    0 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |        -14.000000
- @ 1 day 2 hours 3 mins 4 secs |     4000000 |    4000.000 |   4.000000 |      3 |    2 |   1 |     0 |       1 |    0 |      0 |       0 |          0 |      93784.000000
- @ 6 years                     |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     0 |       1 |    6 |      0 |       0 |          0 |  189216000.000000
- @ 5 mons                      |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     5 |       2 |    0 |      0 |       0 |          0 |   12960000.000000
- @ 5 mons 12 hours             |           0 |       0.000 |   0.000000 |      0 |   12 |   0 |     5 |       2 |    0 |      0 |       0 |          0 |   13003200.000000
+       f1        | microsecond | millisecond |   second   | minute | hour | day | month | quarter | year | decade | century | millennium |       epoch       
+-----------------+-------------+-------------+------------+--------+------+-----+-------+---------+------+--------+---------+------------+-------------------
+ 00:01:00        |           0 |       0.000 |   0.000000 |      1 |    0 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |         60.000000
+ 05:00:00        |           0 |       0.000 |   0.000000 |      0 |    5 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |      18000.000000
+ 10 days         |           0 |       0.000 |   0.000000 |      0 |    0 |  10 |     0 |       1 |    0 |      0 |       0 |          0 |     864000.000000
+ 34 years        |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     0 |       1 |   34 |      3 |       0 |          0 | 1072224000.000000
+ 3 mons          |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     3 |       2 |    0 |      0 |       0 |          0 |    7776000.000000
+ -00:00:14       |   -14000000 |  -14000.000 | -14.000000 |      0 |    0 |   0 |     0 |       1 |    0 |      0 |       0 |          0 |        -14.000000
+ 1 day 02:03:04  |     4000000 |    4000.000 |   4.000000 |      3 |    2 |   1 |     0 |       1 |    0 |      0 |       0 |          0 |      93784.000000
+ 6 years         |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     0 |       1 |    6 |      0 |       0 |          0 |  189216000.000000
+ 5 mons          |           0 |       0.000 |   0.000000 |      0 |    0 |   0 |     5 |       2 |    0 |      0 |       0 |          0 |   12960000.000000
+ 5 mons 12:00:00 |           0 |       0.000 |   0.000000 |      0 |   12 |   0 |     5 |       2 |    0 |      0 |       0 |          0 |   13003200.000000
 (10 rows)
 
 SELECT EXTRACT(FORTNIGHT FROM INTERVAL '2 days');  -- error
@@ -1022,18 +1017,18 @@ SELECT f1,
     date_part('second', f1) AS second,
     date_part('epoch', f1) AS epoch
     FROM INTERVAL_TBL;
-              f1               | microsecond | millisecond | second |   epoch    
--------------------------------+-------------+-------------+--------+------------
- @ 1 min                       |           0 |           0 |      0 |         60
- @ 5 hours                     |           0 |           0 |      0 |      18000
- @ 10 days                     |           0 |           0 |      0 |     864000
- @ 34 years                    |           0 |           0 |      0 | 1072958400
- @ 3 mons                      |           0 |           0 |      0 |    7776000
- @ 14 secs ago                 |   -14000000 |      -14000 |    -14 |        -14
- @ 1 day 2 hours 3 mins 4 secs |     4000000 |        4000 |      4 |      93784
- @ 6 years                     |           0 |           0 |      0 |  189345600
- @ 5 mons                      |           0 |           0 |      0 |   12960000
- @ 5 mons 12 hours             |           0 |           0 |      0 |   13003200
+       f1        | microsecond | millisecond | second |   epoch    
+-----------------+-------------+-------------+--------+------------
+ 00:01:00        |           0 |           0 |      0 |         60
+ 05:00:00        |           0 |           0 |      0 |      18000
+ 10 days         |           0 |           0 |      0 |     864000
+ 34 years        |           0 |           0 |      0 | 1072958400
+ 3 mons          |           0 |           0 |      0 |    7776000
+ -00:00:14       |   -14000000 |      -14000 |    -14 |        -14
+ 1 day 02:03:04  |     4000000 |        4000 |      4 |      93784
+ 6 years         |           0 |           0 |      0 |  189345600
+ 5 mons          |           0 |           0 |      0 |   12960000
+ 5 mons 12:00:00 |           0 |           0 |      0 |   13003200
 (10 rows)
 
 -- internal overflow test case
@@ -1043,3 +1038,4 @@ SELECT extract(epoch from interval '1000000000 days');
  86400000000000.000000
 (1 row)
 
+DROP TABLE INTERVAL_TBL;
