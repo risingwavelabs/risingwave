@@ -88,6 +88,7 @@ mod sort_buffer;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
+mod temporal_join;
 mod top_n;
 mod union;
 mod watermark;
