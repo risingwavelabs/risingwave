@@ -22,7 +22,7 @@ auto-retry: &auto-retry
 steps:
   - label: "main-cron build"
     command: "ci/scripts/build.sh -t ci-release -p ci-release"
-    key: "build"
+    key: "main-cron-build"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -34,7 +34,7 @@ steps:
 
   - label: "main-cron build other components"
     command: "ci/scripts/build-other.sh"
-    key: "build-other"
+    key: "main-cron-build-other"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -50,7 +50,7 @@ steps:
 
   - label: "main-cron build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
-    key: "build-simulation"
+    key: "main-cron-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -62,7 +62,7 @@ steps:
   
   - label: "main-cron docslt"
     command: "ci/scripts/docslt.sh"
-    key: "docslt"
+    key: "main-cron-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -75,8 +75,8 @@ steps:
   - label: "main-cron end-to-end test (release)"
     command: "ci/scripts/cron-e2e-test.sh -p ci-release"
     depends_on:
-      - "build"
-      - "docslt"
+      - "main-cron-build"
+      - "main-cron-docslt"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -90,8 +90,8 @@ steps:
   - label: "main-cron end-to-end source test (release)"
     command: "ci/scripts/e2e-source-test.sh -p ci-release"
     depends_on:
-      - "build"
-      - "build-other"
+      - "main-cron-build"
+      - "main-cron-build-other"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -131,7 +131,7 @@ steps:
 
   - label: "main-cron scaling test (deterministic simulation)"
     command: "TEST_NUM=60 timeout 110m ci/scripts/deterministic-scale-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-cron-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
@@ -143,7 +143,7 @@ steps:
 
   - label: "main-cron end-to-end test (deterministic simulation)"
     command: "TEST_NUM=64 timeout 55m ci/scripts/deterministic-e2e-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-cron-build-simulation"
     plugins:
       - seek-oss/aws-sm#v2.3.1:
           env:
@@ -161,7 +161,7 @@ steps:
 
   - label: "main-cron recovery test (deterministic simulation)"
     command: "TEST_NUM=12 KILL_RATE=1.0 timeout 55m ci/scripts/deterministic-recovery-test.sh"
-    depends_on: "build-simulation"
+    depends_on: "main-cron-build-simulation"
     plugins:
       - gencer/cache#v2.4.10: *cargo-cache
       - docker-compose#v4.9.0:
