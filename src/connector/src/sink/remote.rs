@@ -253,6 +253,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
 
         //     row_ops.push(row_op);
         // }
+        let binary_data: Vec<u8> = bincode::serialize(&chunk).unwrap();
 
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
@@ -264,7 +265,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
                     epoch,
                     batch_id,
                     // payload: Some(Payload::JsonPayload(JsonPayload { row_ops })),
-                    payload: Some(Payload::StreamChunkPayload(chunk.to_protobuf())),
+                    payload: Some(Payload::StreamChunkPayload(StreamChunkPayload{binary_data})),
                 })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
