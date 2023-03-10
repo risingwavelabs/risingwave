@@ -83,7 +83,11 @@ impl OwnedRow {
                     DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
                     DataType::Interval => x.parse::<IntervalUnit>().unwrap().into(),
                     DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
-                    _ => todo!(),
+                    DataType::Timestamptz
+                    | DataType::Bytea
+                    | DataType::Jsonb
+                    | DataType::List { .. }
+                    | DataType::Struct(_) => todo!(),
                 };
                 Some(scalar)
             })
