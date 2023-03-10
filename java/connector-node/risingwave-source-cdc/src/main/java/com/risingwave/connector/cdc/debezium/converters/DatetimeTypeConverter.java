@@ -26,7 +26,6 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
     private DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
-    private static final String EPOCH_DAY = "1970-01-01";
 
     @Override
     public void configure(Properties props) {
@@ -40,7 +39,7 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
         SchemaBuilder schemaBuilder = null;
         Converter converter = null;
         if ("DATE".equals(sqlType)) {
-            schemaBuilder = SchemaBuilder.string().name("risingwave.cdc.date.string");
+            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string");
             converter = this::convertDate;
         }
         if (schemaBuilder != null) {
@@ -50,7 +49,7 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
 
     private String convertDate(Object input) {
         if (input == null) {
-            return EPOCH_DAY;
+            return null;
         }
         var epochDay = Date.toEpochDay(input, null);
         LocalDate date = LocalDate.ofEpochDay(epochDay);
