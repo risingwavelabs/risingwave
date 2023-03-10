@@ -35,14 +35,14 @@ use tokio::sync::oneshot::{channel, Receiver, Sender};
 use tokio::task::JoinHandle;
 
 const IN_CACHE: u8 = 1;
-const IS_HIGH_PRI: u8 = 1 << 1;
-const IN_HIGH_PRI_POOL: u8 = 1 << 2;
 const REVERSE_IN_CACHE: u8 = !IN_CACHE;
 
 #[cfg(debug_assertions)]
-const IN_LRU: u8 = 2;
+const IN_LRU: u8 = 1 << 1;
 #[cfg(debug_assertions)]
 const REVERSE_IN_LRU: u8 = !IN_LRU;
+const IS_HIGH_PRI: u8 = 1 << 2;
+const IN_HIGH_PRI_POOL: u8 = 1 << 3;
 
 pub trait LruKey: Eq + Send + Hash {}
 impl<T: Eq + Send + Hash> LruKey for T {}
@@ -524,7 +524,6 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
             Box::new(LruHandle::new(key, value, hash, charge))
         };
         handle.set_high_priority(high_priority);
-
         let ptr = Box::into_raw(handle);
         let old = self.table.insert(hash, ptr);
         if !old.is_null() {
@@ -1099,7 +1098,12 @@ mod tests {
         }
     }
 
-    fn insert(cache: &mut LruCacheShard<String, String>, key: &str, value: &str) {
+    fn insert_priority(
+        cache: &mut LruCacheShard<String, String>,
+        key: &str,
+        value: &str,
+        high: bool,
+    ) {
         let mut free_list = vec![];
         unsafe {
             let handle = cache.insert(
@@ -1107,7 +1111,7 @@ mod tests {
                 0,
                 value.len(),
                 value.to_string(),
-                false,
+                high,
                 &mut free_list,
             );
             cache.release(handle);
@@ -1115,9 +1119,13 @@ mod tests {
         free_list.clear();
     }
 
+    fn insert(cache: &mut LruCacheShard<String, String>, key: &str, value: &str) {
+        insert_priority(cache, key, value, false);
+    }
+
     #[test]
     fn test_basic_lru() {
-        let mut cache = create_cache(5);
+        let mut cache = LruCacheShard::new_with_priority_pool(5, 40);
         let keys = vec!["a", "b", "c", "d", "e"];
         for &k in &keys {
             insert(&mut cache, k, k);
@@ -1143,6 +1151,18 @@ mod tests {
         validate_lru_list(&mut cache, vec!["y", "e", "z", "d", "u"]);
         insert(&mut cache, "v", "v");
         validate_lru_list(&mut cache, vec!["e", "z", "d", "u", "v"]);
+        insert_priority(&mut cache, "x", "x", true);
+        validate_lru_list(&mut cache, vec!["z", "d", "u", "v", "x"]);
+        assert!(lookup(&mut cache, "d"));
+        validate_lru_list(&mut cache, vec!["z", "u", "v", "d", "x"]);
+        insert(&mut cache, "y", "y");
+        validate_lru_list(&mut cache, vec!["u", "v", "d", "y", "x"]);
+        insert_priority(&mut cache, "z", "z", true);
+        validate_lru_list(&mut cache, vec!["v", "d", "y", "x", "z"]);
+        insert(&mut cache, "u", "u");
+        validate_lru_list(&mut cache, vec!["d", "y", "u", "x", "z"]);
+        insert_priority(&mut cache, "v", "v", true);
+        validate_lru_list(&mut cache, vec!["y", "u", "x", "z", "v"]);
     }
 
     #[test]
