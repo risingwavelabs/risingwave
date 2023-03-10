@@ -61,6 +61,12 @@ macro_rules! impl_chrono_wrapper {
                 Ok($variant_name(s.parse()?))
             }
         }
+
+        impl From<$chrono> for $variant_name {
+            fn from(data: $chrono) -> Self {
+                $variant_name(data)
+            }
+        }
     };
 }
 

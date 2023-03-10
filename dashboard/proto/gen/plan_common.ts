@@ -218,6 +218,11 @@ export interface StorageTableDesc {
   retentionSeconds: number;
   valueIndices: number[];
   readPrefixLenHint: number;
+  /**
+   * Whether the table is versioned. If `true`, column-aware row encoding will be used
+   * to be compatible with schema changes.
+   */
+  versioned: boolean;
 }
 
 function createBaseField(): Field {
@@ -331,6 +336,7 @@ function createBaseStorageTableDesc(): StorageTableDesc {
     retentionSeconds: 0,
     valueIndices: [],
     readPrefixLenHint: 0,
+    versioned: false,
   };
 }
 
@@ -344,6 +350,7 @@ export const StorageTableDesc = {
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
       valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      versioned: isSet(object.versioned) ? Boolean(object.versioned) : false,
     };
   },
 
@@ -372,6 +379,7 @@ export const StorageTableDesc = {
       obj.valueIndices = [];
     }
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    message.versioned !== undefined && (obj.versioned = message.versioned);
     return obj;
   },
 
@@ -384,6 +392,7 @@ export const StorageTableDesc = {
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
+    message.versioned = object.versioned ?? false;
     return message;
   },
 };
