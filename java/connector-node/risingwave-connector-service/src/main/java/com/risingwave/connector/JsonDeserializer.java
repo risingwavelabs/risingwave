@@ -49,63 +49,82 @@ public class JsonDeserializer implements Deserializer {
                 .iterator();
     }
 
-    private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
-        if (value instanceof Double
-                && (Double) value % 1 == 0
-                && typeName != Data.DataType.TypeName.DOUBLE
-                && typeName != Data.DataType.TypeName.FLOAT) {
-            return (int) (double) value;
+    private static Long castLong(Object value) {
+        if (value instanceof Integer) {
+            return ((Integer) value).longValue();
+        } else if (value instanceof Double) {
+            double d = (Double) value;
+            if (d % 1.0 != 0.0) {
+
+                throw io.grpc.Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "unable to cast into long from non-integer double value: " + d)
+                        .asRuntimeException();
+            }
+            return ((Double) value).longValue();
+        } else if (value instanceof Long) {
+            return (Long) value;
+        } else if (value instanceof Short) {
+            return ((Short) value).longValue();
+        } else if (value instanceof Float) {
+            double f = (Float) value;
+            if (f % 1.0 != 0.0) {
+
+                throw io.grpc.Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "unable to cast into long from non-integer float value: " + f)
+                        .asRuntimeException();
+            }
+            return ((Float) value).longValue();
+        } else {
+            throw io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("unable to cast into long from " + value.getClass())
+                    .asRuntimeException();
         }
+    }
+
+    private static Double castDouble(Object value) {
+        if (value instanceof Double) {
+            return (Double) value;
+        } else if (value instanceof Float) {
+            return ((Float) value).doubleValue();
+        } else {
+            throw io.grpc.Status.INVALID_ARGUMENT
+                    .withDescription("unable to cast into double from " + value.getClass())
+                    .asRuntimeException();
+        }
+    }
+
+    private static Object validateJsonDataTypes(Data.DataType.TypeName typeName, Object value) {
         switch (typeName) {
-            case INT32:
-            case INT64:
             case INT16:
-                if (!(value instanceof Integer)) {
-                    throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected int, got " + value.getClass())
-                            .asRuntimeException();
-                }
-                break;
+                return castLong(value).shortValue();
+            case INT32:
+                return castLong(value).intValue();
+            case INT64:
+                return castLong(value);
             case VARCHAR:
                 if (!(value instanceof String)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription("Expected string, got " + value.getClass())
                             .asRuntimeException();
                 }
-                break;
+                return value;
             case DOUBLE:
-                if (!(value instanceof Double)) {
-                    throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected double, got " + value.getClass())
-                            .asRuntimeException();
-                }
-                break;
+                return castDouble(value);
             case FLOAT:
-                if (!(value instanceof Float)) {
-                    throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected float, got " + value.getClass())
-                            .asRuntimeException();
-                }
-                break;
-            case DECIMAL:
-                if (!(value instanceof Float || value instanceof Double)) {
-                    throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected float, got " + value.getClass())
-                            .asRuntimeException();
-                }
-                break;
+                return castDouble(value).floatValue();
             case BOOLEAN:
                 if (!(value instanceof Boolean)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
                             .withDescription("Expected boolean, got " + value.getClass())
                             .asRuntimeException();
                 }
-                break;
+                return value;
             default:
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)
                         .asRuntimeException();
         }
-        return value;
     }
 }

@@ -91,4 +91,18 @@ public class TableSchema {
     public List<String> getPrimaryKeys() {
         return primaryKeys;
     }
+
+    @Override
+    public String toString() {
+        return "TableSchema{"
+                + "columnNames="
+                + columnNames
+                + ", columns="
+                + columns
+                + ", columnIndices="
+                + columnIndices
+                + ", primaryKeys="
+                + primaryKeys
+                + '}';
+    }
 }
