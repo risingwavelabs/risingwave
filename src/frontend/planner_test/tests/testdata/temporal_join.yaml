@@ -10,6 +10,9 @@
       | └─StreamTableScan { table: stream, columns: [stream.id, stream.a, stream._row_id], pk: [stream._row_id], dist: UpstreamHashShard(stream._row_id) }
       └─StreamNoShuffleExchange { dist: UpstreamHashShard(version.id) }
         └─StreamTableScan { table: version, columns: [version.id, version.a], pk: [version.id], dist: UpstreamHashShard(version.id) }
+  batch_error: |-
+    Not supported: do not support temporal join for batch queries
+    HINT: please use temporal join in streaming queries
 - sql: |
     create table stream(id int, a int, b int) APPEND ONLY;
     create table version(id int, a int, b int, primary key (id));
