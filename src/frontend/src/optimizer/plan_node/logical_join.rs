@@ -1103,6 +1103,7 @@ impl LogicalJoin {
         }
     }
 
+    #[allow(dead_code)]
     fn to_stream_temporal_join(
         &self,
         predicate: EqJoinPredicate,
