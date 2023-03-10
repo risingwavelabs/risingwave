@@ -245,7 +245,7 @@ fn print_kv_pairs(
         println!(
             "\t\t  full key: {:02x?}, len={}",
             raw_full_key,
-            raw_full_key.len()
+            raw_full_key.encoded_len()
         );
         println!("\t\tfull value: {:02x?}, len={}", full_val, full_val.len());
         println!("\t\t  user key: {:02x?}", raw_user_key);
