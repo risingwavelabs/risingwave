@@ -163,6 +163,7 @@ macro_rules! impl_connector_properties {
 macro_rules! impl_common_parser_logic {
     ($parser_name:ty) => {
         impl $parser_name {
+            #[allow(clippy::unused_mut)]
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = RwError)]
             async fn into_chunk_stream(mut self, data_stream: $crate::source::BoxSourceStream) {
                 #[for_await]
