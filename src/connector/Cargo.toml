@@ -69,7 +69,6 @@ tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
 urlencoding = "2"
-uuid = "1"
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
