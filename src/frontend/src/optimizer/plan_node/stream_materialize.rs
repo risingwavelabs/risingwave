@@ -20,6 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::derive_columns;
@@ -28,7 +29,7 @@ use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -232,7 +233,7 @@ impl fmt::Display for StreamMaterialize {
         let order_descs = table
             .pk
             .iter()
-            .map(|order| table.columns()[order.index].column_desc.name.clone())
+            .map(|o| table.columns()[o.column_index].column_desc.name.clone())
             .join(", ");
 
         let mut builder = f.debug_struct("StreamMaterialize");
@@ -307,7 +308,7 @@ impl StreamNode for StreamMaterialize {
                 .table()
                 .pk()
                 .iter()
-                .map(FieldOrder::to_protobuf)
+                .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
             handle_pk_conflict_behavior,
