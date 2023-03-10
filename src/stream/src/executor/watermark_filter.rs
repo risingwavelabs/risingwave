@@ -346,7 +346,7 @@ mod tests {
         let table = create_in_memory_state_table(
             mem_state,
             &[DataType::Int16, WATERMARK_TYPE],
-            &[OrderType::Ascending],
+            &[OrderType::ascending()],
             &[0],
             &[1],
             0,

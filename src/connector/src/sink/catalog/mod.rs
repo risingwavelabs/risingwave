@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{Sink as ProstSink, SinkType as ProstSinkType};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
@@ -117,7 +117,7 @@ pub struct SinkCatalog {
 
     /// Primiary keys of the sink (connector). Now the sink does not care about a field's
     /// order (ASC/DESC).
-    pub pk: Vec<OrderPair>,
+    pub pk: Vec<ColumnOrder>,
 
     /// Primary key indices of the corresponding sink operator's output.
     pub stream_key: Vec<usize>,
@@ -178,7 +178,7 @@ impl SinkCatalog {
     }
 
     pub fn pk_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|k| k.column_idx).collect_vec()
+        self.pk.iter().map(|k| k.column_index).collect_vec()
     }
 }
 
@@ -196,7 +196,7 @@ impl From<ProstSink> for SinkCatalog {
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect_vec(),
-            pk: pb.pk.iter().map(OrderPair::from_protobuf).collect_vec(),
+            pk: pb.pk.iter().map(ColumnOrder::from_protobuf).collect_vec(),
             stream_key: pb.stream_key.iter().map(|k| *k as _).collect_vec(),
             distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: pb.properties.clone(),

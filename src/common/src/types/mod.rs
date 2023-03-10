@@ -32,12 +32,10 @@ mod scalar_impl;
 mod successor;
 
 use std::fmt::Debug;
-use std::io::Cursor;
 use std::str::{FromStr, Utf8Error};
 
 pub use native_type::*;
-use risingwave_pb::data::data_type::IntervalType::*;
-use risingwave_pb::data::data_type::{IntervalType, TypeName};
+use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 pub use successor::*;
 pub mod chrono_wrapper;
@@ -68,8 +66,8 @@ use self::to_binary::ToBinary;
 use self::to_text::ToText;
 use crate::array::serial_array::Serial;
 use crate::array::{
-    read_interval_unit, ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue,
-    PrimitiveArrayItemType, StructRef, StructValue,
+    ArrayBuilderImpl, JsonbRef, JsonbVal, ListRef, ListValue, PrimitiveArrayItemType, StructRef,
+    StructValue,
 };
 use crate::error::Result as RwResult;
 
