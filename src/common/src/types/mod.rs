@@ -347,6 +347,13 @@ impl DataType {
         )
     }
 
+    pub fn as_struct(&self) -> &StructType {
+        match self {
+            DataType::Struct(t) => t,
+            _ => panic!("expect struct type"),
+        }
+    }
+
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
     pub fn min(&self) -> ScalarImpl {

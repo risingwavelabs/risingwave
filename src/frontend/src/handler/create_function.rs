@@ -84,15 +84,21 @@ pub async fn handle_create_function(
             Kind::Scalar(ScalarFunction {})
         }
         Some(CreateFunctionReturns::Table(columns)) => {
-            let datatypes = columns
-                .iter()
-                .map(|c| bind_data_type(&c.data_type))
-                .collect::<Result<Vec<_>>>()?;
-            let names = columns
-                .iter()
-                .map(|c| c.name.real_value())
-                .collect::<Vec<_>>();
-            return_type = DataType::new_struct(datatypes, names);
+            if columns.len() == 1 {
+                // return type is the original type for single column
+                return_type = bind_data_type(&columns[0].data_type)?;
+            } else {
+                // return type is a struct for multiple columns
+                let datatypes = columns
+                    .iter()
+                    .map(|c| bind_data_type(&c.data_type))
+                    .collect::<Result<Vec<_>>>()?;
+                let names = columns
+                    .iter()
+                    .map(|c| c.name.real_value())
+                    .collect::<Vec<_>>();
+                return_type = DataType::new_struct(datatypes, names);
+            }
             Kind::Table(TableFunction {})
         }
         None => {
@@ -137,11 +143,24 @@ pub async fn handle_create_function(
             .map(|t| arrow_schema::Field::new("", t.into(), true))
             .collect(),
     );
-    let returns = arrow_schema::Schema::new(vec![arrow_schema::Field::new(
-        "",
-        return_type.clone().into(),
-        true,
-    )]);
+    let returns = match kind {
+        Kind::Scalar(_) => arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+            "",
+            return_type.clone().into(),
+            true,
+        )]),
+        Kind::Table(_) => arrow_schema::Schema::new(match &return_type {
+            DataType::Struct(s) => (s.fields.iter())
+                .map(|t| arrow_schema::Field::new("", t.clone().into(), true))
+                .collect(),
+            _ => vec![arrow_schema::Field::new(
+                "",
+                return_type.clone().into(),
+                true,
+            )],
+        }),
+        _ => unreachable!(),
+    };
     client
         .check(&identifier, &args, &returns)
         .await
