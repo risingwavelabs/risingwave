@@ -108,6 +108,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
 
         let storage_table = StorageTable::new_partial(
             store,
@@ -120,6 +121,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             table_option,
             value_indices,
             prefix_hint_len,
+            versioned,
         );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {

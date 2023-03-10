@@ -16,6 +16,7 @@ use std::assert_matches::assert_matches;
 use std::str::FromStr;
 
 use chrono::NaiveDateTime;
+use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
 };
