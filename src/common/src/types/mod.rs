@@ -1157,8 +1157,8 @@ impl ScalarImpl {
 /// This is useful for checking whether a physical type is compatible with a logical type.
 #[macro_export]
 macro_rules! for_all_type_pairs {
-    ($macro:ident, $($x:tt),*) => {
-        $macro! { [$($x),*],
+    ($macro:ident) => {
+        $macro! {
             { Boolean,     Bool },
             { Int16,       Int16 },
             { Int32,       Int32 },
@@ -1180,23 +1180,22 @@ macro_rules! for_all_type_pairs {
     };
 }
 
-/// Check whether the `target` with `type` matches the `data_type`.
-#[macro_export]
-macro_rules! check_matches {
-    ([$data_type:expr, $target:expr, $type:ident], $( { $DataType:ident, $PhysicalType:ident }),*) => {
-        match ($data_type, $target) {
-            $(
-                ($crate::types::DataType::$DataType { .. }, $type::$PhysicalType(_)) => true,
-                ($crate::types::DataType::$DataType { .. }, _) => false, // so that we won't forget to match a new logical type
-            )*
-        }
-    };
-}
-
 /// Returns whether the `literal` matches the `data_type`.
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
     match literal {
-        Some(datum) => for_all_type_pairs! { check_matches, data_type, datum, ScalarImpl },
+        Some(scalar) => {
+            macro_rules! matches {
+                ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                    match (data_type, scalar) {
+                        $(
+                            (DataType::$DataType { .. }, ScalarImpl::$PhysicalType(_)) => true,
+                            (DataType::$DataType { .. }, _) => false, // so that we won't forget to match a new logical type
+                        )*
+                    }
+                }
+            }
+            for_all_type_pairs! { matches }
+        }
         None => true,
     }
 }
