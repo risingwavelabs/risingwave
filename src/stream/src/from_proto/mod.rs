@@ -39,6 +39,7 @@ mod row_id_gen;
 mod sink;
 mod sort;
 mod source;
+mod temporal_join;
 mod top_n;
 mod top_n_appendonly;
 mod union;
@@ -47,7 +48,7 @@ mod watermark_filter;
 // import for submodules
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
 use self::batch_query::*;
@@ -74,6 +75,7 @@ use self::row_id_gen::RowIdGenExecutorBuilder;
 use self::sink::*;
 use self::sort::*;
 use self::source::*;
+use self::temporal_join::*;
 use self::top_n::*;
 use self::top_n_appendonly::*;
 use self::union::*;
@@ -149,5 +151,6 @@ pub async fn create_executor(
         NodeBody::Dml => DmlExecutorBuilder,
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
         NodeBody::Now => NowExecutorBuilder,
+        NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
     }
 }
