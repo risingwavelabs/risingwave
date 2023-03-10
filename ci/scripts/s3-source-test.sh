@@ -4,26 +4,12 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-while getopts 'p:' opt; do
+while getopts 'p:s:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
             ;;
-        \? )
-            echo "Invalid Option: -$OPTARG" 1>&2
-            exit 1
-            ;;
-        : )
-            echo "Invalid option: $OPTARG requires an argument" 1>&2
-            ;;
-    esac
-done
-shift $((OPTIND -1))
-
-
-while getopts 's:' opt; do
-    case ${opt} in
-        p )
+        s )
             script=$OPTARG
             ;;
         \? )
@@ -36,6 +22,8 @@ while getopts 's:' opt; do
     esac
 done
 shift $((OPTIND -1))
+
+
 
 echo "--- Download artifacts"
 mkdir -p target/debug
