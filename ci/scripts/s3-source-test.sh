@@ -20,6 +20,23 @@ while getopts 'p:' opt; do
 done
 shift $((OPTIND -1))
 
+
+while getopts 's:' opt; do
+    case ${opt} in
+        p )
+            script=$OPTARG
+            ;;
+        \? )
+            echo "Invalid Option: -$OPTARG" 1>&2
+            exit 1
+            ;;
+        : )
+            echo "Invalid option: $OPTARG requires an argument" 1>&2
+            ;;
+    esac
+done
+shift $((OPTIND -1))
+
 echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
@@ -44,7 +61,7 @@ cargo make ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary
-python3 e2e_test/s3/run.py
+python3 e2e_test/s3/$script.py
 
 echo "--- Kill cluster"
 cargo make ci-kill

@@ -16,19 +16,14 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{Datum, Decimal, ScalarImpl};
 use risingwave_expr::vector_op::cast::{
     str_to_date, str_to_timestamp, str_with_time_zone_to_timestamptz,
 };
-use simd_json::{BorrowedValue, ValueAccess};
 
-use crate::common::UpsertMessage;
 use crate::impl_common_parser_logic;
-use crate::parser::common::simd_json_parse_value;
-use crate::parser::util::at_least_one_ok;
 use crate::parser::{SourceStreamChunkRowWriter, WriteGuard};
 use crate::source::{DataType, SourceColumnDesc, SourceContextRef};
 impl_common_parser_logic!(CsvParser);
@@ -125,10 +120,9 @@ impl CsvParser {
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
                 *headers = fields;
-                tracing::warn!("set headers {:?} {:?}", headers, payload);
                 // Here we want a row, but got nothing. So it's an error for the `parse_inner` but
                 // has no bad impact on the system.
-                return  Err(RwError::from(ProtocolError("This messsage indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
+                return  Err(RwError::from(ProtocolError("This message indicates a header, no row will be inserted. However, internal parser state was updated.".to_string())));
             }
             writer.insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
@@ -155,10 +149,125 @@ impl CsvParser {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::array::Op;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
+
     use super::*;
-    #[test]
-    fn test_parse_row() {
-        let parser = CsvParser::new(
+    use crate::parser::SourceStreamChunkBuilder;
+    #[tokio::test]
+    async fn test_csv_without_headers() {
+        let data = [
+            r#"1,a,2"#,
+            r#""15541","a,1,1,",4"#,
+            r#"0,"""0",0"#,
+            r#"0,0,0,0,0,0,0,0,0,0,0,0,0,"#,
+        ];
+        let descs = vec![
+            SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("b", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("c", DataType::Int32, 2.into()),
+        ];
+        let mut parser = CsvParser::new(
+            Vec::new(),
+            CsvParserConfig {
+                delimiter: b',',
+                has_header: false,
+            },
+            Default::default(),
+        )
+        .unwrap();
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        for item in data {
+            parser
+                .parse_inner(item.as_bytes(), builder.row_writer())
+                .await
+                .unwrap();
+        }
+        let chunk = builder.finish();
+        let mut rows = chunk.rows();
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(1)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("a".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(2)))
+            );
+        }
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(15541)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("a,1,1,".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(4)))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("\"0".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("0".into())))
+            );
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+        }
+    }
+    #[tokio::test]
+    async fn test_csv_with_headers() {
+        let data = [
+            r#"c,b,a"#,
+            r#"1,a,2"#,
+            r#""15541","a,1,1,",4"#,
+            r#"0,"""0",0"#,
+            r#"0,0,0,0,0,0,0,0,0,0,0,0,0,"#,
+        ];
+        let descs = vec![
+            SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
+            SourceColumnDesc::simple("b", DataType::Varchar, 1.into()),
+            SourceColumnDesc::simple("c", DataType::Int32, 2.into()),
+        ];
+        let mut parser = CsvParser::new(
             Vec::new(),
             CsvParserConfig {
                 delimiter: b',',
@@ -167,7 +276,79 @@ mod tests {
             Default::default(),
         )
         .unwrap();
-        let row = parser.read_row(b"a,b,c").unwrap();
-        println!("{:?}", row);
+        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        for item in data {
+            let _ = parser
+                .parse_inner(item.as_bytes(), builder.row_writer())
+                .await;
+        }
+        let chunk = builder.finish();
+        let mut rows = chunk.rows();
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(1)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("a".into())))
+            );
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(2)))
+            );
+        }
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(15541)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("a,1,1,".into())))
+            );
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(4)))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("\"0".into())))
+            );
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(
+                row.datum_at(2).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+            assert_eq!(
+                row.datum_at(1).to_owned_datum(),
+                (Some(ScalarImpl::Utf8("0".into())))
+            );
+            assert_eq!(
+                row.datum_at(0).to_owned_datum(),
+                (Some(ScalarImpl::Int32(0)))
+            );
+        }
     }
 }
