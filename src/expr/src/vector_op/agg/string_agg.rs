@@ -20,7 +20,7 @@ use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -128,10 +128,10 @@ struct StringAggOrdered {
 }
 
 impl StringAggOrdered {
-    fn new(agg_col_idx: usize, delim_col_idx: usize, order_pairs: Vec<OrderPair>) -> Self {
-        let (order_col_indices, order_types) = order_pairs
+    fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
+        let (order_col_indices, order_types) = column_orders
             .into_iter()
-            .map(|p| (p.column_idx, p.order_type))
+            .map(|p| (p.column_index, p.order_type))
             .unzip();
         Self {
             agg_col_idx,
@@ -237,9 +237,9 @@ impl Aggregator for StringAggOrdered {
 pub fn create_string_agg_state(
     agg_col_idx: usize,
     delim_col_idx: usize,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
 ) -> Result<Box<dyn Aggregator>> {
-    if order_pairs.is_empty() {
+    if column_orders.is_empty() {
         Ok(Box::new(StringAggUnordered::new(
             agg_col_idx,
             delim_col_idx,
@@ -248,7 +248,7 @@ pub fn create_string_agg_state(
         Ok(Box::new(StringAggOrdered::new(
             agg_col_idx,
             delim_col_idx,
-            order_pairs,
+            column_orders,
         )))
     }
 }
@@ -256,7 +256,7 @@ pub fn create_string_agg_state(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt, Utf8ArrayBuilder};
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::*;
 
@@ -315,9 +315,9 @@ mod tests {
             1,
             0,
             vec![
-                OrderPair::new(2, OrderType::Ascending),
-                OrderPair::new(3, OrderType::Descending),
-                OrderPair::new(1, OrderType::Descending),
+                ColumnOrder::new(2, OrderType::ascending()),
+                ColumnOrder::new(3, OrderType::descending()),
+                ColumnOrder::new(1, OrderType::descending()),
             ],
         )?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));

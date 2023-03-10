@@ -29,7 +29,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
@@ -69,7 +69,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     pub async fn new(
         input: BoxedExecutor,
         store: S,
-        key: Vec<OrderPair>,
+        key: Vec<ColumnOrder>,
         executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
@@ -77,7 +77,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = input.schema().clone();
 
@@ -188,13 +188,13 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         input: BoxedExecutor,
         store: S,
         table_id: TableId,
-        keys: Vec<OrderPair>,
+        keys: Vec<ColumnOrder>,
         column_ids: Vec<ColumnId>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
         let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
         let schema = input.schema().clone();
         let columns = column_ids
@@ -583,7 +583,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -629,7 +629,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -649,7 +649,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -746,7 +746,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -766,7 +766,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -879,7 +879,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -899,7 +899,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1062,7 +1062,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1082,7 +1082,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1195,7 +1195,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1215,7 +1215,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),

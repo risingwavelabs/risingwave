@@ -19,7 +19,7 @@ use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
-use crate::util::sort_util::OrderPair;
+use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
 ///
@@ -29,7 +29,7 @@ pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
     /// The key used to sort in storage.
-    pub pk: Vec<OrderPair>,
+    pub pk: Vec<ColumnOrder>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
@@ -66,13 +66,13 @@ impl TableDesc {
     }
 
     pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_idx)).collect()
+        self.pk.iter().map(|col| (col.column_index)).collect()
     }
 
     pub fn order_column_ids(&self) -> Vec<ColumnId> {
         self.pk
             .iter()
-            .map(|col| self.columns[col.column_idx].column_id)
+            .map(|col| self.columns[col.column_index].column_id)
             .collect()
     }
 

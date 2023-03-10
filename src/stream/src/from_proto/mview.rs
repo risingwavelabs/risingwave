@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::catalog::ConflictBehavior;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
@@ -40,7 +40,7 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let order_key = node
             .column_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let table = node.get_table()?;
@@ -104,7 +104,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .get_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let table = node.get_table()?;

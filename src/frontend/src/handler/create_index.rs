@@ -20,7 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -33,7 +33,7 @@ use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
@@ -85,11 +85,11 @@ pub(crate) fn gen_create_index_plan(
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
-    let to_order_pair = |(ident, order): &(Ident, OrderType)| {
+    let to_column_order = |(ident, order): &(Ident, OrderType)| {
         let x = ident.real_value();
         table_desc_map
             .get(&x)
-            .map(|x| OrderPair::new(*x, *order))
+            .map(|x| ColumnOrder::new(*x, *order))
             .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
     };
 
@@ -103,7 +103,7 @@ pub(crate) fn gen_create_index_plan(
 
     let mut index_columns = columns
         .iter()
-        .map(to_order_pair)
+        .map(to_column_order)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     let mut include_columns = if include.is_empty() {
@@ -131,7 +131,7 @@ pub(crate) fn gen_create_index_plan(
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
-        .filter(|x| set.insert(x.column_idx))
+        .filter(|x| set.insert(x.column_index))
         .collect_vec();
 
     // Remove include columns are already in index columns
@@ -145,7 +145,7 @@ pub(crate) fn gen_create_index_plan(
     // Distributed by columns should be a prefix of index columns
     if !index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .starts_with(&distributed_by_columns)
     {
@@ -205,7 +205,7 @@ pub(crate) fn gen_create_index_plan(
             .collect_vec(),
         original_columns: index_columns
             .iter()
-            .map(|x| x.column_idx)
+            .map(|x| x.column_index)
             .collect_vec()
             .iter()
             .chain(include_columns.iter())
@@ -269,7 +269,7 @@ fn assemble_materialize(
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
-    index_columns: &[OrderPair],
+    index_columns: &[ColumnOrder],
     include_columns: &[usize],
     distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
@@ -290,7 +290,7 @@ fn assemble_materialize(
 
     let exprs = index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .iter()
         .chain(include_columns.iter())
@@ -307,7 +307,7 @@ fn assemble_materialize(
 
     let out_names: Vec<String> = index_columns
         .iter()
-        .map(|x| x.column_idx)
+        .map(|x| x.column_index)
         .collect_vec()
         .iter()
         .chain(include_columns.iter())
@@ -323,10 +323,7 @@ fn assemble_materialize(
             index_columns
                 .iter()
                 .enumerate()
-                .map(|(i, order_pair)| match order_pair.order_type {
-                    OrderType::Ascending => FieldOrder::ascending(i),
-                    OrderType::Descending => FieldOrder::descending(i),
-                })
+                .map(|(i, column_order)| ColumnOrder::new(i, column_order.order_type))
                 .collect(),
         ),
         project_required_cols,
@@ -339,6 +336,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
+            // TODO(rc): support `NULLS FIRST | LAST`
             if column.nulls_first.is_some() {
                 return Err(ErrorCode::NotImplemented(
                     "nulls_first not supported".into(),
@@ -352,11 +350,11 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
             if let Expr::Identifier(ident) = column.expr {
                 Ok::<(_, _), RwError>((
                     ident,
-                    column.asc.map_or(OrderType::Ascending, |x| {
+                    column.asc.map_or(OrderType::ascending(), |x| {
                         if x {
-                            OrderType::Ascending
+                            OrderType::ascending()
                         } else {
-                            OrderType::Descending
+                            OrderType::descending()
                         }
                     }),
                 ))
