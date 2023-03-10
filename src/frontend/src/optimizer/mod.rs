@@ -54,6 +54,7 @@ use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
+use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
@@ -348,6 +349,13 @@ impl PlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "exist dangling temporal scan".to_string(),
+                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
 
         Ok(plan)
     }

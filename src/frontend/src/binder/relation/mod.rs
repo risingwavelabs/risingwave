@@ -258,6 +258,7 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
@@ -293,7 +294,7 @@ impl Binder {
             Ok(share_relation)
         } else {
 
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_now)
         }
     }
 
@@ -313,7 +314,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None)?,
+            self.bind_relation_by_name(table_name.clone(), None, false)?,
             table_name,
         ))
     }
@@ -358,12 +359,16 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_now,
+            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_now),
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
@@ -378,6 +383,7 @@ impl Binder {
                         Some(PG_CATALOG_SCHEMA_NAME),
                         PG_KEYWORDS_TABLE_NAME,
                         alias,
+                        false,
                     )
                 } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args

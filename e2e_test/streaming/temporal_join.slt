@@ -1,0 +1,64 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table stream(id int, a int, b int) APPEND ONLY;
+
+statement ok
+create table version(id int, a int, b int, primary key (id));
+
+statement ok
+create materialized view v as select stream.id as id1, stream.a as a1, version.id as id2, version.a as a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on stream.id = version.id;
+
+statement ok
+insert into stream values(1, 11, 111);
+
+statement ok
+insert into version values(1, 11, 111);
+
+statement ok
+insert into stream values(1, 11, 111);
+
+statement ok
+delete from version;
+
+query IIII rowsort
+select * from v;
+----
+1 11 1 11
+1 11 NULL NULL
+
+statement ok
+insert into version values(2, 22, 222);
+
+statement ok
+insert into stream values(2, 22, 222);
+
+query IIII rowsort
+select * from v;
+----
+1 11 1 11
+1 11 NULL NULL
+2 22 2 22
+
+statement ok
+drop materialized view v;
+
+statement ok
+create materialized view v as select stream.id as id1, stream.a as a1, version.id as id2, version.a as a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on stream.id = version.id;
+
+query IIII rowsort
+select * from v;
+----
+1 11 NULL NULL
+1 11 NULL NULL
+2 22 2 22
+
+statement ok
+drop materialized view v;
+
+statement ok
+drop table stream;
+
+statement ok
+drop table version;
