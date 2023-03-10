@@ -31,8 +31,6 @@ use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
-use risingwave_common::array::{ArrayResult, StreamChunk};
-use risingwave_pb::data;
 use risingwave_common::hash::VirtualNode;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
@@ -244,13 +242,28 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkFromProtobuf<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew<'a>(
     env: EnvParam<'a>,
-    stream_chunk: data::StreamChunk,
-// ) -> ArrayResult<StreamChunk> {
-    ) -> jobjectArray<StreamChunk> {
-    
-    execute_and_catch(env, move || Ok(StreamChunk::from_protobuf(&stream_chunk)))
+    stream_chunk: JByteArray<'a>,
+) -> Pointer<'static, Iterator> {
+    execute_and_catch(env, move || {
+        let stream_chunk = Message::decode(stream_chunk.to_guarded_slice(*env)?.deref())?;
+        let iter = RUNTIME.block_on(Iterator::new(stream_chunk))?;
+        Ok(iter.into())
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext<'a>(
+    env: EnvParam<'a>,
+    mut pointer: Pointer<'a, Iterator>,
+) -> Pointer<'static, KeyedRow> {
+    execute_and_catch(env, move || {
+        match RUNTIME.block_on(pointer.as_mut().next())? {
+            None => Ok(Pointer::null()),
+            Some(row) => Ok(row.into()),
+        }
+    })
 }
 
 #[no_mangle]
