@@ -134,7 +134,7 @@ where
     /// allowed, where `allow_split` should be `false`.
     pub async fn add_full_key(
         &mut self,
-        full_key: &FullKey<&[u8]>,
+        full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
@@ -322,7 +322,7 @@ mod tests {
         for i in 0..table_capacity {
             builder
                 .add_full_key(
-                    &FullKey::from_user_key(
+                    FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
                         (table_capacity - i) as u64,
                     ),
@@ -352,7 +352,7 @@ mod tests {
                 epoch -= 1;
                 builder
                     .add_full_key(
-                        &FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
+                        FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
                         HummockValue::put(b"v"),
                         true,
                     )
@@ -390,7 +390,7 @@ mod tests {
             opts,
         ));
         builder
-            .add_full_key(&test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
+            .add_full_key(test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
     }
@@ -413,7 +413,7 @@ mod tests {
         );
         builder
             .add_full_key(
-                &FullKey::for_test(table_id, b"k", 233),
+                FullKey::for_test(table_id, b"k", 233),
                 HummockValue::put(b"v"),
                 false,
             )

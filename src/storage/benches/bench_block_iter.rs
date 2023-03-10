@@ -109,7 +109,7 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
     let mut builder = BlockBuilder::new(options);
     for tt in 1..=t {
         for ii in 1..=i {
-            builder.add(&FullKey::decode(&key(tt, ii)), &value(ii));
+            builder.add(FullKey::decode(&key(tt, ii)), &value(ii));
         }
     }
     Bytes::from(builder.build().to_vec())

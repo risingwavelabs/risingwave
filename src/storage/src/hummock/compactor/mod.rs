@@ -592,7 +592,7 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(&iter_key, value, is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
