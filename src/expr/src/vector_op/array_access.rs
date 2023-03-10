@@ -14,10 +14,11 @@
 
 use risingwave_common::array::ListRef;
 use risingwave_common::types::{Scalar, ToOwnedDatum};
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
-#[inline(always)]
+#[function("array_access(list, int32) -> *")]
 pub fn array_access<T: Scalar>(l: Option<ListRef<'_>>, r: Option<i32>) -> Result<Option<T>> {
     match (l, r) {
         // index must be greater than 0 following a one-based numbering convention for arrays

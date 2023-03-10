@@ -17,6 +17,7 @@ use std::fmt::Debug;
 use std::ops::{BitAnd, BitOr, BitXor, Not};
 
 use num_traits::{CheckedShl, CheckedShr};
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
@@ -25,7 +26,7 @@ use crate::{ExprError, Result};
 // undefined behaviour. If the RHS is negative, instead of having an unexpected answer, we return an
 // error. If PG had clearly defined behavior rather than relying on UB of C, we would follow it even
 // when it is different from rust std.
-#[inline(always)]
+#[function("bitwise_shift_left(*int, *int) -> auto")]
 pub fn general_shl<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
     T1: CheckedShl + Debug,
@@ -36,7 +37,7 @@ where
     })
 }
 
-#[inline(always)]
+#[function("bitwise_shift_right(*int, *int) -> auto")]
 pub fn general_shr<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
     T1: CheckedShr + Debug,
@@ -48,7 +49,7 @@ where
 }
 
 #[inline(always)]
-pub fn general_shift<T1, T2, F>(l: T1, r: T2, atm: F) -> Result<T1>
+fn general_shift<T1, T2, F>(l: T1, r: T2, atm: F) -> Result<T1>
 where
     T1: Debug,
     T2: TryInto<u32> + Debug,
@@ -61,7 +62,7 @@ where
     atm(l, r)
 }
 
-#[inline(always)]
+#[function("bitwise_and(*int, *int) -> auto")]
 pub fn general_bitand<T1, T2, T3>(l: T1, r: T2) -> T3
 where
     T1: Into<T3> + Debug,
@@ -71,7 +72,7 @@ where
     l.into() & r.into()
 }
 
-#[inline(always)]
+#[function("bitwise_or(*int, *int) -> auto")]
 pub fn general_bitor<T1, T2, T3>(l: T1, r: T2) -> T3
 where
     T1: Into<T3> + Debug,
@@ -81,7 +82,7 @@ where
     l.into() | r.into()
 }
 
-#[inline(always)]
+#[function("bitwise_xor(*int, *int) -> auto")]
 pub fn general_bitxor<T1, T2, T3>(l: T1, r: T2) -> T3
 where
     T1: Into<T3> + Debug,
@@ -91,7 +92,7 @@ where
     l.into() ^ r.into()
 }
 
-#[inline(always)]
+#[function("bitwise_not(*int) -> auto")]
 pub fn general_bitnot<T1: Not<Output = T1>>(expr: T1) -> T1 {
     !expr
 }

@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("trim(varchar) -> varchar")]
 pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
     writer.write_str(s.trim()).unwrap();
     Ok(())

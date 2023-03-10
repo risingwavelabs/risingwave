@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("replace(varchar, varchar, varchar) -> varchar")]
 pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut dyn Write) -> Result<()> {
     if from_str.is_empty() {
         writer.write_str(s).unwrap();

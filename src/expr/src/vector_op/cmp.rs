@@ -12,13 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Debug;
+use risingwave_common::array::{Array, BoolArray};
+use risingwave_common::buffer::Bitmap;
+use risingwave_expr_macro::function;
 
-use risingwave_common::array::{ListRef, StructRef};
-
-use crate::Result;
-
-#[inline(always)]
+#[function("equal(boolean, boolean) -> boolean", batch = boolean_eq)]
+#[function("equal(*number, *number) -> boolean")]
+#[function("equal(date, date) -> boolean")]
+#[function("equal(time, time) -> boolean")]
+#[function("equal(interval, interval) -> boolean")]
+#[function("equal(timestamp, timestamp) -> boolean")]
+#[function("equal(timestamptz, timestamptz) -> boolean")]
+#[function("equal(date, timestamp) -> boolean")]
+#[function("equal(timestamp, date) -> boolean")]
+#[function("equal(time, interval) -> boolean")]
+#[function("equal(interval, time) -> boolean")]
+#[function("equal(varchar, varchar) -> boolean")]
+#[function("equal(list, list) -> boolean")]
+#[function("equal(struct, struct) -> boolean")]
 pub fn general_eq<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -28,7 +39,20 @@ where
     l.into() == r.into()
 }
 
-#[inline(always)]
+#[function("not_equal(boolean, boolean) -> boolean", batch = boolean_ne)]
+#[function("not_equal(*number, *number) -> boolean")]
+#[function("not_equal(date, date) -> boolean")]
+#[function("not_equal(time, time) -> boolean")]
+#[function("not_equal(interval, interval) -> boolean")]
+#[function("not_equal(timestamp, timestamp) -> boolean")]
+#[function("not_equal(timestamptz, timestamptz) -> boolean")]
+#[function("not_equal(date, timestamp) -> boolean")]
+#[function("not_equal(timestamp, date) -> boolean")]
+#[function("not_equal(time, interval) -> boolean")]
+#[function("not_equal(interval, time) -> boolean")]
+#[function("not_equal(varchar, varchar) -> boolean")]
+#[function("not_equal(list, list) -> boolean")]
+#[function("not_equal(struct, struct) -> boolean")]
 pub fn general_ne<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -38,7 +62,23 @@ where
     l.into() != r.into()
 }
 
-#[inline(always)]
+#[function(
+    "greater_than_or_equal(boolean, boolean) -> boolean",
+    batch = boolean_ge
+)]
+#[function("greater_than_or_equal(*number, *number) -> boolean")]
+#[function("greater_than_or_equal(date, date) -> boolean")]
+#[function("greater_than_or_equal(time, time) -> boolean")]
+#[function("greater_than_or_equal(interval, interval) -> boolean")]
+#[function("greater_than_or_equal(timestamp, timestamp) -> boolean")]
+#[function("greater_than_or_equal(timestamptz, timestamptz) -> boolean")]
+#[function("greater_than_or_equal(date, timestamp) -> boolean")]
+#[function("greater_than_or_equal(timestamp, date) -> boolean")]
+#[function("greater_than_or_equal(time, interval) -> boolean")]
+#[function("greater_than_or_equal(interval, time) -> boolean")]
+#[function("greater_than_or_equal(varchar, varchar) -> boolean")]
+#[function("greater_than_or_equal(list, list) -> boolean")]
+#[function("greater_than_or_equal(struct, struct) -> boolean")]
 pub fn general_ge<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -48,7 +88,20 @@ where
     l.into() >= r.into()
 }
 
-#[inline(always)]
+#[function("greater_than(boolean, boolean) -> boolean", batch = boolean_gt)]
+#[function("greater_than(*number, *number) -> boolean")]
+#[function("greater_than(date, date) -> boolean")]
+#[function("greater_than(time, time) -> boolean")]
+#[function("greater_than(interval, interval) -> boolean")]
+#[function("greater_than(timestamp, timestamp) -> boolean")]
+#[function("greater_than(timestamptz, timestamptz) -> boolean")]
+#[function("greater_than(date, timestamp) -> boolean")]
+#[function("greater_than(timestamp, date) -> boolean")]
+#[function("greater_than(time, interval) -> boolean")]
+#[function("greater_than(interval, time) -> boolean")]
+#[function("greater_than(varchar, varchar) -> boolean")]
+#[function("greater_than(list, list) -> boolean")]
+#[function("greater_than(struct, struct) -> boolean")]
 pub fn general_gt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -58,7 +111,23 @@ where
     l.into() > r.into()
 }
 
-#[inline(always)]
+#[function(
+    "less_than_or_equal(boolean, boolean) -> boolean",
+    batch = boolean_le
+)]
+#[function("less_than_or_equal(*number, *number) -> boolean")]
+#[function("less_than_or_equal(date, date) -> boolean")]
+#[function("less_than_or_equal(time, time) -> boolean")]
+#[function("less_than_or_equal(interval, interval) -> boolean")]
+#[function("less_than_or_equal(timestamp, timestamp) -> boolean")]
+#[function("less_than_or_equal(timestamptz, timestamptz) -> boolean")]
+#[function("less_than_or_equal(date, timestamp) -> boolean")]
+#[function("less_than_or_equal(timestamp, date) -> boolean")]
+#[function("less_than_or_equal(time, interval) -> boolean")]
+#[function("less_than_or_equal(interval, time) -> boolean")]
+#[function("less_than_or_equal(varchar, varchar) -> boolean")]
+#[function("less_than_or_equal(list, list) -> boolean")]
+#[function("less_than_or_equal(struct, struct) -> boolean")]
 pub fn general_le<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -68,7 +137,20 @@ where
     l.into() <= r.into()
 }
 
-#[inline(always)]
+#[function("less_than(boolean, boolean) -> boolean", batch = boolean_lt)]
+#[function("less_than(*number, *number) -> boolean")]
+#[function("less_than(date, date) -> boolean")]
+#[function("less_than(time, time) -> boolean")]
+#[function("less_than(interval, interval) -> boolean")]
+#[function("less_than(timestamp, timestamp) -> boolean")]
+#[function("less_than(timestamptz, timestamptz) -> boolean")]
+#[function("less_than(date, timestamp) -> boolean")]
+#[function("less_than(timestamp, date) -> boolean")]
+#[function("less_than(time, interval) -> boolean")]
+#[function("less_than(interval, time) -> boolean")]
+#[function("less_than(varchar, varchar) -> boolean")]
+#[function("less_than(list, list) -> boolean")]
+#[function("less_than(struct, struct) -> boolean")]
 pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
     T1: Into<T3> + Debug,
@@ -78,129 +160,136 @@ where
     l.into() < r.into()
 }
 
+#[function("is_distinct_from(boolean, boolean) -> boolean", batch = boolean_is_distinct_from)]
+#[function("is_distinct_from(*number, *number) -> boolean")]
+#[function("is_distinct_from(date, date) -> boolean")]
+#[function("is_distinct_from(time, time) -> boolean")]
+#[function("is_distinct_from(interval, interval) -> boolean")]
+#[function("is_distinct_from(timestamp, timestamp) -> boolean")]
+#[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_distinct_from(date, timestamp) -> boolean")]
+#[function("is_distinct_from(timestamp, date) -> boolean")]
+#[function("is_distinct_from(time, interval) -> boolean")]
+#[function("is_distinct_from(interval, time) -> boolean")]
+#[function("is_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_distinct_from(list, list) -> boolean")]
+#[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    match (l, r) {
-        (Some(lv), Some(rv)) => general_ne::<T1, T2, T3>(lv, rv),
-        (Some(_), None) => true,
-        (None, Some(_)) => true,
-        (None, None) => false,
-    }
+    l.map(Into::into) != r.map(Into::into)
 }
 
+#[function("is_not_distinct_from(boolean, boolean) -> boolean", batch = boolean_is_not_distinct_from)]
+#[function("is_not_distinct_from(*number, *number) -> boolean")]
+#[function("is_not_distinct_from(date, date) -> boolean")]
+#[function("is_not_distinct_from(time, time) -> boolean")]
+#[function("is_not_distinct_from(interval, interval) -> boolean")]
+#[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
+#[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_not_distinct_from(date, timestamp) -> boolean")]
+#[function("is_not_distinct_from(timestamp, date) -> boolean")]
+#[function("is_not_distinct_from(time, interval) -> boolean")]
+#[function("is_not_distinct_from(interval, time) -> boolean")]
+#[function("is_not_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_not_distinct_from(list, list) -> boolean")]
+#[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
     T2: Into<T3> + Debug,
     T3: Ord,
 {
-    match (l, r) {
-        (Some(lv), Some(rv)) => general_eq::<T1, T2, T3>(lv, rv),
-        (Some(_), None) => false,
-        (None, Some(_)) => false,
-        (None, None) => true,
-    }
+    l.map(Into::into) == r.map(Into::into)
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Comparison {
-    Eq,
-    Ne,
-    Lt,
-    Gt,
-    Le,
-    Ge,
+#[function("is_true(boolean) -> boolean", batch = boolean_is_true)]
+pub fn is_true(v: Option<bool>) -> bool {
+    v == Some(true)
 }
 
-pub(crate) static EQ: Comparison = Comparison::Eq;
-pub(crate) static NE: Comparison = Comparison::Ne;
-pub(crate) static LT: Comparison = Comparison::Lt;
-pub(crate) static GT: Comparison = Comparison::Gt;
-pub(crate) static LE: Comparison = Comparison::Le;
-pub(crate) static GE: Comparison = Comparison::Ge;
-
-#[inline(always)]
-pub fn gen_struct_cmp(op: Comparison) -> fn(StructRef<'_>, StructRef<'_>) -> Result<bool> {
-    use crate::gen_cmp;
-    gen_cmp!(op)
+#[function("is_not_true(boolean) -> boolean", batch = boolean_is_not_true)]
+pub fn is_not_true(v: Option<bool>) -> bool {
+    v != Some(true)
 }
 
-#[inline(always)]
-pub fn gen_list_cmp(op: Comparison) -> fn(ListRef<'_>, ListRef<'_>) -> Result<bool> {
-    use crate::gen_cmp;
-    gen_cmp!(op)
+#[function("is_false(boolean) -> boolean", batch = boolean_is_false)]
+pub fn is_false(v: Option<bool>) -> bool {
+    v == Some(false)
 }
 
-#[inline(always)]
-pub fn gen_str_cmp(op: Comparison) -> fn(&str, &str) -> Result<bool> {
-    use crate::gen_cmp;
-    gen_cmp!(op)
+#[function("is_not_false(boolean) -> boolean", batch = boolean_is_not_false)]
+pub fn is_not_false(v: Option<bool>) -> bool {
+    v != Some(false)
 }
 
-#[macro_export]
-macro_rules! gen_cmp {
-    ($op:expr) => {
-        match $op {
-            Comparison::Eq => |l, r| Ok(l == r),
-            Comparison::Ne => |l, r| Ok(l != r),
-            Comparison::Lt => |l, r| Ok(l < r),
-            Comparison::Gt => |l, r| Ok(l > r),
-            Comparison::Le => |l, r| Ok(l <= r),
-            Comparison::Ge => |l, r| Ok(l >= r),
-        }
-    };
+// optimized functions for bool arrays
+
+fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !(l.data() ^ r.data());
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-pub fn str_is_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
-    match (l, r) {
-        (Some(lv), Some(rv)) => Ok(Some(lv != rv)),
-        (Some(_), None) => Ok(Some(true)),
-        (None, Some(_)) => Ok(Some(true)),
-        (None, None) => Ok(Some(false)),
-    }
+fn boolean_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() ^ r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-pub fn str_is_not_distinct_from(l: Option<&str>, r: Option<&str>) -> Result<Option<bool>> {
-    match (l, r) {
-        (Some(lv), Some(rv)) => Ok(Some(lv == rv)),
-        (Some(_), None) => Ok(Some(false)),
-        (None, Some(_)) => Ok(Some(false)),
-        (None, None) => Ok(Some(true)),
-    }
+fn boolean_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() & !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-#[inline(always)]
-pub fn is_true(v: Option<bool>) -> Option<bool> {
-    Some(v == Some(true))
+fn boolean_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() & r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-#[inline(always)]
-pub fn is_not_true(v: Option<bool>) -> Option<bool> {
-    Some(v != Some(true))
+fn boolean_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = l.data() | !r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-#[inline(always)]
-pub fn is_false(v: Option<bool>) -> Option<bool> {
-    Some(v == Some(false))
+fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !l.data() | r.data();
+    let bitmap = l.null_bitmap() & r.null_bitmap();
+    BoolArray::new(data, bitmap)
 }
 
-#[inline(always)]
-pub fn is_not_false(v: Option<bool>) -> Option<bool> {
-    Some(v != Some(false))
+fn boolean_is_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = ((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+        | (l.null_bitmap() ^ r.null_bitmap());
+    BoolArray::new(data, Bitmap::ones(l.len()))
 }
 
-#[inline(always)]
-pub fn is_unknown(v: Option<bool>) -> Option<bool> {
-    Some(v.is_none())
+fn boolean_is_not_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
+    let data = !(((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
+        | (l.null_bitmap() ^ r.null_bitmap()));
+    BoolArray::new(data, Bitmap::ones(l.len()))
 }
 
-#[inline(always)]
-pub fn is_not_unknown(v: Option<bool>) -> Option<bool> {
-    Some(v.is_some())
+fn boolean_is_true(a: &BoolArray) -> BoolArray {
+    BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn boolean_is_not_true(a: &BoolArray) -> BoolArray {
+    BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn boolean_is_false(a: &BoolArray) -> BoolArray {
+    BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len()))
+}
+
+fn boolean_is_not_false(a: &BoolArray) -> BoolArray {
+    BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len()))
 }
 
 #[cfg(test)]

@@ -15,23 +15,25 @@
 use std::cmp::{max, min};
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::{bail, Result};
 
-#[inline(always)]
+#[function("substr(varchar, int32) -> varchar")]
 pub fn substr_start(s: &str, start: i32, writer: &mut dyn Write) -> Result<()> {
     let start = (start.saturating_sub(1).max(0) as usize).min(s.len());
     writer.write_str(&s[start..]).unwrap();
     Ok(())
 }
 
-#[inline(always)]
+// #[function("substr(varchar, 0, int32) -> varchar")]
 pub fn substr_for(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
     let end = min(count as usize, s.len());
     writer.write_str(&s[..end]).unwrap();
     Ok(())
 }
 
-#[inline(always)]
+#[function("substr(varchar, int32, int32) -> varchar")]
 pub fn substr_start_for(s: &str, start: i32, count: i32, writer: &mut dyn Write) -> Result<()> {
     if count < 0 {
         bail!("length in substr should be non-negative: {}", count);

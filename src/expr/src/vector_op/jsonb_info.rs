@@ -15,17 +15,18 @@
 use std::fmt::Write;
 
 use risingwave_common::array::JsonbRef;
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[inline(always)]
+#[function("jsonb_typeof(jsonb) -> varchar")]
 pub fn jsonb_typeof(v: JsonbRef<'_>, writer: &mut dyn Write) -> Result<()> {
     writer
         .write_str(v.type_name())
         .map_err(|e| ExprError::Internal(e.into()))
 }
 
-#[inline(always)]
+#[function("jsonb_array_length(jsonb) -> int32")]
 pub fn jsonb_array_length(v: JsonbRef<'_>) -> Result<i32> {
     v.array_len()
         .map(|n| n as i32)

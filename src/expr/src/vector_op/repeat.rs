@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("repeat(varchar, int32) -> varchar")]
 pub fn repeat(s: &str, count: i32, writer: &mut dyn Write) -> Result<()> {
     for _ in 0..count {
         writer.write_str(s).unwrap();

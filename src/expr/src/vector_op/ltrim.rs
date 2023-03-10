@@ -14,12 +14,14 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
 /// Note: the behavior of `ltrim` in `PostgreSQL` and `trim_start` (or `trim_left`) in Rust
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
-#[inline(always)]
+#[function("ltrim(varchar) -> varchar")]
 pub fn ltrim(s: &str, writer: &mut dyn Write) -> Result<()> {
     writer.write_str(s.trim_start()).unwrap();
     Ok(())

@@ -14,25 +14,29 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-macro_rules! gen_trim {
-    ($( { $func_name:ident, $method:ident }),*) => {
-        $(#[inline(always)]
-        pub fn $func_name(s: &str, characters: &str, writer: &mut dyn Write) -> Result<()> {
-            let pattern = |c| characters.chars().any(|ch| ch == c);
-            // We remark that feeding a &str and a slice of chars into trim_left/right_matches
-            // means different, one is matching with the entire string and the other one is matching
-            // with any char in the slice.
-            Ok(writer.write_str(s.$method(pattern)).unwrap())
-        })*
-    }
+#[function("trim(varchar, varchar) -> varchar")]
+pub fn trim_characters(s: &str, characters: &str, writer: &mut dyn Write) -> Result<()> {
+    let pattern = |c| characters.chars().any(|ch| ch == c);
+    // We remark that feeding a &str and a slice of chars into trim_left/right_matches
+    // means different, one is matching with the entire string and the other one is matching
+    // with any char in the slice.
+    Ok(writer.write_str(s.trim_matches(pattern)).unwrap())
 }
 
-gen_trim! {
-    { trim_characters, trim_matches },
-    { ltrim_characters, trim_start_matches },
-    { rtrim_characters, trim_end_matches }
+#[function("ltrim(varchar, varchar) -> varchar")]
+pub fn ltrim_characters(s: &str, characters: &str, writer: &mut dyn Write) -> Result<()> {
+    let pattern = |c| characters.chars().any(|ch| ch == c);
+    Ok(writer.write_str(s.trim_start_matches(pattern)).unwrap())
+}
+
+#[function("rtrim(varchar, varchar) -> varchar")]
+pub fn rtrim_characters(s: &str, characters: &str, writer: &mut dyn Write) -> Result<()> {
+    let pattern = |c| characters.chars().any(|ch| ch == c);
+    Ok(writer.write_str(s.trim_end_matches(pattern)).unwrap())
 }
 
 #[cfg(test)]

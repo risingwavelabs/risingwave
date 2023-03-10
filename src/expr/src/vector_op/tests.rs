@@ -107,7 +107,7 @@ fn test_arithmetic() {
         OrderedF32::from(-1f32)
     );
     assert_eq!(
-        date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+        date_interval_add(
             NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
             IntervalUnit::from_month(12)
         )
@@ -117,7 +117,7 @@ fn test_arithmetic() {
         )
     );
     assert_eq!(
-        interval_date_add::<IntervalUnit, NaiveDateWrapper, NaiveDateTimeWrapper>(
+        interval_date_add(
             IntervalUnit::from_month(12),
             NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1)
         )
@@ -127,7 +127,7 @@ fn test_arithmetic() {
         )
     );
     assert_eq!(
-        date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(
+        date_interval_sub(
             NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
             IntervalUnit::from_month(12)
         )

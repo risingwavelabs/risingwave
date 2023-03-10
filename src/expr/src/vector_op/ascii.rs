@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr_macro::scalar;
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
-#[scalar("(varchar) -> int32")]
+#[function("ascii(varchar) -> int32")]
 pub fn ascii(s: &str) -> Result<i32> {
     Ok(s.as_bytes().first().map(|x| *x as i32).unwrap_or(0))
 }

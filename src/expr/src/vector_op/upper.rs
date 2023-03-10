@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("upper(varchar) -> varchar")]
 pub fn upper(s: &str, writer: &mut dyn Write) -> Result<()> {
     for c in s.chars() {
         writer.write_char(c.to_ascii_uppercase()).unwrap();

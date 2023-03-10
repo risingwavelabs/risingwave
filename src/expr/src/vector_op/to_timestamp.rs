@@ -14,6 +14,7 @@
 
 use chrono::format::Parsed;
 use risingwave_common::types::NaiveDateTimeWrapper;
+use risingwave_expr_macro::function;
 
 use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::Result;
@@ -65,7 +66,7 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
     ))
 }
 
-#[inline(always)]
+#[function("to_timestamp(varchar, varchar) -> timestamp")]
 pub fn to_timestamp(s: &str, tmpl: &str) -> Result<NaiveDateTimeWrapper> {
     let pattern = compile_pattern_to_chrono(tmpl);
     to_timestamp_const_tmpl(s, &pattern)

@@ -27,6 +27,7 @@ use risingwave_common::types::{
     OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr_macro::function;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
 use crate::{ExprError, Result};
@@ -49,17 +50,17 @@ const PARSE_ERROR_STR_TO_TIME: &str =
 const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected format is YYYY-MM-DD)";
 const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
-#[inline(always)]
+#[function("cast(varchar) -> date")]
 pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
     Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> time")]
 pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
     Ok(NaiveTimeWrapper::new(parse_naive_time(elem)?))
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> timestamp")]
 pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
     Ok(NaiveDateTimeWrapper::new(parse_naive_datetime(elem)?))
 }
@@ -184,7 +185,7 @@ pub fn i64_to_timestamptz(t: i64) -> Result<i64> {
     }
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> bytea")]
 pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
     // Padded with whitespace str is not allowed.
     if elem.starts_with(' ') && elem.trim().starts_with("\\x") {
@@ -250,7 +251,9 @@ pub fn parse_bytes_traditional(s: &str) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> *number")]
+#[function("cast(varchar) -> interval")]
+#[function("cast(varchar) -> jsonb")]
 pub fn str_parse<T>(elem: &str) -> Result<T>
 where
     T: FromStr,
@@ -301,27 +304,27 @@ define_cast_to_primitive! { f64, OrderedF64 }
 
 // In postgresSql, the behavior of casting decimal to integer is rounding.
 // We should write them separately
-#[inline(always)]
+#[function("cast(decimal) -> int16")]
 pub fn dec_to_i16(elem: Decimal) -> Result<i16> {
     to_i16(elem.round_dp(0))
 }
 
-#[inline(always)]
+#[function("cast(decimal) -> int32")]
 pub fn dec_to_i32(elem: Decimal) -> Result<i32> {
     to_i32(elem.round_dp(0))
 }
 
-#[inline(always)]
+#[function("cast(decimal) -> int64")]
 pub fn dec_to_i64(elem: Decimal) -> Result<i64> {
     to_i64(elem.round_dp(0))
 }
 
-#[inline(always)]
+#[function("cast(jsonb) -> boolean")]
 pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
     v.as_bool().map_err(|e| ExprError::Parse(e.into()))
 }
 
-#[inline(always)]
+#[function("cast(jsonb) -> decimal")]
 pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
     v.as_number()
         .map_err(|e| ExprError::Parse(e.into()))
@@ -335,38 +338,38 @@ pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
 /// This is less powerful but still meets RFC 8259 interoperability.
 macro_rules! define_jsonb_to_number {
-    ($ty:ty) => {
+    ($ty:ty, $sig:literal) => {
         define_jsonb_to_number! { $ty, $ty }
     };
-    ($ty:ty, $wrapper_ty:ty) => {
+    ($ty:ty, $wrapper_ty:ty, $sig:literal) => {
         paste::paste! {
-            #[inline(always)]
+            #[function($sig)]
             pub fn [<jsonb_to_ $ty>](v: JsonbRef<'_>) -> Result<$wrapper_ty> {
                 v.as_number().map_err(|e| ExprError::Parse(e.into())).and_then([<to_ $ty>])
             }
         }
     };
 }
-define_jsonb_to_number! { i16 }
-define_jsonb_to_number! { i32 }
-define_jsonb_to_number! { i64 }
-define_jsonb_to_number! { f32, OrderedF32 }
-define_jsonb_to_number! { f64, OrderedF64 }
+define_jsonb_to_number! { i16, "cast(jsonb) -> int16" }
+define_jsonb_to_number! { i32, "cast(jsonb) -> int32" }
+define_jsonb_to_number! { i64, "cast(jsonb) -> int64" }
+define_jsonb_to_number! { f32, OrderedF32, "cast(jsonb) -> float32" }
+define_jsonb_to_number! { f64, OrderedF64, "cast(jsonb) -> float64" }
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
-#[inline(always)]
+#[function("cast(timestamp) -> date")]
 pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> NaiveDateWrapper {
     NaiveDateWrapper(elem.0.date())
 }
 
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
-#[inline(always)]
+#[function("cast(timestamp) -> time")]
 pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
     NaiveTimeWrapper(elem.0.time())
 }
 
 /// In `PostgreSQL`, casting from interval to time discards the days part.
-#[inline(always)]
+#[function("cast(interval) -> time")]
 pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
     let ms = elem.get_ms_of_day();
     let secs = (ms / 1000) as u32;
@@ -374,7 +377,22 @@ pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
     NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
-#[inline(always)]
+#[function("cast(boolean) -> int32")]
+#[function("cast(int32) -> int16")]
+#[function("cast(int32) -> float32")]
+#[function("cast(int64) -> int16")]
+#[function("cast(int64) -> int32")]
+#[function("cast(int64) -> float32")]
+#[function("cast(int64) -> float64")]
+#[function("cast(float32) -> int16")]
+#[function("cast(float32) -> int32")]
+#[function("cast(float32) -> int64")]
+#[function("cast(float64) -> int16")]
+#[function("cast(float64) -> int32")]
+#[function("cast(float64) -> int64")]
+#[function("cast(float64) -> float32")]
+#[function("cast(decimal) -> float32")]
+#[function("cast(decimal) -> float64")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,
@@ -384,7 +402,20 @@ where
         .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
 }
 
-#[inline(always)]
+#[function("cast(int16) -> int32")]
+#[function("cast(int16) -> int64")]
+#[function("cast(int16) -> float32")]
+#[function("cast(int16) -> float64")]
+#[function("cast(int16) -> decimal")]
+#[function("cast(int32) -> int64")]
+#[function("cast(int32) -> float64")]
+#[function("cast(int32) -> decimal")]
+#[function("cast(int64) -> decimal")]
+#[function("cast(float32) -> float64")]
+#[function("cast(float32) -> decimal")]
+#[function("cast(float64) -> decimal")]
+#[function("cast(date) -> timestamp")]
+#[function("cast(time) -> interval")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -392,7 +423,7 @@ where
     elem.into()
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> boolean")]
 pub fn str_to_bool(input: &str) -> Result<bool> {
     let trimmed_input = input.trim();
     if TRUE_BOOL_LITERALS
@@ -410,17 +441,26 @@ pub fn str_to_bool(input: &str) -> Result<bool> {
     }
 }
 
+#[function("cast(int32) -> boolean")]
 pub fn int32_to_bool(input: i32) -> Result<bool> {
     Ok(input != 0)
 }
 
 // For most of the types, cast them to varchar is similar to return their text format.
 // So we use this function to cast type to varchar.
+#[function("cast(*number) -> varchar")]
+#[function("cast(time) -> varchar")]
+#[function("cast(date) -> varchar")]
+#[function("cast(interval) -> varchar")]
+#[function("cast(timestamp) -> varchar")]
+#[function("cast(jsonb) -> varchar")]
+#[function("cast(list) -> varchar")]
 pub fn general_to_text(elem: impl ToText, mut writer: &mut dyn Write) -> Result<()> {
     elem.write(&mut writer).unwrap();
     Ok(())
 }
 
+#[function("cast(boolean) -> varchar")]
 pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
     writer
         .write_str(if input { "true" } else { "false" })
@@ -430,6 +470,7 @@ pub fn bool_to_varchar(input: bool, writer: &mut dyn Write) -> Result<()> {
 
 /// `bool_out` is different from `general_to_string<bool>` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
+#[function("bool_out(boolean) -> varchar")]
 pub fn bool_out(input: bool, writer: &mut dyn Write) -> Result<()> {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
     Ok(())
@@ -617,7 +658,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
     Ok(items)
 }
 
-#[inline(always)]
+#[function("cast(varchar) -> list")]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
     // Return a new ListValue.
     // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
@@ -641,6 +682,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
+#[function("cast(list) -> list")]
 pub fn list_cast(
     input: ListRef<'_>,
     source_elem_type: &DataType,
@@ -660,6 +702,7 @@ pub fn list_cast(
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
+#[function("cast(struct) -> struct")]
 pub fn struct_cast(
     input: StructRef<'_>,
     source_elem_type: &StructType,

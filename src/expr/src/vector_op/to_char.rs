@@ -19,6 +19,7 @@ use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
 use risingwave_common::types::NaiveDateTimeWrapper;
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
@@ -70,7 +71,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     .build()
 }
 
-#[inline(always)]
+#[function("to_char(timestamp, varchar) -> varchar")]
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,

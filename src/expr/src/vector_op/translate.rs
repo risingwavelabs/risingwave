@@ -15,9 +15,11 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("translate(varchar, varchar, varchar) -> varchar")]
 pub fn translate(
     s: &str,
     match_str: &str,

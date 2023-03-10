@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
-#[inline(always)]
+#[function("tumble_start(date, interval) -> timestamp")]
 pub fn tumble_start_date(
     time: NaiveDateWrapper,
     window: IntervalUnit,
@@ -24,7 +25,7 @@ pub fn tumble_start_date(
     tumble_start_date_time(time.into(), window)
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamp, interval) -> timestamp")]
 pub fn tumble_start_date_time(
     time: NaiveDateTimeWrapper,
     window: IntervalUnit,
@@ -37,7 +38,7 @@ pub fn tumble_start_date_time(
     ))
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamptz, interval) -> timestamptz")]
 pub fn tumble_start_timestamptz(time: i64, window: IntervalUnit) -> Result<i64> {
     // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
     // enduser function separate.

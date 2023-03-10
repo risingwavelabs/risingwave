@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
-pub fn length_default(s: &str) -> Result<i32> {
+#[function("length(varchar) -> int32")]
+pub fn length(s: &str) -> Result<i32> {
     Ok(s.chars().count() as i32)
 }
 
-#[inline(always)]
+#[function("octet_length(varchar) -> int32")]
 pub fn octet_length(s: &str) -> Result<i32> {
     Ok(s.as_bytes().len() as i32)
 }
 
-#[inline(always)]
+#[function("bit_length(varchar) -> int32")]
 pub fn bit_length(s: &str) -> Result<i32> {
     octet_length(s).map(|n| n * 8)
 }
@@ -39,7 +41,7 @@ mod tests {
         let cases = [("hello world", 11), ("hello rust", 10)];
 
         for (s, expected) in cases {
-            assert_eq!(length_default(s).unwrap(), expected)
+            assert_eq!(length(s).unwrap(), expected)
         }
     }
 

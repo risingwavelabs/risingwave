@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("concat_op(varchar, varchar) -> varchar")]
 pub fn concat_op(left: &str, right: &str, writer: &mut dyn Write) -> Result<()> {
     writer.write_str(left).unwrap();
     writer.write_str(right).unwrap();

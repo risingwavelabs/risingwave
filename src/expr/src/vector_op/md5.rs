@@ -14,9 +14,11 @@
 
 use std::fmt::Write;
 
+use risingwave_expr_macro::function;
+
 use crate::Result;
 
-#[inline(always)]
+#[function("md5(varchar) -> varchar")]
 pub fn md5(s: &str, writer: &mut dyn Write) -> Result<()> {
     write!(writer, "{:x}", ::md5::compute(s)).unwrap();
     Ok(())
