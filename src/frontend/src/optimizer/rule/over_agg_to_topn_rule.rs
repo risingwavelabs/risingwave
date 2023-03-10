@@ -20,7 +20,7 @@ use crate::expr::{ExprImpl, ExprType, WindowFunctionType};
 use crate::optimizer::plan_node::{
     LogicalFilter, LogicalTopN, PlanTreeNodeUnary, PlanWindowFunction,
 };
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::PlanRef;
 
@@ -93,13 +93,7 @@ impl Rule for OverAggToTopNRule {
             offset,
             with_ties,
             Order {
-                field_order: order_by
-                    .iter()
-                    .map(|f| FieldOrder {
-                        index: f.input.index,
-                        direct: f.direction,
-                    })
-                    .collect(),
+                column_orders: order_by.to_vec(),
             },
             partition_by.iter().map(|i| i.index).collect(),
         )

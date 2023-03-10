@@ -842,6 +842,7 @@ fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
 mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{
         Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, Scalar,
     };
