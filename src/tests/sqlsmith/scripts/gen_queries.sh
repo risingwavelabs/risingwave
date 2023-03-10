@@ -30,6 +30,7 @@ echo_err() {
 }
 
 ################## EXTRACT
+# TODO(kwannoel): Write tests for these
 
 # Get reason for generation crash.
 get_failure_reason() {
@@ -67,7 +68,70 @@ extract_failing_query() {
   grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' || true
 }
 
+extract_from() {
+  echo "$1" \
+   | sed -E "s/^.*FROM (([[:alnum:]]( AS [[:alnum:]])?, )*[[:alnum:]]( AS [[:alnum:]])?).*;?$/\1/" \
+   | sed -E "s/, /\n/g" \
+   | sed -E "s/([[:alnum:]]) AS [[:alnum:]]/\1/"
+}
+
+extract_inserts_by_name() {
+  grep "INSERT INTO $1 .*"
+}
+
+extract_table_by_name() {
+  grep "CREATE TABLE $1 .*"
+}
+
+extract_materialized_view_by_name() {
+  grep "CREATE MATERIALIZED VIEW $1 .*"
+}
+
+# Extract dml by names
+extract_dml_by_names() {
+  for TABLE_NAME in $1
+  do
+    extract_inserts_by_name "$TABLE_NAME"
+  done
+}
+
+# Extract ddl names only
+extract_ddl_names() {
+  for TABLE_NAME in $1
+  do
+    echo "$TABLE_NAME"
+    CREATE_MVIEW=$(extract_materialized_view_by_name "$TABLE_NAME")
+    if [[ -n "$CREATE_MVIEW" ]]; then
+      TABLE_NAMES=$(select_mview_dependencies "$CREATE_MVIEW")
+      extract_ddl_names "$TABLE_NAMES"
+    fi
+  done
+}
+
+# Extract ddl, echo ddl to stdout
+extract_ddl_by_names() {
+  for TABLE_NAME in $1
+  do
+    CREATE_TABLE=$(extract_table_by_name "$TABLE_NAME")
+    CREATE_MVIEW=$(extract_materialized_view_by_name "$TABLE_NAME")
+    if [[ -n "$CREATE_TABLE" ]]; then
+      echo "$CREATE_TABLE"
+    fi
+    if [[ -n "$CREATE_MVIEW" ]]; then
+      TABLE_NAMES=$(select_mview_dependencies "$CREATE_MVIEW")
+      extract_ddl_by_names "$TABLE_NAMES"
+      echo "$CREATE_MVIEW"
+    fi
+  done
+}
+
+shrink_query() {
+  FROM_NAMES=$(extract_from "$1")
+  extract_ddl_by_names "$FROM_NAMES"
+}
+
 # Extract fail info from logs in log dir
+# Also shrinks query.
 extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
   do
@@ -86,9 +150,12 @@ extract_fail_info_from_logs() {
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
       echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
-      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.log"
+      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
+
+      FROM_TABLE_NAMES=$(extract_from "$QUERY")
+
       cp "$LOGFILE" "$FAIL_DIR/$LOGFILENAME"
     fi
   done
@@ -243,6 +310,11 @@ cleanup() {
   echo_err "[INFO] Success!"
 }
 
+
+################### TESTS
+
+################### MAIN
+
 main() {
   setup
 
@@ -255,4 +327,4 @@ main() {
   cleanup
 }
 
-main
+# main
