@@ -1760,6 +1760,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "csv-core"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5996,7 +6008,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "csv-core",
+ "csv",
  "duration-str",
  "enum-as-inner",
  "futures",
