@@ -737,6 +737,10 @@ template:
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
 
+    memory-control-policy: streaming-only
+
+    streaming-memory-proportion: 0.7
+
     # Parallelism of tasks per compute node
     parallelism: 4
 
