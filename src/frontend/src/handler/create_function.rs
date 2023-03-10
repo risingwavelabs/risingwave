@@ -16,6 +16,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::FunctionId;
+use risingwave_common::types::DataType;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 use risingwave_pb::catalog::Function;
 use risingwave_sqlparser::ast::{
@@ -76,22 +77,23 @@ pub async fn handle_create_function(
         )
         .into());
     };
-    let mut return_types = vec![];
+    let return_type;
     let kind = match returns {
         Some(CreateFunctionReturns::Value(data_type)) => {
-            let return_type = bind_data_type(&data_type)?;
-            return_types.push(return_type.clone());
-            Kind::Scalar(ScalarFunction {
-                return_type: Some(return_type.into()),
-            })
+            return_type = bind_data_type(&data_type)?;
+            Kind::Scalar(ScalarFunction {})
         }
         Some(CreateFunctionReturns::Table(columns)) => {
-            for column in columns {
-                return_types.push(bind_data_type(&column.data_type)?);
-            }
-            Kind::Table(TableFunction {
-                return_types: return_types.iter().map(|t| t.clone().into()).collect(),
-            })
+            let datatypes = columns
+                .iter()
+                .map(|c| bind_data_type(&c.data_type))
+                .collect::<Result<Vec<_>>>()?;
+            let names = columns
+                .iter()
+                .map(|c| c.name.real_value())
+                .collect::<Vec<_>>();
+            return_type = DataType::new_struct(datatypes, names);
+            Kind::Table(TableFunction {})
         }
         None => {
             return Err(ErrorCode::InvalidParameterValue(
@@ -135,12 +137,11 @@ pub async fn handle_create_function(
             .map(|t| arrow_schema::Field::new("", t.into(), true))
             .collect(),
     );
-    let returns = arrow_schema::Schema::new(
-        return_types
-            .iter()
-            .map(|t| arrow_schema::Field::new("", t.into(), true))
-            .collect(),
-    );
+    let returns = arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+        "",
+        return_type.clone().into(),
+        true,
+    )]);
     client
         .check(&identifier, &args, &returns)
         .await
@@ -153,6 +154,7 @@ pub async fn handle_create_function(
         name: function_name,
         kind: Some(kind),
         arg_types: arg_types.into_iter().map(|t| t.into()).collect(),
+        return_type: Some(return_type.into()),
         language,
         identifier,
         link,

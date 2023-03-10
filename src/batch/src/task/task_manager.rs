@@ -363,7 +363,7 @@ mod tests {
                             make_i32_literal(i32::MAX),
                             make_i32_literal(1),
                         ],
-                        return_types: vec![DataType::Int32.to_protobuf()],
+                        return_type: Some(DataType::Int32.to_protobuf()),
                         udtf: None,
                     }),
                 })),

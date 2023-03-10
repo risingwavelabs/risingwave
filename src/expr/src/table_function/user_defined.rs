@@ -25,7 +25,7 @@ use super::*;
 pub struct UserDefinedTableFunction {
     children: Vec<BoxedExpression>,
     arg_schema: SchemaRef,
-    return_types: Vec<DataType>,
+    return_type: DataType,
     client: ArrowFlightUdfClient,
     identifier: String,
     #[allow(dead_code)]
@@ -35,8 +35,7 @@ pub struct UserDefinedTableFunction {
 #[cfg(not(madsim))]
 impl TableFunction for UserDefinedTableFunction {
     fn return_type(&self) -> DataType {
-        // FIXME: support multiple return types
-        self.return_types[0].clone()
+        self.return_type.clone()
     }
 
     fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
@@ -84,7 +83,7 @@ pub fn new_user_defined(
 
     Ok(UserDefinedTableFunction {
         children: prost.args.iter().map(expr_build_from_prost).try_collect()?,
-        return_types: prost.return_types.iter().map(|t| t.into()).collect(),
+        return_type: prost.return_type.as_ref().expect("no return type").into(),
         arg_schema,
         client,
         identifier: udtf.identifier.clone(),

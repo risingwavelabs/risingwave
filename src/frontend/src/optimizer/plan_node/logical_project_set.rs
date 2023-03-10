@@ -92,7 +92,7 @@ impl LogicalProjectSet {
 
                     let TableFunction {
                         args,
-                        return_types,
+                        return_type,
                         function_type,
                         udtf_catalog,
                     } = table_func;
@@ -104,7 +104,7 @@ impl LogicalProjectSet {
                     self.level -= 1;
                     TableFunction {
                         args,
-                        return_types,
+                        return_type,
                         function_type,
                         udtf_catalog,
                     }

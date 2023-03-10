@@ -69,7 +69,7 @@ pub trait ExprRewriter {
     fn rewrite_table_function(&mut self, table_func: TableFunction) -> ExprImpl {
         let TableFunction {
             args,
-            return_types,
+            return_type,
             function_type,
             udtf_catalog,
         } = table_func;
@@ -79,7 +79,7 @@ pub trait ExprRewriter {
             .collect();
         TableFunction {
             args,
-            return_types,
+            return_type,
             function_type,
             udtf_catalog,
         }

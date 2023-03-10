@@ -160,7 +160,7 @@ message TableFunction {
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
-  repeated data.DataType return_types = 3;
+  data.DataType return_type = 3;
   // optional. only used when the type is UDTF.
   UserDefinedTableFunction udtf = 4;
 }

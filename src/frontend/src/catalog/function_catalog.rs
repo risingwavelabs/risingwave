@@ -24,6 +24,7 @@ pub struct FunctionCatalog {
     pub owner: u32,
     pub kind: FunctionKind,
     pub arg_types: Vec<DataType>,
+    pub return_type: DataType,
     pub language: String,
     pub identifier: String,
     pub link: String,
@@ -31,8 +32,8 @@ pub struct FunctionCatalog {
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub enum FunctionKind {
-    Scalar { return_type: DataType },
-    Table { return_types: Vec<DataType> },
+    Scalar,
+    Table,
     Aggregate,
 }
 
@@ -40,12 +41,8 @@ impl From<&ProstKind> for FunctionKind {
     fn from(prost: &ProstKind) -> Self {
         use risingwave_pb::catalog::function::*;
         match prost {
-            Kind::Scalar(ScalarFunction { return_type }) => Self::Scalar {
-                return_type: return_type.as_ref().unwrap().into(),
-            },
-            Kind::Table(TableFunction { return_types }) => Self::Table {
-                return_types: return_types.iter().map(|arg| arg.into()).collect(),
-            },
+            Kind::Scalar(ScalarFunction {}) => Self::Scalar,
+            Kind::Table(TableFunction {}) => Self::Table,
             Kind::Aggregate(AggregateFunction {}) => Self::Aggregate,
         }
     }
@@ -59,6 +56,7 @@ impl From<&ProstFunction> for FunctionCatalog {
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),
             arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
+            return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),
             identifier: prost.identifier.clone(),
             link: prost.link.clone(),

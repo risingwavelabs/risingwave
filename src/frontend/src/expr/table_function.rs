@@ -34,7 +34,7 @@ use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct TableFunction {
     pub args: Vec<ExprImpl>,
-    pub return_types: Vec<DataType>,
+    pub return_type: DataType,
     pub function_type: TableFunctionType,
     /// Catalog of user defined table function.
     pub udtf_catalog: Option<Arc<FunctionCatalog>>,
@@ -129,7 +129,7 @@ impl TableFunction {
 
                 Ok(TableFunction {
                     args,
-                    return_types: vec![data_type],
+                    return_type: data_type,
                     function_type,
                     udtf_catalog: None,
                 })
@@ -148,7 +148,7 @@ impl TableFunction {
 
                     Ok(TableFunction {
                         args: vec![expr],
-                        return_types: vec![data_type],
+                        return_type: data_type,
                         function_type: TableFunctionType::Unnest,
                         udtf_catalog: None,
                     })
@@ -204,9 +204,9 @@ impl TableFunction {
                 }
                 Ok(TableFunction {
                     args,
-                    return_types: vec![DataType::List {
+                    return_type: DataType::List {
                         datatype: Box::new(DataType::Varchar),
-                    }],
+                    },
                     function_type: TableFunctionType::RegexpMatches,
                     udtf_catalog: None,
                 })
@@ -218,12 +218,12 @@ impl TableFunction {
 
     /// Create a user-defined `TableFunction`.
     pub fn new_user_defined(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
-        let FunctionKind::Table { return_types } = &catalog.kind else {
+        let FunctionKind::Table = &catalog.kind else {
             panic!("not a table function");
         };
         TableFunction {
             args,
-            return_types: return_types.clone(),
+            return_type: catalog.return_type.clone(),
             function_type: TableFunctionType::Udtf,
             udtf_catalog: Some(catalog),
         }
@@ -233,7 +233,7 @@ impl TableFunction {
         TableFunctionProst {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
-            return_types: self.return_types.iter().map(|t| t.to_protobuf()).collect(),
+            return_type: Some(self.return_type.to_protobuf()),
             udtf: self
                 .udtf_catalog
                 .as_ref()
@@ -263,7 +263,7 @@ impl std::fmt::Debug for TableFunction {
         if f.alternate() {
             f.debug_struct("FunctionCall")
                 .field("function_type", &self.function_type)
-                .field("return_types", &self.return_types)
+                .field("return_type", &self.return_type)
                 .field("args", &self.args)
                 .finish()
         } else {
@@ -279,7 +279,7 @@ impl std::fmt::Debug for TableFunction {
 
 impl Expr for TableFunction {
     fn return_type(&self) -> DataType {
-        self.return_types[0].clone()
+        self.return_type.clone()
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {

@@ -111,6 +111,7 @@ message Function {
   string name = 4;
   uint32 owner = 9;
   repeated data.DataType arg_types = 5;
+  data.DataType return_type = 6;
   string language = 7;
   string link = 8;
   string identifier = 10;
@@ -120,12 +121,8 @@ message Function {
     TableFunction table = 12;
     AggregateFunction aggregate = 13;
   }
-  message ScalarFunction {
-    data.DataType return_type = 1;
-  }
-  message TableFunction {
-    repeated data.DataType return_types = 1;
-  }
+  message ScalarFunction {}
+  message TableFunction {}
   message AggregateFunction {}
 }
 

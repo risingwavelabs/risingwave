@@ -34,7 +34,7 @@ impl UserDefinedFunction {
 
     pub(super) fn from_expr_proto(
         udf: &risingwave_pb::expr::UserDefinedFunction,
-        ret_type: DataType,
+        return_type: DataType,
     ) -> risingwave_common::error::Result<Self> {
         let args: Vec<_> = udf
             .get_children()
@@ -50,10 +50,9 @@ impl UserDefinedFunction {
             name: udf.get_name().clone(),
             // FIXME(yuhao): owner is not in udf proto.
             owner: u32::MAX - 1,
-            kind: FunctionKind::Scalar {
-                return_type: ret_type,
-            },
+            kind: FunctionKind::Scalar,
             arg_types,
+            return_type,
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
             link: udf.get_link().clone(),
@@ -68,10 +67,7 @@ impl UserDefinedFunction {
 
 impl Expr for UserDefinedFunction {
     fn return_type(&self) -> DataType {
-        match &self.catalog.kind {
-            FunctionKind::Scalar { return_type } => return_type.clone(),
-            _ => panic!("not a scalar function"),
-        }
+        self.catalog.return_type.clone()
     }
 
     fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
