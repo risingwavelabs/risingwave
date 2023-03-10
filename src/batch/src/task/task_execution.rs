@@ -21,25 +21,23 @@ use futures::StreamExt;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
 };
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::task_info::TaskStatus;
-use risingwave_pb::task_service::{GetDataResponse, TaskInfo, TaskInfoResponse};
+use risingwave_pb::task_service::task_info_response::TaskStatus;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio_metrics::TaskMonitor;
-use tonic::Status;
 
-use crate::error::BatchError::SenderError;
-use crate::error::{BatchError, Result as BatchResult};
+use crate::error::BatchError::{Aborted, SenderError};
+use crate::error::{to_rw_error, BatchError, Result as BatchResult};
 use crate::executor::{BoxedExecutor, ExecutorBuilder};
 use crate::rpc::service::exchange::ExchangeWriter;
-use crate::rpc::service::task_service::{GetDataResponseResult, TaskInfoResponseResult};
+use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::channel::{create_output_channel, ChanReceiverImpl, ChanSenderImpl};
 use crate::task::BatchTaskContext;
 
@@ -76,8 +74,11 @@ where
                 biased;
                 _ = monitor => unreachable!(),
                 output = future => {
-                    // Report bytes allocated when actor ends. Note we should not report 0, cuz actor may allocate memory in block cache and may not be dealloc.
-                    BYTES_ALLOCATED.with(|bytes| context.store_mem_usage(bytes.val()));
+                    // NOTE: Report bytes allocated when the actor ends. We simply report 0 here,
+                    // assuming that all memory allocated by this batch task will be freed at some
+                    // time. Maybe we should introduce a better monitoring strategy for batch memory
+                    // usage.
+                    BYTES_ALLOCATED.with(|_| context.store_mem_usage(0));
                     output
                 },
             };
@@ -94,29 +95,16 @@ where
 /// effect. Local sender only report Failed update, Distributed sender will also report
 /// Finished/Pending/Starting/Aborted etc.
 pub enum StateReporter {
-    Local(tokio::sync::mpsc::Sender<GetDataResponseResult>),
     Distributed(tokio::sync::mpsc::Sender<TaskInfoResponseResult>),
     Mock(),
 }
 
 impl StateReporter {
-    pub async fn send(&mut self, val: TaskInfoResponseResult) -> BatchResult<()> {
+    pub async fn send(&mut self, val: TaskInfoResponse) -> BatchResult<()> {
         match self {
-            Self::Local(s) => {
-                if let Err(e) = val {
-                    s.send(Err(e)).await.map_err(|_| SenderError)
-                } else {
-                    // do nothing and just return.
-                    Ok(())
-                }
-            }
-            Self::Distributed(s) => s.send(val).await.map_err(|_| SenderError),
+            Self::Distributed(s) => s.send(Ok(val)).await.map_err(|_| SenderError),
             Self::Mock() => Ok(()),
         }
-    }
-
-    pub fn new_with_local_sender(s: tokio::sync::mpsc::Sender<GetDataResponseResult>) -> Self {
-        Self::Local(s)
     }
 
     pub fn new_with_dist_sender(s: tokio::sync::mpsc::Sender<TaskInfoResponseResult>) -> Self {
@@ -222,7 +210,6 @@ impl TaskOutput {
                     );
                     let pb = chunk.to_protobuf().await;
                     let resp = GetDataResponse {
-                        status: Default::default(),
                         record_batch: Some(pb),
                     };
                     writer.write(resp).await?;
@@ -233,14 +220,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    let possible_err = self.failure.lock().take();
-                    return if let Some(err) = possible_err {
-                        // Task error
-                        Err(err)
-                    } else {
-                        // Channel error
-                        Err(e)
-                    };
+                    return Err(to_rw_error(e));
                 }
             }
             cnt += 1;
@@ -267,7 +247,12 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> Result<Option<DataChunk>> {
-        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
+        Ok(self
+            .receiver
+            .recv()
+            .await
+            .map_err(to_rw_error)?
+            .map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -298,12 +283,12 @@ pub struct BatchTaskExecution<C> {
     /// The execution failure.
     failure: Arc<Mutex<Option<RwError>>>,
 
-    /// Shutdown signal sender.
-    shutdown_tx: Mutex<Option<Sender<u64>>>,
+    /// Shutdown signal sender, which sends the reason for task failure.
+    shutdown_tx: Mutex<Option<Sender<String>>>,
 
     /// State receivers. Will be moved out by `.state_receivers()`. Returned back to client.
     /// This is a hack, cuz there is no easy way to get out the receiver.
-    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponseResult>>>,
+    state_rx: Mutex<Option<tokio::sync::mpsc::Receiver<TaskInfoResponse>>>,
 
     epoch: BatchQueryEpoch,
 
@@ -354,7 +339,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     /// hash partitioned across multiple channels.
     /// To obtain the result, one must pick one of the channels to consume via [`TaskOutputId`]. As
     /// such, parallel consumers are able to consume the result independently.
-    pub async fn async_execute(self: Arc<Self>, state_tx: StateReporter) -> Result<()> {
+    pub async fn async_execute(self: Arc<Self>, state_tx: Option<StateReporter>) -> Result<()> {
         let mut state_tx = state_tx;
         trace!(
             "Prepare executing plan [{:?}]: {}",
@@ -373,15 +358,15 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Init shutdown channel and data receivers.
         let sender = self.sender.clone();
-        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<u64>();
+        let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<String>();
         *self.shutdown_tx.lock() = Some(shutdown_tx);
-        let failure = self.failure.clone();
+        let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
         // After we init the output receivers, it's must safe to schedule next stage -- able to send
         // TaskStatus::Running here.
         // Init the state receivers. Swap out later.
-        self.change_state_notify(TaskStatus::Running, &mut state_tx, None)
+        self.change_state_notify(TaskStatus::Running, state_tx.as_mut(), None)
             .await?;
 
         // Clone `self` to make compiler happy because of the move block.
@@ -390,15 +375,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
-            let mut sender = sender;
+            let sender = sender;
             let mut state_tx = state_tx;
             let task_metrics = t_1.context.task_metrics();
 
             let task = |task_id: TaskId| async move {
                 // We should only pass a reference of sender to execution because we should only
                 // close it after task error has been set.
-                if let Err(e) = t_1
-                    .try_execute(exec, &mut sender, shutdown_rx, &mut state_tx)
+                t_1.run(exec, sender, shutdown_rx, state_tx.as_mut())
                     .in_span({
                         let mut span = Span::enter_with_local_parent("batch_execute");
                         span.add_property(|| ("task_id", task_id.task_id.to_string()));
@@ -406,24 +390,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         span.add_property(|| ("query_id", task_id.query_id.to_string()));
                         span
                     })
-                    .await
-                {
-                    error!("Execution failed [{:?}]: {}", &task_id, e);
-                    let err_str = e.to_string();
-                    *failure.lock() = Some(e);
-                    if let Err(_e) = t_1
-                        .change_state_notify(TaskStatus::Failed, &mut state_tx, Some(err_str))
-                        .await
-                    {
-                        // It's possible to send fail. Same reason in `.try_execute`.
-                        warn!("send task execution error message fail!");
-                    }
-
-                    // There will be no more chunks, so send None.
-                    if let Err(_e) = sender.send(None).await {
-                        warn!("failed to send None to annotate end");
-                    }
-                }
+                    .await;
             };
 
             if let Some(task_metrics) = task_metrics {
@@ -487,24 +454,21 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub async fn change_state_notify(
         &self,
         task_status: TaskStatus,
-        state_tx: &mut StateReporter,
+        state_tx: Option<&mut StateReporter>,
         err_str: Option<String>,
     ) -> BatchResult<()> {
         self.change_state(task_status);
-        if let Some(err_str) = err_str {
-            state_tx.send(Err(Status::internal(err_str))).await
-        } else {
-            // Notify frontend the task status.
-            state_tx
-                .send(Ok(TaskInfoResponse {
-                    task_info: Some(TaskInfo {
-                        task_id: Some(TaskId::default().to_prost()),
-                        task_status: task_status.into(),
-                    }),
-                    // TODO: Fill the real status.
-                    ..Default::default()
-                }))
+        // Notify frontend the task status.
+        if let Some(reporter) = state_tx {
+            reporter
+                .send(TaskInfoResponse {
+                    task_id: Some(self.task_id.to_prost()),
+                    task_status: task_status.into(),
+                    error_message: err_str.unwrap_or("".to_string()),
+                })
                 .await
+        } else {
+            Ok(())
         }
     }
 
@@ -512,78 +476,95 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         *self.state.lock() = task_status;
     }
 
-    pub async fn try_execute(
+    async fn run(
         &self,
         root: BoxedExecutor,
-        sender: &mut ChanSenderImpl,
-        mut shutdown_rx: Receiver<u64>,
-        state_tx: &mut StateReporter,
-    ) -> Result<()> {
+        mut sender: ChanSenderImpl,
+        mut shutdown_rx: Receiver<String>,
+        state_tx: Option<&mut StateReporter>,
+    ) {
         let mut data_chunk_stream = root.execute();
-        let mut state = TaskStatus::Unspecified;
+        let mut state;
+        let mut error = None;
         loop {
             tokio::select! {
-            // We prioritize abort signal over normal data chunks.
-            biased;
-            _ = &mut shutdown_rx => {
-                state = TaskStatus::Aborted;
-                break;
-            }
-            res = data_chunk_stream.next() => {
-                if let Some(data_chunk) = res {
-                if let Err(e) = sender.send(Some(data_chunk?)).await {
-                        match e {
-                            BatchError::SenderError => {
-                                // This is possible since when we have limit executor in parent
-                                // stage, it may early stop receiving data from downstream, which
-                                // leads to close of channel.
-                                warn!("Task receiver closed!");
-                                break;
-                            },
-                            x => {
-                                return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
-                            }
-                        }
-                    }
-                } else {
-                    state = TaskStatus::Finished;
+                // We prioritize abort signal over normal data chunks.
+                biased;
+                err_reason = &mut shutdown_rx => {
+                    state = TaskStatus::Aborted;
+                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
                     break;
                 }
-            }
+                res = data_chunk_stream.next() => {
+                    match res {
+                            Some(Ok(data_chunk)) => {
+                                if let Err(e) = sender.send(data_chunk).await {
+                                    match e {
+                                        BatchError::SenderError => {
+                                            // This is possible since when we have limit executor in parent
+                                            // stage, it may early stop receiving data from downstream, which
+                                            // leads to close of channel.
+                                            warn!("Task receiver closed!");
+                                            state = TaskStatus::Finished;
+                                            break;
+                                        },
+                                        x => {
+                                            error!("Failed to send data!");
+                                            error = Some(x);
+                                            state = TaskStatus::Failed;
+                                            break;
+                                        }
+                                    }
+                            }
+                        },
+                        Some(Err(e)) => {
+                              error!("Batch task failed: {:?}", e);
+                              error = Some(BatchError::from(e));
+                              state = TaskStatus::Failed;
+                              break;
+                        },
+                        None => {
+                             debug!("Batch task {:?} finished successfully.", self.task_id);
+                             state = TaskStatus::Finished;
+                             break;
+                        }
+                    }
+                }
             }
         }
 
-        *self.state.lock() = state;
-        if let Err(e) = sender.send(None).await {
+        let error = error.map(Arc::new);
+        *self.failure.lock() = error.clone().map(to_rw_error);
+        let err_str = error.as_ref().map(|e| format!("{:?}", e));
+        if let Err(e) = sender.close(error).await {
             match e {
-                BatchError::SenderError => {
+                SenderError => {
                     // This is possible since when we have limit executor in parent
                     // stage, it may early stop receiving data from downstream, which
                     // leads to close of channel.
                     warn!("Task receiver closed when sending None!");
                 }
-                x => {
-                    return Err(InternalError(format!("Failed to send data: {:?}", x)))?;
+                _x => {
+                    error!("Failed to close task output channel: {:?}", self.task_id);
+                    state = TaskStatus::Failed;
                 }
             }
         }
 
-        if let Err(e) = self.change_state_notify(state, state_tx, None).await {
+        if let Err(e) = self.change_state_notify(state, state_tx, err_str).await {
             warn!(
                 "The status receiver in FE has closed so the status push is failed {:}",
                 e
             );
         }
-
-        Ok(())
     }
 
-    pub fn abort_task(&self) {
+    pub fn abort_task(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
-            if sender.send(0).is_err() {
-                debug!("The task has already died before this request, so the abort did no-op")
+            if sender.send(err_msg).is_err() {
+                debug!("The task has already died before this request.")
             } else {
                 info!("Abort task {:?} done", self.task_id);
             }
@@ -632,7 +613,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
+    pub fn state_receiver(&self) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
         self.state_rx
             .lock()
             .take()

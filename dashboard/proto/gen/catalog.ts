@@ -1,14 +1,8 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 import { ExprNode } from "./expr";
-import {
-  ColumnCatalog,
-  ColumnOrder,
-  Field,
-  RowFormatType,
-  rowFormatTypeFromJSON,
-  rowFormatTypeToJSON,
-} from "./plan_common";
+import { ColumnCatalog, Field, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "catalog";
 
@@ -59,13 +53,45 @@ export function sinkTypeToJSON(object: SinkType): string {
   }
 }
 
-/**
- * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as an optional field, we wrap
- * uint64 inside this message.
- */
-export interface ColumnIndex {
-  index: number;
+export const HandleConflictBehavior = {
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
+    case 1:
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
+    case 2:
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
 }
 
 /** A mapping of column indices. */
@@ -105,8 +131,8 @@ export interface Source {
    * The column index of row ID. If the primary key is specified by the user,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /** Columns of the source. */
   columns: ColumnCatalog[];
@@ -206,15 +232,15 @@ export interface Table {
    * an optional column index which is the vnode of each row computed by the
    * table's consistent hash distribution
    */
-  vnodeColIndex:
-    | ColumnIndex
+  vnodeColIndex?:
+    | number
     | undefined;
   /**
    * An optional column index of row id. If the primary key is specified by users,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /**
    * The column indices which are stored in the state store's value with
@@ -223,9 +249,10 @@ export interface Table {
    */
   valueIndices: number[];
   definition: string;
-  handlePkConflict: boolean;
+  handlePkConflictBehavior: HandleConflictBehavior;
   readPrefixLenHint: number;
   watermarkIndices: number[];
+  distKeyInPk: number[];
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -334,28 +361,6 @@ export interface Database {
   name: string;
   owner: number;
 }
-
-function createBaseColumnIndex(): ColumnIndex {
-  return { index: 0 };
-}
-
-export const ColumnIndex = {
-  fromJSON(object: any): ColumnIndex {
-    return { index: isSet(object.index) ? Number(object.index) : 0 };
-  },
-
-  toJSON(message: ColumnIndex): unknown {
-    const obj: any = {};
-    message.index !== undefined && (obj.index = Math.round(message.index));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
-    const message = createBaseColumnIndex();
-    message.index = object.index ?? 0;
-    return message;
-  },
-};
 
 function createBaseColIndexMapping(): ColIndexMapping {
   return { targetSize: 0, map: [] };
@@ -488,7 +493,7 @@ export const Source = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
       pkColumnIds: Array.isArray(object?.pkColumnIds) ? object.pkColumnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -511,8 +516,7 @@ export const Source = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.columns) {
       obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
@@ -545,9 +549,7 @@ export const Source = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.pkColumnIds = object.pkColumnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -892,9 +894,10 @@ function createBaseTable(): Table {
     rowIdIndex: undefined,
     valueIndices: [],
     definition: "",
-    handlePkConflict: false,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     readPrefixLenHint: 0,
     watermarkIndices: [],
+    distKeyInPk: [],
     version: undefined,
   };
 }
@@ -928,17 +931,20 @@ export const Table = {
         }, {})
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      vnodeColIndex: isSet(object.vnodeColIndex) ? Number(object.vnodeColIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
       definition: isSet(object.definition) ? String(object.definition) : "",
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
         : [],
+      distKeyInPk: Array.isArray(object?.distKeyInPk) ? object.distKeyInPk.map((e: any) => Number(e)) : [],
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -986,22 +992,26 @@ export const Table = {
       });
     }
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.vnodeColIndex !== undefined &&
-      (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.vnodeColIndex !== undefined && (obj.vnodeColIndex = Math.round(message.vnodeColIndex));
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
       obj.valueIndices = [];
     }
     message.definition !== undefined && (obj.definition = message.definition);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
     if (message.watermarkIndices) {
       obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
     } else {
       obj.watermarkIndices = [];
+    }
+    if (message.distKeyInPk) {
+      obj.distKeyInPk = message.distKeyInPk.map((e) => Math.round(e));
+    } else {
+      obj.distKeyInPk = [];
     }
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
@@ -1042,17 +1052,14 @@ export const Table = {
       {},
     );
     message.fragmentId = object.fragmentId ?? 0;
-    message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
-      ? ColumnIndex.fromPartial(object.vnodeColIndex)
-      : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.vnodeColIndex = object.vnodeColIndex ?? undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
+    message.distKeyInPk = object.distKeyInPk?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

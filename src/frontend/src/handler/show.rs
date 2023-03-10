@@ -105,13 +105,13 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
                 vec![
                     PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                     PgFieldDescriptor::new(
                         "Type".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                 ],
             ));
@@ -129,8 +129,8 @@ pub fn handle_show_object(handler_args: HandlerArgs, command: ShowObject) -> Res
         rows.into(),
         vec![PgFieldDescriptor::new(
             "Name".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
         )],
     ))
 }
@@ -184,13 +184,13 @@ pub fn handle_show_create_object(
         vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Create Sql".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))
@@ -210,7 +210,7 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         let sql = r#"CREATE SOURCE t1
-        WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+        WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
         ROW FORMAT JSON"#;
         frontend.run_sql(sql).await.unwrap();
 
@@ -224,7 +224,7 @@ mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );

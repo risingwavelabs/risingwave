@@ -271,6 +271,7 @@ message CompactTask {
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
+  bool split_by_state_table = 21;
 }
 
 message LevelHandler {
@@ -543,6 +544,15 @@ message PinVersionResponse {
   HummockVersion pinned_version = 1;
 }
 
+message SplitCompactionGroupRequest {
+  uint64 group_id = 1;
+  repeated uint32 table_ids = 2;
+}
+
+message SplitCompactionGroupResponse {
+  uint64 new_group_id = 1;
+}
+
 service HummockManagerService {
   rpc UnpinVersionBefore(UnpinVersionBeforeRequest) returns (UnpinVersionBeforeResponse);
   rpc GetCurrentVersion(GetCurrentVersionRequest) returns (GetCurrentVersionResponse);
@@ -571,6 +581,7 @@ service HummockManagerService {
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
+  rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
 }
 
 message CompactionConfig {
@@ -590,6 +601,7 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
+  bool split_by_state_table = 14;
 }
 
 message TableStats {

@@ -14,15 +14,17 @@
 
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
-use std::ops::Bound::{self, Excluded, Included, Unbounded};
-use std::ops::RangeBounds;
+use std::ops::Bound::{Excluded, Included, Unbounded};
+use std::ops::{Bound, RangeBounds};
 use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::key::{bound_table_key_range, user_key, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{
+    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
+};
 use risingwave_pb::hummock::{HummockVersion, SstableInfo};
 use tokio::sync::Notify;
 
@@ -33,27 +35,27 @@ use crate::store::{ReadOptions, StateStoreRead};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
-    inclusive_start_key: impl AsRef<[u8]>,
-    inclusive_end_key: impl AsRef<[u8]>,
+    inclusive_start_key: &B,
+    inclusive_end_key: &B,
 ) -> bool
 where
     R: RangeBounds<B>,
-    B: AsRef<[u8]>,
+    B: Ord,
 {
     let (start_bound, end_bound) = (search_key_range.start_bound(), search_key_range.end_bound());
 
     //        RANGE
     // TABLE
     let too_left = match start_bound {
-        Included(range_start) => range_start.as_ref() > inclusive_end_key.as_ref(),
-        Excluded(range_start) => range_start.as_ref() >= inclusive_end_key.as_ref(),
+        Included(range_start) => range_start > inclusive_end_key,
+        Excluded(range_start) => range_start >= inclusive_end_key,
         Unbounded => false,
     };
     // RANGE
     //        TABLE
     let too_right = match end_bound {
-        Included(range_end) => range_end.as_ref() < inclusive_start_key.as_ref(),
-        Excluded(range_end) => range_end.as_ref() <= inclusive_start_key.as_ref(),
+        Included(range_end) => range_end < inclusive_start_key,
+        Excluded(range_end) => range_end <= inclusive_start_key,
         Unbounded => false,
     };
 
@@ -91,17 +93,15 @@ pub fn validate_table_key_range(version: &HummockVersion) {
 pub fn filter_single_sst<R, B>(info: &SstableInfo, table_id: TableId, table_key_range: &R) -> bool
 where
     R: RangeBounds<TableKey<B>>,
-    B: AsRef<[u8]>,
+    B: AsRef<[u8]> + EmptySliceRef,
 {
     let table_range = info.key_range.as_ref().unwrap();
-    let table_start = user_key(table_range.left.as_slice());
-    let table_end = user_key(table_range.right.as_slice());
-    let user_key_range = bound_table_key_range(table_id, table_key_range);
-    let encoded_user_key_range = (
-        user_key_range.start_bound().map(UserKey::encode),
-        user_key_range.end_bound().map(UserKey::encode),
-    );
-    range_overlap(&encoded_user_key_range, table_start, table_end)
+    let table_start = FullKey::decode(table_range.left.as_slice()).user_key;
+    let table_end = FullKey::decode(table_range.right.as_slice()).user_key;
+    let (left, right) = bound_table_key_range(table_id, table_key_range);
+    let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
+    let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
+    range_overlap(&(left, right), &table_start, &table_end)
         && info
             .get_table_ids()
             .binary_search(&table_id.table_id())
@@ -109,12 +109,11 @@ where
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
-pub(crate) fn search_sst_idx<B>(ssts: &[SstableInfo], key: &B) -> usize
-where
-    B: AsRef<[u8]> + Send + ?Sized,
-{
+pub(crate) fn search_sst_idx(ssts: &[SstableInfo], key: UserKey<&[u8]>) -> usize {
     ssts.partition_point(|table| {
-        let ord = user_key(&table.key_range.as_ref().unwrap().left).cmp(key.as_ref());
+        let ord = FullKey::decode(&table.key_range.as_ref().unwrap().left)
+            .user_key
+            .cmp(&key);
         ord == Ordering::Less || ord == Ordering::Equal
     })
 }
@@ -128,7 +127,7 @@ pub fn prune_overlapping_ssts<'a, R, B>(
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo>
 where
     R: RangeBounds<TableKey<B>>,
-    B: AsRef<[u8]>,
+    B: AsRef<[u8]> + EmptySliceRef,
 {
     ssts.iter()
         .filter(move |info| filter_single_sst(info, table_id, table_key_range))
@@ -136,16 +135,17 @@ where
 
 /// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
 /// with a specific table id. Returns the sst ids after pruning.
+#[allow(clippy::type_complexity)]
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
-    encoded_user_key_range: &'a (Bound<Vec<u8>>, Bound<Vec<u8>>),
+    user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
-    let start_table_idx = match encoded_user_key_range.start_bound() {
+    let start_table_idx = match user_key_range.0 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => 0,
     };
-    let end_table_idx = match encoded_user_key_range.end_bound() {
+    let end_table_idx = match user_key_range.1 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => ssts.len().saturating_sub(1),
     };
@@ -338,8 +338,8 @@ pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
-    key: &[u8],
-    value: &[u8],
+    key: Bytes,
+    value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -351,14 +351,15 @@ pub(crate) async fn do_insert_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
-    let stored_value = inner.get(key, epoch, read_options).await?;
+    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Insert(stored_value),
-            new: KeyOp::Insert(Bytes::copy_from_slice(value)),
+            new: KeyOp::Insert(value),
         })
         .into());
     }
@@ -367,8 +368,8 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
-    key: &[u8],
-    old_value: &[u8],
+    key: Bytes,
+    old_value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -380,20 +381,21 @@ pub(crate) async fn do_delete_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
-    match inner.get(key, epoch, read_options).await? {
+    match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+            new: KeyOp::Delete(old_value),
         })
         .into()),
         Some(stored_value) => {
             if stored_value != old_value {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key: Bytes::copy_from_slice(key),
+                    key,
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+                    new: KeyOp::Delete(old_value),
                 })
                 .into())
             } else {
@@ -405,9 +407,9 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
-    key: &[u8],
-    old_value: &[u8],
-    new_value: &[u8],
+    key: Bytes,
+    old_value: Bytes,
+    new_value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -419,27 +421,22 @@ pub(crate) async fn do_update_sanity_check(
         retention_seconds: table_option.retention_seconds,
         table_id,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
 
-    match inner.get(key, epoch, read_options).await? {
+    match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Update((
-                Bytes::copy_from_slice(old_value),
-                Bytes::copy_from_slice(new_value),
-            )),
+            new: KeyOp::Update((old_value, new_value)),
         })
         .into()),
         Some(stored_value) => {
             if stored_value != old_value {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key: Bytes::copy_from_slice(key),
+                    key,
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Update((
-                        Bytes::copy_from_slice(old_value),
-                        Bytes::copy_from_slice(new_value),
-                    )),
+                    new: KeyOp::Update((old_value, new_value)),
                 })
                 .into())
             } else {

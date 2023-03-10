@@ -22,6 +22,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::Direction;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
@@ -29,7 +30,6 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
-use crate::optimizer::property::Direction;
 
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
@@ -60,7 +60,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .table_catalog
                     .pk()
                     .iter()
-                    .map(|idx| t.table_catalog.columns[idx.index].clone())
+                    .map(|x| t.table_catalog.columns[x.column_index].clone())
                     .collect_vec();
                 (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
             }
@@ -117,10 +117,10 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         let index_columns_with_ordering = index_table
             .pk
             .iter()
-            .filter(|x| !index_table.columns[x.index].is_hidden)
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
             .map(|x| {
-                let index_column_name = index_table.columns[x.index].name().to_string();
-                if Direction::Desc == x.direct {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                if Direction::Descending == x.order_type.direction() {
                     index_column_name + " DESC"
                 } else {
                     index_column_name
@@ -131,7 +131,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         let pk_column_index_set = index_table
             .pk
             .iter()
-            .map(|x| x.index)
+            .map(|x| x.column_index)
             .collect::<HashSet<_>>();
 
         let include_columns = index_table
@@ -176,19 +176,19 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // TODO: recover the original user statement
     Ok(PgResponse::new_for_stream(
-        StatementType::DESCRIBE_TABLE,
+        StatementType::DESCRIBE,
         None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Type".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))

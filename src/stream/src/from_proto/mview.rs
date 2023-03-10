@@ -14,7 +14,10 @@
 
 use std::sync::Arc;
 
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::catalog::ConflictBehavior;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::BasicSerde;
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
@@ -37,25 +40,49 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let order_key = node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let table = node.get_table()?;
-        let handle_pk_conflict = node.get_handle_pk_conflict();
-        let executor = MaterializeExecutor::new(
-            input,
-            store,
-            order_key,
-            params.executor_id,
-            params.actor_context,
-            params.vnode_bitmap.map(Arc::new),
-            table,
-            stream.get_watermark_epoch(),
-            handle_pk_conflict,
-        )
-        .await;
+        let versioned = table.version.is_some();
 
-        Ok(executor.boxed())
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
+                ConflictBehavior::OverWrite
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
+                ConflictBehavior::IgnoreConflict
+            }
+        };
+
+        macro_rules! new_executor {
+            ($SD:ident) => {
+                MaterializeExecutor::<_, $SD>::new(
+                    input,
+                    store,
+                    order_key,
+                    params.executor_id,
+                    params.actor_context,
+                    params.vnode_bitmap.map(Arc::new),
+                    table,
+                    stream.get_watermark_epoch(),
+                    conflict_behavior,
+                )
+                .await
+                .boxed()
+            };
+        }
+
+        let executor = if versioned {
+            new_executor!(ColumnAwareSerde)
+        } else {
+            new_executor!(BasicSerde)
+        };
+
+        Ok(executor)
     }
 }
 
@@ -77,7 +104,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             .get_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let table = node.get_table()?;
@@ -85,8 +112,18 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         // FIXME: Lookup is now implemented without cell-based table API and relies on all vnodes
         // being `DEFAULT_VNODE`, so we need to make the Arrange a singleton.
         let vnodes = params.vnode_bitmap.map(Arc::new);
-        let handle_pk_conflict = node.get_handle_pk_conflict();
-        let executor = MaterializeExecutor::new(
+        let conflict_behavior = match table.handle_pk_conflict_behavior() {
+            risingwave_pb::catalog::HandleConflictBehavior::NoCheckUnspecified => {
+                ConflictBehavior::NoCheck
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Overwrite => {
+                ConflictBehavior::OverWrite
+            }
+            risingwave_pb::catalog::HandleConflictBehavior::Ignore => {
+                ConflictBehavior::IgnoreConflict
+            }
+        };
+        let executor = MaterializeExecutor::<_, BasicSerde>::new(
             input,
             store,
             keys,
@@ -95,7 +132,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             vnodes,
             table,
             stream.get_watermark_epoch(),
-            handle_pk_conflict,
+            conflict_behavior,
         )
         .await;
 

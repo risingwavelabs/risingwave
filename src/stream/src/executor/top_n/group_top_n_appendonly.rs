@@ -35,7 +35,7 @@ use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::group_top_n::GroupTopNCache;
@@ -63,9 +63,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -119,9 +119,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -144,7 +144,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager),
             cache_key_serde,

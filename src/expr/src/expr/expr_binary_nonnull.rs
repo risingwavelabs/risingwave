@@ -14,7 +14,8 @@
 
 use risingwave_common::array::{
     Array, BoolArray, DecimalArray, F64Array, I32Array, I64Array, IntervalArray, JsonbArrayBuilder,
-    ListArray, NaiveDateArray, NaiveDateTimeArray, StructArray, Utf8Array, Utf8ArrayBuilder,
+    ListArray, NaiveDateArray, NaiveDateTimeArray, NaiveTimeArray, StructArray, Utf8Array,
+    Utf8ArrayBuilder,
 };
 use risingwave_common::types::*;
 use risingwave_pb::expr::expr_node::Type;
@@ -31,7 +32,7 @@ use crate::vector_op::bitwise_op::*;
 use crate::vector_op::cmp::*;
 use crate::vector_op::date_trunc::{date_trunc_interval, date_trunc_timestamp};
 use crate::vector_op::extract::{
-    extract_from_date, extract_from_timestamp, extract_from_timestamptz,
+    extract_from_date, extract_from_time, extract_from_timestamp, extract_from_timestamptz,
 };
 use crate::vector_op::like::like_default;
 use crate::vector_op::position::position;
@@ -382,6 +383,12 @@ fn build_extract_expr(
             >::new(
                 l, r, ret, extract_from_timestamptz
             )),
+            DataType::Time => Box::new(BinaryExpression::<
+                Utf8Array,
+                NaiveTimeArray,
+                DecimalArray,
+                _,
+            >::new(l, r, ret, extract_from_time)),
             _ => {
                 return Err(ExprError::UnsupportedFunction(format!(
                     "Extract ( {:?} ) is not supported yet!",
@@ -835,6 +842,7 @@ fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
 mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{
         Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, Scalar,
     };

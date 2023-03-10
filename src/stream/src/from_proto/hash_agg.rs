@@ -105,6 +105,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 extreme_cache_size: stream.config.developer.unsafe_stream_extreme_cache_size,
 
                 agg_calls,
+                row_count_index: node.get_row_count_index() as usize,
                 storages,
                 result_table,
                 distinct_dedup_tables,

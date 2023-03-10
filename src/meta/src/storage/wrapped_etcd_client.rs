@@ -15,8 +15,9 @@
 use std::sync::Arc;
 
 use etcd_client::{
-    ConnectOptions, DeleteOptions, DeleteResponse, GetOptions, GetResponse, PutOptions,
-    PutResponse, Txn, TxnResponse,
+    CampaignResponse, ConnectOptions, DeleteOptions, DeleteResponse, GetOptions, GetResponse,
+    LeaderResponse, LeaseGrantOptions, LeaseGrantResponse, LeaseKeepAliveStream, LeaseKeeper,
+    ObserveStream, PutOptions, PutResponse, Txn, TxnResponse,
 };
 use tokio::sync::RwLock;
 
@@ -25,66 +26,6 @@ use tokio::sync::RwLock;
 pub enum WrappedEtcdClient {
     Raw(etcd_client::Client),
     EnableRefresh(EtcdRefreshClient),
-}
-
-impl WrappedEtcdClient {
-    pub async fn connect(
-        endpoints: Vec<String>,
-        options: Option<ConnectOptions>,
-        auth_enabled: bool,
-    ) -> Result<Self> {
-        let client = etcd_client::Client::connect(&endpoints, options.clone()).await?;
-        if auth_enabled {
-            Ok(Self::EnableRefresh(EtcdRefreshClient {
-                inner: Arc::new(RwLock::new(ClientWithVersion::new(client, 0))),
-                endpoints,
-                options,
-            }))
-        } else {
-            Ok(Self::Raw(client))
-        }
-    }
-
-    pub async fn get(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        opts: Option<GetOptions>,
-    ) -> Result<GetResponse> {
-        match self {
-            Self::Raw(client) => client.kv_client().get(key, opts).await,
-            Self::EnableRefresh(client) => client.get(key, opts).await,
-        }
-    }
-
-    pub async fn put(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        value: impl Into<Vec<u8>> + Clone,
-        opts: Option<PutOptions>,
-    ) -> Result<PutResponse> {
-        match self {
-            Self::Raw(client) => client.kv_client().put(key, value, opts).await,
-            Self::EnableRefresh(client) => client.put(key, value, opts).await,
-        }
-    }
-
-    pub async fn delete(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        opts: Option<DeleteOptions>,
-    ) -> Result<DeleteResponse> {
-        match self {
-            Self::Raw(client) => client.kv_client().delete(key, opts).await,
-            Self::EnableRefresh(client) => client.delete(key, opts).await,
-        }
-    }
-
-    pub async fn txn(&self, txn: Txn) -> Result<TxnResponse> {
-        match self {
-            Self::Raw(client) => client.kv_client().txn(txn).await,
-            Self::EnableRefresh(client) => client.txn(txn).await,
-        }
-    }
 }
 
 struct ClientWithVersion {
@@ -147,74 +88,98 @@ impl EtcdRefreshClient {
             _ => false,
         }
     }
+}
 
-    #[inline]
-    pub async fn get(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        options: Option<GetOptions>,
-    ) -> Result<GetResponse> {
-        let (resp, version) = {
-            let inner = self.inner.read().await;
-            (
-                inner.client.kv_client().get(key, options).await,
-                inner.version,
-            )
-        };
-        if let Err(err) = &resp && Self::should_refresh(err) {
-            self.try_refresh_conn(version).await?;
+macro_rules! impl_etcd_client_command_proxy {
+    ($func:ident, $client:ident, ($($arg:ident : $sig:ty),+), $result:ty) => {
+        impl WrappedEtcdClient {
+            pub async fn $func(
+                &self,
+                $($arg:$sig),+
+            ) -> Result<$result> {
+                match self {
+                    Self::Raw(client) => client.$client().$func($($arg),+).await,
+                    Self::EnableRefresh(client) => client.$func($($arg),+).await,
+                }
+            }
         }
-        resp
+
+
+        impl EtcdRefreshClient {
+            #[inline]
+            pub async fn $func(
+                &self,
+                $($arg:$sig),+
+            ) -> Result<$result> {
+                let (resp, version) = {
+                    let inner = self.inner.read().await;
+                    (
+                        inner.client.$client().$func($($arg),+).await,
+                        inner.version,
+                    )
+                };
+
+                match resp {
+                    Err(err) if Self::should_refresh(&err) => {
+                        self.try_refresh_conn(version).await?;
+                        Err(err)
+                    }
+                    _ => resp,
+                }
+            }
+        }
     }
+}
 
-    #[inline]
-    pub async fn put(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        value: impl Into<Vec<u8>> + Clone,
-        options: Option<PutOptions>,
-    ) -> Result<PutResponse> {
-        let (resp, version) = {
-            let inner = self.inner.read().await;
-            (
-                inner.client.kv_client().put(key, value, options).await,
-                inner.version,
-            )
-        };
-        if let Err(err) = &resp && Self::should_refresh(err) {
-            self.try_refresh_conn(version).await?;
-        }
-        resp
-    }
+impl_etcd_client_command_proxy!(get, kv_client, (key: impl Into<Vec<u8>> + Clone, opts: Option<GetOptions>), GetResponse);
+impl_etcd_client_command_proxy!(put, kv_client, (key: impl Into<Vec<u8>> + Clone, value: impl Into<Vec<u8>> + Clone, opts: Option<PutOptions>), PutResponse);
+impl_etcd_client_command_proxy!(delete, kv_client, (key: impl Into<Vec<u8>> + Clone, opts: Option<DeleteOptions>), DeleteResponse);
+impl_etcd_client_command_proxy!(txn, kv_client, (txn: Txn), TxnResponse);
+impl_etcd_client_command_proxy!(
+    grant,
+    lease_client,
+    (ttl: i64, options: Option<LeaseGrantOptions>),
+    LeaseGrantResponse
+);
+impl_etcd_client_command_proxy!(
+    keep_alive,
+    lease_client,
+    (id: i64),
+    (LeaseKeeper, LeaseKeepAliveStream)
+);
+impl_etcd_client_command_proxy!(leader, election_client, (name: impl Into<Vec<u8>> + Clone), LeaderResponse);
+impl_etcd_client_command_proxy!(
+    campaign,
+    election_client,
+    (
+        name: impl Into<Vec<u8>>,
+        value: impl Into<Vec<u8>>,
+        lease: i64
+    ),
+    CampaignResponse
+);
+impl_etcd_client_command_proxy!(
+    observe,
+    election_client,
+    (name: impl Into<Vec<u8>>),
+    ObserveStream
+);
 
-    #[inline]
-    pub async fn delete(
-        &self,
-        key: impl Into<Vec<u8>> + Clone,
-        options: Option<DeleteOptions>,
-    ) -> Result<DeleteResponse> {
-        let (resp, version) = {
-            let inner = self.inner.read().await;
-            (
-                inner.client.kv_client().delete(key, options).await,
-                inner.version,
-            )
-        };
-        if let Err(err) = &resp && Self::should_refresh(err) {
-            self.try_refresh_conn(version).await?;
+impl WrappedEtcdClient {
+    pub async fn connect(
+        endpoints: Vec<String>,
+        options: Option<ConnectOptions>,
+        auth_enabled: bool,
+    ) -> Result<Self> {
+        let client = etcd_client::Client::connect(&endpoints, options.clone()).await?;
+        if auth_enabled {
+            Ok(Self::EnableRefresh(EtcdRefreshClient {
+                inner: Arc::new(RwLock::new(ClientWithVersion::new(client, 0))),
+                endpoints,
+                options,
+            }))
+        } else {
+            Ok(Self::Raw(client))
         }
-        resp
-    }
-
-    #[inline]
-    pub async fn txn(&self, txn: Txn) -> Result<TxnResponse> {
-        let (resp, version) = {
-            let inner = self.inner.read().await;
-            (inner.client.kv_client().txn(txn).await, inner.version)
-        };
-        if let Err(err) = &resp && Self::should_refresh(err) {
-            self.try_refresh_conn(version).await?;
-        }
-        resp
     }
 }

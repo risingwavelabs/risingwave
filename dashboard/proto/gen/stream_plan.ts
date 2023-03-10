@@ -1,20 +1,11 @@
 /* eslint-disable */
-import {
-  ColumnIndex,
-  SinkType,
-  sinkTypeFromJSON,
-  sinkTypeToJSON,
-  StreamSourceInfo,
-  Table,
-  WatermarkDesc,
-} from "./catalog";
-import { Buffer } from "./common";
-import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
-import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
+import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
+import { Buffer, ColumnOrder } from "./common";
+import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
+import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
@@ -24,6 +15,47 @@ import {
 import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
+
+export const HandleConflictBehavior = {
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
+    case 1:
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
+    case 2:
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 export const ChainType = {
   CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
@@ -326,11 +358,9 @@ export interface Barrier {
 }
 
 export interface Watermark {
-  /** The watermark column's index in the stream's schema. */
-  colIdx: number;
-  /** The watermark type, used for deserialization of the watermark value. */
-  dataType:
-    | DataType
+  /** The reference to the watermark column in the stream's schema. */
+  column:
+    | InputRef
     | undefined;
   /** The watermark value, there will be no record having a greater value in the watermark column. */
   val: Datum | undefined;
@@ -352,7 +382,7 @@ export interface ActorMapping {
 export interface StreamSource {
   sourceId: number;
   stateTable: Table | undefined;
-  rowIdIndex: ColumnIndex | undefined;
+  rowIdIndex?: number | undefined;
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
@@ -426,8 +456,8 @@ export interface MaterializeNode {
   table:
     | Table
     | undefined;
-  /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  /** Used to handle pk conflict, open it when upstream executor is source executor. */
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 export interface AggCallState {
@@ -470,6 +500,7 @@ export interface SimpleAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface SimpleAggNode_DistinctDedupTablesEntry {
@@ -490,6 +521,7 @@ export interface HashAggNode {
    */
   isAppendOnly: boolean;
   distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
 }
 
 export interface HashAggNode_DistinctDedupTablesEntry {
@@ -605,10 +637,12 @@ export interface DeltaIndexJoinNode {
 }
 
 export interface HopWindowNode {
-  timeCol: InputRefExpr | undefined;
+  timeCol: number;
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
+  windowStartExprs: ExprNode[];
+  windowEndExprs: ExprNode[];
 }
 
 export interface MergeNode {
@@ -698,7 +732,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -1606,31 +1640,28 @@ export const Barrier = {
 };
 
 function createBaseWatermark(): Watermark {
-  return { colIdx: 0, dataType: undefined, val: undefined };
+  return { column: undefined, val: undefined };
 }
 
 export const Watermark = {
   fromJSON(object: any): Watermark {
     return {
-      colIdx: isSet(object.colIdx) ? Number(object.colIdx) : 0,
-      dataType: isSet(object.dataType) ? DataType.fromJSON(object.dataType) : undefined,
+      column: isSet(object.column) ? InputRef.fromJSON(object.column) : undefined,
       val: isSet(object.val) ? Datum.fromJSON(object.val) : undefined,
     };
   },
 
   toJSON(message: Watermark): unknown {
     const obj: any = {};
-    message.colIdx !== undefined && (obj.colIdx = Math.round(message.colIdx));
-    message.dataType !== undefined && (obj.dataType = message.dataType ? DataType.toJSON(message.dataType) : undefined);
+    message.column !== undefined && (obj.column = message.column ? InputRef.toJSON(message.column) : undefined);
     message.val !== undefined && (obj.val = message.val ? Datum.toJSON(message.val) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<Watermark>, I>>(object: I): Watermark {
     const message = createBaseWatermark();
-    message.colIdx = object.colIdx ?? 0;
-    message.dataType = (object.dataType !== undefined && object.dataType !== null)
-      ? DataType.fromPartial(object.dataType)
+    message.column = (object.column !== undefined && object.column !== null)
+      ? InputRef.fromPartial(object.column)
       : undefined;
     message.val = (object.val !== undefined && object.val !== null) ? Datum.fromPartial(object.val) : undefined;
     return message;
@@ -1751,7 +1782,7 @@ export const StreamSource = {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
       pkColumnIds: Array.isArray(object?.pkColumnIds) ? object.pkColumnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -1770,8 +1801,7 @@ export const StreamSource = {
     message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
     message.stateTable !== undefined &&
       (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.columns) {
       obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
@@ -1799,9 +1829,7 @@ export const StreamSource = {
     message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
       ? Table.fromPartial(object.stateTable)
       : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.pkColumnIds = object.pkColumnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -2084,7 +2112,12 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
+  return {
+    tableId: 0,
+    columnOrders: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const MaterializeNode = {
@@ -2095,7 +2128,9 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -2108,7 +2143,8 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -2117,7 +2153,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
@@ -2287,6 +2323,7 @@ function createBaseSimpleAggNode(): SimpleAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2306,6 +2343,7 @@ export const SimpleAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2335,6 +2373,7 @@ export const SimpleAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2356,6 +2395,7 @@ export const SimpleAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };
@@ -2397,6 +2437,7 @@ function createBaseHashAggNode(): HashAggNode {
     resultTable: undefined,
     isAppendOnly: false,
     distinctDedupTables: {},
+    rowCountIndex: 0,
   };
 }
 
@@ -2416,6 +2457,7 @@ export const HashAggNode = {
           return acc;
         }, {})
         : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2445,6 +2487,7 @@ export const HashAggNode = {
         obj.distinctDedupTables[k] = Table.toJSON(v);
       });
     }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2466,6 +2509,7 @@ export const HashAggNode = {
       },
       {},
     );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
     return message;
   },
 };
@@ -2825,22 +2869,35 @@ export const DeltaIndexJoinNode = {
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: undefined, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return {
+    timeCol: 0,
+    windowSlide: undefined,
+    windowSize: undefined,
+    outputIndices: [],
+    windowStartExprs: [],
+    windowEndExprs: [],
+  };
 }
 
 export const HopWindowNode = {
   fromJSON(object: any): HopWindowNode {
     return {
-      timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
+      timeCol: isSet(object.timeCol) ? Number(object.timeCol) : 0,
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      windowStartExprs: Array.isArray(object?.windowStartExprs)
+        ? object.windowStartExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
+      windowEndExprs: Array.isArray(object?.windowEndExprs)
+        ? object.windowEndExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: HopWindowNode): unknown {
     const obj: any = {};
-    message.timeCol !== undefined && (obj.timeCol = message.timeCol ? InputRefExpr.toJSON(message.timeCol) : undefined);
+    message.timeCol !== undefined && (obj.timeCol = Math.round(message.timeCol));
     message.windowSlide !== undefined &&
       (obj.windowSlide = message.windowSlide ? IntervalUnit.toJSON(message.windowSlide) : undefined);
     message.windowSize !== undefined &&
@@ -2850,14 +2907,22 @@ export const HopWindowNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.windowStartExprs) {
+      obj.windowStartExprs = message.windowStartExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowStartExprs = [];
+    }
+    if (message.windowEndExprs) {
+      obj.windowEndExprs = message.windowEndExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowEndExprs = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<HopWindowNode>, I>>(object: I): HopWindowNode {
     const message = createBaseHopWindowNode();
-    message.timeCol = (object.timeCol !== undefined && object.timeCol !== null)
-      ? InputRefExpr.fromPartial(object.timeCol)
-      : undefined;
+    message.timeCol = object.timeCol ?? 0;
     message.windowSlide = (object.windowSlide !== undefined && object.windowSlide !== null)
       ? IntervalUnit.fromPartial(object.windowSlide)
       : undefined;
@@ -2865,6 +2930,8 @@ export const HopWindowNode = {
       ? IntervalUnit.fromPartial(object.windowSize)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.windowStartExprs = object.windowStartExprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.windowEndExprs = object.windowEndExprs?.map((e) => ExprNode.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3079,7 +3146,12 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
+  return {
+    tableInfo: undefined,
+    distributionKey: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const ArrangeNode = {
@@ -3088,7 +3160,9 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -3102,7 +3176,8 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -3113,7 +3188,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };

@@ -18,7 +18,7 @@ use std::future::Future;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -262,20 +262,14 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let (barrier, is_watermark) = match msg {
-                    Message::Chunk(_) => (None, false),
-                    Message::Barrier(ref barrier) => (Some(barrier.clone()), false),
-                    Message::Watermark(_) => (None, true),
+                let (barrier, message) = match msg {
+                    Message::Chunk(_) => (None, "dispatch_chunk"),
+                    Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
+                    Message::Watermark(_) => (None, "dispatch_watermark"),
                 };
                 self.inner
                     .dispatch(msg)
-                    .verbose_stack_trace(if barrier.is_some() {
-                        "dispatch_barrier"
-                    } else if is_watermark {
-                        "dispatch_watermark"
-                    } else {
-                        "dispatch_chunk"
-                    })
+                    .verbose_instrument_await(message)
                     .await?;
                 if let Some(barrier) = barrier {
                     yield barrier;

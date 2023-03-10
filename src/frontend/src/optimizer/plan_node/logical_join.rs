@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
+use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
@@ -28,7 +28,9 @@ use super::{
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{
+    push_down_into_join, push_down_join_condition, GenericPlanRef,
+};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
@@ -91,6 +93,10 @@ impl fmt::Display for LogicalJoin {
     }
 }
 
+pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
+    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
+}
+
 impl LogicalJoin {
     pub(crate) fn new(left: PlanRef, right: PlanRef, join_type: JoinType, on: Condition) -> Self {
         let core = generic::Join::with_full_output(left, right, join_type, on);
@@ -104,6 +110,8 @@ impl LogicalJoin {
         on: Condition,
         output_indices: Vec<usize>,
     ) -> Self {
+        // We cannot deal with repeated output indices in join
+        debug_assert!(!has_repeated_element(&output_indices));
         let core = generic::Join {
             left,
             right,
@@ -324,41 +332,6 @@ impl LogicalJoin {
         predicate.conjunctions = others.conjunctions;
 
         (left, right, on)
-    }
-
-    pub fn can_push_left_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
-        )
-    }
-
-    pub fn can_push_right_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
-        )
-    }
-
-    pub fn can_push_on_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
-        )
-    }
-
-    pub fn can_push_left_from_on(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
-        )
-    }
-
-    pub fn can_push_right_from_on(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
-        )
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join
@@ -700,18 +673,18 @@ impl PlanTreeNodeBinary for LogicalJoin {
 
         let old_o2i = self.o2i_col_mapping();
 
-        let old_i2l = old_o2i
+        let old_o2l = old_o2i
             .composite(&self.core.i2l_col_mapping())
             .composite(&left_col_change);
-        let old_i2r = old_o2i
+        let old_o2r = old_o2i
             .composite(&self.core.i2r_col_mapping())
             .composite(&right_col_change);
-        let new_l2i = join.core.l2i_col_mapping().composite(&new_i2o);
-        let new_r2i = join.core.r2i_col_mapping().composite(&new_i2o);
+        let new_l2o = join.core.l2i_col_mapping().composite(&new_i2o);
+        let new_r2o = join.core.r2i_col_mapping().composite(&new_i2o);
 
-        let out_col_change = old_i2l
-            .composite(&new_l2i)
-            .union(&old_i2r.composite(&new_r2i));
+        let out_col_change = old_o2l
+            .composite(&new_l2o)
+            .union(&old_o2r.composite(&new_r2o));
         (join, out_col_change)
     }
 }
@@ -915,28 +888,12 @@ impl PredicatePushdown for LogicalJoin {
 
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
-            &mut predicate,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_filter(join_type),
-            LogicalJoin::can_push_right_from_filter(join_type),
-            LogicalJoin::can_push_on_from_filter(join_type),
-        );
+        let (left_from_filter, right_from_filter, on) =
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
-            &mut new_on,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_on(join_type),
-            LogicalJoin::can_push_right_from_on(join_type),
-            false,
-        );
-        assert!(
-            on.always_true(),
-            "On-clause should not be pushed to on-clause."
-        );
+        let (left_from_on, right_from_on) =
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
@@ -1309,45 +1266,56 @@ impl ToStream for LogicalJoin {
             join.internal_column_num(),
         );
 
-        let l2i = join.core.l2i_col_mapping().composite(&mapping);
-        let r2i = join.core.r2i_col_mapping().composite(&mapping);
+        let l2o = join.core.l2i_col_mapping().composite(&mapping);
+        let r2o = join.core.r2i_col_mapping().composite(&mapping);
 
         // Add missing pk indices to the logical join
-        let left_to_add = left
+        let mut left_to_add = left
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| l2i.try_map(*i).is_none());
+            .filter(|i| l2o.try_map(*i).is_none())
+            .collect_vec();
 
-        let right_to_add = right
+        let mut right_to_add = right
             .logical_pk()
             .iter()
             .cloned()
-            .filter(|i| r2i.try_map(*i).is_none())
-            .map(|i| i + left_len);
+            .filter(|i| r2o.try_map(*i).is_none())
+            .map(|i| i + left_len)
+            .collect_vec();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
         let right_len = right.schema().len();
         let eq_predicate = EqJoinPredicate::create(left_len, right_len, join.on().clone());
 
-        let left_to_add = left_to_add
-            .chain(
-                eq_predicate
-                    .left_eq_indexes()
-                    .into_iter()
-                    .filter(|i| l2i.try_map(*i).is_none()),
-            )
-            .unique();
-        let right_to_add = right_to_add
-            .chain(
-                eq_predicate
-                    .right_eq_indexes()
-                    .into_iter()
-                    .filter(|i| r2i.try_map(*i).is_none())
-                    .map(|i| i + left_len),
-            )
-            .unique();
+        let either_or_both = self.core.add_which_join_key_to_pk();
+
+        for (lk, rk) in eq_predicate.eq_indexes() {
+            match either_or_both {
+                EitherOrBoth::Left(_) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                }
+                EitherOrBoth::Right(_) => {
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+                EitherOrBoth::Both(_, _) => {
+                    if l2o.try_map(lk).is_none() {
+                        left_to_add.push(lk);
+                    }
+                    if r2o.try_map(rk).is_none() {
+                        right_to_add.push(rk + left_len)
+                    }
+                }
+            };
+        }
+        let left_to_add = left_to_add.into_iter().unique();
+        let right_to_add = right_to_add.into_iter().unique();
         // NOTE(st1page) over
 
         let mut new_output_indices = join.output_indices().clone();

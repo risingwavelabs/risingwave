@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.ExprNode", "#[derive(Eq, Hash)]")
         .type_attribute("data.DataType", "#[derive(Eq, Hash)]")
         .type_attribute("expr.ExprNode.rex_node", "#[derive(Eq, Hash)]")
-        .type_attribute("expr.InputRefExpr", "#[derive(Eq, Hash)]")
+        .type_attribute("expr.InputRef", "#[derive(Eq, Hash)]")
         .type_attribute("data.Datum", "#[derive(Eq, Hash)]")
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")

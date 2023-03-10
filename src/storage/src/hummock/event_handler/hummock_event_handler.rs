@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
@@ -124,7 +124,7 @@ async fn flush_imms(
             });
     }
     compact(compactor_context, payload, task_info.compaction_group_index)
-        .verbose_stack_trace("shared_buffer_compact")
+        .verbose_instrument_await("shared_buffer_compact")
         .await
 }
 
