@@ -662,7 +662,7 @@ impl Display for IntervalUnit {
         let months = self.months % 12;
         let days = self.days;
         let mut space = false;
-        let mut write = |arg: std::fmt::Arguments<'_>| {
+        let mut write = |arg: std::fmt::Arguments<'_>| -> std::result::Result<(), std::fmt::Error> {
             if space {
                 write!(f, " ")?;
             }
