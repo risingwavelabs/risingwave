@@ -566,7 +566,7 @@ fn validate_compatibility(
         if !props.contains_key("slot.name") {
             // Build a random slot name with UUID
             // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-            let uuid = uuid::Uuid::new_v4().to_string().replace("-", "");
+            let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
             props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
         }
         if !props.contains_key("schema.name") {
