@@ -25,7 +25,7 @@ steps:
   # - https://buildkite.com/docs/pipelines/conditionals
   - label: ":pipeline: New workflow tests"
     command: |
-      MATCHES="ci/workflows/main-cron.yml|ci/workflows/main.yml"
+      MATCHES="ci/workflows/main-cron.yml\|ci/workflows/main.yml"
       CHANGED=$(git diff --name-only origin/main | grep "$MATCHES")
       if [[ -n "$CHANGED" ]]; then
         echo "Changes to main-cron.yml and main.yml detected, testing the new workflows."
