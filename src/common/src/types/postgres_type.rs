@@ -22,8 +22,8 @@ impl DataType {
             DataType::Boolean => 1,
             DataType::Int16 => 2,
             DataType::Int32 | DataType::Float32 | DataType::Date => 4,
-            DataType::Serial => todo!(),
             DataType::Int64
+            | DataType::Serial
             | DataType::Float64
             | DataType::Timestamp
             | DataType::Timestamptz
@@ -115,7 +115,7 @@ impl DataType {
             DataType::Int16 => 21,
             DataType::Int32 => 23,
             DataType::Int64 => 20,
-            DataType::Serial => todo!("SERIAL"),
+            DataType::Serial => 20,
             DataType::Float32 => 700,
             DataType::Float64 => 701,
             DataType::Decimal => 1700,
@@ -135,7 +135,7 @@ impl DataType {
                 DataType::Int16 => 1005,
                 DataType::Int32 => 1007,
                 DataType::Int64 => 1016,
-                DataType::Serial => todo!("SERIAL"),
+                DataType::Serial => 1016,
                 DataType::Float32 => 1021,
                 DataType::Float64 => 1022,
                 DataType::Decimal => 1231,
