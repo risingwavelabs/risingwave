@@ -216,7 +216,7 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry  
   - label: "S3 source check on AWS (csv parser)"
-    command: "ci/scripts/s3-source-test.sh -p ci-dev -s run_csv"
+    command: "ci/scripts/s3-source-test.sh -p ci-release -s run_csv"
     depends_on: build
     plugins:
       - seek-oss/aws-sm#v2.3.1:
