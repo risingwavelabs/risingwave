@@ -70,7 +70,7 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         },
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
-            BorrowedValue::String(_) => str_to_time(ensure_str!(v, "time"))?.into(),
+            BorrowedValue::String(s) => str_to_time(s)?.into(),
             BorrowedValue::Static(_) => NaiveTimeWrapper::with_milli(
                 ensure_i64!(v, i64)
                     .try_into()

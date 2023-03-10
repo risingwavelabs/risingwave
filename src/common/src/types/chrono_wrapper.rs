@@ -188,7 +188,7 @@ impl NaiveDateWrapper {
         Ok(NaiveDateWrapper::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?
-                .checked_add_days(Days::new(UNIX_EPOCH_DAYS.try_into().unwrap()))
+                .checked_add_days(Days::new(UNIX_EPOCH_DAYS as u64))
                 .ok_or_else(|| InvalidParamsError::date(days))?,
         ))
     }
