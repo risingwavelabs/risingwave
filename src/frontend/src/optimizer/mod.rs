@@ -165,7 +165,8 @@ impl PlanRoot {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_string(),
                 "please use temporal join in streaming queries".to_string(),
-            ).into());
+            )
+            .into());
         }
 
         // Convert to physical plan node
