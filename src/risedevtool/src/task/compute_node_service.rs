@@ -67,7 +67,7 @@ impl ComputeNodeService {
             .arg("--total-memory-bytes")
             .arg(&config.total_memory_bytes.to_string())
             .arg("--memory-control-policy")
-            .arg(&config.memory_control_policy.to_string())
+            .arg(&config.memory_control_policy)
             .arg("--streaming-memory-proportion")
             .arg(&config.streaming_memory_proportion.to_string());
 

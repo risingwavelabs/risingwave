@@ -104,7 +104,7 @@ pub struct ComputeNodeOpts {
     pub memory_control_policy: String,
 
     /// The proportion of streaming memory to all available memory for computing. Only works when
-    /// `memory_control_policy` is "streaming-batch". Ignored otherwise. See
+    /// `memory_control_policy` is set to "streaming-batch". Ignored otherwise. See
     /// [`FixedProportionPolicy`] for more details.
     #[clap(long, env = "RW_STREAMING_MEMORY_PROPORTION", default_value_t = 0.7)]
     pub streaming_memory_proportion: f64,
