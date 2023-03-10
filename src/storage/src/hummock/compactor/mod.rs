@@ -37,7 +37,6 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
-use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -50,7 +49,6 @@ use risingwave_pb::hummock::{
 };
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
-use sysinfo::{CpuExt, CpuRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -340,7 +338,8 @@ impl Compactor {
         let stream_retry_interval = Duration::from_secs(60);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
-        let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
+        let mut process_cpu_info = process::ProcessCpuInfo::new().unwrap();
+        let cpu_core_num = process_cpu_info.cpu_num() as u32;
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
@@ -380,9 +379,6 @@ impl Compactor {
 
                 let executor = compactor_context.compaction_executor.clone();
                 let mut last_workload = CompactorWorkload::default();
-                let mut sys = System::new_with_specifics(
-                    RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
-                );
 
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
@@ -405,10 +401,15 @@ impl Compactor {
                         }
 
                         _ = workload_collect_interval.tick() => {
-                            sys.refresh_cpu();
-                            let cpu = sys.global_cpu_info().cpu_usage() as u32;
+                            let cpu = match process_cpu_info.cpu_avg() {
+                                Ok(v) => (v * 100.0) as u32,
+                                Err(e) => {
+                                    tracing::warn!("Failed to collect process cpu. {e:?}");
+                                    0
+                                }
+                            };
 
-                            tracing::info!("compactor cpu {cpu}");
+                            tracing::info!("compactor cpu usage {cpu}");
                             let workload = CompactorWorkload {
                                 cpu,
                             };
@@ -788,5 +789,85 @@ impl Compactor {
         let ssts = sst_builder.finish().await?;
 
         Ok((ssts, compaction_statistics))
+    }
+}
+
+mod process {
+    use std::io::{Error, ErrorKind, Result};
+
+    use minstant::Instant;
+    #[cfg(target_os = "linux")]
+    use risingwave_common::monitor::CLOCK_TICK;
+    use risingwave_common::util::resource_util;
+
+    pub struct ProcessCpuInfo {
+        sched_time: f64,
+        num_cpus: usize,
+        last_cpu_collect_time: Instant,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl ProcessCpuInfo {
+        fn sched_time() -> Result<f64> {
+            let p = procfs::process::Process::myself()
+                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+            Ok(((p.stat.utime + p.stat.stime) as f64) / (*CLOCK_TICK as f64))
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    impl ProcessCpuInfo {
+        fn sched_time() -> Result<f64> {
+            let pid = unsafe { libc::getpid() };
+            let clock_tick = unsafe {
+                let mut info = mach::mach_time::mach_timebase_info::default();
+                let errno = mach::mach_time::mach_timebase_info(&mut info as *mut _);
+                if errno != 0 {
+                    1_f64
+                } else {
+                    (info.numer / info.denom) as f64
+                }
+            };
+            let proc_info = darwin_libproc::task_info(pid)
+                .map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
+
+            let total =
+                (proc_info.pti_total_user + proc_info.pti_total_system) as f64 * clock_tick / 1e9;
+
+            Ok(total)
+        }
+    }
+
+    impl ProcessCpuInfo {
+        pub fn new() -> Result<Self> {
+            Ok(Self {
+                sched_time: Self::sched_time()?,
+                num_cpus: resource_util::cpu::total_cpu_available() as usize,
+                last_cpu_collect_time: Instant::now(),
+            })
+        }
+
+        pub fn cpu_avg(&mut self) -> Result<f64> {
+            self.cpu_total().map(|v| v / self.num_cpus as f64)
+        }
+
+        pub fn cpu_total(&mut self) -> Result<f64> {
+            // The number of seconds this process has been scheduled since last measurement.
+            let sched_time_total = Self::sched_time()?;
+            let sched_time_delta = sched_time_total - self.sched_time;
+            assert!(sched_time_delta >= 0.0, "time went backwards");
+
+            let now = Instant::now();
+            let elapsed = now - self.last_cpu_collect_time;
+
+            self.sched_time = sched_time_total;
+            self.last_cpu_collect_time = now;
+
+            Ok(sched_time_delta / elapsed.as_secs_f64())
+        }
+
+        pub fn cpu_num(&self) -> usize {
+            self.num_cpus
+        }
     }
 }

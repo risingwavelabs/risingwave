@@ -48,7 +48,6 @@ scopeguard = "1"
 sled = "0.34.7"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
-sysinfo = { version = "0.26", default-features = false }
 tempfile = "3"
 thiserror = "1"
 # tikv-client = { git = "https://github.com/tikv/client-rust", rev = "5714b2", optional = true }
@@ -68,7 +67,14 @@ xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
 
 [target.'cfg(target_os = "linux")'.dependencies]
+procfs = { version = "0.12", default-features = false }
+libc = "0.2"
 nix = { version = "0.25", features = ["fs", "mman"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+darwin-libproc = { git = "https://github.com/risingwavelabs/darwin-libproc.git", rev = "a502be24bd0971463f5bcbfe035a248d8ba503b7" }
+libc = "0.2.72"
+mach = "0.3.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
