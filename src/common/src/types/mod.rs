@@ -1390,7 +1390,7 @@ mod tests {
                 ),
                 DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
-                    ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
+                    ScalarImpl::Interval(IntervalUnit::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
                 DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
