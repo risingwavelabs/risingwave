@@ -190,7 +190,7 @@ impl TaskOutput {
     /// Return whether the data stream is finished.
     async fn take_data_inner(
         &mut self,
-        writer: &mut dyn ExchangeWriter,
+        writer: &mut impl ExchangeWriter,
         at_most_num: Option<usize>,
     ) -> Result<bool> {
         let mut cnt: usize = 0;
@@ -212,7 +212,7 @@ impl TaskOutput {
                     let resp = GetDataResponse {
                         record_batch: Some(pb),
                     };
-                    writer.write(resp).await?;
+                    writer.write(Ok(resp)).await?;
                 }
                 // Reached EOF
                 Ok(None) => {
@@ -220,7 +220,7 @@ impl TaskOutput {
                 }
                 // Error happened
                 Err(e) => {
-                    return Err(to_rw_error(e));
+                    writer.write(Err(Status::from(&*e))).await?;
                 }
             }
             cnt += 1;
@@ -232,14 +232,14 @@ impl TaskOutput {
     /// Return whether the data stream is finished.
     pub async fn take_data_with_num(
         &mut self,
-        writer: &mut dyn ExchangeWriter,
+        writer: &mut impl ExchangeWriter,
         num: usize,
     ) -> Result<bool> {
         self.take_data_inner(writer, Some(num)).await
     }
 
     /// Take all data and write the data in serialized format to `ExchangeWriter`.
-    pub async fn take_data(&mut self, writer: &mut dyn ExchangeWriter) -> Result<()> {
+    pub async fn take_data(&mut self, writer: &mut impl ExchangeWriter) -> Result<()> {
         let finish = self.take_data_inner(writer, None).await?;
         assert!(finish);
         Ok(())
