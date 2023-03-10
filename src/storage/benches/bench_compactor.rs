@@ -59,6 +59,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
         policy: CachePolicy::Fill,
+        fill_high_priority_cache: false,
     }
 }
 
@@ -91,6 +92,7 @@ async fn build_table(
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Fill,
+            fill_high_priority_cache: false,
         },
     );
     let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);
@@ -180,6 +182,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(iter: I, sstable_store
         stats_target_table_ids: None,
         task_type: compact_task::TaskType::Dynamic,
         split_by_table: false,
+        fill_high_priority_cache: false,
     };
     Compactor::compact_and_build_sst(
         &mut builder,

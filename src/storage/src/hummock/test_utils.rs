@@ -134,6 +134,7 @@ pub fn default_writer_opt_for_test() -> SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
         policy: CachePolicy::Disable,
+        fill_high_priority_cache: false,
     }
 }
 
@@ -206,6 +207,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
+        fill_high_priority_cache: false,
         policy,
     };
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);

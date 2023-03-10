@@ -252,13 +252,15 @@ impl SstableStore {
         } else {
             policy
         };
+        let high_priority = sst.is_high_priority();
 
         match policy {
-            CachePolicy::Fill => {
-                Ok(self
-                    .block_cache
-                    .get_or_insert_with(sst_id, block_index as u64, fetch_block))
-            }
+            CachePolicy::Fill => Ok(self.block_cache.get_or_insert_with(
+                sst_id,
+                block_index as u64,
+                high_priority,
+                fetch_block,
+            )),
             CachePolicy::NotFill => match self.block_cache.get(sst_id, block_index as u64) {
                 Some(block) => Ok(BlockResponse::Block(block)),
                 None => match self
@@ -338,13 +340,14 @@ impl SstableStore {
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
+        high_priority: bool,
         stats: &StoreLocalStatistic,
     ) -> HummockResult<(TableHolder, u64)> {
         let mut local_cache_meta_block_miss = 0;
         let sst_id = sst.id;
         let result = self
             .meta_cache
-            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {
+            .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, false, || {
                 let store = self.store.clone();
                 let meta_path = self.get_sst_data_path(sst_id);
                 local_cache_meta_block_miss += 1;
@@ -360,7 +363,8 @@ impl SstableStore {
                         .await
                         .map_err(HummockError::object_io_error)?;
                     let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let sst = Sstable::new(sst_id, meta);
+                    let mut sst = Sstable::new(sst_id, meta);
+                    sst.set_high_priority(high_priority);
                     let charge = sst.estimate_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
@@ -377,7 +381,7 @@ impl SstableStore {
         sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        self.sstable_syncable(sst, stats).await.map(
+        self.sstable_syncable(sst, false, stats).await.map(
             |(table_holder, local_cache_meta_block_miss)| {
                 stats.apply_meta_fetch(local_cache_meta_block_miss);
                 table_holder
@@ -404,16 +408,7 @@ impl SstableStore {
         let sst = Sstable::new(sst_id, meta);
         let charge = sst.estimate_size();
         self.meta_cache
-            .insert(sst_id, sst_id, charge, Box::new(sst));
-    }
-
-    pub fn insert_block_cache(
-        &self,
-        sst_id: HummockSstableId,
-        block_index: u64,
-        block: Box<Block>,
-    ) {
-        self.block_cache.insert(sst_id, block_index, block);
+            .insert(sst_id, sst_id, charge, Box::new(sst), false);
     }
 
     pub fn get_meta_memory_usage(&self) -> u64 {
@@ -487,6 +482,7 @@ pub struct SstableWriterOptions {
     pub capacity_hint: Option<usize>,
     pub tracker: Option<MemoryTracker>,
     pub policy: CachePolicy,
+    pub fill_high_priority_cache: bool,
 }
 
 pub trait SstableWriterFactory: Send + Sync {
@@ -533,6 +529,7 @@ pub struct BatchUploadWriter {
     policy: CachePolicy,
     buf: Vec<u8>,
     block_info: Vec<Block>,
+    fill_cache_priority: bool,
     tracker: Option<MemoryTracker>,
 }
 
@@ -549,6 +546,7 @@ impl BatchUploadWriter {
             buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
             block_info: Vec::new(),
             tracker: options.tracker,
+            fill_cache_priority: options.fill_high_priority_cache,
         }
     }
 }
@@ -597,6 +595,7 @@ impl SstableWriter for BatchUploadWriter {
                         self.sst_id,
                         block_idx as u64,
                         Box::new(block),
+                        self.fill_cache_priority,
                     );
                 }
             }
@@ -614,6 +613,7 @@ pub struct StreamingUploadWriter {
     sst_id: HummockSstableId,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
+    fill_high_priority_cache: bool,
     /// Data are uploaded block by block, except for the size footer.
     object_uploader: ObjectStreamingUploader,
     /// Compressed blocks to refill block or meta cache. Keep the uncompressed capacity for decode.
@@ -637,6 +637,7 @@ impl StreamingUploadWriter {
             blocks: Vec::new(),
             data_len: 0,
             tracker: options.tracker,
+            fill_high_priority_cache: options.fill_high_priority_cache,
         }
     }
 }
@@ -690,6 +691,7 @@ impl SstableWriter for StreamingUploadWriter {
                         self.sst_id,
                         block_idx as u64,
                         Box::new(block),
+                        self.fill_high_priority_cache,
                     );
                 }
             }
@@ -920,6 +922,7 @@ mod tests {
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Disable,
+            fill_high_priority_cache: false,
         };
         let info = put_sst(
             SST_ID,
@@ -950,6 +953,7 @@ mod tests {
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Disable,
+            fill_high_priority_cache: false,
         };
         let info = put_sst(
             SST_ID,

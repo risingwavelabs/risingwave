@@ -161,12 +161,14 @@ impl BlockCache {
         sst_id: HummockSstableId,
         block_idx: u64,
         block: Box<Block>,
+        high_priority: bool,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
             (sst_id, block_idx),
             Self::hash(sst_id, block_idx),
             block.capacity(),
             block,
+            high_priority,
         ))
     }
 
@@ -174,6 +176,7 @@ impl BlockCache {
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
+        high_priority: bool,
         mut fetch_block: F,
     ) -> BlockResponse
     where
@@ -182,16 +185,19 @@ impl BlockCache {
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        match self
-            .inner
-            .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
+        match self.inner.lookup_with_request_dedup::<_, HummockError, _>(
+            h,
+            key,
+            high_priority,
+            || {
                 let f = fetch_block();
                 async move {
                     let block = f.await?;
                     let len = block.capacity();
                     Ok((block, len))
                 }
-            }) {
+            },
+        ) {
             LookupResponse::Invalid => unreachable!(),
             LookupResponse::Cached(entry) => {
                 BlockResponse::Block(BlockHolder::from_cached_block(entry))

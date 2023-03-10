@@ -151,6 +151,7 @@ impl DiskObjectStore {
             .lookup_with_request_dedup::<_, ObjectError, _>(
                 hash,
                 path.clone(),
+                false,
                 move || async move {
                     let file = utils::open_file(&path, true, false, false)
                         .await?

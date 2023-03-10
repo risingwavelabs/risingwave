@@ -128,6 +128,7 @@ pub struct Sstable {
     pub id: HummockSstableId,
     pub meta: SstableMeta,
     pub filter_reader: XorFilterReader,
+    high_priority: bool,
 }
 
 impl Debug for Sstable {
@@ -147,6 +148,7 @@ impl Sstable {
             id,
             meta,
             filter_reader,
+            high_priority: false,
         }
     }
 
@@ -163,6 +165,16 @@ impl Sstable {
         };
         let uncompressed_capacity = block_meta.uncompressed_size as usize;
         (block_loc, uncompressed_capacity)
+    }
+
+    #[inline(always)]
+    pub fn set_high_priority(&mut self, high_priority: bool) {
+        self.high_priority = high_priority;
+    }
+
+    #[inline(always)]
+    pub fn is_high_priority(&self) -> bool {
+        self.high_priority
     }
 
     #[inline(always)]

@@ -277,6 +277,7 @@ impl TableBuilderFactory for LocalTableBuilderFactory {
             capacity_hint: Some(self.options.capacity),
             tracker: Some(tracker),
             policy: self.policy,
+            fill_high_priority_cache: false,
         };
         let writer = self
             .sstable_store

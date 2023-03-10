@@ -90,6 +90,7 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 watermark: task.watermark,
                 stats_target_table_ids: Some(stats_target_table_ids),
+                fill_high_priority_cache: false,
                 task_type: task.task_type(),
                 split_by_table: task.split_by_state_table,
             },
