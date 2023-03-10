@@ -30,9 +30,9 @@ steps:
         cat <<- YAML | buildkite-agent pipeline upload
         steps:
           - label: ":pipeline: Main Cron Pipeline Upload"
-            command: buildkite-agent pipeline upload ci/workflows/main-cron.yml
+            command: buildkite-agent pipeline upload ci/workflows/main-cron.yml --replace
           - label: ":pipeline: Main Pipeline Upload"
-            command: buildkite-agent pipeline upload ci/workflows/main.yml
+            command: buildkite-agent pipeline upload ci/workflows/main.yml --replace
       YAML
       fi
 
