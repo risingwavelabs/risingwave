@@ -28,10 +28,14 @@ public class Binding {
     // Return a pointer to the iterator
     static native long hummockIteratorNew(byte[] readPlan);
 
-    static native Iterator<SinkRow> streamChunkFromProtobuf(byte[] streamChunk);
-
     // return a pointer to the next row
     static native long hummockIteratorNext(long pointer);
+
+    // Return a pointer to the stream chunk iterator
+    static native long  streamChunkIteratorNew(byte[] streamChunk);
+
+    // return a pointer to the next row
+    static native long streamChunkIteratorNext(long pointer);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the iterator to release the iterator instance pointed by the pointer.
