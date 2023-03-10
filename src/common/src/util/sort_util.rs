@@ -95,14 +95,14 @@ impl OrderType {
         }
     }
 
-    // Create an descending order type, with other options set to default.
+    /// Create an descending order type, with other options set to default.
     pub const fn descending() -> Self {
         Self {
             direction: Direction::Descending,
         }
     }
 
-    // Get the order direction.
+    /// Get the order direction.
     pub fn direction(&self) -> Direction {
         self.direction
     }
