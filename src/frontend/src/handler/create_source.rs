@@ -213,11 +213,7 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_protobuf_table_schema(
-                    protobuf_schema,
-                    with_properties.clone().into_iter().collect(),
-                )
-                .await?,
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
 
             StreamSourceInfo {
