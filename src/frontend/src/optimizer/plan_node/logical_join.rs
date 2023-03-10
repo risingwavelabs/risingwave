@@ -29,7 +29,9 @@ use super::{
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, InputRef};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{
+    push_down_into_join, push_down_join_condition, GenericPlanRef,
+};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
@@ -332,41 +334,6 @@ impl LogicalJoin {
         predicate.conjunctions = others.conjunctions;
 
         (left, right, on)
-    }
-
-    pub fn can_push_left_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
-        )
-    }
-
-    pub fn can_push_right_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
-        )
-    }
-
-    pub fn can_push_on_from_filter(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
-        )
-    }
-
-    pub fn can_push_left_from_on(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
-        )
-    }
-
-    pub fn can_push_right_from_on(ty: JoinType) -> bool {
-        matches!(
-            ty,
-            JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
-        )
     }
 
     /// Try to simplify the outer join with the predicate on the top of the join
@@ -925,28 +892,12 @@ impl PredicatePushdown for LogicalJoin {
 
         predicate = predicate.rewrite_expr(&mut mapping);
 
-        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
-            &mut predicate,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_filter(join_type),
-            LogicalJoin::can_push_right_from_filter(join_type),
-            LogicalJoin::can_push_on_from_filter(join_type),
-        );
+        let (left_from_filter, right_from_filter, on) =
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
 
         let mut new_on = self.on().clone().and(on);
-        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
-            &mut new_on,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_on(join_type),
-            LogicalJoin::can_push_right_from_on(join_type),
-            false,
-        );
-        assert!(
-            on.always_true(),
-            "On-clause should not be pushed to on-clause."
-        );
+        let (left_from_on, right_from_on) =
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);
