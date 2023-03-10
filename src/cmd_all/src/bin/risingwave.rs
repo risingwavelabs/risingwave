@@ -128,7 +128,7 @@ fn main() -> Result<()> {
             Box::new(move |_: Vec<String>| {
                 let settings = risingwave_rt::LoggerSettings::new()
                     .enable_tokio_console(false)
-                    .with_target("risingwave_storage", Level::INFO);
+                    .with_target("risingwave_storage", Level::WARN);
                 risingwave_rt::init_risingwave_logger(settings);
 
                 risingwave_rt::main_okk(playground())

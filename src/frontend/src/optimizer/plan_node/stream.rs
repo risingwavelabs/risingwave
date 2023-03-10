@@ -296,6 +296,8 @@ impl HashJoin {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
+    window_start_exprs: Vec<ExprImpl>,
+    window_end_exprs: Vec<ExprImpl>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HopWindow, core, input);
 
@@ -497,7 +499,7 @@ pub fn to_stream_prost_body(
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
-                    arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                     column_descs: left_table
                         .core
                         .column_descs()
@@ -507,7 +509,7 @@ pub fn to_stream_prost_body(
                     table_desc: Some(left_table_desc.to_protobuf()),
                 }),
                 right_info: Some(ArrangementInfo {
-                    arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                     column_descs: right_table
                         .core
                         .column_descs()
@@ -625,12 +627,26 @@ pub fn to_stream_prost_body(
             unreachable!();
         }
         Node::HopWindow(me) => {
+            let window_start_exprs = me
+                .window_start_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect();
+            let window_end_exprs = me
+                .window_end_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect();
             let me = &me.core;
             ProstNode::HopWindow(HopWindowNode {
                 time_col: me.time_col.index() as _,
                 window_slide: Some(me.window_slide.into()),
                 window_size: Some(me.window_size.into()),
                 output_indices: me.output_indices.iter().map(|&x| x as u32).collect(),
+                window_start_exprs,
+                window_end_exprs,
             })
         }
         Node::LocalSimpleAgg(me) => {

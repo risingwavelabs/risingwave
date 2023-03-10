@@ -198,7 +198,7 @@ impl StreamNode for StreamDeltaJoin {
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: left_table
                     .column_descs()
@@ -209,7 +209,7 @@ impl StreamNode for StreamDeltaJoin {
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: right_table
                     .column_descs()

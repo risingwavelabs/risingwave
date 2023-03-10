@@ -20,6 +20,7 @@ use std::ptr;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
 
@@ -458,6 +459,15 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     pub fn encoded_len(&self) -> usize {
         self.table_key.as_ref().len() + TABLE_PREFIX_LEN
     }
+
+    pub fn get_vnode_id(&self) -> usize {
+        VirtualNode::from_be_bytes(
+            self.table_key.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        )
+        .to_index()
+    }
 }
 
 impl<'a> UserKey<&'a [u8]> {
@@ -740,6 +750,14 @@ mod tests {
         let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
+        let mut table_key = vec![1];
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 2;
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 129;
+        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
     }
 
     #[test]

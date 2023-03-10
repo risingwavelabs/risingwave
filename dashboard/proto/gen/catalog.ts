@@ -1,14 +1,8 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 import { ExprNode } from "./expr";
-import {
-  ColumnCatalog,
-  ColumnOrder,
-  Field,
-  RowFormatType,
-  rowFormatTypeFromJSON,
-  rowFormatTypeToJSON,
-} from "./plan_common";
+import { ColumnCatalog, Field, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "catalog";
 
