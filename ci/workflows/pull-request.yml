@@ -20,13 +20,23 @@ auto-retry: &auto-retry
       limit: 2
 
 steps:
-  # Docs: https://buildkite.com/docs/agent/v3/cli-pipeline
-  - label: ":pipeline: Pipeline upload"
-    command: buildkite-agent pipeline upload ci/workflows/main-cron.yml
-
-  # Docs: https://buildkite.com/docs/agent/v3/cli-pipeline
-  - label: ":pipeline: Pipeline upload"
-    command: buildkite-agent pipeline upload ci/workflows/main.yml
+  # Docs:
+  # - https://buildkite.com/docs/agent/v3/cli-pipeline
+  # - https://buildkite.com/docs/pipelines/conditionals
+  - label: ":pipeline: New workflow tests"
+    command: |
+      MATCHES="ci/workflows/main-cron.yml|ci/workflows/main.yml"
+      CHANGED=$(git diff --name-only origin/main | grep "$MATCHES")
+      if [[ -n "$CHANGED" ]]; then
+        echo "Changes to main-cron.yml and main.yml detected, testing the new workflows."
+        cat <<- YAML | buildkite-agent pipeline upload
+        steps:
+          - label: ":pipeline: Main Cron Pipeline Upload"
+            command: buildkite-agent pipeline upload ci/workflows/main-cron.yml
+          - label: ":pipeline: Main Pipeline Upload"
+            command: buildkite-agent pipeline upload ci/workflows/main.yml
+      YAML
+      fi
 
   - label: "check ci image rebuild"
     plugins:
