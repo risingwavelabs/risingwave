@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
 
 use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::ExprRewriter;
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::stream::StreamPlanRef;
@@ -47,7 +47,6 @@ impl StreamTemporalJoin {
             logical.join_type() == JoinType::Inner || logical.join_type() == JoinType::LeftOuter
         );
         assert!(logical.left().append_only());
-        assert!(!eq_join_predicate.has_non_eq());
         assert!(logical.right().logical_pk() == eq_join_predicate.right_eq_indexes());
 
         let l2o = logical
@@ -186,6 +185,11 @@ impl StreamNode for StreamTemporalJoin {
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
+            condition: self
+                .eq_join_predicate
+                .other_cond()
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto()),
             output_indices: self
                 .logical
                 .output_indices()
@@ -193,6 +197,12 @@ impl StreamNode for StreamTemporalJoin {
                 .map(|&x| x as u32)
                 .collect(),
             table_desc: Some(scan.logical().table_desc().to_protobuf()),
+            table_output_indices: scan
+                .logical()
+                .output_column_indices()
+                .iter()
+                .map(|&i| i as _)
+                .collect(),
         })
     }
 }

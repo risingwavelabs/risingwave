@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::plan_common::{JoinType as JoinTypeProto, StorageTableDesc};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -122,6 +123,18 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .collect_vec();
 
         let null_safe = node.get_null_safe().to_vec();
+
+        let condition = match node.get_condition() {
+            Ok(cond_prost) => Some(build_from_prost(cond_prost)?),
+            Err(_) => None,
+        };
+
+        let table_output_indices = node
+            .get_table_output_indices()
+            .iter()
+            .map(|&x| x as usize)
+            .collect_vec();
+
         let output_indices = node
             .get_output_indices()
             .iter()
@@ -136,8 +149,10 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             left_join_keys,
             right_join_keys,
             null_safe,
+            condition,
             pk_indices: params.pk_indices,
             output_indices,
+            table_output_indices,
             executor_id: params.executor_id,
             watermark_epoch: stream.get_watermark_epoch(),
             chunk_size: params.env.config().developer.stream_chunk_size,
@@ -157,8 +172,10 @@ struct TemporalJoinExecutorDispatcherArgs<S: StateStore> {
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
+    condition: Option<BoxedExpression>,
     pk_indices: PkIndices,
     output_indices: Vec<usize>,
+    table_output_indices: Vec<usize>,
     executor_id: u64,
     watermark_epoch: AtomicU64Ref,
     chunk_size: usize,
@@ -179,8 +196,10 @@ impl<S: StateStore> TemporalJoinExecutorDispatcherArgs<S> {
                         self.left_join_keys,
                         self.right_join_keys,
                         self.null_safe,
+                        self.condition,
                         self.pk_indices,
                         self.output_indices,
+                        self.table_output_indices,
                         self.executor_id,
                         self.watermark_epoch,
                         self.metrics,

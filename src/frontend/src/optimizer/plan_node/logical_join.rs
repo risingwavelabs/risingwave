@@ -21,6 +21,7 @@ use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::stream_plan::ChainType;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -34,7 +35,7 @@ use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     BatchHashJoin, BatchLookupJoin, BatchNestedLoopJoin, ColumnPruningContext, EqJoinPredicate,
     LogicalFilter, LogicalScan, PredicatePushdownContext, RewriteStreamContext,
-    StreamDynamicFilter, StreamFilter, StreamTemporalJoin, ToStreamContext,
+    StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
 use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
@@ -1108,12 +1109,6 @@ impl LogicalJoin {
         ctx: &mut ToStreamContext,
     ) -> Result<PlanRef> {
         assert!(predicate.has_eq());
-        if predicate.has_non_eq() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join doesn't support non-equal condition".into(),
-                "Please remove the non-equal condition".into(),
-            )));
-        }
 
         let left = self.left().to_stream_with_dist_required(
             &RequiredDist::shard_by_key(self.left().schema().len(), &predicate.left_eq_indexes()),
@@ -1134,14 +1129,6 @@ impl LogicalJoin {
                 "Please provide a table scan".into(),
             )));
         };
-
-        let logical_scan: &LogicalScan = logical_scan;
-        if !logical_scan.predicate().always_true() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join needs a lookup table without predicates".into(),
-                "Please remove the predicate of the lookup table".into(),
-            )));
-        }
 
         let table_desc = logical_scan.table_desc();
 
@@ -1206,8 +1193,6 @@ impl LogicalJoin {
             new_join_on.clone(),
         );
 
-        // We discovered that we cannot use a lookup join after pulling up the predicate
-        // from one side and simplifying the condition. Let's use some other join instead.
         if !new_predicate.has_eq() {
             return Err(RwError::from(ErrorCode::NotSupported(
                 "Temporal join requires a non trivial join condition".into(),
@@ -1229,9 +1214,10 @@ impl LogicalJoin {
                 }
             })
             .collect_vec();
-
-        let new_scan_ref: PlanRef = new_scan.into();
-        let right = RequiredDist::no_shuffle(new_scan_ref.to_stream(ctx)?);
+        // Use UpstreamOnly chain type
+        let new_stream_table_scan =
+            StreamTableScan::new_with_chain_type(new_scan, ChainType::UpstreamOnly);
+        let right = RequiredDist::no_shuffle(new_stream_table_scan.into());
 
         // Construct a new logical join, because we have change its RHS.
         let new_logical_join = LogicalJoin::with_output_indices(

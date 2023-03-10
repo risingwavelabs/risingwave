@@ -294,10 +294,13 @@ message TemporalJoinNode {
   repeated int32 left_key = 2;
   repeated int32 right_key = 3;
   repeated bool null_safe = 4;
+  expr.ExprNode condition = 5;
   // The output indices of current node
-  repeated uint32 output_indices = 5;
+  repeated uint32 output_indices = 6;
   // The table desc of the lookup side table.
-  plan_common.StorageTableDesc table_desc = 6;
+  plan_common.StorageTableDesc table_desc = 7;
+  // The output indices of the lookup side table
+  repeated uint32 table_output_indices = 8;
 }
 
 message DynamicFilterNode {
