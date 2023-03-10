@@ -790,6 +790,10 @@ impl ScalarImpl {
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
+            DataType::Serial => Self::Serial(Serial::from(
+                i64::from_sql(&Type::INT8, bytes)
+                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
+            )),
             DataType::Float32 => Self::Float32(
                 f32::from_sql(&Type::FLOAT4, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
@@ -872,6 +876,9 @@ impl ScalarImpl {
             DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
+            DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?)),
             DataType::Float32 => Self::Float32(
                 f32::from_str(str)
                     .map_err(|_| {
