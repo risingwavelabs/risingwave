@@ -47,8 +47,6 @@ pub struct Compactor {
     context_id: HummockContextId,
     sender: Sender<MetaResult<SubscribeCompactTasksResponse>>,
     max_concurrent_task_number: AtomicU64,
-    // state: Mutex<CompactorState>,
-
     // state
     pub cpu_ratio: AtomicU32,
     pub total_cpu_core: u32,
@@ -73,7 +71,7 @@ impl Compactor {
             sender,
             max_concurrent_task_number: AtomicU64::new(std::cmp::min(
                 max_concurrent_task_number,
-                cpu_core_num as u64,
+                (cpu_core_num as f64 * 3.0 / 2.0).ceil() as u64,
             )),
             cpu_ratio: AtomicU32::new(0),
             total_cpu_core: cpu_core_num,
@@ -118,9 +116,8 @@ impl Compactor {
             .store(config.max_concurrent_task_number, Ordering::Relaxed);
     }
 
-    pub fn is_busy(&self) -> bool {
-        const CPU_THRESHOLD: u32 = 80;
-        self.cpu_ratio.load(Ordering::Acquire) > CPU_THRESHOLD
+    pub fn is_busy(&self, limit: u32) -> bool {
+        self.cpu_ratio.load(Ordering::Acquire) > limit
     }
 }
 
@@ -160,6 +157,9 @@ impl CompactorManager {
         let manager = Self {
             policy: RwLock::new(Box::new(ScoredPolicy::with_task_assignment(
                 &task_assignment,
+                env.opts.compactor_scaling_busy_threshold_sec,
+                env.opts.compactor_scaling_idle_threshold_sec,
+                env.opts.compactor_scaling_cpu_busy_threshold,
             ))),
             task_expiry_seconds,
             task_heartbeats: Default::default(),

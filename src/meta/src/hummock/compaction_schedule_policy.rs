@@ -27,8 +27,6 @@ use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
-const MIN_LAST_STATE_TIME: u64 = 60;
-const MAX_IDLE_TIME: u64 = 600;
 
 #[derive(Debug)]
 pub enum ScalePolicy {
@@ -265,11 +263,20 @@ pub struct ScoredPolicy {
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
     context_id_to_score: HashMap<HummockContextId, Score>,
     state: CompactorState,
+
+    compactor_scaling_busy_threshold_sec: u64,
+    compactor_scaling_idle_threshold_sec: u64,
+    compactor_scaling_cpu_busy_threshold: u32,
 }
 
 impl ScoredPolicy {
     /// Initialize policy with already assigned tasks.
-    pub fn with_task_assignment(task_assignment: &[CompactTaskAssignment]) -> Self {
+    pub fn with_task_assignment(
+        task_assignment: &[CompactTaskAssignment],
+        compactor_scaling_busy_threshold_sec: u64,
+        compactor_scaling_idle_threshold_sec: u64,
+        compactor_scaling_cpu_busy_threshold: u32,
+    ) -> Self {
         let mut compactor_to_score = HashMap::new();
         task_assignment.iter().for_each(|assignment| {
             let score_delta =
@@ -279,10 +286,14 @@ impl ScoredPolicy {
                 .and_modify(|old_score| *old_score += score_delta)
                 .or_insert(score_delta);
         });
+
         Self {
             score_to_compactor: BTreeMap::new(),
             context_id_to_score: compactor_to_score,
             state: CompactorState::Idle(Instant::now()),
+            compactor_scaling_busy_threshold_sec,
+            compactor_scaling_idle_threshold_sec,
+            compactor_scaling_cpu_busy_threshold,
         }
     }
 
@@ -292,6 +303,9 @@ impl ScoredPolicy {
             score_to_compactor: BTreeMap::default(),
             context_id_to_score: HashMap::default(),
             state: CompactorState::Idle(Instant::now()),
+            compactor_scaling_busy_threshold_sec: 60,
+            compactor_scaling_idle_threshold_sec: 600,
+            compactor_scaling_cpu_busy_threshold: 80,
         }
     }
 
@@ -438,7 +452,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
             CompactorState::Busy(_) => return ScalePolicy::ScaleOut,
             CompactorState::Burst(_) => (),
             CompactorState::Idle(last_idle_time) => {
-                if last_idle_time.elapsed().as_secs() > MAX_IDLE_TIME
+                if last_idle_time.elapsed().as_secs() > self.compactor_scaling_idle_threshold_sec
                     && self.score_to_compactor.len() > 1
                 {
                     let decrease_core = self
@@ -469,7 +483,7 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         let idle_count = self
             .score_to_compactor
             .values()
-            .filter(|compactor| !compactor.is_busy())
+            .filter(|compactor| !compactor.is_busy(self.compactor_scaling_cpu_busy_threshold))
             .count();
 
         let old_state = self.state.clone();
@@ -477,12 +491,12 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         if idle_count == 0 {
             match self.state {
                 CompactorState::Idle(last_update) => {
-                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
+                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
                         self.state = CompactorState::Burst(Instant::now());
                     }
                 }
                 CompactorState::Burst(last_update) => {
-                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
+                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
                         self.state = CompactorState::Busy(Instant::now());
                     }
                 }
@@ -493,13 +507,13 @@ impl CompactionSchedulePolicy for ScoredPolicy {
                 CompactorState::Idle(_) => {}
 
                 CompactorState::Burst(last_update) => {
-                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
+                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
                         self.state = CompactorState::Idle(Instant::now());
                     }
                 }
 
                 CompactorState::Busy(last_update) => {
-                    if last_update.elapsed().as_secs() > MIN_LAST_STATE_TIME {
+                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
                         self.state = CompactorState::Burst(Instant::now());
                     }
                 }
@@ -747,7 +761,7 @@ mod tests {
                 });
             });
 
-        let mut policy = ScoredPolicy::with_task_assignment(&existing_assignments);
+        let mut policy = ScoredPolicy::with_task_assignment(&existing_assignments, 60, 600, 80);
         assert_eq!(policy.score_to_compactor.len(), 0);
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
 

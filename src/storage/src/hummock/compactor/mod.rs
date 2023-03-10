@@ -335,7 +335,7 @@ impl Compactor {
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let stream_retry_interval = Duration::from_secs(60);
+        let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
         let mut process_cpu_info = process::ProcessCpuInfo::new().unwrap();

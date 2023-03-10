@@ -96,6 +96,12 @@ pub struct MetaOpts {
 
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    pub compactor_scaling_cpu_busy_threshold: u32,
+
+    pub compactor_scaling_busy_threshold_sec: u64,
+
+    pub compactor_scaling_idle_threshold_sec: u64,
 }
 
 impl MetaOpts {
@@ -116,6 +122,9 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            compactor_scaling_cpu_busy_threshold: 80,
+            compactor_scaling_busy_threshold_sec: 60,
+            compactor_scaling_idle_threshold_sec: 600,
         }
     }
 }
