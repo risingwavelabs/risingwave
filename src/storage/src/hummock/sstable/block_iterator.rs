@@ -255,10 +255,10 @@ mod tests {
     fn build_iterator_for_test() -> BlockIterator {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(construct_full_key_struct(0, b"k01", 1), b"v01");
-        builder.add(construct_full_key_struct(0, b"k02", 2), b"v02");
-        builder.add(construct_full_key_struct(0, b"k04", 4), b"v04");
-        builder.add(construct_full_key_struct(0, b"k05", 5), b"v05");
+        builder.add(&construct_full_key_struct(0, b"k01", 1), b"v01");
+        builder.add(&construct_full_key_struct(0, b"k02", 2), b"v02");
+        builder.add(&construct_full_key_struct(0, b"k04", 4), b"v04");
+        builder.add(&construct_full_key_struct(0, b"k05", 5), b"v05");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         BlockIterator::new(BlockHolder::from_owned_block(Box::new(

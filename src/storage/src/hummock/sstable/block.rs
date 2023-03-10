@@ -271,7 +271,7 @@ impl BlockBuilder {
     /// # Panics
     ///
     /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+    pub fn add(&mut self, full_key: &FullKey<&[u8]>, value: &[u8]) {
         let mut key: BytesMut = Default::default();
         full_key.encode_into(&mut key);
         if self.entry_count > 0 {
@@ -400,10 +400,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add(&construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(&construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(&construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(&construct_full_key_struct(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
@@ -445,10 +445,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
-        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
-        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
-        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
+        builder.add(&construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(&construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(&construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(&construct_full_key_struct(0, b"k4", 4), b"v04");
         let capcitiy = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());
@@ -501,9 +501,9 @@ mod tests {
         let large_key = vec![b'b'; MAX_KEY_LEN];
         let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
 
-        builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
-        builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
-        builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+        builder.add(&construct_full_key_struct(0, &medium_key, 1), b"v1");
+        builder.add(&construct_full_key_struct(0, &large_key, 2), b"v2");
+        builder.add(&construct_full_key_struct(0, &xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());

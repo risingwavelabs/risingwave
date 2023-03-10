@@ -254,7 +254,7 @@ impl ConcatSstableIterator {
                     // start_index points to the greatest block whose smallest_key <= seek_key.
                     block_metas
                         .partition_point(|block| {
-                            seek_key.cmp(&FullKey::decode(&block.smallest_key)) != Ordering::Greater
+                            seek_key.cmp(&FullKey::decode(&block.smallest_key)) != Ordering::Less
                         })
                         .saturating_sub(1)
                 }
