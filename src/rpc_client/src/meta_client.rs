@@ -784,7 +784,7 @@ impl MetaClient {
     }
 
     pub async fn get_telemetry_info(&self) -> Result<TelemetryInfoResponse> {
-        let req = TelemetryInfoRequest {};
+        let req = GetTelemetryInfoRequest {};
         let resp = self.inner.get_telemetry_info(req).await?;
         Ok(resp)
     }
@@ -1421,7 +1421,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
-            ,{ telemetry_client, get_telemetry_info, TelemetryInfoRequest, TelemetryInfoResponse}
+            ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }

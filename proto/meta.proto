@@ -13,8 +13,7 @@ import "user.proto";
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
-message TelemetryInfoRequest {
-}
+message GetTelemetryInfoRequest {}
 
 message TelemetryInfoResponse {
   optional string tracking_id = 1;
@@ -22,7 +21,7 @@ message TelemetryInfoResponse {
 
 service TelemetryInfoService {
   // Request telemetry info from meta node
-  rpc GetTelemetryInfo(TelemetryInfoRequest) returns(TelemetryInfoResponse);
+  rpc GetTelemetryInfo(GetTelemetryInfoRequest) returns (TelemetryInfoResponse);
 }
 
 message HeartbeatRequest {

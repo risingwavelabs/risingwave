@@ -71,7 +71,7 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
   }
 }
 
-export interface TelemetryInfoRequest {
+export interface GetTelemetryInfoRequest {
 }
 
 export interface TelemetryInfoResponse {
@@ -600,22 +600,22 @@ export interface SetSystemParamRequest {
 export interface SetSystemParamResponse {
 }
 
-function createBaseTelemetryInfoRequest(): TelemetryInfoRequest {
+function createBaseGetTelemetryInfoRequest(): GetTelemetryInfoRequest {
   return {};
 }
 
-export const TelemetryInfoRequest = {
-  fromJSON(_: any): TelemetryInfoRequest {
+export const GetTelemetryInfoRequest = {
+  fromJSON(_: any): GetTelemetryInfoRequest {
     return {};
   },
 
-  toJSON(_: TelemetryInfoRequest): unknown {
+  toJSON(_: GetTelemetryInfoRequest): unknown {
     const obj: any = {};
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<TelemetryInfoRequest>, I>>(_: I): TelemetryInfoRequest {
-    const message = createBaseTelemetryInfoRequest();
+  fromPartial<I extends Exact<DeepPartial<GetTelemetryInfoRequest>, I>>(_: I): GetTelemetryInfoRequest {
+    const message = createBaseGetTelemetryInfoRequest();
     return message;
   },
 };
