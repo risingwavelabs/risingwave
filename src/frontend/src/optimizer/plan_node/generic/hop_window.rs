@@ -34,6 +34,7 @@ pub struct HopWindow<PlanRef> {
     pub time_col: InputRef,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
+    pub window_offset: IntervalUnit,
     /// Provides mapping from input schema, window_start, window_end to output schema.
     /// For example, if we had:
     /// input schema: | 0: trip_time | 1: trip_name |
@@ -98,12 +99,13 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit,IntervalUnit, Vec<usize>) {
         (
             self.input,
             self.time_col,
             self.window_slide,
             self.window_size,
+            self.window_offset,
             self.output_indices,
         )
     }

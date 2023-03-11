@@ -47,6 +47,7 @@ impl LogicalHopWindow {
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
@@ -75,6 +76,7 @@ impl LogicalHopWindow {
             time_col,
             window_slide,
             window_size,
+            window_offset,
             output_indices,
         };
 
@@ -115,7 +117,16 @@ impl LogicalHopWindow {
         LogicalHopWindow { base, core }
     }
 
-    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        PlanRef,
+        InputRef,
+        IntervalUnit,
+        IntervalUnit,
+        IntervalUnit,
+        Vec<usize>,
+    ) {
         self.core.into_parts()
     }
 
@@ -126,6 +137,7 @@ impl LogicalHopWindow {
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
@@ -133,7 +145,15 @@ impl LogicalHopWindow {
                 .unwrap()
                 .into(),
         );
-        Self::new(input, time_col, window_slide, window_size, None).into()
+        Self::new(
+            input,
+            time_col,
+            window_slide,
+            window_size,
+            window_offset,
+            None,
+        )
+        .into()
     }
 
     pub fn internal_window_start_col_idx(&self) -> usize {
@@ -166,6 +186,7 @@ impl LogicalHopWindow {
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(output_indices),
         )
     }
@@ -201,6 +222,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(self.core.output_indices.clone()),
         )
     }
@@ -242,6 +264,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             time_col,
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(new_output_indices),
         );
         (
@@ -374,7 +397,8 @@ impl ToStream for LogicalHopWindow {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
+        let (input, time_col, window_slide, window_size, window_offset, mut output_indices) =
+            hop.into_parts();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))
         // When both `window_start` and `window_end` are not in `output_indices`,
@@ -395,6 +419,7 @@ impl ToStream for LogicalHopWindow {
             time_col,
             window_slide,
             window_size,
+            window_offset,
             Some(output_indices),
         );
         Ok((new_hop.into(), out_col_change))
@@ -444,6 +469,7 @@ mod test {
             InputRef::new(0, DataType::Date),
             IntervalUnit::new(0, 1, 0),
             IntervalUnit::new(0, 3, 0),
+            IntervalUnit::new(0, 0, 0),
             None,
         )
         .into();
@@ -499,6 +525,7 @@ mod test {
             InputRef::new(0, DataType::Date),
             IntervalUnit::new(0, 1, 0),
             IntervalUnit::new(0, 3, 0),
+            IntervalUnit::new(0, 0, 0),
             None,
         )
         .into();

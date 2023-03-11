@@ -16,6 +16,7 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use num_traits::Zero;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
@@ -36,6 +37,7 @@ pub struct HopWindowExecutor {
     time_col_idx: usize,
     window_slide: IntervalUnit,
     window_size: IntervalUnit,
+    window_offset: IntervalUnit,
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     output_indices: Vec<usize>,
@@ -56,6 +58,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         let time_col = hop_window_node.get_time_col() as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
+        let window_offset = hop_window_node.get_window_offset()?.into();
         let output_indices = hop_window_node
             .get_output_indices()
             .iter()
@@ -97,6 +100,7 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             time_col,
             window_slide,
             window_size,
+            window_offset,
             source.plan_node().get_identity().clone(),
             window_start_exprs,
             window_end_exprs,
@@ -113,6 +117,7 @@ impl HopWindowExecutor {
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
         identity: String,
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
@@ -125,6 +130,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            window_offset:IntervalUnit::new(0, 0, 0),
             window_start_exprs,
             window_end_exprs,
             output_indices,
@@ -151,9 +157,9 @@ impl HopWindowExecutor {
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
-
             window_slide,
             window_size,
+            window_offset,
             output_indices,
             ..
         } = *self;
@@ -210,6 +216,7 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
+    use num_traits::Zero;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
@@ -243,6 +250,7 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
+        let window_offset = IntervalUnit::new(0, 0, 0);
         let (window_start_exprs, window_end_exprs) =
             make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
 
@@ -252,6 +260,7 @@ mod tests {
             2,
             window_slide,
             window_size,
+            window_offset,
             "test".to_string(),
             window_start_exprs,
             window_end_exprs,

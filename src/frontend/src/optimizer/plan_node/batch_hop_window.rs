@@ -122,6 +122,7 @@ impl ToBatchProst for BatchHopWindow {
             time_col: self.logical.core.time_col.index() as _,
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),
+            window_offset: Some(self.logical.core.window_offset.into()),
             output_indices: self
                 .logical
                 .core
