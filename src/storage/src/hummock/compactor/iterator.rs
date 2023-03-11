@@ -43,7 +43,7 @@ struct SstableStreamIterator {
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
 
-    // For debugging
+    /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
 }
 
@@ -77,6 +77,22 @@ impl SstableStreamIterator {
         }
     }
 
+    async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
+        while let Some(block_iter) = self.block_iter.as_mut() {
+            if self
+                .sstable_info
+                .get_table_ids()
+                .binary_search(&FullKey::decode(block_iter.key()).user_key.table_id.table_id)
+                .is_ok()
+            {
+                return Ok(());
+            } else {
+                self.next_block().await?;
+            }
+        }
+        Ok(())
+    }
+
     /// Initialises the iterator by moving it to the first KV-pair in the stream's first block where
     /// key >= `seek_key`. If that block does not contain such a KV-pair, the iterator continues to
     /// the first KV-pair of the next block. If `seek_key` is not given, the iterator will move to
@@ -98,7 +114,7 @@ impl SstableStreamIterator {
             }
         }
 
-        Ok(())
+        self.prune_from_valid_block_iter().await
     }
 
     /// Loads a new block, creates a new iterator for it, and stores that iterator in
@@ -147,6 +163,7 @@ impl SstableStreamIterator {
         block_iter.next();
         if !block_iter.is_valid() {
             self.next_block().await?;
+            self.prune_from_valid_block_iter().await?;
         }
 
         Ok(())
@@ -226,7 +243,7 @@ impl ConcatSstableIterator {
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
     async fn seek_idx(
         &mut self,
-        idx: usize,
+        mut idx: usize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
         self.sstable_iter.take();
@@ -240,7 +257,7 @@ impl ConcatSstableIterator {
             (None, false) => Some(FullKey::decode(&self.key_range.left)),
         };
 
-        if idx < self.tables.len() {
+        while idx < self.tables.len() {
             let table_info = &self.tables[idx];
             let table = self
                 .sstable_store
@@ -291,9 +308,15 @@ impl ConcatSstableIterator {
                 &self.stats,
             );
             sstable_iter.seek(seek_key).await?;
-
-            self.sstable_iter = Some(sstable_iter);
             self.cur_idx = idx;
+
+            if sstable_iter.is_valid() {
+                self.sstable_iter = Some(sstable_iter);
+                return Ok(());
+            } else {
+                idx += 1;
+                seek_key = None;
+            }
         }
         Ok(())
     }
