@@ -211,6 +211,13 @@ impl Planner {
                     FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
                         .into();
                 exprs.push(window_start);
+                // timestamp - (timestamp - offset) % windowSize
+
+                // 现在的
+                // tumble_start (time , window) = time - time % window
+
+                // tumble_offset (time , offset) =  abs(timestamp - offset)
+                // tumble_start (time , window_offset)
                 exprs.push(window_end);
                 let base = self.plan_relation(input)?;
                 let project = LogicalProject::create(base, exprs);

@@ -68,23 +68,98 @@ fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
     Ok(delta_usecs)
 }
 
+#[inline(always)]
+pub fn tumble_offset_date(
+    time: NaiveDateWrapper,
+    offset: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
+    tumble_offset_date_time(time.into(), offset)
+}
+
+#[inline(always)]
+pub fn tumble_offset_date_time(
+    time: NaiveDateTimeWrapper,
+    offset: IntervalUnit,
+) -> Result<NaiveDateTimeWrapper> {
+    let time = time.0.timestamp_micros();
+    let window_offset = tm_subtracts(time, offset)?;
+    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+        window_offset / 1_000_000,
+        (window_offset % 1_000_000 * 1000) as u32,
+    ))
+}
+
+#[inline(always)]
+pub fn tumble_offset_timestamptz(time: i64, offset: IntervalUnit) -> Result<i64> {
+    Ok(tm_subtracts(time, offset)?)
+}
+
+#[inline(always)]
+fn tm_subtracts(time: i64, offset: IntervalUnit) -> Result<i64> {
+    const DAY_MS: i64 = 86400000;
+    let offset_usecs = offset.get_days() as i64 * DAY_MS + offset.get_ms() * 1000;
+    let time_usecs = time - offset_usecs;
+    if time_usecs < 0 {
+        Ok(-time_usecs)
+    } else {
+        Ok(time_usecs)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use chrono::{Datelike, Timelike};
+    use chrono::{offset, Datelike, Timelike};
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
-    use super::tumble_start_date_time;
+    use super::{tm_subtracts, tumble_start_date_time};
 
     #[test]
     fn test_tumble_start_date_time() {
         let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
-        let interval = IntervalUnit::new(0, 0, 30 * 60 * 1000);
+        let interval = IntervalUnit::from_minutes(30);
+        println!("{}", dt);
+        println!("{}", interval);
         let w = tumble_start_date_time(dt, interval).unwrap().0;
+        println!("{}", w);
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
         assert_eq!(w.day(), 22);
         assert_eq!(w.hour(), 22);
         assert_eq!(w.minute(), 0);
         assert_eq!(w.second(), 0);
+    }
+
+    #[test]
+    fn test_tm_subtracts() {
+        let time = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22)
+            .and_hms_uncheck(22, 22, 22)
+            .0
+            .timestamp_micros();
+        let offset = IntervalUnit::from_minutes(30);
+
+        assert_eq!(
+            tm_subtracts(time, offset).unwrap(),
+            NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22)
+                .and_hms_uncheck(21, 52, 22)
+                .0
+                .timestamp_micros()
+        )
+    }
+    #[test]
+    fn test_tm_subtracts_overflow() {
+        let time = NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+            .and_hms_uncheck(0, 0, 0)
+            .0
+            .timestamp_micros();
+        let offset = IntervalUnit::from_minutes(30);
+
+        assert_eq!(
+            tm_subtracts(time, offset).unwrap(),
+            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+                .and_hms_uncheck(0, 30, 0)
+                .0
+                .timestamp_micros()
+        )
     }
 }

@@ -179,6 +179,7 @@ impl HopWindowExecutor {
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
             assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+            print!("{}", data_chunk.to_pretty_string());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
@@ -205,6 +206,11 @@ impl HopWindowExecutor {
                         }
                     })
                     .collect_vec();
+                print!(
+                    "{}",
+                    DataChunk::new(new_cols.clone(), len).to_pretty_string()
+                );
+                let a = 2;
                 yield DataChunk::new(new_cols, len);
             }
         }
