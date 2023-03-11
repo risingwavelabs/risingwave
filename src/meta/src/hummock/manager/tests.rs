@@ -64,7 +64,7 @@ fn get_compaction_group_object_ids(
 ) -> Vec<HummockSstableId> {
     get_compaction_group_ssts(version, group_id)
         .into_iter()
-        .map(|(object_id, sst_id)| object_id)
+        .map(|(object_id, _)| object_id)
         .collect_vec()
 }
 
@@ -1528,7 +1528,7 @@ async fn test_split_compaction_group_on_demand_basic() {
                 .get(&new_group_id)
                 .cloned()
                 .unwrap(),
-            object_id,
+            vec![object_id],
             "trivial adjust should also generate a new SST id"
         );
     }
@@ -1596,8 +1596,8 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     let branched_ssts = get_branched_ssts(&hummock_manager).await;
     assert_eq!(branched_ssts.len(), 1);
     assert_eq!(branched_ssts.get(&10).unwrap().len(), 2);
-    let sst_id = branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap();
-    assert_ne!(sst_id, 10);
+    let sst_ids = branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap();
+    assert_ne!(sst_ids, vec![10]);
     assert_ne!(
         branched_ssts
             .get(&10)
@@ -1605,7 +1605,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             .get(&new_group_id)
             .cloned()
             .unwrap(),
-        sst_id,
+        sst_ids,
     );
     assert_ne!(
         branched_ssts
@@ -1614,7 +1614,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             .get(&new_group_id)
             .cloned()
             .unwrap(),
-        10,
+        vec![10],
     );
 }
 
