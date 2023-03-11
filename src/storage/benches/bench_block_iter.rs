@@ -25,6 +25,7 @@ const TABLES_PER_SSTABLE: u32 = 10;
 const KEYS_PER_TABLE: u64 = 100;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
+const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL / 2;
 
 fn block_iter_next(block: BlockHolder) {
     let mut iter = BlockIterator::new(block);
@@ -88,7 +89,6 @@ fn bench_block_iter(c: &mut Criterion) {
     let l = data.len();
     let block = BlockHolder::from_owned_block(Box::new(Block::decode(data, l).unwrap()));
     let mut iter = BlockIterator::new(block);
-    const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL / 2;
     let mut item_count = 0;
     let mut ext_index = 0;
     let (mut k_ext, mut v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
@@ -135,7 +135,6 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
         restart_interval: RESTART_INTERVAL,
     };
     let mut builder = BlockBuilder::new(options);
-    const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL / 2;
     let mut item_count = 0;
     let mut ext_index = 0;
     let (mut k_ext, mut v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);

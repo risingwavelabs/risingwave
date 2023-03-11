@@ -134,9 +134,9 @@ impl LenType {
         put_fn!(
             self,
             buf, overlap, diff, value,
-            (U8U8 => (put_u8,u8, put_u8, u8)),
-            (U8U16 => (put_u8,u8, put_u16, u16)),
-            (U8U32 => (put_u8,u8, put_u32, u32)),
+            (U8U8 => (put_u8, u8, put_u8, u8)),
+            (U8U16 => (put_u8, u8, put_u16, u16)),
+            (U8U32 => (put_u8, u8, put_u32, u32)),
             (U16U8 => (put_u16, u16, put_u8, u8)),
             (U16U16 => (put_u16, u16, put_u16, u16)),
             (U16U32 => (put_u16, u16, put_u32, u32)),
@@ -230,12 +230,6 @@ impl Block {
             index_value_vec.push(LenType::from(value));
         }
 
-        // let restart_points_type_index: BTreeMap<_, _> = key_vec
-        //     .into_iter()
-        //     .zip_eq_fast(value_vec.into_iter())
-        //     .map(|(k, v)| (k, v))
-        //     .collect();
-
         // Decode restart points.
         let n_restarts = ((&buf[data_len - 4..]).get_u32_le()) as usize;
         let restart_points_len = size_of::<u32>() + n_restarts * (size_of::<u32>());
@@ -305,10 +299,6 @@ impl Block {
     }
 
     pub fn restart_points_type_index(&self, index: usize) -> LenType {
-        // let iter = self
-        //     .restart_points_type_index
-        //     .range(..=index)
-        //     .take_while(|(offset, _)| **offset <= index);
         self.restart_points_type_index[index].1
     }
 }
@@ -404,7 +394,6 @@ pub struct BlockBuilder {
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 
-    // restart_points_type_index: BTreeMap<u32, u8>,
     restart_points_type_index: BTreeMap<u32, LenType>,
 }
 
@@ -468,6 +457,8 @@ impl BlockBuilder {
         } else {
             bytes_diff_below_max_key_length(&self.last_key, key)
         };
+
+        assert!(key.len() > 8);
 
         let prefix = KeyPrefix {
             overlap: key.len() - diff_key.len(),
@@ -754,15 +745,15 @@ mod tests {
             if index < 50 {
                 let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                 medium_key.push(index);
-                // assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
+                assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
             } else if index < 80 {
                 let mut large_key = vec![b'B'; MAX_KEY_LEN];
                 large_key.push(index);
-                // assert_eq!(&full_key(&large_key, 2)[..], bi.key());
+                assert_eq!(&full_key(&large_key, 2)[..], bi.key());
             } else {
                 let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                 xlarge_key.push(index);
-                // assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
+                assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
             }
             bi.next();
         }
