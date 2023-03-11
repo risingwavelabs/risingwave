@@ -107,7 +107,14 @@ pub fn run_all_test_files() {
     use walkdir::WalkDir;
     for entry in WalkDir::new("../tests/testdata/") {
         let entry = entry.unwrap();
-        if !entry.path().is_file() {
+        if !(entry.path().is_file()) {
+            continue;
+        }
+        if !(entry
+            .path()
+            .extension()
+            .map_or(false, |p| p.eq_ignore_ascii_case("yaml")))
+        {
             continue;
         }
         let file_content = std::fs::read_to_string(entry.path()).unwrap();
