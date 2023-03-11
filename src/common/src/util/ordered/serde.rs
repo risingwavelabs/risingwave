@@ -17,10 +17,9 @@ use std::borrow::Cow;
 use bytes::BufMut;
 
 use crate::row::{OwnedRow, Row};
-use crate::types::{
-    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
-};
+use crate::types::{DataType, ToDatumRef};
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::memcmp_encoding;
 use crate::util::sort_util::{Direction, OrderType};
 
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
@@ -64,19 +63,21 @@ impl OrderedRowSerde {
         datum_refs: impl Iterator<Item = impl ToDatumRef>,
         mut append_to: impl BufMut,
     ) {
-        for (datum, order_type) in datum_refs.zip_eq_debug(self.order_types.iter()) {
-            let mut serializer = memcomparable::Serializer::new(&mut append_to);
-            serializer.set_reverse(order_type.direction() == Direction::Descending);
-            memcmp_serialize_datum_into(datum, &mut serializer).unwrap();
+        let mut serializer = memcomparable::Serializer::new(&mut append_to);
+        for (datum, order) in datum_refs.zip_eq_debug(self.order_types.iter().copied()) {
+            memcmp_encoding::serialize_datum(datum, order, &mut serializer).unwrap();
         }
     }
 
     pub fn deserialize(&self, data: &[u8]) -> memcomparable::Result<OwnedRow> {
         let mut values = Vec::with_capacity(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.schema.iter().zip_eq_fast(self.order_types.iter()) {
-            deserializer.set_reverse(order_type.direction() == Direction::Descending);
-            let datum = memcmp_deserialize_datum_from(data_type, &mut deserializer)?;
+        for (data_type, order) in self
+            .schema
+            .iter()
+            .zip_eq_fast(self.order_types.iter().copied())
+        {
+            let datum = memcmp_encoding::deserialize_datum(data_type, order, &mut deserializer)?;
             values.push(datum);
         }
         Ok(OwnedRow::new(values))
@@ -103,7 +104,7 @@ impl OrderedRowSerde {
             let data = &key[len..];
             let mut deserializer = memcomparable::Deserializer::new(data);
             deserializer.set_reverse(order_type.direction() == Direction::Descending);
-
+            // TODO(): suspecious
             len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
         }
 
@@ -422,7 +423,7 @@ mod tests {
                         let mut row_bytes = vec![];
                         serde.serialize(&row, &mut row_bytes);
                         let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                        deserializer.set_reverse(true);
+                        deserializer.set_reverse(true); // TODO(): suspecious
                         let encoding_data_size =
                             ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
                                 .unwrap();

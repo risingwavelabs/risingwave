@@ -52,7 +52,6 @@ impl Direction {
     }
 }
 
-#[allow(dead_code)]
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 pub enum NullsAre {
     #[default]
@@ -65,14 +64,14 @@ pub enum NullsAre {
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
 pub struct OrderType {
     direction: Direction,
-    // TODO(rc): enable `NULLS FIRST | LAST`
-    // nulls_are: NullsAre,
+    nulls_are: NullsAre,
 }
 
 impl OrderType {
     pub fn from_protobuf(order_type: &PbOrderType) -> OrderType {
         OrderType {
             direction: Direction::from_protobuf(&order_type.direction()),
+            nulls_are: NullsAre::default(),
         }
     }
 
@@ -84,27 +83,68 @@ impl OrderType {
 }
 
 impl OrderType {
-    pub const fn new(direction: Direction) -> Self {
-        Self { direction }
+    // TODO(): new(dir, nulls), default_ascending, default_descending, ascending(nulls),
+    // descending(nulls), default_nulls_first, default_nulls_last, nulls_first(dir),
+    // nulls_last(dir)
+
+    // TODO(): unittest
+
+    pub fn new(direction: Direction) -> Self {
+        Self {
+            direction,
+            nulls_are: NullsAre::default(),
+        }
     }
 
     /// Create an ascending order type, with other options set to default.
-    pub const fn ascending() -> Self {
+    pub fn ascending() -> Self {
         Self {
             direction: Direction::Ascending,
+            nulls_are: NullsAre::default(),
         }
     }
 
     /// Create an descending order type, with other options set to default.
-    pub const fn descending() -> Self {
+    pub fn descending() -> Self {
         Self {
             direction: Direction::Descending,
+            nulls_are: NullsAre::default(),
         }
     }
 
     /// Get the order direction.
     pub fn direction(&self) -> Direction {
         self.direction
+    }
+
+    /// Get which extreme nulls are considered to be.
+    pub fn nulls_are(&self) -> NullsAre {
+        self.nulls_are
+    }
+
+    pub fn is_ascending(&self) -> bool {
+        self.direction == Direction::Ascending
+    }
+
+    pub fn is_descending(&self) -> bool {
+        self.direction == Direction::Descending
+    }
+
+    pub fn nulls_are_smallest(&self) -> bool {
+        self.nulls_are == NullsAre::Smallest
+    }
+
+    pub fn nulls_are_largest(&self) -> bool {
+        self.nulls_are == NullsAre::Largest
+    }
+
+    pub fn nulls_are_first(&self) -> bool {
+        self.is_ascending() && self.nulls_are_smallest()
+            || self.is_descending() && self.nulls_are_largest()
+    }
+
+    pub fn nulls_are_last(&self) -> bool {
+        !self.nulls_are_first()
     }
 }
 

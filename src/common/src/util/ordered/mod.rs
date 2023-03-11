@@ -20,9 +20,10 @@ use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
 use super::iter_util::ZipEqFast;
+use super::memcmp_encoding;
 use super::sort_util::Direction;
 use crate::row::OwnedRow;
-use crate::types::{memcmp_serialize_datum_into, Datum};
+use crate::types::Datum;
 use crate::util::sort_util::OrderType;
 
 // TODO(rc): support `NULLS FIRST | LAST`
@@ -92,17 +93,12 @@ impl OrderedRow {
     pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         for v in &self.0 {
-            let datum = match v {
-                NormalOrder(datum) => {
-                    serializer.set_reverse(false);
-                    datum
-                }
-                ReversedOrder(datum) => {
-                    serializer.set_reverse(true);
-                    &datum.0
-                }
+            // TODO(): not good
+            let (datum, order) = match v {
+                NormalOrder(datum) => (datum, OrderType::ascending()),
+                ReversedOrder(datum) => (&datum.0, OrderType::descending()),
             };
-            memcmp_serialize_datum_into(datum, &mut serializer)?;
+            memcmp_encoding::serialize_datum(datum, order, &mut serializer)?;
         }
         Ok(serializer.into_inner())
     }
@@ -140,14 +136,15 @@ mod tests {
                 .map(|v| Some(ScalarImpl::Int64(v)))
                 .collect(),
         );
-        OrderedRow::new(row, ORDER_TYPES)
+        OrderedRow::new(
+            row,
+            &[
+                OrderType::ascending(),
+                OrderType::descending(),
+                OrderType::ascending(),
+            ],
+        )
     }
-
-    const ORDER_TYPES: &[OrderType] = &[
-        OrderType::ascending(),
-        OrderType::descending(),
-        OrderType::ascending(),
-    ];
 
     #[test]
     fn test_prefix() {
