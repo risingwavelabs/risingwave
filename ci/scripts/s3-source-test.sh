@@ -4,10 +4,13 @@ set -euo pipefail
 
 source ci/scripts/common.env.sh
 
-while getopts 'p:' opt; do
+while getopts 'p:s:' opt; do
     case ${opt} in
         p )
             profile=$OPTARG
+            ;;
+        s )
+            script=$OPTARG
             ;;
         \? )
             echo "Invalid Option: -$OPTARG" 1>&2
@@ -19,6 +22,8 @@ while getopts 'p:' opt; do
     esac
 done
 shift $((OPTIND -1))
+
+
 
 echo "--- Download artifacts"
 mkdir -p target/debug
@@ -44,7 +49,7 @@ cargo make ci-start ci-1cn-1fe
 
 echo "--- Run test"
 python3 -m pip install minio psycopg2-binary
-python3 e2e_test/s3/run.py
+python3 e2e_test/s3/$script.py
 
 echo "--- Kill cluster"
 cargo make ci-kill

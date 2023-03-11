@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -36,8 +36,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::Asc;
-use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -225,12 +224,9 @@ impl LogicalScan {
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc().columns[order.column_idx].column_id)
+                        .get(&self.table_desc().columns[order.column_index].column_id)
                         .unwrap();
-                    match order.order_type {
-                        OrderType::Ascending => FieldOrder::ascending(*idx),
-                        OrderType::Descending => FieldOrder::descending(*idx),
-                    }
+                    ColumnOrder::new(*idx, order.order_type)
                 })
                 .collect(),
         );
@@ -316,7 +312,7 @@ impl LogicalScan {
         self.core.chunk_size
     }
 
-    pub fn primary_key(&self) -> Vec<OrderPair> {
+    pub fn primary_key(&self) -> Vec<ColumnOrder> {
         self.core.table_desc.pk.clone()
     }
 
@@ -568,19 +564,16 @@ impl LogicalScan {
         &self,
         required_order: &Order,
     ) -> Option<Result<PlanRef>> {
-        if required_order.field_order.is_empty() {
+        if required_order.column_orders.is_empty() {
             return None;
         }
 
         let index = self.indexes().iter().find(|idx| {
             Order {
-                field_order: idx
+                column_orders: idx
                     .index_item
                     .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: idx_item.index,
-                        direct: Asc,
-                    })
+                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::ascending()))
                     .collect(),
             }
             .satisfies(required_order)
@@ -679,8 +672,8 @@ impl ToStream for LogicalScan {
                     .pk
                     .iter()
                     .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
-                            Some(c.column_idx)
+                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
+                            Some(c.column_index)
                         } else {
                             None
                         }

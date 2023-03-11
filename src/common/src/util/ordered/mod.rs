@@ -20,10 +20,12 @@ use OrderedDatum::{NormalOrder, ReversedOrder};
 
 pub use self::serde::*;
 use super::iter_util::ZipEqFast;
+use super::sort_util::Direction;
 use crate::row::OwnedRow;
 use crate::types::{memcmp_serialize_datum_into, Datum};
 use crate::util::sort_util::OrderType;
 
+// TODO(rc): support `NULLS FIRST | LAST`
 #[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub enum OrderedDatum {
     NormalOrder(Datum),
@@ -62,9 +64,9 @@ impl OrderedRow {
             row.into_inner()
                 .into_iter()
                 .zip_eq_fast(order_types.iter())
-                .map(|(datum, order_type)| match order_type {
-                    OrderType::Ascending => NormalOrder(datum),
-                    OrderType::Descending => ReversedOrder(Reverse(datum)),
+                .map(|(datum, order_type)| match order_type.direction() {
+                    Direction::Ascending => NormalOrder(datum),
+                    Direction::Descending => ReversedOrder(Reverse(datum)),
                 })
                 .collect::<Vec<_>>(),
         )
@@ -142,9 +144,9 @@ mod tests {
     }
 
     const ORDER_TYPES: &[OrderType] = &[
-        OrderType::Ascending,
-        OrderType::Descending,
-        OrderType::Ascending,
+        OrderType::ascending(),
+        OrderType::descending(),
+        OrderType::ascending(),
     ];
 
     #[test]

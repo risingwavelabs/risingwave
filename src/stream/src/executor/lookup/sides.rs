@@ -19,7 +19,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
@@ -61,7 +61,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
 
     /// Order rules of the arrangement (only join key is needed, pk should not be included, used
     /// for lookup)
-    pub order_rules: Vec<OrderPair>,
+    pub order_rules: Vec<ColumnOrder>,
 
     /// Key indices for the join
     ///

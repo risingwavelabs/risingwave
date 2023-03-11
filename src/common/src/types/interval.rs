@@ -109,46 +109,6 @@ impl IntervalUnit {
         }
     }
 
-    #[must_use]
-    pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
-        let months = year * 12 + month;
-        let days = days;
-        let ms = 0;
-        IntervalUnit { months, days, ms }
-    }
-
-    #[must_use]
-    pub fn from_month(months: i32) -> Self {
-        IntervalUnit {
-            months,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_days(days: i32) -> Self {
-        Self {
-            days,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_millis(ms: i64) -> Self {
-        Self {
-            ms,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_minutes(minutes: i64) -> Self {
-        Self {
-            ms: 1000 * 60 * minutes,
-            ..Default::default()
-        }
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -431,6 +391,63 @@ impl IntervalUnit {
             months: self.months / 12 / 1000 * 12 * 1000,
             days: 0,
             ms: 0,
+        }
+    }
+}
+
+/// A separate mod so that `use types::*` or `use interval::*` does not `use IntervalUnitTestExt` by
+/// accident.
+pub mod test_utils {
+    use super::*;
+
+    /// These constructors may panic when value out of bound. Only use in tests with known input.
+    pub trait IntervalUnitTestExt {
+        fn from_ymd(year: i32, month: i32, days: i32) -> Self;
+        fn from_month(months: i32) -> Self;
+        fn from_days(days: i32) -> Self;
+        fn from_millis(ms: i64) -> Self;
+        fn from_minutes(minutes: i64) -> Self;
+    }
+
+    impl IntervalUnitTestExt for IntervalUnit {
+        #[must_use]
+        fn from_ymd(year: i32, month: i32, days: i32) -> Self {
+            let months = year * 12 + month;
+            let days = days;
+            let ms = 0;
+            IntervalUnit { months, days, ms }
+        }
+
+        #[must_use]
+        fn from_month(months: i32) -> Self {
+            IntervalUnit {
+                months,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_days(days: i32) -> Self {
+            Self {
+                days,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_millis(ms: i64) -> Self {
+            Self {
+                ms,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_minutes(minutes: i64) -> Self {
+            Self {
+                ms: 1000 * 60 * minutes,
+                ..Default::default()
+            }
         }
     }
 }
@@ -926,21 +943,21 @@ impl IntervalUnit {
         (|| match leading_field {
             Year => {
                 let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months as i32))
+                Some(IntervalUnit::new(months as i32, 0, 0))
             }
-            Month => Some(IntervalUnit::from_month(num as i32)),
-            Day => Some(IntervalUnit::from_days(num as i32)),
+            Month => Some(IntervalUnit::new(num as i32, 0, 0)),
+            Day => Some(IntervalUnit::new(0, num as i32, 0)),
             Hour => {
                 let ms = num.checked_mul(3600 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                Some(IntervalUnit::new(0, 0, ms))
             }
             Minute => {
                 let ms = num.checked_mul(60 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                Some(IntervalUnit::new(0, 0, ms))
             }
             Second => {
                 let ms = num.checked_mul(1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                Some(IntervalUnit::new(0, 0, ms))
             }
         })()
         .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
@@ -963,21 +980,21 @@ impl IntervalUnit {
                     result = result + (|| match interval_unit {
                         Year => {
                             let months = num.checked_mul(12)?;
-                            Some(IntervalUnit::from_month(months as i32))
+                            Some(IntervalUnit::new(months as i32, 0, 0))
                         }
-                        Month => Some(IntervalUnit::from_month(num as i32)),
-                        Day => Some(IntervalUnit::from_days(num as i32)),
+                        Month => Some(IntervalUnit::new(num as i32, 0, 0)),
+                        Day => Some(IntervalUnit::new(0, num as i32, 0)),
                         Hour => {
                             let ms = num.checked_mul(3600 * 1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            Some(IntervalUnit::new(0, 0, ms))
                         }
                         Minute => {
                             let ms = num.checked_mul(60 * 1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            Some(IntervalUnit::new(0, 0, ms))
                         }
                         Second => {
                             let ms = num.checked_mul(1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            Some(IntervalUnit::new(0, 0, ms))
                         }
                     })()
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
@@ -989,7 +1006,7 @@ impl IntervalUnit {
                             // If unsatisfied precision is passed as input, we should not return None (Error).
                             // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
                             let ms = (second.into_inner() * 1000_f64).round() as i64;
-                            Some(IntervalUnit::from_millis(ms))
+                            Some(IntervalUnit::new(0, 0, ms))
                         }
                         _ => None,
                     }
@@ -1022,6 +1039,8 @@ impl FromStr for IntervalUnit {
 
 #[cfg(test)]
 mod tests {
+    use interval::test_utils::IntervalUnitTestExt;
+
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
 

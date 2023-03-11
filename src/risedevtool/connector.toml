@@ -49,8 +49,8 @@ description = "Download Maven"
 script = '''
 #!/usr/bin/env bash
 
-if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ "11" ]]); then
-  echo "JDK 11 is not installed. Please install JDK 11 first."
+if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ ^(11|17) ]]); then
+  echo "JDK 11+ is not installed. Please install JDK 11+ first."
   exit 1
 fi
 
