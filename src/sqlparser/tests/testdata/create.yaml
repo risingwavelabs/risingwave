@@ -16,7 +16,9 @@
 - input: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
   formatted_sql: CREATE TABLE t (a INT, b INT) AS SELECT 1 AS b, 2 AS a
 - input: CREATE SOURCE src
-  error_msg: 'sql parser error: Expected ROW, found: EOF'
+  error_msg: |-
+    sql parser error: Expected ROW, found: EOF
+    Near "CREATE SOURCE src"
 - input: CREATE SOURCE src ROW FORMAT JSON
   formatted_sql: CREATE SOURCE src ROW FORMAT JSON
 - input: CREATE SOURCE IF NOT EXISTS src WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001') ROW FORMAT PROTOBUF MESSAGE 'Foo' ROW SCHEMA LOCATION 'file://'
@@ -41,7 +43,9 @@
 - input: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
   formatted_sql: CREATE USER user WITH SUPERUSER CREATEDB PASSWORD 'password'
 - input: CREATE SINK snk
-  error_msg: 'sql parser error: Expected FROM or AS after CREATE SINK sink_name, found: EOF'
+  error_msg: |-
+    sql parser error: Expected FROM or AS after CREATE SINK sink_name, found: EOF
+    Near "CREATE SINK snk"
 - input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
   formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
 - input: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
@@ -55,4 +59,6 @@
 - input: create user tmp with encrypted password '' password null
   error_msg: 'sql parser error: conflicting or redundant options'
 - input: create user tmp with encrypted password null
-  error_msg: 'sql parser error: Expected literal string, found: null'
+  error_msg: |-
+    sql parser error: Expected literal string, found: null
+    Near " tmp with encrypted password null"

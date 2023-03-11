@@ -42,9 +42,13 @@
 - input: SELECT * FROM t FETCH FIRST ROWS WITH TIES
   error_msg: 'sql parser error: WITH TIES cannot be specified without ORDER BY clause'
 - input: select * from (select 1 from 1);
-  error_msg: 'sql parser error: Expected identifier, found: 1'
+  error_msg: |-
+    sql parser error: Expected identifier, found: 1
+    Near "from (select 1 from 1"
 - input: select * from (select * from tumble(t, x, interval '10' minutes))
-  error_msg: 'sql parser error: Expected ), found: minutes'
+  error_msg: |-
+    sql parser error: Expected ), found: minutes
+    Near "(t, x, interval '10'"
 - input: SELECT 1, FROM t
   error_msg: 'sql parser error: syntax error at or near "FROM"'
 - input: SELECT 1, WHERE true
@@ -69,4 +73,6 @@
 - input: SELECT 1::float(54)
   error_msg: 'sql parser error: precision for type float must be less than 54 bits'
 - input: SELECT 1::int(2)
-  error_msg: 'sql parser error: Expected end of statement, found: ('
+  error_msg: |-
+    sql parser error: Expected end of statement, found: (
+    Near "SELECT 1::int"
