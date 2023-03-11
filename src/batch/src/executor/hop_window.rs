@@ -16,7 +16,7 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use num_traits::Zero;
+
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
@@ -130,7 +130,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
-            window_offset:IntervalUnit::new(0, 0, 0),
+            window_offset,
             window_start_exprs,
             window_end_exprs,
             output_indices,
@@ -216,7 +216,6 @@ impl HopWindowExecutor {
 #[cfg(test)]
 mod tests {
     use futures::stream::StreamExt;
-    use num_traits::Zero;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::test_utils::IntervalUnitTestExt;

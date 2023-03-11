@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -231,11 +231,21 @@ impl Planner {
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
+
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+        };
+
+        let window_offset = match (args.next(), args.next()) {
+            (Some(ExprImpl::Literal(window_offset)), None) => match *window_offset.get_data() {
+                Some(ScalarImpl::Interval(window_offset)) => window_offset,
+                _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+            },
+            (None, None) => IntervalUnit::new(0, 0, 0),
+            _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {
@@ -249,11 +259,13 @@ impl Planner {
         if window_size.exact_div(&window_slide).is_none() {
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
+
         Ok(LogicalHopWindow::create(
             input,
             time_col,
             window_slide,
             window_size,
+            window_offset,
         ))
     }
 }
