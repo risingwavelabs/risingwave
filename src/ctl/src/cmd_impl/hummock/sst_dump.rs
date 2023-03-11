@@ -26,6 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
@@ -73,14 +74,14 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     for level in version.get_combined_levels() {
         for sstable_info in &level.table_infos {
             if let Some(sst_id) = &args.sst_id {
-                if *sst_id == sstable_info.id {
+                if *sst_id == sstable_info.get_object_id() {
                     if args.print_level {
                         print_level(level);
                     }
 
                     sst_dump_via_sstable_store(
                         sstable_store,
-                        sstable_info.id,
+                        sstable_info.get_object_id(),
                         sstable_info.meta_offset,
                         sstable_info.file_size,
                         &table_data,
@@ -96,7 +97,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 
                 sst_dump_via_sstable_store(
                     sstable_store,
-                    sstable_info.id,
+                    sstable_info.get_object_id(),
                     sstable_info.meta_offset,
                     sstable_info.file_size,
                     &table_data,
@@ -111,16 +112,16 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 
 pub async fn sst_dump_via_sstable_store(
     sstable_store: &SstableStore,
-    sst_id: u64,
+    object_id: HummockSstableId,
     meta_offset: u64,
     file_size: u64,
     table_data: &TableData,
     args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
     let sstable_info = SstableInfo {
-        id: sst_id,
-        meta_offset,
+        object_id,
         file_size,
+        meta_offset,
         ..Default::default()
     };
     let sstable_cache = sstable_store
@@ -129,7 +130,7 @@ pub async fn sst_dump_via_sstable_store(
     let sstable = sstable_cache.value().as_ref();
     let sstable_meta = &sstable.meta;
 
-    println!("SST id: {}", sst_id);
+    println!("SST object id: {}", object_id);
     println!("-------------------------------------");
     println!("File Size: {}", sstable.estimate_size());
 

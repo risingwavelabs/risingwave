@@ -47,15 +47,14 @@ export function levelTypeToJSON(object: LevelType): string {
 }
 
 export interface SstableInfo {
-  id: number;
+  objectId: number;
+  sstId: number;
   keyRange: KeyRange | undefined;
   fileSize: number;
   tableIds: number[];
   metaOffset: number;
   staleKeyCount: number;
   totalKeyCount: number;
-  /** When a SST is divided, its divide_version will increase one. */
-  divideVersion: number;
   minEpoch: number;
   maxEpoch: number;
   uncompressedFileSize: number;
@@ -97,6 +96,7 @@ export interface GroupConstruct {
   parentGroupId: number;
   tableIds: number[];
   groupId: number;
+  newSstStartId: number;
 }
 
 export interface GroupMetaChange {
@@ -866,14 +866,14 @@ export interface WriteLimits_WriteLimitsEntry {
 
 function createBaseSstableInfo(): SstableInfo {
   return {
-    id: 0,
+    objectId: 0,
+    sstId: 0,
     keyRange: undefined,
     fileSize: 0,
     tableIds: [],
     metaOffset: 0,
     staleKeyCount: 0,
     totalKeyCount: 0,
-    divideVersion: 0,
     minEpoch: 0,
     maxEpoch: 0,
     uncompressedFileSize: 0,
@@ -883,14 +883,14 @@ function createBaseSstableInfo(): SstableInfo {
 export const SstableInfo = {
   fromJSON(object: any): SstableInfo {
     return {
-      id: isSet(object.id) ? Number(object.id) : 0,
+      objectId: isSet(object.objectId) ? Number(object.objectId) : 0,
+      sstId: isSet(object.sstId) ? Number(object.sstId) : 0,
       keyRange: isSet(object.keyRange) ? KeyRange.fromJSON(object.keyRange) : undefined,
       fileSize: isSet(object.fileSize) ? Number(object.fileSize) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       metaOffset: isSet(object.metaOffset) ? Number(object.metaOffset) : 0,
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
-      divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
       minEpoch: isSet(object.minEpoch) ? Number(object.minEpoch) : 0,
       maxEpoch: isSet(object.maxEpoch) ? Number(object.maxEpoch) : 0,
       uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
@@ -899,7 +899,8 @@ export const SstableInfo = {
 
   toJSON(message: SstableInfo): unknown {
     const obj: any = {};
-    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.objectId !== undefined && (obj.objectId = Math.round(message.objectId));
+    message.sstId !== undefined && (obj.sstId = Math.round(message.sstId));
     message.keyRange !== undefined && (obj.keyRange = message.keyRange ? KeyRange.toJSON(message.keyRange) : undefined);
     message.fileSize !== undefined && (obj.fileSize = Math.round(message.fileSize));
     if (message.tableIds) {
@@ -910,7 +911,6 @@ export const SstableInfo = {
     message.metaOffset !== undefined && (obj.metaOffset = Math.round(message.metaOffset));
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
-    message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
     message.minEpoch !== undefined && (obj.minEpoch = Math.round(message.minEpoch));
     message.maxEpoch !== undefined && (obj.maxEpoch = Math.round(message.maxEpoch));
     message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
@@ -919,7 +919,8 @@ export const SstableInfo = {
 
   fromPartial<I extends Exact<DeepPartial<SstableInfo>, I>>(object: I): SstableInfo {
     const message = createBaseSstableInfo();
-    message.id = object.id ?? 0;
+    message.objectId = object.objectId ?? 0;
+    message.sstId = object.sstId ?? 0;
     message.keyRange = (object.keyRange !== undefined && object.keyRange !== null)
       ? KeyRange.fromPartial(object.keyRange)
       : undefined;
@@ -928,7 +929,6 @@ export const SstableInfo = {
     message.metaOffset = object.metaOffset ?? 0;
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
-    message.divideVersion = object.divideVersion ?? 0;
     message.minEpoch = object.minEpoch ?? 0;
     message.maxEpoch = object.maxEpoch ?? 0;
     message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
@@ -1098,7 +1098,7 @@ export const IntraLevelDelta = {
 };
 
 function createBaseGroupConstruct(): GroupConstruct {
-  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0 };
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0, newSstStartId: 0 };
 }
 
 export const GroupConstruct = {
@@ -1108,6 +1108,7 @@ export const GroupConstruct = {
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      newSstStartId: isSet(object.newSstStartId) ? Number(object.newSstStartId) : 0,
     };
   },
 
@@ -1122,6 +1123,7 @@ export const GroupConstruct = {
       obj.tableIds = [];
     }
     message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    message.newSstStartId !== undefined && (obj.newSstStartId = Math.round(message.newSstStartId));
     return obj;
   },
 
@@ -1133,6 +1135,7 @@ export const GroupConstruct = {
     message.parentGroupId = object.parentGroupId ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
     message.groupId = object.groupId ?? 0;
+    message.newSstStartId = object.newSstStartId ?? 0;
     return message;
   },
 };

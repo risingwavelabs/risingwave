@@ -100,7 +100,7 @@ where
         let tracked_sst_ids: HashSet<HummockSstableId> = {
             let versioning_guard = read_lock!(self, versioning).await;
             let mut tracked_sst_ids =
-                HashSet::from_iter(versioning_guard.current_version.get_sst_ids());
+                HashSet::from_iter(versioning_guard.current_version.get_object_ids());
             for delta in versioning_guard.hummock_version_deltas.values() {
                 tracked_sst_ids.extend(delta.get_gc_sst_ids());
             }

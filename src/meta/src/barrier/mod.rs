@@ -1022,7 +1022,7 @@ fn collect_synced_ssts(
             .iter_mut()
             .map(|grouped| {
                 let sst_info = std::mem::take(&mut grouped.sst).expect("field not None");
-                sst_to_worker.insert(sst_info.id, resp.worker_id);
+                sst_to_worker.insert(sst_info.get_object_id(), resp.worker_id);
                 ExtendedSstableInfo::new(
                     grouped.compaction_group_id,
                     sst_info,

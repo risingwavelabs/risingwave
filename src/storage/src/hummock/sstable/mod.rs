@@ -196,7 +196,8 @@ impl Sstable {
     #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
         SstableInfo {
-            id: self.id,
+            object_id: self.id,
+            sst_id: self.id,
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
@@ -207,7 +208,6 @@ impl Sstable {
             meta_offset: self.meta.meta_offset,
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
-            divide_version: 0,
             uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,

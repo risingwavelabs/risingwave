@@ -341,7 +341,7 @@ impl SstableStore {
         stats: &StoreLocalStatistic,
     ) -> HummockResult<(TableHolder, u64)> {
         let mut local_cache_meta_block_miss = 0;
-        let sst_id = sst.id;
+        let sst_id = sst.get_object_id();
         let result = self
             .meta_cache
             .lookup_with_request_dedup::<_, HummockError, _>(sst_id, sst_id, || {

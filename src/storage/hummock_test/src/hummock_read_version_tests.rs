@@ -151,7 +151,8 @@ async fn test_read_version_basic() {
         let dummy_sst = StagingSstableInfo::new(
             vec![
                 LocalSstableInfo::for_test(SstableInfo {
-                    id: 1,
+                    object_id: 1,
+                    sst_id: 1,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
                         right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
@@ -162,13 +163,13 @@ async fn test_read_version_basic() {
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
-                    divide_version: 0,
                     uncompressed_file_size: 1,
                     min_epoch: 0,
                     max_epoch: 0,
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
-                    id: 2,
+                    object_id: 2,
+                    sst_id: 2,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
                         right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
@@ -179,7 +180,6 @@ async fn test_read_version_basic() {
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
-                    divide_version: 0,
                     uncompressed_file_size: 1,
                     min_epoch: 0,
                     max_epoch: 0,
@@ -233,8 +233,8 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
-        assert_eq!(1, staging_ssts[0].id);
-        assert_eq!(2, staging_ssts[1].id);
+        assert_eq!(1, staging_ssts[0].get_object_id());
+        assert_eq!(2, staging_ssts[1].get_object_id());
     }
 
     {
@@ -257,7 +257,7 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
-        assert_eq!(2, staging_ssts[0].id);
+        assert_eq!(2, staging_ssts[0].get_object_id());
     }
 }
 

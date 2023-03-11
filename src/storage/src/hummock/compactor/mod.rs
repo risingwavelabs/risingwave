@@ -264,7 +264,7 @@ impl Compactor {
         context.compactor_metrics.compact_task_pending_num.dec();
         for level in &compact_task.input_ssts {
             for table in &level.table_infos {
-                context.sstable_store.delete_cache(table.id);
+                context.sstable_store.delete_cache(table.get_object_id());
             }
         }
         task_status

@@ -67,7 +67,7 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_sst_ids(),
+            ssts: v.get_object_ids(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
         }

@@ -180,8 +180,11 @@ impl SstableStreamIterator {
 
     fn sst_debug_info(&self) -> String {
         format!(
-            "sst_id={}, meta_offset={}, table_ids={:?}",
-            self.sstable_info.id, self.sstable_info.meta_offset, self.sstable_info.table_ids
+            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
+            self.sstable_info.get_object_id(),
+            self.sstable_info.get_sst_id(),
+            self.sstable_info.meta_offset,
+            self.sstable_info.table_ids
         )
     }
 }

@@ -98,7 +98,8 @@ pub fn gen_dummy_sst_info(
         file_size += batch.size() as u64;
     }
     SstableInfo {
-        id,
+        object_id: id,
+        sst_id: id,
         key_range: Some(KeyRange {
             left: FullKey::for_test(table_id, min_table_key, epoch).encode(),
             right: FullKey::for_test(table_id, max_table_key, epoch).encode(),
@@ -109,7 +110,6 @@ pub fn gen_dummy_sst_info(
         meta_offset: 0,
         stale_key_count: 0,
         total_key_count: 0,
-        divide_version: 0,
         uncompressed_file_size: file_size,
         min_epoch: 0,
         max_epoch: 0,
@@ -173,7 +173,8 @@ pub async fn put_sst(
     }
     meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
-        id: sst_id,
+        object_id: sst_id,
+        sst_id,
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),
@@ -184,7 +185,6 @@ pub async fn put_sst(
         meta_offset: meta.meta_offset,
         stale_key_count: 0,
         total_key_count: 0,
-        divide_version: 0,
         uncompressed_file_size: meta.estimated_size as u64,
         min_epoch: 0,
         max_epoch: 0,
