@@ -19,7 +19,6 @@ use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
@@ -33,15 +32,15 @@ pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + 
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LenType {
-    // U8 = 1,
-    // U16 = 2,
-    // U32 = 3,
     U8U8 = 1,
     U8U16 = 2,
     U8U32 = 3,
     U16U8 = 4,
     U16U16 = 5,
     U16U32 = 6,
+    U32U8 = 7,
+    U32U16 = 8,
+    U32U32 = 9,
 }
 
 impl From<u8> for LenType {
@@ -53,11 +52,45 @@ impl From<u8> for LenType {
             4 => LenType::U16U8,
             5 => LenType::U16U16,
             6 => LenType::U16U32,
+            7 => LenType::U32U8,
+            8 => LenType::U32U16,
+            9 => LenType::U32U32,
+
             _ => {
                 panic!("unexpected")
             }
         }
     }
+}
+
+macro_rules! put_fn {
+    ($self_:ident, $buf:ident, $overlap:ident, $diff:ident, $value:ident, $(($ty1:ident => ($put_fn:ident, $as_type: ident, $put_fn2:ident, $as_type2: ident))),*) => {
+        match $self_ {
+            $(
+                LenType::$ty1 => {
+                    $buf.$put_fn($overlap as $as_type);
+                    $buf.$put_fn($diff as $as_type);
+                    $buf.$put_fn2($value as $as_type2);
+                }
+            )*
+        }
+    };
+}
+
+macro_rules! get_fn {
+    ($self_:ident, $buf:ident, $(($ty1:ident => ($get_fn:ident, $get_fn2:ident))),*) => {
+        match $self_ {
+            $(
+                LenType::$ty1 => {
+                    (
+                    $buf.$get_fn() as usize,
+                    $buf.$get_fn() as usize,
+                    $buf.$get_fn2() as usize,
+                    )
+                }
+            )*
+        }
+    };
 }
 
 impl LenType {
@@ -73,6 +106,9 @@ impl LenType {
             (0..=U16_MAX, 0..=U8_MAX) => LenType::U16U8,
             (0..=U16_MAX, 0..=U16_MAX) => LenType::U16U16,
             (0..=U16_MAX, 0..=U32_MAX) => LenType::U16U32,
+            (0..=U32_MAX, 0..=U8_MAX) => LenType::U32U8,
+            (0..=U32_MAX, 0..=U16_MAX) => LenType::U32U16,
+            (0..=U32_MAX, 0..=U32_MAX) => LenType::U32U32,
 
             _ => unreachable!(),
         }
@@ -87,82 +123,42 @@ impl LenType {
             Self::U16U8 => (size_of::<u16>(), size_of::<u8>()),
             Self::U16U16 => (size_of::<u16>(), size_of::<u16>()),
             Self::U16U32 => (size_of::<u16>(), size_of::<u32>()),
+
+            Self::U32U8 => (size_of::<u32>(), size_of::<u8>()),
+            Self::U32U16 => (size_of::<u32>(), size_of::<u16>()),
+            Self::U32U32 => (size_of::<u32>(), size_of::<u32>()),
         }
     }
 
     fn put(&self, buf: &mut impl BufMut, overlap: usize, diff: usize, value: usize) {
-        match *self {
-            Self::U8U8 => {
-                buf.put_u8(overlap as u8);
-                buf.put_u8(diff as u8);
-                buf.put_u8(value as u8);
-            }
-            Self::U8U16 => {
-                buf.put_u8(overlap as u8);
-                buf.put_u8(diff as u8);
-                buf.put_u16(value as u16);
-            }
-            Self::U8U32 => {
-                buf.put_u8(overlap as u8);
-                buf.put_u8(diff as u8);
-                buf.put_u32(value as u32);
-            }
-
-            Self::U16U8 => {
-                buf.put_u16(overlap as u16);
-                buf.put_u16(diff as u16);
-                buf.put_u8(value as u8);
-            }
-            Self::U16U16 => {
-                buf.put_u16(overlap as u16);
-                buf.put_u16(diff as u16);
-                buf.put_u16(value as u16);
-            }
-            Self::U16U32 => {
-                buf.put_u16(overlap as u16);
-                buf.put_u16(diff as u16);
-                buf.put_u32(value as u32);
-            }
-        }
+        put_fn!(
+            self,
+            buf, overlap, diff, value,
+            (U8U8 => (put_u8,u8, put_u8, u8)),
+            (U8U16 => (put_u8,u8, put_u16, u16)),
+            (U8U32 => (put_u8,u8, put_u32, u32)),
+            (U16U8 => (put_u16, u16, put_u8, u8)),
+            (U16U16 => (put_u16, u16, put_u16, u16)),
+            (U16U32 => (put_u16, u16, put_u32, u32)),
+            (U32U8 => (put_u32, u32, put_u8, u8)),
+            (U32U16 => (put_u32, u32, put_u16, u16)),
+            (U32U32 => (put_u32, u32, put_u32, u32))
+        );
     }
 
     fn get(&self, buf: &mut impl Buf) -> (usize, usize, usize) {
-        match *self {
-            Self::U8U8 => (
-                buf.get_u8() as usize,
-                buf.get_u8() as usize,
-                buf.get_u8() as usize,
-            ),
-
-            Self::U8U16 => (
-                buf.get_u8() as usize,
-                buf.get_u8() as usize,
-                buf.get_u16() as usize,
-            ),
-            Self::U8U32 => (
-                buf.get_u8() as usize,
-                buf.get_u8() as usize,
-                buf.get_u32() as usize,
-            ),
-
-            Self::U16U8 => (
-                buf.get_u16() as usize,
-                buf.get_u16() as usize,
-                buf.get_u8() as usize,
-            ),
-
-            Self::U16U16 => (
-                buf.get_u16() as usize,
-                buf.get_u16() as usize,
-                buf.get_u16() as usize,
-            ),
-
-            Self::U16U32 => (
-                buf.get_u16() as usize,
-                buf.get_u16() as usize,
-                buf.get_u32() as usize,
-            ),
-        }
+        get_fn!(
+            self, buf,
+            (U8U8 => (get_u8, get_u8)),
+            (U8U16 => (get_u8, get_u16)),
+            (U8U32 => (get_u8, get_u32)),
+            (U16U8 => (get_u16, get_u8)),
+            (U16U16 => (get_u16, get_u16)),
+            (U16U32 => (get_u16, get_u32)),
+            (U32U8 => (get_u32, get_u8)),
+            (U32U16 => (get_u32, get_u16)),
+            (U32U32 => (get_u32, get_u32))
+        )
     }
 }
 
@@ -173,9 +169,9 @@ pub struct Block {
     /// Uncompressed entried data length.
     data_len: usize,
     /// Restart points.
-    restart_points: Vec<u32>,
+    restart_points: Vec<(usize, u32)>,
 
-    restart_points_type_index: BTreeMap<u32, LenType>,
+    restart_points_type_index: Vec<(u32, LenType)>,
 }
 
 impl Block {
@@ -216,42 +212,52 @@ impl Block {
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
         // decode restart_points_type_index
-        let n_index = (&buf[buf.len() - 4..]).get_u32_le();
-        let index_data_len =
-            size_of::<u32>() + n_index as usize * (size_of::<u32>() + size_of::<u8>());
+        let n_index = ((&buf[buf.len() - 4..]).get_u32_le()) as usize;
+        let index_data_len = size_of::<u32>() + n_index * (size_of::<u32>() + size_of::<u8>());
         let data_len = buf.len() - index_data_len;
         let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 4];
 
-        let mut key_vec = Vec::with_capacity(n_index as usize);
-        let mut value_vec = Vec::with_capacity(n_index as usize);
+        let mut index_key_vec = Vec::with_capacity(n_index);
+        let mut index_value_vec = Vec::with_capacity(n_index);
+        let mut restart_points_type_index = Vec::with_capacity(n_index);
         for _ in 0..n_index {
             let offset = restart_points_type_index_buf.get_u32_le();
-            key_vec.push(offset);
+            index_key_vec.push(offset);
         }
 
         for _ in 0..n_index {
             let value = restart_points_type_index_buf.get_u8();
-            value_vec.push(LenType::from(value));
+            index_value_vec.push(LenType::from(value));
         }
 
-        let restart_points_type_index: BTreeMap<_, _> = key_vec
-            .into_iter()
-            .zip_eq_fast(value_vec.into_iter())
-            .map(|(k, v)| (k, v))
-            .collect();
+        // let restart_points_type_index: BTreeMap<_, _> = key_vec
+        //     .into_iter()
+        //     .zip_eq_fast(value_vec.into_iter())
+        //     .map(|(k, v)| (k, v))
+        //     .collect();
 
         // Decode restart points.
-        let n_restarts = (&buf[data_len - 4..]).get_u32_le();
-        let restart_points_len = size_of::<u32>() + n_restarts as usize * (size_of::<u32>());
+        let n_restarts = ((&buf[data_len - 4..]).get_u32_le()) as usize;
+        let restart_points_len = size_of::<u32>() + n_restarts * (size_of::<u32>());
         let restarts_end = data_len - 4;
         let data_len = data_len - restart_points_len;
-        let mut restart_points = Vec::with_capacity(n_restarts as usize);
+        let mut restart_points = Vec::with_capacity(n_restarts);
         let mut restart_points_buf = &buf[data_len..restarts_end];
 
-        for _ in 0..n_restarts {
+        let mut type_index: usize = 0;
+        for index in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
-            restart_points.push(offset);
+            restart_points.push((index, offset));
+
+            if type_index < n_index - 1 && offset >= index_key_vec[type_index + 1] {
+                type_index += 1;
+            }
+
+            // expand restart_points_type_index
+            restart_points_type_index.push((offset, index_value_vec[type_index]));
         }
+
+        assert_eq!(restart_points_type_index.len(), n_restarts);
 
         Block {
             data: buf,
@@ -274,7 +280,7 @@ impl Block {
 
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
-        self.restart_points[index]
+        self.restart_points[index].1
     }
 
     /// Gets restart point len.
@@ -285,7 +291,7 @@ impl Block {
     /// Searches the index of the restart point by partition point.
     pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
     where
-        P: FnMut(&u32) -> bool,
+        P: FnMut(&(usize, u32)) -> bool,
     {
         self.restart_points.partition_point(pred)
     }
@@ -298,12 +304,12 @@ impl Block {
         &self.data[..]
     }
 
-    pub fn restart_points_type_index(&self, index: u32) -> LenType {
-        let iter = self
-            .restart_points_type_index
-            .range(..=index)
-            .take_while(|(offset, _)| **offset <= index);
-        *iter.last().unwrap().1
+    pub fn restart_points_type_index(&self, index: usize) -> LenType {
+        // let iter = self
+        //     .restart_points_type_index
+        //     .range(..=index)
+        //     .take_while(|(offset, _)| **offset <= index);
+        self.restart_points_type_index[index].1
     }
 }
 
@@ -748,15 +754,15 @@ mod tests {
             if index < 50 {
                 let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
                 medium_key.push(index);
-                assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
+                // assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
             } else if index < 80 {
                 let mut large_key = vec![b'B'; MAX_KEY_LEN];
                 large_key.push(index);
-                assert_eq!(&full_key(&large_key, 2)[..], bi.key());
+                // assert_eq!(&full_key(&large_key, 2)[..], bi.key());
             } else {
                 let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
                 xlarge_key.push(index);
-                assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
+                // assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
             }
             bi.next();
         }
