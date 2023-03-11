@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, get_compaction_group_object_ids, HummockVersionExt,
+    get_compaction_group_ids, get_compaction_group_ssts, HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
@@ -33,8 +33,8 @@ use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
-    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
-    SstableInfo,
+    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
+    KeyRange, SstableInfo,
 };
 
 use crate::hummock::compaction::{default_level_selector, ManualCompactionOption};
@@ -55,6 +55,16 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
     pin_snapshots
         .iter()
         .map(|p| p.minimal_pinned_snapshot)
+        .collect_vec()
+}
+
+fn get_compaction_group_object_ids(
+    version: &HummockVersion,
+    group_id: CompactionGroupId,
+) -> Vec<HummockSstableId> {
+    get_compaction_group_ssts(version, group_id)
+        .into_iter()
+        .map(|(object_id, sst_id)| object_id)
         .collect_vec()
 }
 
@@ -1377,7 +1387,7 @@ async fn test_split_compaction_group_on_commit() {
 
 async fn get_branched_ssts<S: MetaStore>(
     hummock_manager: &HummockManager<S>,
-) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
+) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>> {
     hummock_manager
         .versioning
         .read(&["", "", ""])

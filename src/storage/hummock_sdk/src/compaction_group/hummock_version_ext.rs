@@ -119,7 +119,7 @@ pub trait HummockVersionUpdateExt {
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(
         &self,
-    ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>>;
+    ) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -193,6 +193,8 @@ pub type SstSplitInfo = (
     HummockSstableId,
     // SST id.
     HummockSstableId,
+    // Old SST id in parent group.
+    HummockSstableId,
     // New SST id in parent group.
     Option<HummockSstableId>,
 );
@@ -236,16 +238,16 @@ impl HummockVersionUpdateExt for HummockVersion {
                         let mut branch_table_info = sst_info.clone();
                         branch_table_info.sst_id = new_sst_id;
                         new_sst_id += 1;
-                        if !is_trivial {
-                            sst_info.sst_id = new_sst_id;
-                            new_sst_id += 1;
-                        }
+                        let parent_old_sst_id = sst_info.get_sst_id();
                         split_id_vers.push((
                             branch_table_info.get_object_id(),
                             branch_table_info.get_sst_id(),
+                            parent_old_sst_id,
                             if is_trivial {
                                 None
                             } else {
+                                sst_info.sst_id = new_sst_id;
+                                new_sst_id += 1;
                                 Some(sst_info.get_sst_id())
                             },
                         ));
@@ -287,16 +289,16 @@ impl HummockVersionUpdateExt for HummockVersion {
                     let mut branch_table_info = sst_info.clone();
                     branch_table_info.sst_id = new_sst_id;
                     new_sst_id += 1;
-                    if !is_trivial {
-                        sst_info.sst_id = new_sst_id;
-                        new_sst_id += 1;
-                    }
+                    let parent_old_sst_id = sst_info.get_sst_id();
                     split_id_vers.push((
                         branch_table_info.get_object_id(),
                         branch_table_info.get_sst_id(),
+                        parent_old_sst_id,
                         if is_trivial {
                             None
                         } else {
+                            sst_info.sst_id = new_sst_id;
+                            new_sst_id += 1;
                             Some(sst_info.get_sst_id())
                         },
                     ));
@@ -414,20 +416,27 @@ impl HummockVersionUpdateExt for HummockVersion {
 
     fn build_branched_sst_info(
         &self,
-    ) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
-        let mut ret: BTreeMap<_, HashMap<_, _>> = BTreeMap::new();
+    ) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>> {
+        let mut ret: BTreeMap<_, BTreeMap<_, Vec<_>>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
             self.level_iter(*compaction_group_id, |level| {
                 for table_info in level.get_table_infos() {
                     let object_id = table_info.get_object_id();
                     ret.entry(object_id)
                         .or_default()
-                        .insert(*compaction_group_id, table_info.get_sst_id());
+                        .entry(*compaction_group_id)
+                        .or_default()
+                        .push(table_info.get_sst_id());
                 }
                 true
             });
         }
-        ret.retain(|object_id, v| v.len() != 1 || *v.values().next().unwrap() != *object_id);
+        ret.retain(|object_id, v| {
+            v.len() != 1 || {
+                let sst_id_vec = v.values().next().unwrap();
+                sst_id_vec.len() != 1 || sst_id_vec[0] != *object_id
+            }
+        });
         ret
     }
 }
@@ -579,11 +588,11 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
         .collect()
 }
 
-/// Gets all object ids in `group_id`
-pub fn get_compaction_group_object_ids(
+/// Gets all SSTs in `group_id`
+pub fn get_compaction_group_ssts(
     version: &HummockVersion,
     group_id: CompactionGroupId,
-) -> Vec<HummockSstableId> {
+) -> Vec<(HummockSstableId, HummockSstableId)> {
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
@@ -597,7 +606,7 @@ pub fn get_compaction_group_object_ids(
             level
                 .table_infos
                 .iter()
-                .map(|table_info| table_info.get_object_id())
+                .map(|table_info| (table_info.get_object_id(), table_info.get_sst_id()))
         })
         .collect_vec()
 }

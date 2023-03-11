@@ -82,7 +82,7 @@ pub struct Versioning {
     pub branched_ssts: BTreeMap<
         // SST object id
         HummockSstableId,
-        HashMap<CompactionGroupId, /* SST id */ HummockSstableId>,
+        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
     >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
