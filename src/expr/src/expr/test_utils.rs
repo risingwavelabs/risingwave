@@ -139,6 +139,7 @@ pub fn make_hop_window_expression(
                 })?;
         let window_size_sub_slide_expr = LiteralExpression::new(
             DataType::Interval,
+            // change here , to simulate the offset
             Some(ScalarImpl::Interval(IntervalUnit::from_minutes(15))),
         )
         .boxed();

@@ -276,9 +276,7 @@ mod tests {
     #[tokio::test]
     async fn test_size_and_slide() {
         let default_indices = (0..3 + 2).collect_vec();
-        print!("{:?}", default_indices);
         let executor = create_executor(default_indices, IntervalUnit::from_minutes(0));
-
         let mut stream = executor.execute();
         let chunk = stream.next().await.unwrap().unwrap();
         print!("{}", chunk.to_pretty_string());
