@@ -348,7 +348,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
     use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
     use tokio::task;
 
@@ -439,12 +439,14 @@ mod tests {
                     column_index: 1,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
                 PbColumnOrder {
                     column_index: 3,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
             ],

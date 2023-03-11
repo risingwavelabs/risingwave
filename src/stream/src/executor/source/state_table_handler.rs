@@ -28,7 +28,7 @@ use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
@@ -228,6 +228,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Ascending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         ..Default::default()

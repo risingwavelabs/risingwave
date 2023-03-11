@@ -68,9 +68,9 @@ impl Rule for MinMaxOnIndexRule {
                 column_orders: vec![ColumnOrder::new(
                     calls.first()?.inputs.first()?.index(),
                     if kind == AggKind::Min {
-                        OrderType::ascending()
+                        OrderType::default_ascending()
                     } else {
-                        OrderType::descending()
+                        OrderType::default_descending()
                     },
                 )],
             };

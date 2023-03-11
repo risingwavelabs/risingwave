@@ -1039,6 +1039,7 @@ impl ScalarImpl {
         data_type: &DataType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<usize> {
+        // TODO(): this function should be moved to `memcmp_encoding.rs`
         let base_position = deserializer.position();
         let null_tag = u8::deserialize(&mut *deserializer)?;
         match null_tag {

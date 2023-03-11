@@ -17,7 +17,7 @@ use std::fmt;
 use std::sync::Arc;
 
 use parse_display::Display;
-use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
@@ -36,18 +36,18 @@ pub enum Direction {
 }
 
 impl Direction {
-    pub fn from_protobuf(order_type: &PbDirection) -> Direction {
-        match order_type {
-            PbDirection::Ascending => Direction::Ascending,
-            PbDirection::Descending => Direction::Descending,
+    pub fn from_protobuf(direction: &PbDirection) -> Self {
+        match direction {
+            PbDirection::Ascending => Self::Ascending,
+            PbDirection::Descending => Self::Descending,
             PbDirection::Unspecified => unreachable!(),
         }
     }
 
     pub fn to_protobuf(self) -> PbDirection {
         match self {
-            Direction::Ascending => PbDirection::Ascending,
-            Direction::Descending => PbDirection::Descending,
+            Self::Ascending => PbDirection::Ascending,
+            Self::Descending => PbDirection::Descending,
         }
     }
 }
@@ -61,6 +61,23 @@ pub enum NullsAre {
     Smallest,
 }
 
+impl NullsAre {
+    pub fn from_protobuf(nulls_are: &PbNullsAre) -> Self {
+        match nulls_are {
+            PbNullsAre::Largest => Self::Largest,
+            PbNullsAre::Smallest => Self::Smallest,
+            PbNullsAre::Unspecified => unreachable!(),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbNullsAre {
+        match self {
+            Self::Largest => PbNullsAre::Largest,
+            Self::Smallest => PbNullsAre::Smallest,
+        }
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
 pub struct OrderType {
     direction: Direction,
@@ -71,44 +88,79 @@ impl OrderType {
     pub fn from_protobuf(order_type: &PbOrderType) -> OrderType {
         OrderType {
             direction: Direction::from_protobuf(&order_type.direction()),
-            nulls_are: NullsAre::default(),
+            nulls_are: NullsAre::from_protobuf(&order_type.nulls_are()),
         }
     }
 
     pub fn to_protobuf(self) -> PbOrderType {
         PbOrderType {
             direction: self.direction.to_protobuf() as _,
+            nulls_are: self.nulls_are.to_protobuf() as _,
         }
     }
 }
 
 impl OrderType {
-    // TODO(): new(dir, nulls), default_ascending, default_descending, ascending(nulls),
-    // descending(nulls), default_nulls_first, default_nulls_last, nulls_first(dir),
-    // nulls_last(dir)
-
     // TODO(): unittest
 
-    pub fn new(direction: Direction) -> Self {
+    pub fn new(direction: Direction, nulls_are: NullsAre) -> Self {
         Self {
             direction,
-            nulls_are: NullsAre::default(),
+            nulls_are,
         }
     }
 
-    /// Create an ascending order type, with other options set to default.
-    pub fn ascending() -> Self {
+    pub fn ascending(nulls_are: NullsAre) -> Self {
         Self {
             direction: Direction::Ascending,
-            nulls_are: NullsAre::default(),
+            nulls_are,
         }
+    }
+
+    pub fn descending(nulls_are: NullsAre) -> Self {
+        Self {
+            direction: Direction::Descending,
+            nulls_are,
+        }
+    }
+
+    // TODO(): many places that call `default_ascending` should call `default`, need to revisit all
+    // calling spots later
+    /// Create an ascending order type, with other options set to default.
+    pub fn default_ascending() -> Self {
+        Self::ascending(NullsAre::default())
     }
 
     /// Create an descending order type, with other options set to default.
-    pub fn descending() -> Self {
+    pub fn default_descending() -> Self {
+        Self::descending(NullsAre::default())
+    }
+
+    pub fn nulls_largest(direction: Direction) -> Self {
         Self {
-            direction: Direction::Descending,
-            nulls_are: NullsAre::default(),
+            direction,
+            nulls_are: NullsAre::Largest,
+        }
+    }
+
+    pub fn nulls_smallest(direction: Direction) -> Self {
+        Self {
+            direction,
+            nulls_are: NullsAre::Smallest,
+        }
+    }
+
+    pub fn nulls_first(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::nulls_smallest(direction),
+            Direction::Descending => Self::nulls_largest(direction),
+        }
+    }
+
+    pub fn nulls_last(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::nulls_largest(direction),
+            Direction::Descending => Self::nulls_smallest(direction),
         }
     }
 
@@ -130,12 +182,12 @@ impl OrderType {
         self.direction == Direction::Descending
     }
 
-    pub fn nulls_are_smallest(&self) -> bool {
-        self.nulls_are == NullsAre::Smallest
-    }
-
     pub fn nulls_are_largest(&self) -> bool {
         self.nulls_are == NullsAre::Largest
+    }
+
+    pub fn nulls_are_smallest(&self) -> bool {
+        self.nulls_are == NullsAre::Smallest
     }
 
     pub fn nulls_are_first(&self) -> bool {
@@ -150,7 +202,16 @@ impl OrderType {
 
 impl fmt::Display for OrderType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.direction)
+        write!(
+            f,
+            "{} NULLS {}",
+            self.direction,
+            if self.nulls_are_first() {
+                "FIRST"
+            } else {
+                "LAST"
+            }
+        )
     }
 }
 
@@ -276,14 +337,15 @@ fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -
 where
     T: Ord,
 {
-    let ord = match (lhs, rhs) {
-        (Some(l), Some(r)) => l.cmp(r),
-        (None, None) => Ordering::Equal,
-        // TODO(yuchao): `null first` / `null last` is not supported yet.
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
+    let ord = match (lhs, rhs, order_type.nulls_are) {
+        (Some(l), Some(r), _) => l.cmp(r),
+        (None, None, _) => Ordering::Equal,
+        (Some(_), None, NullsAre::Largest) => Ordering::Less,
+        (Some(_), None, NullsAre::Smallest) => Ordering::Greater,
+        (None, Some(_), NullsAre::Largest) => Ordering::Greater,
+        (None, Some(_), NullsAre::Smallest) => Ordering::Less,
     };
-    if order_type.direction == Direction::Descending {
+    if order_type.is_descending() {
         ord.reverse()
     } else {
         ord

@@ -93,10 +93,10 @@ impl OrderedRow {
     pub fn serialize(&self) -> Result<Vec<u8>, memcomparable::Error> {
         let mut serializer = memcomparable::Serializer::new(vec![]);
         for v in &self.0 {
-            // TODO(): not good
+            // TODO(): can't handle NULLS FIRST/LAST
             let (datum, order) = match v {
-                NormalOrder(datum) => (datum, OrderType::ascending()),
-                ReversedOrder(datum) => (&datum.0, OrderType::descending()),
+                NormalOrder(datum) => (datum, OrderType::default_ascending()),
+                ReversedOrder(datum) => (&datum.0, OrderType::default_descending()),
             };
             memcmp_encoding::serialize_datum(datum, order, &mut serializer)?;
         }

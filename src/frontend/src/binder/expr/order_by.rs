@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::error::Result;
 use risingwave_sqlparser::ast::OrderByExpr;
 
+use crate::binder::derive_order_type_from_order_by_expr;
 use crate::expr::OrderByExpr as BoundOrderByExpr;
 use crate::Binder;
 
@@ -28,26 +28,10 @@ impl Binder {
     /// output-column names or numbers are not allowed here.
     pub(super) fn bind_order_by_expr(
         &mut self,
-        OrderByExpr {
-            expr,
-            asc,
-            nulls_first,
-        }: OrderByExpr,
+        order_by_expr: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        // TODO(rc): support `NULLS FIRST | LAST`
-        if nulls_first.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                "NULLS FIRST or NULLS LAST".to_string(),
-                4743.into(),
-            )
-            .into());
-        }
-        let order_type = match asc {
-            None => OrderType::default(),
-            Some(true) => OrderType::ascending(),
-            Some(false) => OrderType::descending(),
-        };
-        let expr = self.bind_expr(expr)?;
+        let order_type = derive_order_type_from_order_by_expr(&order_by_expr);
+        let expr = self.bind_expr(order_by_expr.expr)?;
         Ok(BoundOrderByExpr { expr, order_type })
     }
 }

@@ -27,7 +27,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
+use crate::binder::{derive_order_type_from_order_by_expr, Binder};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
@@ -336,28 +336,12 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            // TODO(rc): support `NULLS FIRST | LAST`
-            if column.nulls_first.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    "nulls_first not supported".into(),
-                    None.into(),
-                )
-                .into());
-            }
+            let order_type = derive_order_type_from_order_by_expr(&column);
 
             use risingwave_sqlparser::ast::Expr;
 
             if let Expr::Identifier(ident) = column.expr {
-                Ok::<(_, _), RwError>((
-                    ident,
-                    column.asc.map_or(OrderType::ascending(), |x| {
-                        if x {
-                            OrderType::ascending()
-                        } else {
-                            OrderType::descending()
-                        }
-                    }),
-                ))
+                Ok::<(_, _), RwError>((ident, order_type))
             } else {
                 Err(ErrorCode::NotImplemented(
                     "only identifier is supported for create index".into(),

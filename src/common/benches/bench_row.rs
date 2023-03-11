@@ -59,7 +59,7 @@ impl Case {
 fn memcmp_encode(c: &Case) -> Vec<Vec<u8>> {
     let serde = OrderedRowSerde::new(
         c.schema.to_vec(),
-        vec![OrderType::descending(); c.schema.len()],
+        vec![OrderType::default_descending(); c.schema.len()],
     );
     let mut array = vec![];
     for row in &c.rows {
@@ -92,7 +92,7 @@ fn column_aware_encode(c: &Case) -> Vec<Vec<u8>> {
 fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> Result<Vec<Vec<Datum>>> {
     let serde = OrderedRowSerde::new(
         c.schema.to_vec(),
-        vec![OrderType::descending(); c.schema.len()],
+        vec![OrderType::default_descending(); c.schema.len()],
     );
     let mut res = vec![];
     if c.column_ids == c.needed_ids {

@@ -262,7 +262,7 @@ impl HashJoin {
             internal_table_catalog_builder.add_column(field);
         });
         pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::default_ascending())
         });
 
         // Build degree table.
@@ -273,7 +273,8 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
+            degree_table_catalog_builder
+                .add_order_column(order_idx, OrderType::default_ascending());
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder

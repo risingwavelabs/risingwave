@@ -569,11 +569,13 @@ impl LogicalScan {
         }
 
         let index = self.indexes().iter().find(|idx| {
+            // TODO(): Do we support `[ ASC | DESC ] [ NULLS { FIRST | LAST } ]` when creating
+            // index? if so, we should somehow use the column orders stored in the index catalog.
             Order {
                 column_orders: idx
                     .index_item
                     .iter()
-                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::ascending()))
+                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::default()))
                     .collect(),
             }
             .satisfies(required_order)

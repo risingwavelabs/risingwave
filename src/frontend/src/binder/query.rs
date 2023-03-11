@@ -18,9 +18,10 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
+use super::derive_order_type_from_order_by_expr;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{CorrelatedId, Depth, ExprImpl};
 
@@ -199,29 +200,13 @@ impl Binder {
     /// * `visible_output_num` - the number of all visible output columns, including duplicates.
     fn bind_order_by_expr_in_query(
         &mut self,
-        OrderByExpr {
-            expr,
-            asc,
-            nulls_first,
-        }: OrderByExpr,
+        order_by_expr: OrderByExpr,
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<ColumnOrder> {
-        // TODO(rc): support `NULLS FIRST | LAST`
-        if nulls_first.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                "NULLS FIRST or NULLS LAST".to_string(),
-                4743.into(),
-            )
-            .into());
-        }
-        let order_type = match asc {
-            None => OrderType::default(),
-            Some(true) => OrderType::ascending(),
-            Some(false) => OrderType::descending(),
-        };
-        let column_index = match expr {
+        let order_type = derive_order_type_from_order_by_expr(&order_by_expr);
+        let column_index = match order_by_expr.expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),

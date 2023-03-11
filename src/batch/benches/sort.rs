@@ -32,7 +32,10 @@ fn create_order_by_executor(
     const CHUNK_SIZE: usize = 1024;
     let (child, column_orders) = if single_column {
         let input = create_input(&[DataType::Int64], chunk_size, chunk_num);
-        (input, vec![ColumnOrder::new(0, OrderType::ascending())])
+        (
+            input,
+            vec![ColumnOrder::new(0, OrderType::default_ascending())],
+        )
     } else {
         let input = create_input(
             &[
@@ -47,9 +50,9 @@ fn create_order_by_executor(
         (
             input,
             vec![
-                ColumnOrder::new(0, OrderType::ascending()),
-                ColumnOrder::new(1, OrderType::descending()),
-                ColumnOrder::new(2, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::default_ascending()),
+                ColumnOrder::new(1, OrderType::default_descending()),
+                ColumnOrder::new(2, OrderType::default_ascending()),
             ],
         )
     };

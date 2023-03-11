@@ -81,9 +81,9 @@ impl<S: StateStore> MaterializedInputState<S> {
                 // `min`/`max` need not to order by any other columns, but have to
                 // order by the agg value implicitly.
                 let order_type = if agg_call.kind == AggKind::Min {
-                    OrderType::ascending()
+                    OrderType::default_ascending()
                 } else {
-                    OrderType::descending()
+                    OrderType::default_descending()
                 };
                 (vec![arg_col_indices[0]], vec![order_type])
             } else {
@@ -96,7 +96,7 @@ impl<S: StateStore> MaterializedInputState<S> {
 
         let pk_len = pk_indices.len();
         order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
+        order_types.extend(itertools::repeat_n(OrderType::default_ascending(), pk_len));
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices

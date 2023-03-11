@@ -111,7 +111,7 @@ pub(crate) fn derive_pk(
         if in_order.contains(idx) {
             continue;
         }
-        pk.push(ColumnOrder::new(idx, OrderType::ascending()));
+        pk.push(ColumnOrder::new(idx, OrderType::default_ascending()));
         in_order.insert(idx);
     }
 
