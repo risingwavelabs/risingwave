@@ -158,7 +158,6 @@ impl HopWindowExecutor {
             child,
             window_slide,
             window_size,
-            window_offset,
             output_indices,
             ..
         } = *self;
@@ -173,7 +172,7 @@ impl HopWindowExecutor {
                 ),
             })?
             .get();
-// (eridanous:todo)
+
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
         #[for_await]
@@ -224,7 +223,10 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
+    fn create_executor(
+        output_indices: Vec<usize>,
+        window_offset: IntervalUnit,
+    ) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -242,15 +244,20 @@ mod tests {
             8 3 ^11:02:00"
                 .replace('^', "2022-2-2T"),
         );
-
+        // print!("{}", chunk.to_pretty_string());
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
 
-        let window_slide = IntervalUnit::from_minutes(15);
+        let window_slide = IntervalUnit::from_minutes(10);
         let window_size = IntervalUnit::from_minutes(30);
-        let window_offset = IntervalUnit::new(0, 0, 0);
-        let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+        let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
+            DataType::Timestamp,
+            2,
+            window_size,
+            window_slide,
+            window_offset,
+        )
+        .unwrap();
 
         Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
@@ -267,14 +274,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_size_and_slide() {
+        let default_indices = (0..3 + 2).collect_vec();
+        print!("{:?}", default_indices);
+        let executor = create_executor(default_indices, IntervalUnit::from_minutes(0));
+
+        let mut stream = executor.execute();
+        let chunk = stream.next().await.unwrap().unwrap();
+        print!("{}", chunk.to_pretty_string());
+
+        let default_indices = (0..3 + 2).collect_vec();
+        let executor = create_executor(default_indices, IntervalUnit::from_minutes(5));
+        let mut stream = executor.execute();
+        let chunk = stream.next().await.unwrap().unwrap();
+        print!("{}", chunk.to_pretty_string());
+    }
+
+    #[tokio::test]
     async fn test_execute() {
         let default_indices = (0..3 + 2).collect_vec();
-        let executor = create_executor(default_indices);
+        print!("{:?}", default_indices);
+        let executor = create_executor(default_indices, IntervalUnit::from_minutes(0));
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
 
         let chunk = stream.next().await.unwrap().unwrap();
+
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
@@ -292,6 +318,7 @@ mod tests {
         );
 
         let chunk = stream.next().await.unwrap().unwrap();
+        print!("{}", chunk.to_pretty_string());
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
@@ -310,7 +337,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let executor = create_executor(vec![1, 3, 4, 2]);
+        let executor = create_executor(vec![1, 3, 4, 2], IntervalUnit::from_minutes(0));
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.

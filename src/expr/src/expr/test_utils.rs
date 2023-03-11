@@ -17,6 +17,7 @@
 use std::num::NonZeroUsize;
 
 use num_traits::CheckedSub;
+use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::serialize_datum;
@@ -101,6 +102,7 @@ pub fn make_hop_window_expression(
     time_col_idx: usize,
     window_size: IntervalUnit,
     window_slide: IntervalUnit,
+    window_offset: IntervalUnit,
 ) -> Result<(Vec<BoxedExpression>, Vec<BoxedExpression>)> {
     let units = window_size
         .exact_div(&window_slide)
@@ -137,7 +139,7 @@ pub fn make_hop_window_expression(
                 })?;
         let window_size_sub_slide_expr = LiteralExpression::new(
             DataType::Interval,
-            Some(ScalarImpl::Interval(window_size_sub_slide)),
+            Some(ScalarImpl::Interval(IntervalUnit::from_minutes(15))),
         )
         .boxed();
 

@@ -99,7 +99,16 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
-    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit,IntervalUnit, Vec<usize>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        PlanRef,
+        InputRef,
+        IntervalUnit,
+        IntervalUnit,
+        IntervalUnit,
+        Vec<usize>,
+    ) {
         (
             self.input,
             self.time_col,
@@ -158,6 +167,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         let Self {
             window_size,
             window_slide,
+            window_offset,
             time_col,
             ..
         } = &self;
@@ -175,9 +185,18 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         let window_size_expr = Literal::new(Some((*window_size).into()), DataType::Interval).into();
         let window_slide_expr: ExprImpl =
             Literal::new(Some((*window_slide).into()), DataType::Interval).into();
+        let window_offset_expr: ExprImpl =
+            Literal::new(Some((*window_offset).into()), DataType::Interval).into();
+
         let window_size_sub_slide = FunctionCall::new(
             ExprType::Subtract,
             vec![window_size_expr, window_slide_expr.clone()],
+        )?
+        .into();
+
+        let window_size_sub_slide = FunctionCall::new(
+            ExprType::Subtract,
+            vec![window_size_sub_slide, window_offset_expr],
         )?
         .into();
 

@@ -203,9 +203,15 @@ mod tests {
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-        let window_offset = IntervalUnit::new(0, 0, 0);
-        let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+        let window_offset = IntervalUnit::from_minutes(1);
+        let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
+            DataType::Timestamp,
+            2,
+            window_size,
+            window_slide,
+            window_offset,
+        )
+        .unwrap();
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
