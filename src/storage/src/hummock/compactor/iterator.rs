@@ -406,7 +406,8 @@ mod tests {
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::test_utils::{
-        default_builder_opt_for_test, gen_test_sstable, test_key_of, test_value_of, TEST_KEYS_COUNT,
+        default_builder_opt_for_test, gen_test_sstable_and_info, test_key_of, test_value_of,
+        TEST_KEYS_COUNT,
     };
     use crate::hummock::value::HummockValue;
 
@@ -417,7 +418,7 @@ mod tests {
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let table = gen_test_sstable(
+            let (_table, table_info) = gen_test_sstable_and_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)
@@ -425,7 +426,7 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
-            table_infos.push(table.get_sstable_info());
+            table_infos.push(table_info);
         }
         let start_index = 5000;
         let end_index = 25000;
@@ -517,7 +518,7 @@ mod tests {
         for object_id in 0..3 {
             let start_index = object_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
             let end_index = (object_id + 1) * TEST_KEYS_COUNT;
-            let table = gen_test_sstable(
+            let (_table, table_info) = gen_test_sstable_and_info(
                 default_builder_opt_for_test(),
                 object_id as u64,
                 (start_index..end_index)
@@ -525,7 +526,7 @@ mod tests {
                 sstable_store.clone(),
             )
             .await;
-            table_infos.push(table.get_sstable_info());
+            table_infos.push(table_info);
         }
 
         // Test seek_idx. Result is dominated by given seek key rather than key range.
@@ -559,7 +560,7 @@ mod tests {
         let block_1_second_key = iter.key().to_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
-        iter.seek_idx(0, Some(seek_key.to_ref())).await.unwrap();
+        iter.seek_idx(table_infos.len() - 1, Some(seek_key.to_ref())).await.unwrap();
         assert!(!iter.is_valid());
 
         // Test seek_idx. Result is dominated by key range rather than given seek key.
