@@ -234,10 +234,10 @@ impl HummockVersionUpdateExt for HummockVersion {
                             .iter()
                             .all(|table_id| member_table_ids.contains(table_id));
                         let mut branch_table_info = sst_info.clone();
+                        branch_table_info.sst_id = new_sst_id;
+                        new_sst_id += 1;
                         if !is_trivial {
                             sst_info.sst_id = new_sst_id;
-                            new_sst_id += 1;
-                            branch_table_info.sst_id = new_sst_id;
                             new_sst_id += 1;
                         }
                         split_id_vers.push((
@@ -285,10 +285,10 @@ impl HummockVersionUpdateExt for HummockVersion {
                         .iter()
                         .all(|table_id| member_table_ids.contains(table_id));
                     let mut branch_table_info = sst_info.clone();
+                    branch_table_info.sst_id = new_sst_id;
+                    new_sst_id += 1;
                     if !is_trivial {
                         sst_info.sst_id = new_sst_id;
-                        new_sst_id += 1;
-                        branch_table_info.sst_id = new_sst_id;
                         new_sst_id += 1;
                     }
                     split_id_vers.push((

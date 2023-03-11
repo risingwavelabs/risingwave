@@ -1511,7 +1511,7 @@ async fn test_split_compaction_group_on_demand_basic() {
     assert_eq!(branched_ssts.len(), 2);
     for object_id in [10, 11] {
         assert_eq!(branched_ssts.get(&object_id).unwrap().len(), 1);
-        assert_eq!(
+        assert_ne!(
             branched_ssts
                 .get(&object_id)
                 .unwrap()
@@ -1519,7 +1519,7 @@ async fn test_split_compaction_group_on_demand_basic() {
                 .cloned()
                 .unwrap(),
             object_id,
-            "trivial adjust doesn't generate a new SST id"
+            "trivial adjust should also generate a new SST id"
         );
     }
 }
