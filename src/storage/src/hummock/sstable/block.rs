@@ -129,11 +129,13 @@ impl LenType {
             Self::U32U32 => (size_of::<u32>(), size_of::<u32>()),
         }
     }
+}
 
-    fn put(&self, buf: &mut impl BufMut, overlap: usize, diff: usize, value: usize) {
+pub trait BufMutExt: BufMut {
+    fn put_var_var_var(&mut self, v1: usize, v2: usize, v3: usize, encoder: LenType) {
         put_fn!(
-            self,
-            buf, overlap, diff, value,
+            encoder,
+            self, v1, v2, v3,
             (U8U8 => (put_u8, u8, put_u8, u8)),
             (U8U16 => (put_u8, u8, put_u16, u16)),
             (U8U32 => (put_u8, u8, put_u32, u32)),
@@ -145,10 +147,12 @@ impl LenType {
             (U32U32 => (put_u32, u32, put_u32, u32))
         );
     }
+}
 
-    fn get(&self, buf: &mut impl Buf) -> (usize, usize, usize) {
+pub trait BufExt: Buf {
+    fn get_var_var_var(&mut self, decoder: LenType) -> (usize, usize, usize) {
         get_fn!(
-            self, buf,
+            decoder, self,
             (U8U8 => (get_u8, get_u8)),
             (U8U16 => (get_u8, get_u16)),
             (U8U32 => (get_u8, get_u32)),
@@ -161,6 +165,10 @@ impl LenType {
         )
     }
 }
+
+impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
+
+impl<T: Buf + ?Sized> BufExt for &mut T {}
 
 #[derive(Clone)]
 pub struct Block {
@@ -316,12 +324,12 @@ pub struct KeyPrefix {
 }
 
 impl KeyPrefix {
-    pub fn encode(&self, buf: &mut impl BufMut, encoder: LenType) {
-        encoder.put(buf, self.overlap, self.diff, self.value)
+    pub fn encode(&self, mut buf: &mut impl BufMut, encoder: LenType) {
+        buf.put_var_var_var(self.overlap, self.diff, self.value, encoder)
     }
 
-    pub fn decode(buf: &mut impl Buf, offset: usize, decoder: LenType) -> Self {
-        let (overlap, diff, value) = decoder.get(buf);
+    pub fn decode(mut buf: &mut impl Buf, offset: usize, decoder: LenType) -> Self {
+        let (overlap, diff, value) = buf.get_var_var_var(decoder);
         let (k_len, v_len) = decoder.len();
         let len = k_len * 2 + v_len;
 

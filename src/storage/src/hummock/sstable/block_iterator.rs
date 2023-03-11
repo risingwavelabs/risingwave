@@ -205,14 +205,11 @@ impl BlockIterator {
             return false;
         }
 
-        let new_restart_point_index =
-            if self.block.restart_point(self.restart_point_index) as usize == self.offset {
-                self.restart_point_index - 1
-            } else {
-                self.restart_point_index
-            };
+        if self.block.restart_point(self.restart_point_index) as usize == self.offset {
+            self.restart_point_index -= 1;
+        }
         let origin_offset = self.offset;
-        self.seek_restart_point_by_index(new_restart_point_index);
+        self.seek_restart_point_by_index(self.restart_point_index);
         self.next_until_prev_offset(origin_offset);
         true
     }
