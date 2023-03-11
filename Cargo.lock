@@ -6497,8 +6497,12 @@ name = "risingwave_sqlparser_test_runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console",
+ "futures",
+ "madsim-tokio",
  "risingwave_sqlparser",
  "serde",
+ "serde_with 2.2.0",
  "serde_yaml",
  "walkdir",
  "workspace-hack",
