@@ -34,6 +34,7 @@ pub struct HopWindowExecutor {
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
+    pub window_offset: IntervalUnit,
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     pub output_indices: Vec<usize>,
@@ -48,6 +49,7 @@ impl HopWindowExecutor {
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
         output_indices: Vec<usize>,
@@ -59,6 +61,7 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
+            window_offset,
             window_start_exprs,
             window_end_exprs,
             output_indices,
@@ -200,6 +203,7 @@ mod tests {
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
+        let window_offset = IntervalUnit::new(0, 0, 0);
         let (window_start_exprs, window_end_exprs) =
             make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
 
@@ -215,6 +219,7 @@ mod tests {
             2,
             window_slide,
             window_size,
+            window_offset,
             window_start_exprs,
             window_end_exprs,
             output_indices,

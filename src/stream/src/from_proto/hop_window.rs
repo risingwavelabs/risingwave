@@ -83,6 +83,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         };
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
+        let window_offset = node.get_window_offset()?.into();
 
         Ok(HopWindowExecutor::new(
             actor_context,
@@ -91,6 +92,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
             time_col,
             window_slide,
             window_size,
+            window_offset,
             window_start_exprs,
             window_end_exprs,
             output_indices,

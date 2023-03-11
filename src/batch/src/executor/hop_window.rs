@@ -16,7 +16,6 @@ use std::num::NonZeroUsize;
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{DataChunk, Vis};
 use risingwave_common::catalog::{Field, Schema};
@@ -174,7 +173,7 @@ impl HopWindowExecutor {
                 ),
             })?
             .get();
-
+// (eridanous:todo)
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
         #[for_await]
