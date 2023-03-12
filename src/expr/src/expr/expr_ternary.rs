@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{
-    I32Array, I64Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray, Utf8Array,
-};
+use risingwave_common::array::{I64Array, IntervalArray, NaiveDateArray, NaiveDateTimeArray};
 use risingwave_common::types::DataType;
 
 use super::template::TernaryExpression;
 use super::BoxedExpression;
 use crate::vector_op::tumble::{
-    tumble_start_date, tumble_start_date_time, tumble_start_offset_date,
-    tumble_start_offset_date_time, tumble_start_offset_timestamptz, tumble_start_timestamptz,
+    tumble_start_offset_date, tumble_start_offset_date_time, tumble_start_offset_timestamptz,
 };
-use crate::Result;
+use crate::{ExprError, Result};
 
 pub(crate) fn new_tumble_start_offset(
     time: BoxedExpression,
@@ -77,7 +74,7 @@ pub(crate) fn new_tumble_start_offset(
                 time.return_type()
             )))
         }
-    }?;
+    };
 
     Ok(expr)
 }

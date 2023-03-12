@@ -83,16 +83,20 @@ pub fn tumble_start_offset_date_time(
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    let time = time.0.timestamp_micros();
-    let window_offset = tm_subtracts(time, offset)?;
+    let diff = time.0.timestamp_micros();
+    let window_start = tm_diff_bin(diff, window_size)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        window_offset / 1_000_000,
-        (window_offset % 1_000_000 * 1000) as u32,
+        window_start / 1_000_000,
+        (window_start % 1_000_000 * 1000) as u32,
     ))
 }
 
 #[inline(always)]
-pub fn tumble_start_offset_timestamptz(time: i64, offset: IntervalUnit) -> Result<i64> {
+pub fn tumble_start_offset_timestamptz(
+    time: i64,
+    window_size: IntervalUnit,
+    offset: IntervalUnit,
+) -> Result<i64> {
     Ok(tm_subtracts(time, offset)?)
 }
 
@@ -110,7 +114,7 @@ fn tm_subtracts(time: i64, offset: IntervalUnit) -> Result<i64> {
 
 #[cfg(test)]
 mod tests {
-    use chrono::{offset, Datelike, Timelike};
+    use chrono::{Datelike, Timelike};
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
