@@ -1,3 +1,6 @@
+//! This module provides utility functions for SQL data type conversion and manipulation.
+
+/// Expands a type wildcard string into a list of concrete types.
 pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
     match ty {
         "*" => vec![
@@ -25,6 +28,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
     }
 }
 
+/// Maps a data type to its corresponding type name.
 pub fn to_data_type_name(ty: &str) -> Option<&str> {
     Some(match ty {
         "boolean" => "Boolean",
@@ -48,6 +52,7 @@ pub fn to_data_type_name(ty: &str) -> Option<&str> {
     })
 }
 
+/// Computes the minimal compatible type between a pair of data types.
 pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
     if types.len() == 1 {
         return types[0].as_ref();
@@ -107,6 +112,7 @@ pub fn min_compatible_type(types: &[impl AsRef<str>]) -> &str {
     }
 }
 
+/// Maps a data type to its corresponding array type name.
 pub fn to_array_type(ty: &str) -> &str {
     match ty {
         "boolean" => "BoolArray",
@@ -130,6 +136,7 @@ pub fn to_array_type(ty: &str) -> &str {
     }
 }
 
+/// Maps a data type to its corresponding ScalarRef type name.
 pub fn to_data_type(ty: &str) -> &str {
     match ty {
         "boolean" => "bool",
@@ -153,6 +160,7 @@ pub fn to_data_type(ty: &str) -> &str {
     }
 }
 
+/// Checks if a data type is primitive.
 pub fn is_primitive(ty: &str) -> bool {
     match ty {
         "int16" | "int32" | "int64" | "float32" | "float64" | "decimal" | "date" | "time"

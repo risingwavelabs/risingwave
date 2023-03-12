@@ -1,3 +1,4 @@
+/// Convert a string from snake_case to CamelCase.
 pub fn to_camel_case(input: &str) -> String {
     input
         .split('_')
