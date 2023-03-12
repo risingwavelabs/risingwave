@@ -65,6 +65,7 @@ pub mod store;
 pub mod vacuum;
 mod validator;
 pub mod value;
+pub mod write_limiter;
 
 pub use error::*;
 pub use risingwave_common::cache::{CacheableEntry, LookupResult, LruCache};
@@ -91,6 +92,7 @@ use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::HummockVersionReader;
+use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::store::{gen_min_epoch, NewLocalOptions, ReadOptions};
 
@@ -134,6 +136,8 @@ pub struct HummockStorage {
 
     /// current_epoch < min_current_epoch cannot be read.
     min_current_epoch: Arc<AtomicU64>,
+
+    write_limiter: WriteLimiterRef,
 }
 
 impl HummockStorage {
@@ -155,6 +159,7 @@ impl HummockStorage {
         ));
 
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
+        let write_limiter = Arc::new(WriteLimiter::default());
         let (event_tx, mut event_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
@@ -163,6 +168,7 @@ impl HummockStorage {
                 filter_key_extractor_manager.clone(),
                 backup_reader.clone(),
                 event_tx.clone(),
+                write_limiter.clone(),
             ),
         )
         .await;
@@ -217,6 +223,7 @@ impl HummockStorage {
             tracing,
             backup_reader,
             min_current_epoch,
+            write_limiter,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -241,6 +248,7 @@ impl HummockStorage {
             self.hummock_event_sender.clone(),
             self.buffer_tracker.get_memory_limiter().clone(),
             self.tracing.clone(),
+            self.write_limiter.clone(),
             option,
         )
     }

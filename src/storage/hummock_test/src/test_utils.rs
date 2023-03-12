@@ -40,6 +40,7 @@ use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use risingwave_storage::hummock::observer_manager::HummockObserverNode;
 use risingwave_storage::hummock::test_utils::default_opts_for_test;
+use risingwave_storage::hummock::write_limiter::WriteLimiter;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -60,12 +61,14 @@ pub async fn prepare_first_valid_version(
     let notification_client =
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone());
     let backup_manager = BackupReader::unused();
+    let write_limiter = WriteLimiter::unused();
     let observer_manager = ObserverManager::new(
         notification_client,
         HummockObserverNode::new(
             Arc::new(FilterKeyExtractorManager::default()),
             backup_manager,
             tx.clone(),
+            write_limiter,
         ),
     )
     .await;
