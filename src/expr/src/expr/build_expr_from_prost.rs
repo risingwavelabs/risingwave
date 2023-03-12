@@ -25,7 +25,7 @@ use super::expr_binary_bytes::{
     new_trim_characters,
 };
 use super::expr_binary_nonnull::{
-    new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp,
+    new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp, new_tumble_start,
 };
 use super::expr_binary_nullable::new_nullable_binary_expr;
 use super::expr_case::CaseExpression;
@@ -52,7 +52,7 @@ use super::expr_unary::{
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
-use crate::expr::expr_ternary::new_tumble_start;
+use crate::expr::expr_ternary::new_tumble_start_offset;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
@@ -280,12 +280,14 @@ fn build_tumble_start_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     ensure!(children.len() == 2 || children.len() == 3);
     let time = expr_build_from_prost(&children[0])?;
     let window_size = expr_build_from_prost(&children[1])?;
-    let offset = if let Some(child) = children.get(2) {
-        Some(expr_build_from_prost(child)?)
+    if children.len() == 2 {
+        new_tumble_start(time, window_size, ret_type)
+    } else if children.len() == 3 {
+        let offset = expr_build_from_prost(&children[2])?;
+        new_tumble_start_offset(time, window_size, offset, ret_type)
     } else {
-        None
-    };
-    Ok(new_tumble_start(ret_type, time, window_size, offset))
+        unreachable!()
+    }
 }
 
 fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {

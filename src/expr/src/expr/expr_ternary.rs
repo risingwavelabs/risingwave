@@ -20,35 +20,31 @@ use risingwave_common::types::DataType;
 use super::template::TernaryExpression;
 use super::BoxedExpression;
 use crate::vector_op::tumble::{
-    tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
+    tumble_start_date, tumble_start_date_time, tumble_start_offset_date,
+    tumble_start_offset_date_time, tumble_start_offset_timestamptz, tumble_start_timestamptz,
 };
-use crate::ExprError;
+use crate::Result;
 
-pub(crate) fn new_tumble_start(
+pub(crate) fn new_tumble_start_offset(
     time: BoxedExpression,
     window_size: BoxedExpression,
-    offset: Option<BoxedExpression>,
+    offset: BoxedExpression,
     return_type: DataType,
-) -> BoxedExpression {
+) -> Result<BoxedExpression> {
     let expr: BoxedExpression = match time.return_type() {
         DataType::Date => Box::new(TernaryExpression::<
             NaiveDateArray,
             IntervalArray,
-            Option<IntervalArray>,
+            IntervalArray,
             NaiveDateTimeArray,
             _,
         >::new(
-            time, window_size, offset, return_type, tumble_start_date
+            time,
+            window_size,
+            offset,
+            return_type,
+            tumble_start_offset_date,
         )),
-        // Box::new(
-        //     TernaryBytesExpression::<Utf8Array, I32Array, I32Array, _>::new(
-        //         items,
-        //         off,
-        //         len,
-        //         return_type,
-        //         substr_start_for,
-        //     ),
-        // )
         DataType::Timestamp => Box::new(TernaryExpression::<
             NaiveDateTimeArray,
             IntervalArray,
@@ -60,7 +56,7 @@ pub(crate) fn new_tumble_start(
             window_size,
             offset,
             return_type,
-            tumble_start_date_time,
+            tumble_start_offset_date_time,
         )),
         DataType::Timestamptz => Box::new(TernaryExpression::<
             I64Array,
@@ -73,7 +69,7 @@ pub(crate) fn new_tumble_start(
             window_size,
             offset,
             return_type,
-            tumble_start_timestamptz,
+            tumble_start_offset_timestamptz,
         )),
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(

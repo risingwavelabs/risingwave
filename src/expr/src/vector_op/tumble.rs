@@ -20,16 +20,14 @@ use crate::{ExprError, Result};
 pub fn tumble_start_date(
     time: NaiveDateWrapper,
     window: IntervalUnit,
-    offset: Option<IntervalUnit>,
 ) -> Result<NaiveDateTimeWrapper> {
-    tumble_start_date_time(time.into(), window, offset)
+    tumble_start_date_time(time.into(), window)
 }
 
 #[inline(always)]
 pub fn tumble_start_date_time(
     time: NaiveDateTimeWrapper,
     window: IntervalUnit,
-    offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     let diff = time.0.timestamp_micros();
     let window_start = tm_diff_bin(diff, window)?;
@@ -71,16 +69,18 @@ fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
 }
 
 #[inline(always)]
-pub fn tumble_offset_date(
+pub fn tumble_start_offset_date(
     time: NaiveDateWrapper,
+    window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    tumble_offset_date_time(time.into(), offset)
+    tumble_start_offset_date_time(time.into(), window_size, offset)
 }
 
 #[inline(always)]
-pub fn tumble_offset_date_time(
+pub fn tumble_start_offset_date_time(
     time: NaiveDateTimeWrapper,
+    window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     let time = time.0.timestamp_micros();
@@ -92,7 +92,7 @@ pub fn tumble_offset_date_time(
 }
 
 #[inline(always)]
-pub fn tumble_offset_timestamptz(time: i64, offset: IntervalUnit) -> Result<i64> {
+pub fn tumble_start_offset_timestamptz(time: i64, offset: IntervalUnit) -> Result<i64> {
     Ok(tm_subtracts(time, offset)?)
 }
 
@@ -120,10 +120,9 @@ mod tests {
     fn test_tumble_start_date_time() {
         let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let interval = IntervalUnit::from_minutes(30);
-        let offset = IntervalUnit::from_minutes(0);
         println!("{}", dt);
         println!("{}", interval);
-        let w = tumble_start_date_time(dt, interval, offset).unwrap().0;
+        let w = tumble_start_date_time(dt, interval).unwrap().0;
         println!("{}", w);
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
