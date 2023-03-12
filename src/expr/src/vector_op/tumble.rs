@@ -83,32 +83,45 @@ pub fn tumble_start_offset_date_time(
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    let diff = time.0.timestamp_micros();
-    let window_start = tm_diff_bin(diff, window_size)?;
+    let timestamp_micro_second = time.0.timestamp_micros();
+    let window_start_micro_second =
+        get_window_start_with_offset(timestamp_micro_second, window_size, offset)?;
+
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        window_start / 1_000_000,
-        (window_start % 1_000_000 * 1000) as u32,
+        window_start_micro_second / 1_000_000,
+        (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))
 }
 
 #[inline(always)]
 pub fn tumble_start_offset_timestamptz(
-    time: i64,
+    timestamp_micro_second: i64,
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<i64> {
-    Ok(tm_subtracts(time, offset)?)
 }
 
 #[inline(always)]
-fn tm_subtracts(time: i64, offset: IntervalUnit) -> Result<i64> {
-    const DAY_MS: i64 = 86400000;
-    let offset_usecs = offset.get_days() as i64 * DAY_MS + offset.get_ms() * 1000;
-    let time_usecs = time - offset_usecs;
-    if time_usecs < 0 {
-        Ok(-time_usecs)
+fn get_window_start_with_offset(
+    timestamp_micro_second: i64,
+    window_size: IntervalUnit,
+    offset: IntervalUnit,
+) -> Result<i64> {
+    const DAY_MICOR_SECOND: i64 = 86400000000;
+    const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
+
+    let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
+        + window_size.get_days() as i64 * DAY_MICOR_SECOND
+        + window_size.get_ms() * 1000;
+
+    let offset_micro_second =
+        offset.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + offset.get_ms() * 1000;
+
+    let remainder = (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
+    if remainder < 0 {
+        Ok(timestamp_micro_second - (remainder + window_size_micro_second))
     } else {
-        Ok(time_usecs)
+        Ok(timestamp_micro_second - remainder)
     }
 }
 
