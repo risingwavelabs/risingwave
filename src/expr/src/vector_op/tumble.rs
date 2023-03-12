@@ -14,23 +14,23 @@
 
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn tumble_start_date(
-    time: NaiveDateWrapper,
-    window: IntervalUnit,
+    timestamp: NaiveDateWrapper,
+    window_size: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    tumble_start_date_time(time.into(), window)
+    tumble_start_date_time(timestamp.into(), window_size)
 }
 
 #[inline(always)]
 pub fn tumble_start_date_time(
-    time: NaiveDateTimeWrapper,
-    window: IntervalUnit,
+    timestamp: NaiveDateTimeWrapper,
+    window_size: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    let diff = time.0.timestamp_micros();
-    let window_start = tm_diff_bin(diff, window)?;
+    let timestamp_micro_second = timestamp.0.timestamp_micros();
+    let window_start = get_window_start(timestamp_micro_second, window_size)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
         window_start / 1_000_000,
         (window_start % 1_000_000 * 1000) as u32,
@@ -38,43 +38,30 @@ pub fn tumble_start_date_time(
 }
 
 #[inline(always)]
-pub fn tumble_start_timestamptz(time: i64, window: IntervalUnit) -> Result<i64> {
-    // Actually directly calls into the helper `tm_diff_bin`. But we keep the shared utility and
-    // enduser function separate.
-    let diff = time;
-    let window_start = tm_diff_bin(diff, window)?;
-    Ok(window_start)
+pub fn tumble_start_timestamptz(
+    timestamp_micro_second: i64,
+    window_size: IntervalUnit,
+) -> Result<i64> {
+    Ok(get_window_start(timestamp_micro_second, window_size)?)
 }
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
 #[inline(always)]
-fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
-    if window.get_months() != 0 {
-        return Err(ExprError::InvalidParam {
-            name: "window",
-            reason: "unimplemented: tumble_start only support days or milliseconds".to_string(),
-        });
-    }
-    let window_usecs = window.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + window.get_ms() * 1000;
-
-    if window_usecs <= 0 {
-        return Err(ExprError::InvalidParam {
-            name: "window",
-            reason: "window must be positive".to_string(),
-        });
-    }
-
-    let delta_usecs = diff_usecs - diff_usecs % window_usecs;
-    Ok(delta_usecs)
+fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> Result<i64> {
+    Ok(get_window_start_with_offset(
+        timestamp_micro_second,
+        window_size,
+        IntervalUnit::new(0, 0, 0),
+    )?)
 }
 
 #[inline(always)]
 pub fn tumble_start_offset_date(
-    time: NaiveDateWrapper,
+    timestamp_date: NaiveDateWrapper,
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
-    tumble_start_offset_date_time(time.into(), window_size, offset)
+    tumble_start_offset_date_time(timestamp_date.into(), window_size, offset)
 }
 
 #[inline(always)]
@@ -99,6 +86,11 @@ pub fn tumble_start_offset_timestamptz(
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<i64> {
+    Ok(get_window_start_with_offset(
+        timestamp_micro_second,
+        window_size,
+        offset,
+    )?)
 }
 
 #[inline(always)]
@@ -131,7 +123,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
-    use super::{tm_subtracts, tumble_start_date_time};
+    use crate::vector_op::tumble::get_window_start;
 
     #[test]
     fn test_tumble_start_date_time() {
@@ -139,7 +131,7 @@ mod tests {
         let interval = IntervalUnit::from_minutes(30);
         println!("{}", dt);
         println!("{}", interval);
-        let w = tumble_start_date_time(dt, interval).unwrap().0;
+        let w = get_window_start(dt, interval).unwrap().0;
         println!("{}", w);
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
@@ -161,22 +153,6 @@ mod tests {
             tm_subtracts(time, offset).unwrap(),
             NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22)
                 .and_hms_uncheck(21, 52, 22)
-                .0
-                .timestamp_micros()
-        )
-    }
-    #[test]
-    fn test_tm_subtracts_overflow() {
-        let time = NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
-            .and_hms_uncheck(0, 0, 0)
-            .0
-            .timestamp_micros();
-        let offset = IntervalUnit::from_minutes(30);
-
-        assert_eq!(
-            tm_subtracts(time, offset).unwrap(),
-            NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
-                .and_hms_uncheck(0, 30, 0)
                 .0
                 .timestamp_micros()
         )
