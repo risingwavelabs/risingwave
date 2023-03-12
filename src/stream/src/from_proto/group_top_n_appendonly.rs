@@ -30,7 +30,7 @@ use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::GroupTopNNode;
 
 use super::*;
@@ -58,13 +58,21 @@ impl ExecutorBuilder for AppendOnlyGroupTopNExecutorBuilder {
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTable::from_table_catalog(table, store, vnodes).await;
-        let storage_key = table.get_pk().iter().map(OrderPair::from_prost).collect();
+        let storage_key = table
+            .get_pk()
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .collect();
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let group_key_types = group_by
             .iter()
             .map(|i| input.schema()[*i].data_type())
             .collect();
-        let order_by = node.order_by.iter().map(OrderPair::from_prost).collect();
+        let order_by = node
+            .order_by
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .collect();
 
         assert_eq!(&params.pk_indices, input.pk_indices());
         let args = AppendOnlyGroupTopNExecutorDispatcherArgs {
@@ -87,9 +95,9 @@ impl ExecutorBuilder for AppendOnlyGroupTopNExecutorBuilder {
 struct AppendOnlyGroupTopNExecutorDispatcherArgs<S: StateStore> {
     input: BoxedExecutor,
     ctx: ActorContextRef,
-    storage_key: Vec<OrderPair>,
+    storage_key: Vec<ColumnOrder>,
     offset_and_limit: (usize, usize),
-    order_by: Vec<OrderPair>,
+    order_by: Vec<ColumnOrder>,
     executor_id: u64,
     group_by: Vec<usize>,
     state_table: StateTable<S>,

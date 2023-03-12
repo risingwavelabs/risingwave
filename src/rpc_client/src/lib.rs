@@ -23,6 +23,7 @@
 #![feature(generators)]
 #![feature(iterator_try_collect)]
 #![feature(hash_drain_filter)]
+#![feature(try_blocks)]
 
 #[cfg(madsim)]
 use std::collections::HashMap;

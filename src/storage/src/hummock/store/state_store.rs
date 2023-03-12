@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
@@ -86,15 +86,15 @@ impl LocalHummockStorage {
         self.read_version.write().update(info)
     }
 
-    pub async fn get_inner<'a>(
-        &'a self,
-        table_key: TableKey<&'a [u8]>,
+    pub async fn get_inner(
+        &self,
+        table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_key_range = (
-            Bound::Included(TableKey(table_key.to_vec())),
-            Bound::Included(TableKey(table_key.to_vec())),
+            Bound::Included(table_key.clone()),
+            Bound::Included(table_key.clone()),
         );
 
         let read_snapshot = read_filter_for_local(
@@ -132,11 +132,7 @@ impl LocalHummockStorage {
         key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
-        let bytes_key_range = (
-            key_range.start_bound().map(|v| Bytes::from(v.clone())),
-            key_range.end_bound().map(|v| Bytes::from(v.clone())),
-        );
-        if self.mem_table.iter(bytes_key_range).next().is_some() {
+        if self.mem_table.iter(key_range.clone()).next().is_some() {
             return Ok(true);
         }
 
@@ -160,12 +156,7 @@ impl StateStoreRead for LocalHummockStorage {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         assert!(epoch <= self.epoch());
         self.get_inner(TableKey(key), epoch, read_options)
     }
@@ -198,9 +189,9 @@ impl LocalStateStore for LocalHummockStorage {
         self.may_exist_inner(key_range, read_options)
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            match self.mem_table.buffer.get(key) {
+            match self.mem_table.buffer.get(&key) {
                 None => {
                     self.get_inner(TableKey(key), self.epoch(), read_options)
                         .await
@@ -259,8 +250,8 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Insert(value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_insert_sanity_check(
-                                &key,
-                                &value,
+                                key.clone(),
+                                value.clone(),
                                 self,
                                 self.epoch(),
                                 self.table_id,
@@ -273,8 +264,8 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Delete(old_value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_delete_sanity_check(
-                                &key,
-                                &old_value,
+                                key.clone(),
+                                old_value,
                                 self,
                                 self.epoch(),
                                 self.table_id,
@@ -287,9 +278,9 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Update((old_value, new_value)) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_update_sanity_check(
-                                &key,
-                                &old_value,
-                                &new_value,
+                                key.clone(),
+                                old_value,
+                                new_value.clone(),
                                 self,
                                 self.epoch(),
                                 self.table_id,

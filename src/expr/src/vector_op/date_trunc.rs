@@ -18,7 +18,7 @@ use crate::{ExprError, Result};
 
 #[inline]
 pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<NaiveDateTimeWrapper> {
-    Ok(match field {
+    Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => ts.truncate_micros(),
         "milliseconds" => ts.truncate_millis(),
         "second" => ts.truncate_second(),
@@ -38,7 +38,7 @@ pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<Nai
 
 #[inline]
 pub fn date_trunc_interval(field: &str, interval: IntervalUnit) -> Result<IntervalUnit> {
-    Ok(match field {
+    Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => interval,
         "milliseconds" => interval.truncate_millis(),
         "second" => interval.truncate_second(),

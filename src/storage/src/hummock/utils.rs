@@ -338,8 +338,8 @@ pub(crate) const ENABLE_SANITY_CHECK: bool = cfg!(debug_assertions);
 
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
-    key: &[u8],
-    value: &[u8],
+    key: Bytes,
+    value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -351,14 +351,15 @@ pub(crate) async fn do_insert_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
-    let stored_value = inner.get(key, epoch, read_options).await?;
+    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Insert(stored_value),
-            new: KeyOp::Insert(Bytes::copy_from_slice(value)),
+            new: KeyOp::Insert(value),
         })
         .into());
     }
@@ -367,8 +368,8 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
-    key: &[u8],
-    old_value: &[u8],
+    key: Bytes,
+    old_value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -380,20 +381,21 @@ pub(crate) async fn do_delete_sanity_check(
         table_id,
         ignore_range_tombstone: false,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
-    match inner.get(key, epoch, read_options).await? {
+    match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+            new: KeyOp::Delete(old_value),
         })
         .into()),
         Some(stored_value) => {
             if stored_value != old_value {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key: Bytes::copy_from_slice(key),
+                    key,
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Delete(Bytes::copy_from_slice(old_value)),
+                    new: KeyOp::Delete(old_value),
                 })
                 .into())
             } else {
@@ -405,9 +407,9 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
-    key: &[u8],
-    old_value: &[u8],
-    new_value: &[u8],
+    key: Bytes,
+    old_value: Bytes,
+    new_value: Bytes,
     inner: &impl StateStoreRead,
     epoch: u64,
     table_id: TableId,
@@ -419,27 +421,22 @@ pub(crate) async fn do_update_sanity_check(
         retention_seconds: table_option.retention_seconds,
         table_id,
         read_version_from_backup: false,
+        prefetch_options: Default::default(),
     };
 
-    match inner.get(key, epoch, read_options).await? {
+    match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
-            key: Bytes::copy_from_slice(key),
+            key,
             prev: KeyOp::Delete(Bytes::default()),
-            new: KeyOp::Update((
-                Bytes::copy_from_slice(old_value),
-                Bytes::copy_from_slice(new_value),
-            )),
+            new: KeyOp::Update((old_value, new_value)),
         })
         .into()),
         Some(stored_value) => {
             if stored_value != old_value {
                 Err(Box::new(MemTableError::InconsistentOperation {
-                    key: Bytes::copy_from_slice(key),
+                    key,
                     prev: KeyOp::Insert(stored_value),
-                    new: KeyOp::Update((
-                        Bytes::copy_from_slice(old_value),
-                        Bytes::copy_from_slice(new_value),
-                    )),
+                    new: KeyOp::Update((old_value, new_value)),
                 })
                 .into())
             } else {

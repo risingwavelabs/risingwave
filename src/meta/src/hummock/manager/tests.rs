@@ -1510,8 +1510,8 @@ async fn test_split_compaction_group_on_demand_basic() {
                 .get(&new_group_id)
                 .cloned()
                 .unwrap(),
-            0,
-            "trivial adjust doesn't increase divide version"
+            1,
+            "trivial adjust should aoso increase divide version"
         );
     }
 }

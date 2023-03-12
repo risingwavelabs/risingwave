@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -52,15 +52,15 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
     ]
 }
 
-fn arrangement_col_arrange_rules() -> Vec<OrderPair> {
+fn arrangement_col_arrange_rules() -> Vec<ColumnOrder> {
     vec![
-        OrderPair::new(1, OrderType::Ascending),
-        OrderPair::new(0, OrderType::Ascending),
+        ColumnOrder::new(1, OrderType::ascending()),
+        ColumnOrder::new(0, OrderType::ascending()),
     ]
 }
 
-fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
-    vec![OrderPair::new(1, OrderType::Ascending)]
+fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
+    vec![ColumnOrder::new(1, OrderType::ascending())]
 }
 
 /// Create a test arrangement.

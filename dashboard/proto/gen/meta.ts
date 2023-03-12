@@ -562,8 +562,9 @@ export interface MembersResponse {
 /**
  * The schema for persisted system parameters.
  * Note on backward compatibility:
- * - Do not remove deprecated fields.
- * - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+ * - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+ * - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
+ * - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
  */
 export interface SystemParams {
   barrierIntervalMs?: number | undefined;
