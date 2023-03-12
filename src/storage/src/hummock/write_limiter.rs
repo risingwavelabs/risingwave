@@ -24,7 +24,10 @@ pub type WriteLimiterRef = Arc<WriteLimiter>;
 
 #[derive(Default)]
 pub struct WriteLimiter {
-    limits: ArcSwap<HashMap<CompactionGroupId, WriteLimit>>,
+    limits: ArcSwap<(
+        HashMap<CompactionGroupId, WriteLimit>,
+        HashMap<TableId, CompactionGroupId>,
+    )>,
     notify: tokio::sync::Notify,
 }
 
@@ -34,40 +37,65 @@ impl WriteLimiter {
     }
 
     pub fn update_write_limits(&self, limits: HashMap<CompactionGroupId, WriteLimit>) {
-        self.limits.store(Arc::new(limits));
+        let mut index: HashMap<TableId, CompactionGroupId> = HashMap::new();
+        for (group_id, limit) in &limits {
+            for table_id in &limit.table_ids {
+                index.insert(table_id.into(), *group_id);
+            }
+        }
+        self.limits.store(Arc::new((limits, index)));
         self.notify.notify_waiters();
     }
 
     /// Returns the reason if write for `table_id` is blocked.
     fn try_find(&self, table_id: &TableId) -> Option<String> {
-        for group in self.limits.load().values() {
-            if group.table_ids.contains(&table_id.table_id) {
-                return Some(group.reason.clone());
+        let limits = self.limits.load();
+        let group_id = match limits.1.get(table_id) {
+            None => {
+                return None;
             }
-        }
-        None
+            Some(group_id) => *group_id,
+        };
+        let reason = limits
+            .0
+            .get(&group_id)
+            .as_ref()
+            .expect("table to group index should be accurate")
+            .reason
+            .clone();
+        Some(reason)
     }
 
     /// Waits until write is permitted for `table_id`.
     pub async fn wait_permission(&self, table_id: TableId) {
         // Fast path.
-        match self.try_find(&table_id) {
-            Some(reason) => {
-                tracing::warn!(
-                    "write to table {} is blocked due to {}",
-                    table_id.table_id,
-                    reason,
-                );
-            }
-            None => {
-                return;
-            }
+        if self.try_find(&table_id).is_none() {
+            return;
         }
+        let mut first_block_msg = true;
         // Slow path.
         loop {
             let notified = self.notify.notified();
-            if self.try_find(&table_id).is_none() {
-                break;
+            match self.try_find(&table_id) {
+                Some(reason) => {
+                    if first_block_msg {
+                        first_block_msg = false;
+                        tracing::warn!(
+                            "write to table {} is blocked: {}",
+                            table_id.table_id,
+                            reason,
+                        );
+                    } else {
+                        tracing::warn!(
+                            "write limiter is updated, but write to table {} is still blocked: {}",
+                            table_id.table_id,
+                            reason,
+                        );
+                    }
+                }
+                None => {
+                    break;
+                }
             }
             notified.await;
         }

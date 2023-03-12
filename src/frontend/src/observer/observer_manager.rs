@@ -75,11 +75,17 @@ impl ObserverState for FrontendObserverNode {
             Info::HummockSnapshot(_) => {
                 self.handle_hummock_snapshot_notification(resp);
             }
+            Info::HummockVersionDeltas(_) => {
+                panic!("frontend node should not receive HummockVersionDeltas");
+            }
+            Info::MetaBackupManifestId(_) => {
+                panic!("frontend node should not receive MetaBackupManifestId");
+            }
+            Info::HummockWriteLimits(_) => {
+                panic!("frontend node should not receive HummockWriteLimits");
+            }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
-            }
-            _ => {
-                panic!("error type notification");
             }
         }
     }

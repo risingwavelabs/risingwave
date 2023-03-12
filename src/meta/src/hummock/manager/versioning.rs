@@ -18,9 +18,7 @@ use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, HummockVersionExt,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
 };
@@ -234,11 +232,7 @@ where
         if new_write_limits == guard.write_limit {
             return false;
         }
-        tracing::debug!(
-            "Hummock write limits is updated: {:#?} -> {:#?}",
-            guard.write_limit,
-            new_write_limits
-        );
+        tracing::info!("Hummock stopped write is updated: {:#?}", new_write_limits);
         guard.write_limit = new_write_limits;
         self.env
             .notification_manager()
@@ -269,7 +263,13 @@ pub(super) fn calc_new_write_limits(
 ) -> HashMap<CompactionGroupId, WriteLimit> {
     let mut new_write_limits = origin_snapshot;
     for (id, config) in &target_groups {
-        let levels = version.get_compaction_group_levels(*id);
+        let levels = match version.levels.get(id) {
+            None => {
+                new_write_limits.remove(id);
+                continue;
+            }
+            Some(levels) => levels,
+        };
         // Add write limit conditions here.
         let threshold = config
             .compaction_config

@@ -490,6 +490,7 @@ where
             .get_compaction_group_configs(&all_group_ids);
         versioning_guard.write_limit =
             calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
 
         Ok(())
     }
