@@ -21,21 +21,11 @@ pub struct ReorderMultiJoinRule {}
 
 impl Rule for ReorderMultiJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        if plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .get_streaming_enable_bushy_join()
-        {
-            let join = plan.as_logical_multi_join()?;
-            join.as_bushy_tree_join().ok()
-        } else {
-            let join = plan.as_logical_multi_join()?;
-            // check if join is inner and can be merged into multijoin
-            let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
-            let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-            Some(left_deep_join)
-        }
+        let join = plan.as_logical_multi_join()?;
+        // check if join is inner and can be merged into multijoin
+        let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
+        let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
+        Some(left_deep_join)
     }
 }
 

@@ -588,17 +588,19 @@ impl LogicalMultiJoin {
         fn create_logical_join(
             s: &LogicalMultiJoin,
             mut join_tree: JoinTreeNode,
+            join_ordering: &mut Vec<usize>,
         ) -> Result<PlanRef> {
             Ok(match (join_tree.left.take(), join_tree.right.take()) {
                 (Some(l), Some(r)) => LogicalJoin::new(
-                    create_logical_join(s, *l)?,
-                    create_logical_join(s, *r)?,
+                    create_logical_join(s, *l, join_ordering)?,
+                    create_logical_join(s, *r, join_ordering)?,
                     JoinType::Inner,
                     Condition::true_cond(),
                 )
                 .into(),
                 (None, None) => {
                     if let Some(idx) = join_tree.idx {
+                        join_ordering.push(idx);
                         s.inputs[idx].clone()
                     } else {
                         return Err(RwError::from(ErrorCode::InternalError(
@@ -613,12 +615,41 @@ impl LogicalMultiJoin {
                 }
             })
         }
-        create_logical_join(
+        let mut join_ordering = vec![];
+        let mut output = create_logical_join(
             self,
             optimized_bushy_tree
                 .expect("no optimized bushy tree node")
                 .join_tree,
-        )
+            &mut join_ordering,
+        )?;
+
+        let total_col_num = self.inner2output.source_size();
+        let reorder_mapping = {
+            let mut reorder_mapping = vec![None; total_col_num];
+
+            join_ordering
+                .iter()
+                .cloned()
+                .flat_map(|input_idx| {
+                    (0..self.inputs[input_idx].schema().len())
+                        .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
+                })
+                .enumerate()
+                .for_each(|(tar, src)| reorder_mapping[src] = Some(tar));
+            reorder_mapping
+        };
+        output =
+            LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
+                .into();
+
+        // We will later push down all of the filters back to the individual joins via the
+        // `FilterJoinRule`.
+        output = LogicalFilter::create(output, self.on.clone());
+        output =
+            LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
+
+        Ok(output)
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {

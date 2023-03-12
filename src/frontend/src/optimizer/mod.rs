@@ -334,12 +334,21 @@ impl PlanRoot {
         );
 
         // Reorder multijoin into left-deep join tree.
-        plan = self.optimize_by_rules(
-            plan,
-            "Join Reorder".to_string(),
-            vec![ReorderMultiJoinRule::create()],
-            ApplyOrder::TopDown,
-        );
+        plan = if for_stream {
+            self.optimize_by_rules(
+                plan,
+                "Join Reorder Streaming".to_string(),
+                vec![ReorderMultiJoinRuleStreaming::create()],
+                ApplyOrder::TopDown,
+            )
+        } else {
+            self.optimize_by_rules(
+                plan,
+                "Join Reorder".to_string(),
+                vec![ReorderMultiJoinRule::create()],
+                ApplyOrder::TopDown,
+            )
+        };
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.

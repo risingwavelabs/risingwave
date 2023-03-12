@@ -32,7 +32,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 19] = [
+const CONFIG_KEYS: [&str; 20] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -52,6 +52,7 @@ const CONFIG_KEYS: [&str; 19] = [
     "RW_ENABLE_TWO_PHASE_AGG",
     "RW_FORCE_TWO_PHASE_AGG",
     "RW_ENABLE_SHARE_PLAN",
+    "RW_STREAMING_ENABLE_BUSHY_JOIN",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
