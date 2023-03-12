@@ -26,6 +26,7 @@ pub use block_iterator::*;
 mod bloom;
 mod xor_filter;
 pub use bloom::BloomFilterBuilder;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 pub use xor_filter::XorFilterBuilder;
 use xor_filter::XorFilterReader;
 pub mod builder;
@@ -33,6 +34,7 @@ pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
 use risingwave_object_store::object::BlockLocation;
+use risingwave_pb::common::Buffer as ProstBuffer;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -255,9 +257,56 @@ impl BlockMeta {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct VNodeBitmap {
+    pub state_table_id: StateTableId,
+    pub vnode_bitmap: ProstBuffer,
+}
+
+impl VNodeBitmap {
+    /// Format:
+    ///
+    /// ```plain
+    /// | state table ID (4B) | compression type (4B) | body len (4B) | body |
+    /// ```
+    pub fn encode(&self, buf: &mut Vec<u8>) {
+        buf.put_u32_le(self.state_table_id);
+        buf.put_u32_le(self.vnode_bitmap.compression() as u32);
+        put_length_prefixed_slice(buf, self.vnode_bitmap.get_body());
+    }
+
+    pub fn decode(buf: &mut &[u8]) -> Self {
+        let state_table_id = buf.get_u32_le();
+        let compression_type = buf.get_u32_le();
+        let body = get_length_prefixed_slice(buf);
+        Self {
+            state_table_id,
+            vnode_bitmap: ProstBuffer {
+                compression: compression_type as i32,
+                body,
+            },
+        }
+    }
+
+    #[inline(always)]
+    pub fn encoded_size(&self) -> usize {
+        12 /* state table ID + compression type + body len */ + self.vnode_bitmap.get_body().len()
+    }
+}
+
+impl PartialEq for VNodeBitmap {
+    /// Should not compare two vnode bitmaps.
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for VNodeBitmap {}
+
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct SstableMeta {
     pub block_metas: Vec<BlockMeta>,
+    pub vnode_bitmaps: Vec<VNodeBitmap>,
     pub bloom_filter: Vec<u8>,
     pub estimated_size: u32,
     pub key_count: u32,
@@ -275,6 +324,8 @@ impl SstableMeta {
     /// ```plain
     /// | N (4B) |
     /// | block meta 0 | ... | block meta N-1 |
+    /// | T (4B) |
+    /// | vnode bitmap 0 | ... | vnode bitmap T-1 |
     /// | bloom filter len (4B) | bloom filter |
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
@@ -293,6 +344,10 @@ impl SstableMeta {
         buf.put_u32_le(self.block_metas.len() as u32);
         for block_meta in &self.block_metas {
             block_meta.encode(buf);
+        }
+        buf.put_u32_le(self.vnode_bitmaps.len() as u32);
+        for vnode_bitmap in &self.vnode_bitmaps {
+            vnode_bitmap.encode(buf);
         }
         put_length_prefixed_slice(buf, &self.bloom_filter);
         buf.put_u32_le(self.estimated_size);
@@ -335,6 +390,11 @@ impl SstableMeta {
         for _ in 0..block_meta_count {
             block_metas.push(BlockMeta::decode(buf));
         }
+        let vnode_bitmap_count = buf.get_u32_le() as usize;
+        let mut vnode_bitmaps = Vec::with_capacity(vnode_bitmap_count);
+        for _ in 0..vnode_bitmap_count {
+            vnode_bitmaps.push(VNodeBitmap::decode(buf));
+        }
         let bloom_filter = get_length_prefixed_slice(buf);
         let estimated_size = buf.get_u32_le();
         let key_count = buf.get_u32_le();
@@ -350,6 +410,7 @@ impl SstableMeta {
 
         Ok(Self {
             block_metas,
+            vnode_bitmaps,
             bloom_filter,
             estimated_size,
             key_count,
@@ -368,6 +429,12 @@ impl SstableMeta {
             .block_metas
             .iter()
             .map(|block_meta| block_meta.encoded_size())
+            .sum::<usize>()
+            + 4 // vnode bitmap count
+            + self
+            .vnode_bitmaps
+            .iter()
+            .map(|vnode_bitmap| vnode_bitmap.encoded_size())
             .sum::<usize>()
             + 4 // delete range tombstones len
             + self
@@ -417,6 +484,13 @@ mod tests {
                     uncompressed_size: 0,
                 },
             ],
+            vnode_bitmaps: vec![VNodeBitmap {
+                state_table_id: 0,
+                vnode_bitmap: ProstBuffer {
+                    compression: 1,
+                    body: b"risingwave".to_vec(),
+                },
+            }],
             bloom_filter: b"0123456789".to_vec(),
             estimated_size: 123,
             key_count: 123,

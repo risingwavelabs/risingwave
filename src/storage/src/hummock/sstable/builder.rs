@@ -13,11 +13,15 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use bytes::BytesMut;
+use itertools::Itertools;
+use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FullKeyFilterKeyExtractor,
 };
@@ -33,7 +37,7 @@ use super::{
 };
 use crate::hummock::sstable::{FilterBuilder, XorFilterBuilder};
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeTombstone, HummockResult};
+use crate::hummock::{DeleteRangeTombstone, HummockResult, VNodeBitmap};
 use crate::opts::StorageOpts;
 
 pub const DEFAULT_SSTABLE_SIZE: usize = 4 * 1024 * 1024;
@@ -98,14 +102,15 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     block_metas: Vec<BlockMeta>,
     /// store operation of delete-range
     range_tombstones: Vec<DeleteRangeTombstone>,
-    /// `table_id` of added keys.
-    table_ids: BTreeSet<u32>,
+    /// `table_id` of added keys and corresponding vnode bitmaps.
+    table_ids: BTreeMap<StateTableId, BitmapBuilder>,
     last_full_key: Vec<u8>,
     last_extract_key: Vec<u8>,
     /// Buffer for encoded key and value to avoid allocation.
     raw_key: BytesMut,
     raw_value: BytesMut,
-    last_table_id: Option<u32>,
+    last_table_id: Option<StateTableId>,
+    last_table_vnode_bitmap: BitmapBuilder,
     sstable_id: u64,
 
     /// `stale_key_count` counts range_tombstones as well.
@@ -155,8 +160,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }),
             filter_builder,
             block_metas: Vec::with_capacity(options.capacity / options.block_capacity + 1),
-            table_ids: BTreeSet::new(),
+            table_ids: BTreeMap::new(),
             last_table_id: None,
+            last_table_vnode_bitmap: Default::default(),
             raw_key: BytesMut::new(),
             raw_value: BytesMut::new(),
             last_full_key: vec![],
@@ -179,7 +185,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             if last_table_id != tombstone.start_user_key.table_id {
                 last_table_id = tombstone.start_user_key.table_id;
                 self.table_ids
-                    .insert(tombstone.start_user_key.table_id.table_id);
+                    .entry(tombstone.start_user_key.table_id.table_id)
+                    .or_insert(BitmapBuilder::zeroed(VirtualNode::COUNT));
             }
         }
         self.range_tombstones.extend(range_tombstones);
@@ -214,11 +221,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             let table_id = full_key.user_key.table_id.table_id();
             is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
             if is_new_table {
-                self.table_ids.insert(table_id);
                 self.finalize_last_table_stats();
                 self.last_table_id = Some(table_id);
+                self.last_table_vnode_bitmap = std::mem::take(
+                    self.table_ids
+                        .entry(table_id)
+                        .or_insert(BitmapBuilder::zeroed(VirtualNode::COUNT)),
+                );
                 self.last_extract_key.clear();
             }
+            self.last_table_vnode_bitmap
+                .set(full_key.user_key.get_vnode_id(), true);
             let mut extract_key = user_key(&self.raw_key);
             extract_key = self.filter_key_extractor.extract(extract_key);
 
@@ -271,6 +284,15 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         Ok(())
     }
 
+    pub fn pre_finish(&mut self) {
+        self.finalize_last_table_stats();
+    }
+
+    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+        self.pre_finish();
+        self.post_finish().await
+    }
+
     /// Finish building sst.
     ///
     /// Unlike most LSM-Tree implementations, sstable meta and data are encoded separately.
@@ -283,14 +305,13 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     /// ```plain
     /// | Block 0 | ... | Block N-1 | N (4B) |
     /// ```
-    pub async fn finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
+    pub async fn post_finish(mut self) -> HummockResult<SstableBuilderOutput<W::Output>> {
         let mut smallest_key = if self.block_metas.is_empty() {
             vec![]
         } else {
             self.block_metas[0].smallest_key.clone()
         };
         let mut largest_key = self.last_full_key.clone();
-        self.finalize_last_table_stats();
 
         self.build_block().await?;
         let mut right_exclusive = false;
@@ -335,8 +356,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             .map(|block_meta| block_meta.uncompressed_size as u64)
             .sum::<u64>();
 
+        let mut table_ids = Vec::with_capacity(self.table_ids.len());
+        let vnode_bitmaps = self
+            .table_ids
+            .iter_mut()
+            .map(|(table_id, bitmap_builder)| {
+                table_ids.push(*table_id);
+                VNodeBitmap {
+                    state_table_id: *table_id,
+                    vnode_bitmap: std::mem::take(bitmap_builder).finish().to_protobuf(),
+                }
+            })
+            .collect_vec();
+
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
+            vnode_bitmaps,
             bloom_filter,
             estimated_size: 0,
             key_count: self.total_key_count as u32,
@@ -411,7 +446,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 right_exclusive,
             }),
             file_size: meta.estimated_size as u64,
-            table_ids: self.table_ids.into_iter().collect(),
+            table_ids,
             meta_offset: meta.meta_offset,
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
@@ -481,10 +516,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.table_ids.is_empty() || self.last_table_id.is_none() {
             return;
         }
-        self.table_stats.insert(
-            self.last_table_id.unwrap(),
-            std::mem::take(&mut self.last_table_stats),
-        );
+        let last_table_id = self.last_table_id.unwrap();
+        *self.table_ids.get_mut(&last_table_id).unwrap() =
+            std::mem::take(&mut self.last_table_vnode_bitmap);
+        self.table_stats
+            .insert(last_table_id, std::mem::take(&mut self.last_table_stats));
     }
 }
 

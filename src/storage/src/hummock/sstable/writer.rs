@@ -100,6 +100,7 @@ mod tests {
         }
         let meta = SstableMeta {
             block_metas,
+            vnode_bitmaps: vec![],
             bloom_filter: vec![],
             estimated_size: 0,
             key_count: 0,

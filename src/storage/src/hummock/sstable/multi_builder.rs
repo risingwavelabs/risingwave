@@ -178,8 +178,9 @@ where
         range_tombstones: Vec<DeleteRangeTombstone>,
     ) -> HummockResult<()> {
         if let Some(mut builder) = self.current_builder.take() {
+            builder.pre_finish();
             builder.add_delete_range(range_tombstones);
-            let builder_output = builder.finish().await?;
+            let builder_output = builder.post_finish().await?;
             {
                 // report
 
