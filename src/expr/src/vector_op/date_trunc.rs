@@ -45,7 +45,7 @@ pub fn date_trunc_timestamptz(field: &str, ts: i64) -> Result<i64> {
 
 #[function("date_trunc(varchar, timestamptz, varchar) -> timestamptz")]
 pub fn date_trunc_timestamptz_at_timezone(field: &str, ts: i64, timezone: &str) -> Result<i64> {
-    let timestamp = timestamptz_at_time_zone(tz, timezone)?;
+    let timestamp = timestamptz_at_time_zone(ts, timezone)?;
     let truncated = date_trunc_timestamp(field, timestamp)?;
     timestamp_at_time_zone(truncated, timezone)
 }

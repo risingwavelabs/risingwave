@@ -336,11 +336,11 @@ impl<F, A, B> fmt::Debug for CompareExpression<F, A, B> {
 
 impl<F, A, B> CompareExpression<F, A, B>
 where
-    F: Fn(A, B) -> bool + Send + Sync,
-    A: PrimitiveArrayItemType,
-    B: PrimitiveArrayItemType,
-    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
-    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+    F: Fn(A::RefItem<'_>, B::RefItem<'_>) -> bool + Send + Sync,
+    A: Array,
+    B: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> &'a B: std::convert::From<&'a ArrayImpl>,
 {
     pub fn new(left: BoxedExpression, right: BoxedExpression, func: F) -> Self {
         CompareExpression {
@@ -354,11 +354,11 @@ where
 
 impl<F, A, B> Expression for CompareExpression<F, A, B>
 where
-    F: Fn(A, B) -> bool + Send + Sync,
-    A: PrimitiveArrayItemType,
-    B: PrimitiveArrayItemType,
-    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
-    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+    F: Fn(A::RefItem<'_>, B::RefItem<'_>) -> bool + Send + Sync,
+    A: Array,
+    B: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> &'a B: std::convert::From<&'a ArrayImpl>,
 {
     fn return_type(&self) -> DataType {
         DataType::Boolean
@@ -375,8 +375,8 @@ where
         };
         bitmap &= left.null_bitmap();
         bitmap &= right.null_bitmap();
-        let a: &PrimitiveArray<A> = (&*left).into();
-        let b: &PrimitiveArray<B> = (&*right).into();
+        let a: &A = (&*left).into();
+        let b: &B = (&*right).into();
         let c = BoolArray::new(
             a.raw_iter()
                 .zip(b.raw_iter())
@@ -425,11 +425,11 @@ impl<F, A, B> fmt::Debug for IsDistinctFromExpression<F, A, B> {
 
 impl<F, A, B> IsDistinctFromExpression<F, A, B>
 where
-    F: Fn(A, B) -> bool + Send + Sync,
-    A: PrimitiveArrayItemType,
-    B: PrimitiveArrayItemType,
-    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
-    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+    F: Fn(A::RefItem<'_>, B::RefItem<'_>) -> bool + Send + Sync,
+    A: Array,
+    B: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> &'a B: std::convert::From<&'a ArrayImpl>,
 {
     pub fn new(left: BoxedExpression, right: BoxedExpression, ne: F, not: bool) -> Self {
         IsDistinctFromExpression {
@@ -444,11 +444,11 @@ where
 
 impl<F, A, B> Expression for IsDistinctFromExpression<F, A, B>
 where
-    F: Fn(A, B) -> bool + Send + Sync,
-    A: PrimitiveArrayItemType,
-    B: PrimitiveArrayItemType,
-    for<'a> &'a PrimitiveArray<A>: From<&'a ArrayImpl>,
-    for<'a> &'a PrimitiveArray<B>: From<&'a ArrayImpl>,
+    F: Fn(A::RefItem<'_>, B::RefItem<'_>) -> bool + Send + Sync,
+    A: Array,
+    B: Array,
+    for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
+    for<'a> &'a B: std::convert::From<&'a ArrayImpl>,
 {
     fn return_type(&self) -> DataType {
         DataType::Boolean
@@ -459,8 +459,8 @@ where
         let right = self.right.eval_checked(data_chunk)?;
         assert_eq!(left.len(), right.len());
 
-        let a: &PrimitiveArray<A> = (&*left).into();
-        let b: &PrimitiveArray<B> = (&*right).into();
+        let a: &A = (&*left).into();
+        let b: &B = (&*right).into();
 
         let mut data: Bitmap = a
             .raw_iter()

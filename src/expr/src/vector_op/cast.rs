@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::any::type_name;
-use std::fmt::Write;
+use std::fmt::{Debug, Write};
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
@@ -264,43 +264,50 @@ where
         .map_err(|_| ExprError::Parse(type_name::<T>().into()))
 }
 
-/// Define the cast function to primitive types.
-///
-/// Due to the orphan rule, some data can't implement `TryFrom` trait for basic type.
-/// We can only use [`ToPrimitive`] trait.
-///
-/// Note: this might be lossy according to the docs from [`ToPrimitive`]:
-/// > On the other hand, conversions with possible precision loss or truncation
-/// are admitted, like an `f32` with a decimal part to an integer type, or
-/// even a large `f64` saturating to `f32` infinity.
-macro_rules! define_cast_to_primitive {
-    ($ty:ty) => {
-        define_cast_to_primitive! { $ty, $ty }
-    };
-    ($ty:ty, $wrapper_ty:ty) => {
-        paste::paste! {
-            #[inline(always)]
-            pub fn [<to_ $ty>]<T>(elem: T) -> Result<$wrapper_ty>
-            where
-                T: ToPrimitive + std::fmt::Debug,
-            {
-                elem.[<to_ $ty>]()
-                    .ok_or_else(|| {
-                        ExprError::CastOutOfRange(
-                            std::any::type_name::<$ty>()
-                        )
-                    })
-                    .map(Into::into)
-            }
-        }
-    };
+// Define the cast function to primitive types.
+//
+// Due to the orphan rule, some data can't implement `TryFrom` trait for basic type.
+// We can only use [`ToPrimitive`] trait.
+//
+// Note: this might be lossy according to the docs from [`ToPrimitive`]:
+// > On the other hand, conversions with possible precision loss or truncation
+// are admitted, like an `f32` with a decimal part to an integer type, or
+// even a large `f64` saturating to `f32` infinity.
+
+#[function("cast(float32) -> int16")]
+#[function("cast(float64) -> int16")]
+pub fn to_i16<T: ToPrimitive + Debug>(elem: T) -> Result<i16> {
+    elem.to_i16().ok_or(ExprError::CastOutOfRange("i16"))
 }
 
-define_cast_to_primitive! { i16 }
-define_cast_to_primitive! { i32 }
-define_cast_to_primitive! { i64 }
-define_cast_to_primitive! { f32, OrderedF32 }
-define_cast_to_primitive! { f64, OrderedF64 }
+#[function("cast(float32) -> int32")]
+#[function("cast(float64) -> int32")]
+pub fn to_i32<T: ToPrimitive + Debug>(elem: T) -> Result<i32> {
+    elem.to_i32().ok_or(ExprError::CastOutOfRange("i32"))
+}
+
+#[function("cast(float32) -> int64")]
+#[function("cast(float64) -> int64")]
+pub fn to_i64<T: ToPrimitive + Debug>(elem: T) -> Result<i64> {
+    elem.to_i64().ok_or(ExprError::CastOutOfRange("i64"))
+}
+
+#[function("cast(int32) -> float32")]
+#[function("cast(int64) -> float32")]
+#[function("cast(float64) -> float32")]
+#[function("cast(decimal) -> float32")]
+pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF32> {
+    elem.to_f32()
+        .map(Into::into)
+        .ok_or(ExprError::CastOutOfRange("f32"))
+}
+
+#[function("cast(decimal) -> float64")]
+pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF64> {
+    elem.to_f64()
+        .map(Into::into)
+        .ok_or(ExprError::CastOutOfRange("f64"))
+}
 
 // In postgresSql, the behavior of casting decimal to integer is rounding.
 // We should write them separately
@@ -339,7 +346,7 @@ pub fn jsonb_to_dec(v: JsonbRef<'_>) -> Result<Decimal> {
 /// This is less powerful but still meets RFC 8259 interoperability.
 macro_rules! define_jsonb_to_number {
     ($ty:ty, $sig:literal) => {
-        define_jsonb_to_number! { $ty, $ty }
+        define_jsonb_to_number! { $ty, $ty, $sig }
     };
     ($ty:ty, $wrapper_ty:ty, $sig:literal) => {
         paste::paste! {
@@ -379,20 +386,9 @@ pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
 
 #[function("cast(boolean) -> int32")]
 #[function("cast(int32) -> int16")]
-#[function("cast(int32) -> float32")]
 #[function("cast(int64) -> int16")]
 #[function("cast(int64) -> int32")]
-#[function("cast(int64) -> float32")]
 #[function("cast(int64) -> float64")]
-#[function("cast(float32) -> int16")]
-#[function("cast(float32) -> int32")]
-#[function("cast(float32) -> int64")]
-#[function("cast(float64) -> int16")]
-#[function("cast(float64) -> int32")]
-#[function("cast(float64) -> int64")]
-#[function("cast(float64) -> float32")]
-#[function("cast(decimal) -> float32")]
-#[function("cast(decimal) -> float64")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
 where
     T1: TryInto<T2> + std::fmt::Debug + Copy,

@@ -268,19 +268,13 @@ fn timestamptz_interval_inner(
 }
 
 #[function("multiply(interval, *int) -> interval")]
-pub fn interval_int_mul<T1, T2>(l: IntervalUnit, r: T2) -> Result<IntervalUnit>
-where
-    T2: TryInto<i32> + Debug,
-{
+pub fn interval_int_mul(l: IntervalUnit, r: impl TryInto<i32> + Debug) -> Result<IntervalUnit> {
     l.checked_mul_int(r).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("multiply(*int, interval) -> interval")]
-pub fn int_interval_mul<T1, T2>(l: T1, r: IntervalUnit) -> Result<IntervalUnit>
-where
-    T1: TryInto<i32> + Debug,
-{
-    interval_int_mul::<T2, T1>(r, l)
+pub fn int_interval_mul(l: impl TryInto<i32> + Debug, r: IntervalUnit) -> Result<IntervalUnit> {
+    interval_int_mul(r, l)
 }
 
 #[function("add(date, time) -> timestamp")]

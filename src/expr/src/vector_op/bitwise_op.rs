@@ -26,7 +26,12 @@ use crate::{ExprError, Result};
 // undefined behaviour. If the RHS is negative, instead of having an unexpected answer, we return an
 // error. If PG had clearly defined behavior rather than relying on UB of C, we would follow it even
 // when it is different from rust std.
-#[function("bitwise_shift_left(*int, *int) -> auto")]
+#[function("bitwise_shift_left(int16, int16) -> int16")]
+#[function("bitwise_shift_left(int16, int32) -> int16")]
+#[function("bitwise_shift_left(int32, int16) -> int32")]
+#[function("bitwise_shift_left(int32, int32) -> int32")]
+#[function("bitwise_shift_left(int64, int16) -> int64")]
+#[function("bitwise_shift_left(int64, int32) -> int64")]
 pub fn general_shl<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
     T1: CheckedShl + Debug,
@@ -37,7 +42,12 @@ where
     })
 }
 
-#[function("bitwise_shift_right(*int, *int) -> auto")]
+#[function("bitwise_shift_right(int16, int16) -> int16")]
+#[function("bitwise_shift_right(int16, int32) -> int16")]
+#[function("bitwise_shift_right(int32, int16) -> int32")]
+#[function("bitwise_shift_right(int32, int32) -> int32")]
+#[function("bitwise_shift_right(int64, int16) -> int64")]
+#[function("bitwise_shift_right(int64, int32) -> int64")]
 pub fn general_shr<T1, T2>(l: T1, r: T2) -> Result<T1>
 where
     T1: CheckedShr + Debug,

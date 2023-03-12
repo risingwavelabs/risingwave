@@ -91,7 +91,10 @@ impl FunctionAttr {
             .map(|ty| sql_type::expand_type_wildcard(&ty));
         let ret = sql_type::expand_type_wildcard(&self.ret);
         let mut tokens = TokenStream2::new();
-        for (args, ret) in args.multi_cartesian_product().cartesian_product(ret) {
+        for (args, mut ret) in args.multi_cartesian_product().cartesian_product(ret) {
+            if ret == "auto" {
+                ret = sql_type::min_compatible_type(&args);
+            }
             let attr = FunctionAttr {
                 name: self.name.clone(),
                 args: args.iter().map(|s| s.to_string()).collect(),
@@ -124,15 +127,12 @@ impl FunctionAttr {
         for ty in &self.args {
             args.push(to_data_type_name(ty)?);
         }
-        let ret = to_data_type_name(match self.ret.as_str() {
-            "auto" => sql_type::min_compatible_type(&self.args),
-            t => t,
-        })?;
+        let ret = to_data_type_name(&self.ret)?;
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let descriptor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
         let descriptor_type = quote! { crate::sig::func::FunctionDescriptor };
-        let build_fn = self.generate_build_fn();
+        let build_fn = self.generate_build_fn()?;
         Ok(quote! {
             static #descriptor_name: #descriptor_type = #descriptor_type {
                 name: #name,
@@ -144,42 +144,210 @@ impl FunctionAttr {
         })
     }
 
-    fn generate_build_fn(&self) -> TokenStream2 {
-        quote! {
-            |prost| {
-                todo!()
+    fn generate_build_fn(&self) -> Result<TokenStream2> {
+        let num_args = self.args.len();
+        let i = 0..self.args.len();
+        let fn_name = format_ident!("{}", self.user_fn.name);
+        let arg_arrays = self
+            .args
+            .iter()
+            .map(|t| format_ident!("{}", sql_type::to_array_type(t)));
+        let ret_array = format_ident!("{}", sql_type::to_array_type(&self.ret));
+        let arg_types = self
+            .args
+            .iter()
+            .map(|t| sql_type::to_data_type(t).parse::<TokenStream2>().unwrap());
+        let ret_type = sql_type::to_data_type(&self.ret)
+            .parse::<TokenStream2>()
+            .unwrap();
+
+        let prepare = quote! {
+            use risingwave_common::array::*;
+            use risingwave_common::types::*;
+            use risingwave_pb::expr::expr_node::RexNode;
+
+            let return_type = DataType::from(prost.get_return_type().unwrap());
+            let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() else {
+                crate::bail!("Expected RexNode::FuncCall");
+            };
+            let children = func_call.get_children();
+            crate::ensure!(children.len() == #num_args);
+            let exprs = [#(crate::expr::build_from_prost(&children[#i])?),*];
+        };
+
+        let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
+            let template_struct = match num_args {
+                1 => format_ident!("UnaryBytesExpression"),
+                2 => format_ident!("BinaryBytesExpression"),
+                3 => format_ident!("TernaryBytesExpression"),
+                4 => format_ident!("QuaternaryBytesExpression"),
+                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
+            };
+            let i = 0..self.args.len();
+            quote! {
+                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, _>::new(
+                    #(exprs[#i]),*,
+                    return_type,
+                    #fn_name,
+                )))
             }
-        }
+        } else if self.args.iter().all(|t| t == "boolean")
+            && self.ret == "boolean"
+            && !self.user_fn.return_result
+            && self.batch.is_some()
+        {
+            let template_struct = match num_args {
+                1 => format_ident!("BooleanUnaryExpression"),
+                2 => format_ident!("BooleanBinaryExpression"),
+                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
+            };
+            let batch = format_ident!("{}", self.batch.as_ref().unwrap());
+            let i = 0..self.args.len();
+            let func = if self.user_fn.arg_option && self.user_fn.return_option {
+                quote! { #fn_name }
+            } else if self.user_fn.arg_option {
+                let args = (0..num_args).map(|i| format_ident!("x{i}"));
+                let args1 = args.clone();
+                quote! { |#(#args),*| Some(#fn_name(#(#args1),*)) }
+            } else {
+                let args = (0..num_args).map(|i| format_ident!("x{i}"));
+                let args1 = args.clone();
+                let args2 = args.clone();
+                let args3 = args.clone();
+                quote! {
+                    |#(#args),*| match (#(#args1),*) {
+                        (#(Some(#args2)),*) => Some(#fn_name(#(#args3),*)),
+                        _ => None,
+                    }
+                }
+            };
+            quote! {
+                Ok(Box::new(crate::expr::template_fast::#template_struct::new(
+                    #(exprs[#i]),*, #batch, #func,
+                )))
+            }
+        } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
+            let compatible_type = sql_type::to_data_type(sql_type::min_compatible_type(&self.args))
+                .parse::<TokenStream2>()
+                .unwrap();
+            quote! {
+                Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
+                    exprs[0], exprs[1], #fn_name::<#(#arg_types),*, #compatible_type>,
+                )))
+            }
+        } else if self.args.iter().all(|t| sql_type::is_primitive(t)) && self.user_fn.is_pure() {
+            let template_struct = match num_args {
+                1 => format_ident!("UnaryExpression"),
+                2 => format_ident!("BinaryExpression"),
+                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
+            };
+            let i = 0..self.args.len();
+            quote! {
+                Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types),*, #ret_type>::new(
+                    #(exprs[#i]),*,
+                    return_type,
+                    #fn_name,
+                )))
+            }
+        } else if self.user_fn.arg_option {
+            let template_struct = match num_args {
+                1 => format_ident!("UnaryNullableExpression"),
+                2 => format_ident!("BinaryNullableExpression"),
+                3 => format_ident!("TernaryNullableExpression"),
+                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
+            };
+            let i = 0..self.args.len();
+            let func = if self.user_fn.return_result {
+                quote! { #fn_name }
+            } else if self.user_fn.return_option {
+                let args = (0..num_args).map(|i| format_ident!("x{i}"));
+                let args1 = args.clone();
+                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            } else {
+                let args = (0..num_args).map(|i| format_ident!("x{i}"));
+                let args1 = args.clone();
+                quote! { |#(#args),*| Ok(Some(#fn_name(#(#args1),*))) }
+            };
+            quote! {
+                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
+                    #(exprs[#i]),*,
+                    return_type,
+                    #func,
+                )))
+            }
+        } else {
+            let template_struct = match num_args {
+                1 => format_ident!("UnaryExpression"),
+                2 => format_ident!("BinaryExpression"),
+                3 => format_ident!("TernaryExpression"),
+                _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
+            };
+            let i = 0..self.args.len();
+            let func = if self.user_fn.return_result {
+                quote! { #fn_name }
+            } else {
+                let args = (0..num_args).map(|i| format_ident!("x{i}"));
+                let args1 = args.clone();
+                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            };
+            quote! {
+                Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
+                    #(exprs[#i]),*,
+                    return_type,
+                    #func,
+                )))
+            }
+        };
+        Ok(quote! {
+            |prost| {
+                #prepare
+                #build_expr
+            }
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 struct UserFunctionAttr {
-    /// The last argument type is `&mut dyn Writer`.
-    writer: bool,
+    /// Function name
+    name: String,
+    /// The last argument type is `&mut dyn Write`.
+    write: bool,
     /// The argument type are `Option`s.
-    nullable: bool,
+    arg_option: bool,
+    /// The return type is `Option`.
+    return_option: bool,
     /// The return type is `Result`.
-    fallible: bool,
+    return_result: bool,
 }
 
 impl UserFunctionAttr {
     fn parse(item: &syn::ItemFn) -> Result<Self> {
         Ok(UserFunctionAttr {
-            writer: last_arg_is_writer(item),
-            nullable: args_are_all_option(item),
-            fallible: return_value_is_result(item),
+            name: item.sig.ident.to_string(),
+            write: last_arg_is_write(item),
+            arg_option: args_are_all_option(item),
+            return_option: return_value_is(item, "Option"),
+            return_result: return_value_is(item, "Result"),
         })
+    }
+
+    fn is_writer_style(&self) -> bool {
+        self.write && !self.arg_option && self.return_result
+    }
+
+    fn is_pure(&self) -> bool {
+        !self.write && !self.arg_option && !self.return_option && !self.return_result
     }
 }
 
-/// Check if the last argument is `&mut dyn Writer`.
-fn last_arg_is_writer(item: &syn::ItemFn) -> bool {
+/// Check if the last argument is `&mut dyn Write`.
+fn last_arg_is_write(item: &syn::ItemFn) -> bool {
     let Some(syn::FnArg::Typed(arg)) = item.sig.inputs.last() else { return false };
     let syn::Type::Reference(syn::TypeReference { elem, .. }) = arg.ty.as_ref() else { return false };
     let syn::Type::TraitObject(syn::TypeTraitObject { bounds, .. }) = elem.as_ref() else { return false };
     let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) = bounds.first() else { return false };
-    path.segments.last().map_or(false, |s| s.ident == "Writer")
+    path.segments.last().map_or(false, |s| s.ident == "Write")
 }
 
 /// Check if all arguments are `Option`s.
@@ -196,9 +364,9 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
 }
 
 /// Check if the return value is `Result`.
-fn return_value_is_result(item: &syn::ItemFn) -> bool {
+fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
     let syn::Type::Path(path) = ty.as_ref() else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
-    seg.ident == "Result"
+    seg.ident == type_
 }

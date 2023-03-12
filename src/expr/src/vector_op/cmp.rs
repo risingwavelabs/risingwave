@@ -18,7 +18,6 @@ use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
 use risingwave_expr_macro::function;
 
-#[function("equal(boolean, boolean) -> boolean", batch = "boolean_eq")]
 #[function("equal(*number, *number) -> boolean")]
 #[function("equal(date, date) -> boolean")]
 #[function("equal(time, time) -> boolean")]
@@ -41,7 +40,6 @@ where
     l.into() == r.into()
 }
 
-#[function("not_equal(boolean, boolean) -> boolean", batch = "boolean_ne")]
 #[function("not_equal(*number, *number) -> boolean")]
 #[function("not_equal(date, date) -> boolean")]
 #[function("not_equal(time, time) -> boolean")]
@@ -64,10 +62,6 @@ where
     l.into() != r.into()
 }
 
-#[function(
-    "greater_than_or_equal(boolean, boolean) -> boolean",
-    batch = "boolean_ge"
-)]
 #[function("greater_than_or_equal(*number, *number) -> boolean")]
 #[function("greater_than_or_equal(date, date) -> boolean")]
 #[function("greater_than_or_equal(time, time) -> boolean")]
@@ -90,7 +84,6 @@ where
     l.into() >= r.into()
 }
 
-#[function("greater_than(boolean, boolean) -> boolean", batch = "boolean_gt")]
 #[function("greater_than(*number, *number) -> boolean")]
 #[function("greater_than(date, date) -> boolean")]
 #[function("greater_than(time, time) -> boolean")]
@@ -113,10 +106,6 @@ where
     l.into() > r.into()
 }
 
-#[function(
-    "less_than_or_equal(boolean, boolean) -> boolean",
-    batch = "boolean_le"
-)]
 #[function("less_than_or_equal(*number, *number) -> boolean")]
 #[function("less_than_or_equal(date, date) -> boolean")]
 #[function("less_than_or_equal(time, time) -> boolean")]
@@ -139,7 +128,6 @@ where
     l.into() <= r.into()
 }
 
-#[function("less_than(boolean, boolean) -> boolean", batch = "boolean_lt")]
 #[function("less_than(*number, *number) -> boolean")]
 #[function("less_than(date, date) -> boolean")]
 #[function("less_than(time, time) -> boolean")]
@@ -162,23 +150,19 @@ where
     l.into() < r.into()
 }
 
-#[function(
-    "is_distinct_from(boolean, boolean) -> boolean",
-    batch = "boolean_is_distinct_from"
-)]
-#[function("is_distinct_from(*number, *number) -> boolean")]
-#[function("is_distinct_from(date, date) -> boolean")]
-#[function("is_distinct_from(time, time) -> boolean")]
-#[function("is_distinct_from(interval, interval) -> boolean")]
-#[function("is_distinct_from(timestamp, timestamp) -> boolean")]
-#[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
-#[function("is_distinct_from(date, timestamp) -> boolean")]
-#[function("is_distinct_from(timestamp, date) -> boolean")]
-#[function("is_distinct_from(time, interval) -> boolean")]
-#[function("is_distinct_from(interval, time) -> boolean")]
-#[function("is_distinct_from(varchar, varchar) -> boolean")]
-#[function("is_distinct_from(list, list) -> boolean")]
-#[function("is_distinct_from(struct, struct) -> boolean")]
+// #[function("is_distinct_from(*number, *number) -> boolean")]
+// #[function("is_distinct_from(date, date) -> boolean")]
+// #[function("is_distinct_from(time, time) -> boolean")]
+// #[function("is_distinct_from(interval, interval) -> boolean")]
+// #[function("is_distinct_from(timestamp, timestamp) -> boolean")]
+// #[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
+// #[function("is_distinct_from(date, timestamp) -> boolean")]
+// #[function("is_distinct_from(timestamp, date) -> boolean")]
+// #[function("is_distinct_from(time, interval) -> boolean")]
+// #[function("is_distinct_from(interval, time) -> boolean")]
+// #[function("is_distinct_from(varchar, varchar) -> boolean")]
+// #[function("is_distinct_from(list, list) -> boolean")]
+// #[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
@@ -188,23 +172,19 @@ where
     l.map(Into::into) != r.map(Into::into)
 }
 
-#[function(
-    "is_not_distinct_from(boolean, boolean) -> boolean",
-    batch = "boolean_is_not_distinct_from"
-)]
-#[function("is_not_distinct_from(*number, *number) -> boolean")]
-#[function("is_not_distinct_from(date, date) -> boolean")]
-#[function("is_not_distinct_from(time, time) -> boolean")]
-#[function("is_not_distinct_from(interval, interval) -> boolean")]
-#[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
-#[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
-#[function("is_not_distinct_from(date, timestamp) -> boolean")]
-#[function("is_not_distinct_from(timestamp, date) -> boolean")]
-#[function("is_not_distinct_from(time, interval) -> boolean")]
-#[function("is_not_distinct_from(interval, time) -> boolean")]
-#[function("is_not_distinct_from(varchar, varchar) -> boolean")]
-#[function("is_not_distinct_from(list, list) -> boolean")]
-#[function("is_not_distinct_from(struct, struct) -> boolean")]
+// #[function("is_not_distinct_from(*number, *number) -> boolean")]
+// #[function("is_not_distinct_from(date, date) -> boolean")]
+// #[function("is_not_distinct_from(time, time) -> boolean")]
+// #[function("is_not_distinct_from(interval, interval) -> boolean")]
+// #[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
+// #[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
+// #[function("is_not_distinct_from(date, timestamp) -> boolean")]
+// #[function("is_not_distinct_from(timestamp, date) -> boolean")]
+// #[function("is_not_distinct_from(time, interval) -> boolean")]
+// #[function("is_not_distinct_from(interval, time) -> boolean")]
+// #[function("is_not_distinct_from(varchar, varchar) -> boolean")]
+// #[function("is_not_distinct_from(list, list) -> boolean")]
+// #[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
@@ -214,89 +194,141 @@ where
     l.map(Into::into) == r.map(Into::into)
 }
 
-#[function("is_true(boolean) -> boolean", batch = "boolean_is_true")]
+#[function("equal(boolean, boolean) -> boolean", batch = "boolarray_eq")]
+pub fn boolean_eq(l: bool, r: bool) -> bool {
+    l == r
+}
+
+#[function("not_equal(boolean, boolean) -> boolean", batch = "boolarray_ne")]
+pub fn boolean_ne(l: bool, r: bool) -> bool {
+    l != r
+}
+
+#[function(
+    "greater_than_or_equal(boolean, boolean) -> boolean",
+    batch = "boolarray_ge"
+)]
+pub fn boolean_ge(l: bool, r: bool) -> bool {
+    l >= r
+}
+
+#[function("greater_than(boolean, boolean) -> boolean", batch = "boolarray_gt")]
+pub fn boolean_gt(l: bool, r: bool) -> bool {
+    l > r
+}
+
+#[function(
+    "less_than_or_equal(boolean, boolean) -> boolean",
+    batch = "boolarray_le"
+)]
+pub fn boolean_le(l: bool, r: bool) -> bool {
+    l <= r
+}
+
+#[function("less_than(boolean, boolean) -> boolean", batch = "boolarray_lt")]
+pub fn boolean_lt(l: bool, r: bool) -> bool {
+    l < r
+}
+
+#[function(
+    "is_distinct_from(boolean, boolean) -> boolean",
+    batch = "boolarray_is_distinct_from"
+)]
+pub fn boolean_is_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
+    l != r
+}
+
+#[function(
+    "is_not_distinct_from(boolean, boolean) -> boolean",
+    batch = "boolarray_is_not_distinct_from"
+)]
+pub fn boolean_is_not_distinct_from(l: Option<bool>, r: Option<bool>) -> bool {
+    l == r
+}
+
+#[function("is_true(boolean) -> boolean", batch = "boolarray_is_true")]
 pub fn is_true(v: Option<bool>) -> bool {
     v == Some(true)
 }
 
-#[function("is_not_true(boolean) -> boolean", batch = "boolean_is_not_true")]
+#[function("is_not_true(boolean) -> boolean", batch = "boolarray_is_not_true")]
 pub fn is_not_true(v: Option<bool>) -> bool {
     v != Some(true)
 }
 
-#[function("is_false(boolean) -> boolean", batch = "boolean_is_false")]
+#[function("is_false(boolean) -> boolean", batch = "boolarray_is_false")]
 pub fn is_false(v: Option<bool>) -> bool {
     v == Some(false)
 }
 
-#[function("is_not_false(boolean) -> boolean", batch = "boolean_is_not_false")]
+#[function("is_not_false(boolean) -> boolean", batch = "boolarray_is_not_false")]
 pub fn is_not_false(v: Option<bool>) -> bool {
     v != Some(false)
 }
 
 // optimized functions for bool arrays
 
-fn boolean_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_eq(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = !(l.data() ^ r.data());
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_ne(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = l.data() ^ r.data();
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_gt(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = l.data() & !r.data();
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_lt(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = !l.data() & r.data();
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_ge(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = l.data() | !r.data();
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_le(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = !l.data() | r.data();
     let bitmap = l.null_bitmap() & r.null_bitmap();
     BoolArray::new(data, bitmap)
 }
 
-fn boolean_is_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_is_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = ((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
         | (l.null_bitmap() ^ r.null_bitmap());
     BoolArray::new(data, Bitmap::ones(l.len()))
 }
 
-fn boolean_is_not_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
+fn boolarray_is_not_distinct_from(l: &BoolArray, r: &BoolArray) -> BoolArray {
     let data = !(((l.data() ^ r.data()) & (l.null_bitmap() & r.null_bitmap()))
         | (l.null_bitmap() ^ r.null_bitmap()));
     BoolArray::new(data, Bitmap::ones(l.len()))
 }
 
-fn boolean_is_true(a: &BoolArray) -> BoolArray {
+fn boolarray_is_true(a: &BoolArray) -> BoolArray {
     BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len()))
 }
 
-fn boolean_is_not_true(a: &BoolArray) -> BoolArray {
+fn boolarray_is_not_true(a: &BoolArray) -> BoolArray {
     BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len()))
 }
 
-fn boolean_is_false(a: &BoolArray) -> BoolArray {
+fn boolarray_is_false(a: &BoolArray) -> BoolArray {
     BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len()))
 }
 
-fn boolean_is_not_false(a: &BoolArray) -> BoolArray {
+fn boolarray_is_not_false(a: &BoolArray) -> BoolArray {
     BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len()))
 }
 
