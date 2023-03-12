@@ -20,14 +20,16 @@ use crate::{ExprError, Result};
 pub fn tumble_start_date(
     time: NaiveDateWrapper,
     window: IntervalUnit,
+    offset: Option<IntervalUnit>,
 ) -> Result<NaiveDateTimeWrapper> {
-    tumble_start_date_time(time.into(), window)
+    tumble_start_date_time(time.into(), window, offset)
 }
 
 #[inline(always)]
 pub fn tumble_start_date_time(
     time: NaiveDateTimeWrapper,
     window: IntervalUnit,
+    offset: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     let diff = time.0.timestamp_micros();
     let window_start = tm_diff_bin(diff, window)?;
@@ -118,9 +120,10 @@ mod tests {
     fn test_tumble_start_date_time() {
         let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let interval = IntervalUnit::from_minutes(30);
+        let offset = IntervalUnit::from_minutes(0);
         println!("{}", dt);
         println!("{}", interval);
-        let w = tumble_start_date_time(dt, interval).unwrap().0;
+        let w = tumble_start_date_time(dt, interval, offset).unwrap().0;
         println!("{}", w);
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);

@@ -232,7 +232,11 @@ fn build_type_derive_map() -> FuncSigMap {
         map.insert(E::Extract, vec![T::Varchar, t], T::Decimal);
     }
     for t in [T::Timestamp, T::Date] {
-        map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
+        map.insert(
+            E::TumbleStart,
+            vec![t, T::Interval, T::Interval, T::Interval],
+            T::Timestamp,
+        );
     }
     map.insert(
         E::TumbleStart,

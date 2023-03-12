@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono::offset;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
@@ -51,6 +52,7 @@ use super::expr_unary::{
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
+use crate::expr::expr_ternary::new_tumble_start;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
@@ -69,9 +71,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_unary_expr_prost(prost)
         }
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
+        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | Position
+        | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor | ConcatOp
+        | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
             build_binary_expr_prost(prost)
         }
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
@@ -87,6 +89,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Translate => build_translate_expr(prost),
 
         // Variable number of arguments and based on `Unary/Binary/Ternary/...Expression`
+        TumbleStart => build_tumble_start_expr(prost),
         Substr => build_substr_expr(prost),
         Overlay => build_overlay_expr(prost),
         Trim => build_trim_expr(prost),
@@ -270,6 +273,19 @@ fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         None
     };
     Ok(new_date_trunc_expr(ret_type, field, source, time_zone))
+}
+
+fn build_tumble_start_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2 || children.len() == 3);
+    let time = expr_build_from_prost(&children[0])?;
+    let window_size = expr_build_from_prost(&children[1])?;
+    let offset = if let Some(child) = children.get(2) {
+        Some(expr_build_from_prost(child)?)
+    } else {
+        None
+    };
+    Ok(new_tumble_start(ret_type, time, window_size, offset))
 }
 
 fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {

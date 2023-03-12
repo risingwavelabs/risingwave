@@ -214,7 +214,11 @@ impl Planner {
                 // timestamp - (timestamp - offset) % windowSize
 
                 // 现在的
-                // tumble_start (time , window) = time - time % window
+                // time_sub_offset = sub(time - offset)
+                // window_offset  = window_offset(time_sub_offset , window_size)
+                //  if time_sub_offset < 0:  window_offset % window_size + window_size
+                //  else : window_offset % window_size
+                // window_start = sub(time , window_offset)
 
                 // tumble_offset (time , offset) =  abs(timestamp - offset)
                 // tumble_start (time , window_offset)

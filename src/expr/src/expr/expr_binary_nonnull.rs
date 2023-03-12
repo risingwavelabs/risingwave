@@ -42,7 +42,8 @@ use crate::vector_op::timestamptz::{
 };
 use crate::vector_op::to_timestamp::to_timestamp;
 use crate::vector_op::tumble::{
-    tumble_start_date, tumble_start_date_time, tumble_start_timestamptz,
+    tumble_offset_date, tumble_offset_date_time, tumble_offset_timestamptz, tumble_start_date,
+    tumble_start_date_time, tumble_start_timestamptz,
 };
 use crate::{for_all_cmp_variants, ExprError, Result};
 
@@ -688,7 +689,6 @@ pub fn new_binary_expr(
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
-        Type::TumbleStart => new_tumble_start(l, r, ret)?,
         Type::ConcatOp => new_concat_op(l, r, ret),
         Type::JsonbAccessInner => match r.return_type() {
             DataType::Varchar => {
@@ -722,7 +722,6 @@ pub fn new_binary_expr(
             .boxed(),
             t => return Err(ExprError::UnsupportedFunction(format!("jsonb ->> {t}"))),
         },
-
         tp => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?}({:?}, {:?})",
@@ -735,46 +734,45 @@ pub fn new_binary_expr(
     Ok(expr)
 }
 
-fn new_tumble_start(
-    expr_ia1: BoxedExpression,
-    expr_ia2: BoxedExpression,
-    return_type: DataType,
-) -> Result<BoxedExpression> {
-    let expr: BoxedExpression = match expr_ia1.return_type() {
-        DataType::Date => Box::new(BinaryExpression::<
-            NaiveDateArray,
-            IntervalArray,
-            NaiveDateTimeArray,
-            _,
-        >::new(
-            expr_ia1, expr_ia2, return_type, tumble_start_date
-        )),
-        DataType::Timestamp => Box::new(BinaryExpression::<
-            NaiveDateTimeArray,
-            IntervalArray,
-            NaiveDateTimeArray,
-            _,
-        >::new(
-            expr_ia1, expr_ia2, return_type, tumble_start_date_time
-        )),
-        DataType::Timestamptz => Box::new(
-            BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
-                expr_ia1,
-                expr_ia2,
-                return_type,
-                tumble_start_timestamptz,
-            ),
-        ),
-        _ => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "tumble_start is not supported for {:?}",
-                expr_ia1.return_type()
-            )))
-        }
-    };
-    Ok(expr)
-}
-
+// fn new_tumble_offset(
+//     expr_ia1: BoxedExpression,
+//     expr_ia2: BoxedExpression,
+//     return_type: DataType,
+// ) -> Result<BoxedExpression> {
+//     let expr: BoxedExpression = match expr_ia1.return_type() {
+//         DataType::Date => Box::new(BinaryExpression::<
+//             NaiveDateArray,
+//             IntervalArray,
+//             NaiveDateTimeArray,
+//             _,
+//         >::new(
+//             expr_ia1, expr_ia2, return_type, tumble_offset_date
+//         )),
+//         DataType::Timestamp => Box::new(BinaryExpression::<
+//             NaiveDateTimeArray,
+//             IntervalArray,
+//             NaiveDateTimeArray,
+//             _,
+//         >::new(
+//             expr_ia1, expr_ia2, return_type, tumble_offset_date_time
+//         )),
+//         DataType::Timestamptz => Box::new(
+//             BinaryExpression::<I64Array, IntervalArray, I64Array, _>::new(
+//                 expr_ia1,
+//                 expr_ia2,
+//                 return_type,
+//                 tumble_offset_timestamptz,
+//             ),
+//         ),
+//         _ => {
+//             return Err(ExprError::UnsupportedFunction(format!(
+//                 "tumble_offset is not supported for {:?}",
+//                 expr_ia1.return_type()
+//             )))
+//         }
+//     };
+//     Ok(expr)
+// }
 pub fn new_like_default(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
