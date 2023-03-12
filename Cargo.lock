@@ -6120,6 +6120,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
+ "itertools",
  "proc-macro-error",
  "proc-macro2",
  "quote",

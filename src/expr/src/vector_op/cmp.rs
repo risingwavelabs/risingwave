@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Debug;
+
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::buffer::Bitmap;
 use risingwave_expr_macro::function;
 
-#[function("equal(boolean, boolean) -> boolean", batch = boolean_eq)]
+#[function("equal(boolean, boolean) -> boolean", batch = "boolean_eq")]
 #[function("equal(*number, *number) -> boolean")]
 #[function("equal(date, date) -> boolean")]
 #[function("equal(time, time) -> boolean")]
@@ -39,7 +41,7 @@ where
     l.into() == r.into()
 }
 
-#[function("not_equal(boolean, boolean) -> boolean", batch = boolean_ne)]
+#[function("not_equal(boolean, boolean) -> boolean", batch = "boolean_ne")]
 #[function("not_equal(*number, *number) -> boolean")]
 #[function("not_equal(date, date) -> boolean")]
 #[function("not_equal(time, time) -> boolean")]
@@ -64,7 +66,7 @@ where
 
 #[function(
     "greater_than_or_equal(boolean, boolean) -> boolean",
-    batch = boolean_ge
+    batch = "boolean_ge"
 )]
 #[function("greater_than_or_equal(*number, *number) -> boolean")]
 #[function("greater_than_or_equal(date, date) -> boolean")]
@@ -88,7 +90,7 @@ where
     l.into() >= r.into()
 }
 
-#[function("greater_than(boolean, boolean) -> boolean", batch = boolean_gt)]
+#[function("greater_than(boolean, boolean) -> boolean", batch = "boolean_gt")]
 #[function("greater_than(*number, *number) -> boolean")]
 #[function("greater_than(date, date) -> boolean")]
 #[function("greater_than(time, time) -> boolean")]
@@ -113,7 +115,7 @@ where
 
 #[function(
     "less_than_or_equal(boolean, boolean) -> boolean",
-    batch = boolean_le
+    batch = "boolean_le"
 )]
 #[function("less_than_or_equal(*number, *number) -> boolean")]
 #[function("less_than_or_equal(date, date) -> boolean")]
@@ -137,7 +139,7 @@ where
     l.into() <= r.into()
 }
 
-#[function("less_than(boolean, boolean) -> boolean", batch = boolean_lt)]
+#[function("less_than(boolean, boolean) -> boolean", batch = "boolean_lt")]
 #[function("less_than(*number, *number) -> boolean")]
 #[function("less_than(date, date) -> boolean")]
 #[function("less_than(time, time) -> boolean")]
@@ -160,7 +162,10 @@ where
     l.into() < r.into()
 }
 
-#[function("is_distinct_from(boolean, boolean) -> boolean", batch = boolean_is_distinct_from)]
+#[function(
+    "is_distinct_from(boolean, boolean) -> boolean",
+    batch = "boolean_is_distinct_from"
+)]
 #[function("is_distinct_from(*number, *number) -> boolean")]
 #[function("is_distinct_from(date, date) -> boolean")]
 #[function("is_distinct_from(time, time) -> boolean")]
@@ -183,7 +188,10 @@ where
     l.map(Into::into) != r.map(Into::into)
 }
 
-#[function("is_not_distinct_from(boolean, boolean) -> boolean", batch = boolean_is_not_distinct_from)]
+#[function(
+    "is_not_distinct_from(boolean, boolean) -> boolean",
+    batch = "boolean_is_not_distinct_from"
+)]
 #[function("is_not_distinct_from(*number, *number) -> boolean")]
 #[function("is_not_distinct_from(date, date) -> boolean")]
 #[function("is_not_distinct_from(time, time) -> boolean")]
@@ -206,22 +214,22 @@ where
     l.map(Into::into) == r.map(Into::into)
 }
 
-#[function("is_true(boolean) -> boolean", batch = boolean_is_true)]
+#[function("is_true(boolean) -> boolean", batch = "boolean_is_true")]
 pub fn is_true(v: Option<bool>) -> bool {
     v == Some(true)
 }
 
-#[function("is_not_true(boolean) -> boolean", batch = boolean_is_not_true)]
+#[function("is_not_true(boolean) -> boolean", batch = "boolean_is_not_true")]
 pub fn is_not_true(v: Option<bool>) -> bool {
     v != Some(true)
 }
 
-#[function("is_false(boolean) -> boolean", batch = boolean_is_false)]
+#[function("is_false(boolean) -> boolean", batch = "boolean_is_false")]
 pub fn is_false(v: Option<bool>) -> bool {
     v == Some(false)
 }
 
-#[function("is_not_false(boolean) -> boolean", batch = boolean_is_not_false)]
+#[function("is_not_false(boolean) -> boolean", batch = "boolean_is_not_false")]
 pub fn is_not_false(v: Option<bool>) -> bool {
     v != Some(false)
 }

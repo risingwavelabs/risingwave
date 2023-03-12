@@ -21,6 +21,10 @@ use std::sync::LazyLock;
 use itertools::iproduct;
 use risingwave_common::types::DataTypeName;
 use risingwave_pb::expr::expr_node::Type as ExprType;
+use risingwave_pb::expr::ExprNode;
+
+use crate::error::Result;
+use crate::expr::BoxedExpression;
 
 pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(build_type_derive_map);
 
@@ -357,4 +361,12 @@ fn build_commutative_funcs(
 fn build_round_funcs(map: &mut FuncSigMap, expr: ExprType) {
     map.insert(expr, vec![DataTypeName::Float64], DataTypeName::Float64);
     map.insert(expr, vec![DataTypeName::Decimal], DataTypeName::Decimal);
+}
+
+pub struct FunctionDescriptor {
+    pub name: &'static str,
+    pub ty: ExprType,
+    pub args: &'static [DataTypeName],
+    pub ret: DataTypeName,
+    pub build_from_prost: fn(prost: &ExprNode) -> Result<BoxedExpression>,
 }
