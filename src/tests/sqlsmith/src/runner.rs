@@ -14,14 +14,18 @@
 
 //! Provides E2E Test runner functionality.
 
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::Write;
 use std::path::Path;
-use anyhow;
+
+use anyhow::anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
-use risingwave_common::error::anyhow_error;
+use risingwave_sqlparser::ast::{Query, Statement};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
@@ -34,13 +38,69 @@ use crate::{
 type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
 
-/// Shrinks a given failing query file
-pub async fn shrink(input_file_path: &str, outdir: &str) {
-    let file_stem = Path::new(input_file_path).file_stem().unwrap_or_else(|| panic!("Failed to stem input file path: {input_file_path}"));
-    let output_file_path = format!("{outdir}/{file_stem}.reduced.sql");
+/// Shrinks a given failing query file.
+/// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
+pub async fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
+    let file_stem = Path::new(input_file_path)
+        .file_stem()
+        .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
+    let output_file_path = format!("{outdir}/{}.reduced.sql", file_stem.to_string_lossy());
 
-    let file_contents = read_file_contents(input_file_path).unwrap();
+    let file_contents = read_file_contents(input_file_path)?;
     let sql_statements = parse_sql(file_contents);
+
+    // Session variable before the failing query.
+    let session_variable = sql_statements
+        .get(sql_statements.len() - 2)
+        .filter(|statement| matches!(statement, Statement::SetVariable { .. }));
+
+    let failing_query = sql_statements
+        .last()
+        .ok_or_else(|| anyhow!("Could not get last sql statement"))?;
+
+    let ddl_references = match failing_query {
+        Statement::Query(ref query) => Ok(find_ddl_references(query)),
+        Statement::CreateView { .. } => todo!(),
+        _ => Err(anyhow!("Last statement was not a query, can't shrink")),
+    }?;
+
+    let mut ddl = sql_statements
+        .iter()
+        .filter(|s| {
+            matches!(*s,
+            Statement::CreateView { name, .. } | Statement::CreateTable { name, .. }
+                if ddl_references.contains(&name.real_value()))
+        })
+        .collect();
+
+    let mut dml = sql_statements
+        .iter()
+        .filter(|s| {
+            matches!(*s,
+            Statement::Insert { table_name, .. }
+                if ddl_references.contains(&table_name.real_value()))
+        })
+        .collect();
+
+    let mut reduced_statements = vec![];
+    reduced_statements.append(&mut ddl);
+    reduced_statements.append(&mut dml);
+    if let Some(session_variable) = session_variable {
+        reduced_statements.push(session_variable);
+    }
+    reduced_statements.push(failing_query);
+
+    let sql = reduced_statements
+        .iter()
+        .map(|s| format!("{s};\n"))
+        .collect::<String>();
+
+    let mut file = create_file(output_file_path).unwrap();
+    write_to_file(&mut file, sql)
+}
+
+fn find_ddl_references(query: &Query) -> HashSet<String> {
+    todo!()
 }
 
 /// e2e test runner for pre-generated queries from sqlsmith
@@ -270,7 +330,7 @@ async fn test_sqlsmith<R: Rng>(
 }
 
 async fn set_variable(client: &Client, variable: &str, value: &str) -> String {
-    let s = format!("SET {variable} TO {value};");
+    let s = format!("SET {variable} TO {value}");
     tracing::info!("[EXECUTING SET_VAR]: {}", s);
     client.simple_query(&s).await.unwrap();
     s
@@ -428,10 +488,27 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
 }
 
 fn read_file_contents<P: AsRef<Path>>(filepath: P) -> Result<String> {
-    match std::fs::read_to_string(queries_path) {
-        Ok(s) => Ok(s),
-        Err(e) => unwrap_or_else(|| anyhow_error!("Failed to read contents from {filepath} due to {e}")),
-    }
+    std::fs::read_to_string(filepath.as_ref()).map_err(|e| {
+        anyhow!(
+            "Failed to read contents from {} due to {e}",
+            filepath.as_ref().display()
+        )
+    })
+}
+
+fn create_file<P: AsRef<Path>>(filepath: P) -> Result<File> {
+    std::fs::File::create(filepath.as_ref()).map_err(|e| {
+        anyhow!(
+            "Failed to create file: {} due to {e}",
+            filepath.as_ref().display()
+        )
+    })
+}
+
+fn write_to_file<S: AsRef<str>>(file: &mut File, contents: S) -> Result<()> {
+    let s = contents.as_ref().as_bytes();
+    file.write_all(s)
+        .map_err(|e| anyhow!("Failed to write file due to {e}"))
 }
 
 /// Validate client responses, returning a count of skipped queries.
@@ -448,7 +525,7 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
             }
             // consolidate error reason for deterministic test
             tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
-            Err(anyhow_error!(e))
+            Err(anyhow!("Encountered unexpected error: {e}"))
         }
     }
 }
