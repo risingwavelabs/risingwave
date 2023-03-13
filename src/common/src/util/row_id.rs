@@ -40,6 +40,10 @@ pub struct RowIdGenerator {
 
 pub type RowId = i64;
 
+pub fn extract_vnode_id_from_row_id(id: RowId) -> u32 {
+    ((id >> VNODE_ID_SHIFT_BITS) & (SEQUENCE_UPPER_BOUND - 1)) as u32
+}
+
 impl RowIdGenerator {
     pub fn new(vnode_id: u32) -> Self {
         assert!(vnode_id < VNODE_ID_UPPER_BOUND);
