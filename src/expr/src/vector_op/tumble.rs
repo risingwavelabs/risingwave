@@ -156,20 +156,20 @@ mod tests {
         let offset_micro_second =
             offset.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + offset.get_ms() * 1000;
 
-        let mut ret_timestamp_micro_second = timestamp_micro_second
+        let mut window_start_timestamp_micro_second = timestamp_micro_second
             - (timestamp_micro_second - offset_micro_second + window_size_micro_second)
                 % window_size_micro_second;
         // which is wrong
-        assert!(ret_timestamp_micro_second > timestamp_micro_second);
+        assert!(window_start_timestamp_micro_second > timestamp_micro_second);
 
         let remainder = (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
         if remainder < 0 {
-            ret_timestamp_micro_second =
+            window_start_timestamp_micro_second =
                 timestamp_micro_second - (remainder + window_size_micro_second);
         } else {
-            ret_timestamp_micro_second = timestamp_micro_second - remainder;
+            window_start_timestamp_micro_second = timestamp_micro_second - remainder;
         }
         // which is right
-        assert!(ret_timestamp_micro_second <= timestamp_micro_second);
+        assert!(window_start_timestamp_micro_second <= timestamp_micro_second);
     }
 }
