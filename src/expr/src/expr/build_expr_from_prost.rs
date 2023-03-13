@@ -33,8 +33,6 @@ use super::expr_to_timestamp_const_tmpl::{
 };
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_array_distinct::ArrayDistinctExpression;
-use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
@@ -64,8 +62,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             // the implementation to improve performance.
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
-        ArrayToString => ArrayToStringExpression::try_from(prost).map(Expression::boxed),
-        ArrayDistinct => ArrayDistinctExpression::try_from(prost).map(Expression::boxed),
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         Now => build_now_expr(prost),
         Udf => UdfExpression::try_from(prost).map(Expression::boxed),
