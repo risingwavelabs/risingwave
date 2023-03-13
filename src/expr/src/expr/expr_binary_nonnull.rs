@@ -688,6 +688,7 @@ pub fn new_binary_expr(
         Type::Position => Box::new(BinaryExpression::<Utf8Array, Utf8Array, I32Array, _>::new(
             l, r, ret, position,
         )),
+        Type::TumbleStart => new_tumble_start(l, r, ret)?,
         Type::ConcatOp => new_concat_op(l, r, ret),
         Type::JsonbAccessInner => match r.return_type() {
             DataType::Varchar => {
@@ -733,7 +734,7 @@ pub fn new_binary_expr(
     Ok(expr)
 }
 
-pub fn new_tumble_start(
+fn new_tumble_start(
     expr_ia1: BoxedExpression,
     expr_ia2: BoxedExpression,
     return_type: DataType,

@@ -14,7 +14,7 @@
 
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-use crate::Result;
+use crate::{ExprError, Result};
 
 #[inline(always)]
 pub fn tumble_start_date(
@@ -48,74 +48,7 @@ pub fn tumble_start_timestamptz(
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
 #[inline(always)]
 fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> Result<i64> {
-    Ok(get_window_start_with_offset(
-        timestamp_micro_second,
-        window_size,
-        IntervalUnit::new(0, 0, 0),
-    )?)
-}
-
-#[inline(always)]
-pub fn tumble_start_offset_date(
-    timestamp_date: NaiveDateWrapper,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
-    tumble_start_offset_date_time(timestamp_date.into(), window_size, offset)
-}
-
-#[inline(always)]
-pub fn tumble_start_offset_date_time(
-    time: NaiveDateTimeWrapper,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<NaiveDateTimeWrapper> {
-    let timestamp_micro_second = time.0.timestamp_micros();
-    let window_start_micro_second =
-        get_window_start_with_offset(timestamp_micro_second, window_size, offset)?;
-
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        window_start_micro_second / 1_000_000,
-        (window_start_micro_second % 1_000_000 * 1000) as u32,
-    ))
-}
-
-#[inline(always)]
-pub fn tumble_start_offset_timestamptz(
-    timestamp_micro_second: i64,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<i64> {
-    Ok(get_window_start_with_offset(
-        timestamp_micro_second,
-        window_size,
-        offset,
-    )?)
-}
-
-#[inline(always)]
-fn get_window_start_with_offset(
-    timestamp_micro_second: i64,
-    window_size: IntervalUnit,
-    offset: IntervalUnit,
-) -> Result<i64> {
-    const DAY_MICOR_SECOND: i64 = 86400000000;
-    const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
-
-    let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
-        + window_size.get_days() as i64 * DAY_MICOR_SECOND
-        + window_size.get_ms() * 1000;
-
-    let offset_micro_second =
-        offset.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + offset.get_ms() * 1000;
-
-    // Inspired by https://issues.apache.org/jira/browse/FLINK-26334
-    let remainder = (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
-    if remainder < 0 {
-        Ok(timestamp_micro_second - (remainder + window_size_micro_second))
-    } else {
-        Ok(timestamp_micro_second - remainder)
-    }
+    Ok(get_window_start(timestamp_micro_second, window_size)?)
 }
 
 #[cfg(test)]
@@ -124,7 +57,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-    use crate::vector_op::tumble::{get_window_start_with_offset, tumble_start_date_time};
+    use crate::vector_op::tumble::tumble_start_date_time;
 
     #[test]
     fn test_tumble_start_date_time() {
