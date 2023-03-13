@@ -83,7 +83,7 @@ struct UserFunctionAttr {
 
 impl UserFunctionAttr {
     fn is_writer_style(&self) -> bool {
-        self.write && !self.arg_option && self.return_result
+        self.write && !self.arg_option
     }
 
     fn is_pure(&self) -> bool {

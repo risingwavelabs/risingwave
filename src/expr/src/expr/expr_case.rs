@@ -25,7 +25,7 @@ use crate::expr::{build_from_prost, BoxedExpression, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]
-struct WhenClause {
+pub struct WhenClause {
     when: BoxedExpression,
     then: BoxedExpression,
 }

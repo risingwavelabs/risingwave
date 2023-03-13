@@ -25,8 +25,13 @@ use risingwave_pb::expr::ExprNode;
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 
-pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> =
-    LazyLock::new(|| unsafe { FUNC_SIG_MAP_INIT.clone() });
+pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
+    let mut map = FuncSigMap::default();
+    for desc in FUNC_SIG_MAP_INIT.drain(..) {
+        map.insert(desc);
+    }
+    map
+});
 
 /// The table of function signatures.
 pub fn func_sigs() -> impl Iterator<Item = &'static FunctionDescriptor> {
@@ -59,7 +64,7 @@ impl FuncSigMap {
 }
 
 /// A function signature.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct FunctionDescriptor {
     pub name: &'static str,
     pub ty: ExprType,
@@ -86,7 +91,7 @@ impl FunctionDescriptor {
 
 /// Register a function into global registry.
 pub fn register(desc: FunctionDescriptor) {
-    unsafe { FUNC_SIG_MAP_INIT.insert(desc) }
+    unsafe { FUNC_SIG_MAP_INIT.push(desc) }
 }
 
-static mut FUNC_SIG_MAP_INIT: FuncSigMap = FuncSigMap::default();
+static mut FUNC_SIG_MAP_INIT: Vec<FunctionDescriptor> = Vec::new();

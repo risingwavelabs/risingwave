@@ -19,8 +19,8 @@ use aho_corasick::{AhoCorasick, AhoCorasickBuilder};
 use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
 use risingwave_common::types::NaiveDateTimeWrapper;
-use risingwave_expr_macro::function;
 
+// use risingwave_expr_macro::function;
 use crate::Result;
 
 #[self_referencing]

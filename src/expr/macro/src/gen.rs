@@ -92,7 +92,6 @@ impl FunctionAttr {
 
     fn generate_build_fn(&self) -> Result<TokenStream2> {
         let num_args = self.args.len();
-        let i = 0..self.args.len();
         let fn_name = format_ident!("{}", self.user_fn.name);
         let arg_arrays = self
             .args
@@ -106,6 +105,10 @@ impl FunctionAttr {
         let ret_type = types::to_data_type(&self.ret)
             .parse::<TokenStream2>()
             .unwrap();
+        let exprs = (0..num_args)
+            .map(|i| format_ident!("e{i}"))
+            .collect::<Vec<_>>();
+        let exprs0 = exprs.clone();
 
         let prepare = quote! {
             use risingwave_common::array::*;
@@ -118,7 +121,8 @@ impl FunctionAttr {
             };
             let children = func_call.get_children();
             crate::ensure!(children.len() == #num_args);
-            let exprs = [#(crate::expr::build_from_prost(&children[#i])?),*];
+            let mut iter = children.iter();
+            #(let #exprs0 = crate::expr::build_from_prost(iter.next().unwrap())?;)*
         };
 
         let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
@@ -129,12 +133,18 @@ impl FunctionAttr {
                 4 => format_ident!("QuaternaryBytesExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let i = 0..self.args.len();
+            let args = (0..=num_args).map(|i| format_ident!("x{i}"));
+            let args1 = args.clone();
+            let func = if self.user_fn.return_result {
+                quote! { |#(#args),*| #fn_name(#(#args1),*) }
+            } else {
+                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, _>::new(
-                    #(exprs[#i]),*,
+                    #(#exprs),*,
                     return_type,
-                    #fn_name,
+                    #func,
                 )))
             }
         } else if self.args.iter().all(|t| t == "boolean")
@@ -148,16 +158,13 @@ impl FunctionAttr {
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
             let batch = format_ident!("{}", self.batch.as_ref().unwrap());
-            let i = 0..self.args.len();
+            let args = (0..num_args).map(|i| format_ident!("x{i}"));
+            let args1 = args.clone();
             let func = if self.user_fn.arg_option && self.user_fn.return_option {
-                quote! { #fn_name }
+                quote! { |#(#args),*| #fn_name(#(#args1),*) }
             } else if self.user_fn.arg_option {
-                let args = (0..num_args).map(|i| format_ident!("x{i}"));
-                let args1 = args.clone();
                 quote! { |#(#args),*| Some(#fn_name(#(#args1),*)) }
             } else {
-                let args = (0..num_args).map(|i| format_ident!("x{i}"));
-                let args1 = args.clone();
                 let args2 = args.clone();
                 let args3 = args.clone();
                 quote! {
@@ -169,16 +176,19 @@ impl FunctionAttr {
             };
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::new(
-                    #(exprs[#i]),*, #batch, #func,
+                    #(#exprs),*, #batch, #func,
                 )))
             }
         } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
             let compatible_type = types::to_data_type(types::min_compatible_type(&self.args))
                 .parse::<TokenStream2>()
                 .unwrap();
+            let args = (0..num_args).map(|i| format_ident!("x{i}"));
+            let args1 = args.clone();
             quote! {
                 Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
-                    exprs[0], exprs[1], #fn_name::<#(#arg_types),*, #compatible_type>,
+                    #(#exprs),*,
+                    |#(#args),*| #fn_name::<#(#arg_types),*, #compatible_type>(#(#args1),*),
                 )))
             }
         } else if self.args.iter().all(|t| types::is_primitive(t)) && self.user_fn.is_pure() {
@@ -187,10 +197,9 @@ impl FunctionAttr {
                 2 => format_ident!("BinaryExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let i = 0..self.args.len();
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::<_, #(#arg_types),*, #ret_type>::new(
-                    #(exprs[#i]),*,
+                    #(#exprs),*,
                     return_type,
                     #fn_name,
                 )))
@@ -202,21 +211,18 @@ impl FunctionAttr {
                 3 => format_ident!("TernaryNullableExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let i = 0..self.args.len();
+            let args = (0..num_args).map(|i| format_ident!("x{i}"));
+            let args1 = args.clone();
             let func = if self.user_fn.return_result {
-                quote! { #fn_name }
+                quote! { |#(#args),*| #fn_name(#(#args1),*) }
             } else if self.user_fn.return_option {
-                let args = (0..num_args).map(|i| format_ident!("x{i}"));
-                let args1 = args.clone();
                 quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
             } else {
-                let args = (0..num_args).map(|i| format_ident!("x{i}"));
-                let args1 = args.clone();
                 quote! { |#(#args),*| Ok(Some(#fn_name(#(#args1),*))) }
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
-                    #(exprs[#i]),*,
+                    #(#exprs),*,
                     return_type,
                     #func,
                 )))
@@ -228,17 +234,16 @@ impl FunctionAttr {
                 3 => format_ident!("TernaryExpression"),
                 _ => return Err(Error::new(Span::call_site(), "unsupported arguments")),
             };
-            let i = 0..self.args.len();
+            let args = (0..num_args).map(|i| format_ident!("x{i}"));
+            let args1 = args.clone();
             let func = if self.user_fn.return_result {
-                quote! { #fn_name }
+                quote! { |#(#args),*| #fn_name(#(#args1),*) }
             } else {
-                let args = (0..num_args).map(|i| format_ident!("x{i}"));
-                let args1 = args.clone();
                 quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
-                    #(exprs[#i]),*,
+                    #(#exprs),*,
                     return_type,
                     #func,
                 )))

@@ -158,7 +158,7 @@ pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
-    value_type: DataType,
+    pub(super) value_type: DataType,
 }
 
 impl Array for ListArray {
@@ -446,6 +446,13 @@ impl<'a> ListRef<'a> {
                 hash_datum(datum_ref, state);
             }
         })
+    }
+
+    pub fn data_type(&self) -> &DataType {
+        match self {
+            ListRef::Indexed { arr, .. } => &arr.value_type,
+            ListRef::ValueRef { .. } => panic!("ListRef::ValueRef has no data type"),
+        }
     }
 }
 

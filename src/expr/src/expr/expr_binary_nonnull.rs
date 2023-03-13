@@ -26,7 +26,7 @@ use crate::{ExprError, Result};
 /// Create a new binary expression.
 pub fn new_binary_expr(
     expr_type: Type,
-    ret: DataType,
+    _ret: DataType,
     l: BoxedExpression,
     r: BoxedExpression,
 ) -> Result<BoxedExpression> {

@@ -14,8 +14,8 @@
 
 use chrono::format::Parsed;
 use risingwave_common::types::NaiveDateTimeWrapper;
-use risingwave_expr_macro::function;
 
+// use risingwave_expr_macro::function;
 use super::to_char::{compile_pattern_to_chrono, ChronoPattern};
 use crate::Result;
 

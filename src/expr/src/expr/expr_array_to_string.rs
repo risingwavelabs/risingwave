@@ -16,7 +16,6 @@ use std::fmt::Write;
 
 use risingwave_common::array::*;
 use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, Datum};
 use risingwave_expr_macro::function;
 
 /// Converts each array element to its text representation, and concatenates those
@@ -70,12 +69,7 @@ use risingwave_expr_macro::function;
 /// ```
 
 #[function("array_to_string(list, varchar) -> varchar")]
-fn array_to_string(
-    array: ListRef<'_>,
-    element_data_type: &DataType,
-    delimiter: &str,
-    mut writer: &mut dyn Write,
-) {
+fn array_to_string(array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Write) {
     let mut first = true;
     for element in array.values_ref().iter().flat_map(|f| f.iter()) {
         if !first {
@@ -84,7 +78,7 @@ fn array_to_string(
             first = false;
         }
         element
-            .write_with_type(element_data_type, &mut writer)
+            .write_with_type(array.data_type(), &mut writer)
             .unwrap();
     }
 }
@@ -92,7 +86,6 @@ fn array_to_string(
 #[function("array_to_string(list, varchar, varchar) -> varchar")]
 fn array_to_string_with_null(
     array: ListRef<'_>,
-    element_data_type: &DataType,
     delimiter: &str,
     null_string: &str,
     mut writer: &mut dyn Write,
@@ -105,7 +98,7 @@ fn array_to_string_with_null(
             first = false;
         }
         match element {
-            Some(s) => s.write_with_type(element_data_type, &mut writer).unwrap(),
+            Some(s) => s.write_with_type(array.data_type(), &mut writer).unwrap(),
             None => write!(writer, "{}", null_string).unwrap(),
         }
     }
