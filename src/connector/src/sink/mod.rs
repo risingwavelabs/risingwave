@@ -253,7 +253,7 @@ pub enum SinkError {
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(format!("{:?}", value))
+        SinkError::Remote(format!("{}", value))
     }
 }
 

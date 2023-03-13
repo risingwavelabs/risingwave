@@ -43,7 +43,7 @@ public class SinkValidationHandler {
                     ConnectorServiceProto.ValidateSinkResponse.newBuilder()
                             .setError(
                                     ConnectorServiceProto.ValidationError.newBuilder()
-                                            .setErrorMessage(e.toString())
+                                            .setErrorMessage(e.getMessage())
                                             .build())
                             .build());
             responseObserver.onCompleted();
