@@ -142,7 +142,7 @@ message SinkDesc {
   string name = 2;
   string definition = 3;
   repeated plan_common.ColumnDesc columns = 4;
-  repeated plan_common.ColumnOrder pk = 5;
+  repeated common.ColumnOrder pk = 5;
   repeated uint32 stream_key = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
@@ -176,7 +176,7 @@ message FilterNode {
 message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
-  repeated plan_common.ColumnOrder column_orders = 2;
+  repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to handle pk conflict, open it when upstream executor is source executor.
@@ -243,7 +243,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  repeated plan_common.ColumnOrder order_by = 4;
+  repeated common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -253,7 +253,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  repeated plan_common.ColumnOrder order_by = 5;
+  repeated common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -287,6 +287,20 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+}
+
+message TemporalJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  repeated bool null_safe = 4;
+  expr.ExprNode condition = 5;
+  // The output indices of current node
+  repeated uint32 output_indices = 6;
+  // The table desc of the lookup side table.
+  plan_common.StorageTableDesc table_desc = 7;
+  // The output indices of the lookup side table
+  repeated uint32 table_output_indices = 8;
 }
 
 message DynamicFilterNode {
@@ -328,6 +342,8 @@ message HopWindowNode {
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message MergeNode {
@@ -400,7 +416,7 @@ message BatchPlanNode {
 message ArrangementInfo {
   // Order key of the arrangement, including order by columns and pk from the materialize
   // executor.
-  repeated plan_common.ColumnOrder arrange_key_orders = 1;
+  repeated common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
   // Used to build storage table by stream lookup join of delta join.
@@ -529,6 +545,7 @@ message StreamNode {
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
+    TemporalJoinNode temporal_join = 131;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

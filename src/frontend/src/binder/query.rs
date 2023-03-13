@@ -18,18 +18,18 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use crate::binder::{Binder, BoundSetExpr};
 use crate::expr::{CorrelatedId, Depth, ExprImpl};
-use crate::optimizer::property::{Direction, FieldOrder};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
 #[derive(Debug, Clone)]
 pub struct BoundQuery {
     pub body: BoundSetExpr,
-    pub order: Vec<FieldOrder>,
+    pub order: Vec<ColumnOrder>,
     pub limit: Option<u64>,
     pub offset: Option<u64>,
     pub with_ties: bool,
@@ -207,7 +207,8 @@ impl Binder {
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
-    ) -> Result<FieldOrder> {
+    ) -> Result<ColumnOrder> {
+        // TODO(rc): support `NULLS FIRST | LAST`
         if nulls_first.is_some() {
             return Err(ErrorCode::NotImplemented(
                 "NULLS FIRST or NULLS LAST".to_string(),
@@ -215,11 +216,12 @@ impl Binder {
             )
             .into());
         }
-        let direct = match asc {
-            None | Some(true) => Direction::Asc,
-            Some(false) => Direction::Desc,
+        let order_type = match asc {
+            None => OrderType::default(),
+            Some(true) => OrderType::ascending(),
+            Some(false) => OrderType::descending(),
         };
-        let index = match expr {
+        let column_index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,
                 false => return Err(ErrorCode::BindError(format!("ORDER BY \"{}\" is ambiguous", name.real_value())).into()),
@@ -239,7 +241,7 @@ impl Binder {
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
-        Ok(FieldOrder { index, direct })
+        Ok(ColumnOrder::new(column_index, order_type))
     }
 
     fn bind_with(&mut self, with: With) -> Result<()> {

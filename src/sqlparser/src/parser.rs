@@ -1475,7 +1475,24 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        parser_err!(format!("Expected {}, found: {}", expected, found))
+        let start_off = self.index.saturating_sub(10);
+        let end_off = self.index.min(self.tokens.len());
+        let near_tokens = &self.tokens[start_off..end_off];
+        struct TokensDisplay<'a>(&'a [Token]);
+        impl<'a> fmt::Display for TokensDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for token in self.0 {
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
+            }
+        }
+        parser_err!(format!(
+            "Expected {}, found: {}\nNear \"{}\"",
+            expected,
+            found,
+            TokensDisplay(near_tokens),
+        ))
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -1971,9 +1988,15 @@ impl Parser {
         // parse optional column list (schema) and watermarks on source.
         let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
 
-        let append_only = if cfg!(debug_assertions) && self.parse_keyword(Keyword::APPEND) {
+        let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            true
+            if cfg!(debug_assertions) {
+                true
+            } else {
+                return Err(ParserError::ParserError(
+                    "APPEND ONLY is only allowed in debug model".to_string(),
+                ));
+            }
         } else {
             false
         };

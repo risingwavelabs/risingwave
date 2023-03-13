@@ -126,16 +126,12 @@ fn parse_update() {
 
     let sql = "UPDATE t WHERE 1";
     let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Expected SET, found: WHERE".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected SET, found: WHERE"));
 
     let sql = "UPDATE t SET a = 1 extrabadstuff";
     let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: extrabadstuff".to_string()),
-        res.unwrap_err()
+    assert!(
+        format!("{}", res.unwrap_err()).contains("Expected end of statement, found: extrabadstuff")
     );
 }
 
@@ -252,10 +248,7 @@ fn parse_select_all() {
 #[test]
 fn parse_select_all_distinct() {
     let result = parse_sql_statements("SELECT ALL DISTINCT name FROM customer");
-    assert_eq!(
-        ParserError::ParserError("syntax error at or near \"DISTINCT\"".to_string()),
-        result.unwrap_err(),
-    );
+    assert!(format!("{}", result.unwrap_err()).contains("syntax error at or near \"DISTINCT\""));
 }
 
 #[test]
@@ -283,10 +276,7 @@ fn parse_select_wildcard() {
 
     let sql = "SELECT * + * FROM foo;";
     let result = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: +".to_string()),
-        result.unwrap_err(),
-    );
+    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: +"));
 }
 
 #[test]
@@ -323,16 +313,10 @@ fn parse_column_aliases() {
 #[test]
 fn test_eof_after_as() {
     let res = parse_sql_statements("SELECT foo AS");
-    assert_eq!(
-        ParserError::ParserError("Expected an identifier after AS, found: EOF".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected an identifier after AS, found: EOF"));
 
     let res = parse_sql_statements("SELECT 1 FROM foo AS");
-    assert_eq!(
-        ParserError::ParserError("Expected an identifier after AS, found: EOF".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected an identifier after AS, found: EOF"));
 }
 
 #[test]
@@ -378,19 +362,13 @@ fn parse_select_count_distinct() {
 
     let sql = "SELECT COUNT(ALL DISTINCT + x) FROM customer";
     let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError("Cannot specify both ALL and DISTINCT".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Cannot specify both ALL and DISTINCT"));
 }
 
 #[test]
 fn parse_invalid_infix_not() {
     let res = parse_sql_statements("SELECT c FROM t WHERE c NOT (");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: NOT".to_string()),
-        res.unwrap_err(),
-    );
+    assert!(format!("{}", res.unwrap_err(),).contains("Expected end of statement, found: NOT"));
 }
 
 #[test]
@@ -1191,10 +1169,7 @@ fn parse_extract() {
     verified_stmt("SELECT EXTRACT(SECOND FROM d)");
 
     let res = parse_sql_statements("SELECT EXTRACT(0 FROM d)");
-    assert_eq!(
-        ParserError::ParserError("Expected date/time field, found: 0".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected date/time field, found: 0"));
 }
 
 #[test]
@@ -1707,18 +1682,12 @@ fn parse_alter_table_alter_column_type() {
 #[test]
 fn parse_bad_constraint() {
     let res = parse_sql_statements("ALTER TABLE tab ADD");
-    assert_eq!(
-        ParserError::ParserError("Expected identifier, found: EOF".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected identifier, found: EOF"));
 
     let res = parse_sql_statements("CREATE TABLE tab (foo int,");
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected column name or constraint definition, found: EOF".to_string()
-        ),
-        res.unwrap_err()
-    );
+
+    assert!(format!("{}", res.unwrap_err())
+        .contains("Expected column name or constraint definition, found: EOF"));
 }
 
 fn run_explain_analyze(query: &str, expected_analyze: bool, expected_options: ExplainOptions) {
@@ -1821,22 +1790,16 @@ fn parse_explain_with_invalid_options() {
     assert!(res.is_err());
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE TRACE) SELECT sqrt(id) FROM foo");
-    assert_eq!(
-        ParserError::ParserError("Expected ), found: TRACE".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected ), found: TRACE"));
 
     let res = parse_sql_statements("EXPLAIN () SELECT sqrt(id) FROM foo");
     assert!(res.is_err());
 
     let res = parse_sql_statements("EXPLAIN (VERBOSE, ) SELECT sqrt(id) FROM foo");
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )"
-                .to_string()
-        ),
-        res.unwrap_err()
-    );
+
+    let err_msg =
+        "Expected one of VERBOSE or TRACE or TYPE or LOGICAL or PHYSICAL or DISTSQL, found: )";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
 #[test]
@@ -2140,16 +2103,10 @@ fn parse_literal_interval() {
     );
 
     let result = parse_sql_statements("SELECT INTERVAL '1' SECOND TO SECOND");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: SECOND".to_string()),
-        result.unwrap_err(),
-    );
+    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: SECOND"));
 
     let result = parse_sql_statements("SELECT INTERVAL '10' HOUR (1) TO HOUR (2)");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: (".to_string()),
-        result.unwrap_err(),
-    );
+    assert!(format!("{}", result.unwrap_err()).contains("Expected end of statement, found: ("));
 
     verified_only_select("SELECT INTERVAL '1' YEAR");
     verified_only_select("SELECT INTERVAL '1' MONTH");
@@ -2516,10 +2473,8 @@ fn parse_natural_join() {
     );
 
     let sql = "SELECT * FROM t1 natural";
-    assert_eq!(
-        ParserError::ParserError("Expected a join type after NATURAL, found: EOF".to_string()),
-        parse_sql_statements(sql).unwrap_err(),
-    );
+    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
+        .contains("Expected a join type after NATURAL, found: EOF"));
 }
 
 #[test]
@@ -2583,10 +2538,7 @@ fn parse_join_syntax_variants() {
     );
 
     let res = parse_sql_statements("SELECT * FROM a OUTER JOIN b ON 1");
-    assert_eq!(
-        ParserError::ParserError("Expected LEFT, RIGHT, or FULL, found: OUTER".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected LEFT, RIGHT, or FULL, found: OUTER"));
 }
 
 #[test]
@@ -2775,10 +2727,8 @@ fn parse_multiple_statements() {
         one_statement_parses_to(&(sql1.to_owned() + ";"), sql1);
         // Check that forgetting the semicolon results in an error:
         let res = parse_sql_statements(&(sql1.to_owned() + " " + sql2_kw + sql2_rest));
-        assert_eq!(
-            ParserError::ParserError("Expected end of statement, found: ".to_string() + sql2_kw),
-            res.unwrap_err()
-        );
+        let err_msg = "Expected end of statement, found: ";
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
     }
     test_with("SELECT foo", "SELECT", " bar");
     // ensure that SELECT/WITH is not parsed as a table or column alias if ';'
@@ -2840,25 +2790,24 @@ fn parse_overlay() {
         "SELECT OVERLAY('abc' PLACING 'xyz' FROM 1 FOR 2)",
     );
 
-    assert_eq!(
-        parse_sql_statements("SELECT OVERLAY('abc', 'xyz')").unwrap_err(),
-        ParserError::ParserError("Expected PLACING, found: ,".to_owned())
-    );
-
-    assert_eq!(
-        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz')").unwrap_err(),
-        ParserError::ParserError("Expected FROM, found: )".to_owned())
-    );
-
-    assert_eq!(
-        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)").unwrap_err(),
-        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
-    );
-
-    assert_eq!(
-        parse_sql_statements("SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)").unwrap_err(),
-        ParserError::ParserError("Expected FROM, found: FOR".to_owned())
-    );
+    for (sql, err_msg) in [
+        ("SELECT OVERLAY('abc', 'xyz')", "Expected PLACING, found: ,"),
+        (
+            "SELECT OVERLAY('abc' PLACING 'xyz')",
+            "Expected FROM, found: )",
+        ),
+        (
+            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2)",
+            "Expected FROM, found: FOR",
+        ),
+        (
+            "SELECT OVERLAY('abc' PLACING 'xyz' FOR 2 FROM 1)",
+            "Expected FROM, found: FOR",
+        ),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -2880,10 +2829,10 @@ fn parse_trim() {
 
     one_statement_parses_to("SELECT TRIM('   foo   ')", "SELECT TRIM('   foo   ')");
 
-    assert_eq!(
-        ParserError::ParserError("Expected ), found: 'xyz'".to_owned()),
-        parse_sql_statements("SELECT TRIM(FOO 'xyz' FROM 'xyzfooxyz')").unwrap_err()
-    );
+    let res = parse_sql_statements("SELECT TRIM(FOO 'xyz' FROM 'xyzfooxyz')");
+
+    let err_msg = "Expected ), found: 'xyz'";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
 #[test]
@@ -2910,20 +2859,13 @@ fn parse_exists_subquery() {
     verified_stmt("SELECT EXISTS (SELECT 1)");
 
     let res = parse_sql_statements("SELECT EXISTS (");
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected SELECT, VALUES, or a subquery in the query body, found: EOF".to_string()
-        ),
-        res.unwrap_err(),
-    );
+    let err_msg = "Expected SELECT, VALUES, or a subquery in the query body, found: EOF";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 
     let res = parse_sql_statements("SELECT EXISTS (NULL)");
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected SELECT, VALUES, or a subquery in the query body, found: NULL".to_string()
-        ),
-        res.unwrap_err(),
-    );
+
+    let err_msg = "Expected SELECT, VALUES, or a subquery in the query body, found: NULL";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
 #[test]
@@ -3162,16 +3104,12 @@ fn parse_drop_table() {
     };
 
     let sql = "DROP TABLE";
-    assert_eq!(
-        ParserError::ParserError("Expected identifier, found: EOF".to_string()),
-        parse_sql_statements(sql).unwrap_err(),
-    );
+    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
+        .contains("Expected identifier, found: EOF"));
 
     let sql = "DROP TABLE IF EXISTS foo CASCADE RESTRICT";
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: RESTRICT".to_string()),
-        parse_sql_statements(sql).unwrap_err(),
-    );
+    assert!(format!("{}", parse_sql_statements(sql).unwrap_err(),)
+        .contains("Expected end of statement, found: RESTRICT"));
 }
 
 #[test]
@@ -3232,10 +3170,7 @@ fn parse_create_user() {
 #[test]
 fn parse_invalid_subquery_without_parens() {
     let res = parse_sql_statements("SELECT SELECT 1 FROM bar WHERE 1=1 FROM baz");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: 1".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected end of statement, found: 1"));
 }
 
 #[test]
@@ -3396,21 +3331,13 @@ fn lateral_derived() {
 
     let sql = "SELECT * FROM customer LEFT JOIN LATERAL generate_series(1, customer.id)";
     let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected subquery after LATERAL, found: generate_series".to_string()
-        ),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err())
+        .contains("Expected subquery after LATERAL, found: generate_series"));
 
     let sql = "SELECT * FROM a LEFT JOIN LATERAL (b CROSS JOIN c)";
     let res = parse_sql_statements(sql);
-    assert_eq!(
-        ParserError::ParserError(
-            "Expected SELECT, VALUES, or a subquery in the query body, found: b".to_string()
-        ),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err())
+        .contains("Expected SELECT, VALUES, or a subquery in the query body, found: b"));
 }
 
 #[test]
@@ -3463,22 +3390,13 @@ fn parse_start_transaction() {
     );
 
     let res = parse_sql_statements("START TRANSACTION ISOLATION LEVEL BAD");
-    assert_eq!(
-        ParserError::ParserError("Expected isolation level, found: BAD".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected isolation level, found: BAD"));
 
     let res = parse_sql_statements("START TRANSACTION BAD");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: BAD".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected end of statement, found: BAD"));
 
     let res = parse_sql_statements("START TRANSACTION READ ONLY,");
-    assert_eq!(
-        ParserError::ParserError("Expected transaction mode, found: EOF".to_string()),
-        res.unwrap_err()
-    );
+    assert!(format!("{}", res.unwrap_err()).contains("Expected transaction mode, found: EOF"));
 }
 
 #[test]

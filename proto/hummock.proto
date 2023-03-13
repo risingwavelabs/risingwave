@@ -271,6 +271,7 @@ message CompactTask {
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
+  bool split_by_state_table = 21;
 }
 
 message LevelHandler {
@@ -518,6 +519,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 target_file_size_base = 7;
       uint32 compaction_filter_mask = 8;
       uint32 max_sub_compaction = 9;
+      uint64 level0_stop_write_threshold_sub_level_number = 10;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -600,6 +602,9 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
+  bool split_by_state_table = 14;
+  // soft limit for max number of sub level number
+  uint64 level0_stop_write_threshold_sub_level_number = 15;
 }
 
 message TableStats {
@@ -611,4 +616,13 @@ message TableStats {
 message HummockVersionStats {
   uint64 hummock_version_id = 1;
   map<uint32, TableStats> table_stats = 2;
+}
+
+message WriteLimits {
+  message WriteLimit {
+    repeated uint32 table_ids = 1;
+    string reason = 2;
+  }
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimit> write_limits = 1;
 }

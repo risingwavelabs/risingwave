@@ -41,7 +41,7 @@ use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
 
-const SCORE_BASE: u64 = 100;
+pub const SCORE_BASE: u64 = 100;
 
 pub trait LevelSelector: Sync + Send {
     fn pick_compaction(
@@ -105,7 +105,6 @@ impl DynamicLevelSelectorCore {
                 Box::new(LevelCompactionPicker::new(
                     target_level,
                     self.config.clone(),
-                    overlap_strategy,
                 ))
             }
         } else {
@@ -114,6 +113,7 @@ impl DynamicLevelSelectorCore {
                 select_level,
                 target_level,
                 self.config.max_bytes_for_level_base,
+                self.config.split_by_state_table,
                 overlap_strategy,
             ))
         }
@@ -590,7 +590,7 @@ pub mod tests {
                 right_exclusive: false,
             }),
             file_size: (right - left + 1) as u64,
-            table_ids: vec![],
+            table_ids: vec![table_prefix as u32],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
@@ -813,6 +813,7 @@ pub mod tests {
             .max_bytes_for_level_base(200)
             .max_level(4)
             .max_bytes_for_level_multiplier(5)
+            .target_file_size_base(5)
             .max_compaction_bytes(10000)
             .level0_tier_compact_file_number(4)
             .compaction_mode(CompactionMode::Range as i32)
@@ -832,6 +833,7 @@ pub mod tests {
                 3,
                 10,
             ))),
+            member_table_ids: vec![1],
             ..Default::default()
         };
 
@@ -857,6 +859,8 @@ pub mod tests {
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         let config = CompactionConfigBuilder::with_config(config)
             .max_bytes_for_level_base(100)
+            .sub_level_max_compaction_bytes(50)
+            .target_file_size_base(20)
             .compaction_filter_mask(compaction_filter_flag.into())
             .build();
         let group_config = CompactionGroup::new(1, config.clone());
@@ -898,8 +902,15 @@ pub mod tests {
         assert_compaction_task(&compaction, &levels_handlers);
         assert_eq!(compaction.input.input_levels[0].level_idx, 3);
         assert_eq!(compaction.input.target_level, 4);
-        assert_eq!(compaction.input.input_levels[0].table_infos.len(), 1);
-        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 1);
+        assert_eq!(
+            compaction.input.input_levels[0]
+                .table_infos
+                .iter()
+                .map(|sst| sst.id)
+                .collect_vec(),
+            vec![5, 6, 7]
+        );
+        assert_eq!(compaction.input.input_levels[1].table_infos.len(), 3);
         assert_eq!(
             compaction.target_file_size,
             config.target_file_size_base * 2

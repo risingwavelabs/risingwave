@@ -20,7 +20,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::sort_util::{HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
@@ -39,7 +39,7 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     context: C,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunk>>,
-    order_pairs: Arc<Vec<OrderPair>>,
+    column_orders: Arc<Vec<ColumnOrder>>,
     min_heap: BinaryHeap<HeapElem>,
     proto_sources: Vec<ProstExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
@@ -76,7 +76,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
         assert!(source_idx < self.source_inputs.len());
         let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
         self.min_heap.push(HeapElem {
-            order_pairs: self.order_pairs.clone(),
+            column_orders: self.column_orders.clone(),
             chunk: chunk_ref.clone(),
             chunk_idx: source_idx,
             elem_idx: row_idx,
@@ -191,12 +191,12 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             NodeBody::MergeSortExchange
         )?;
 
-        let order_pairs = sort_merge_node
+        let column_orders = sort_merge_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
-        let order_pairs = Arc::new(order_pairs);
+        let column_orders = Arc::new(column_orders);
 
         let exchange_node = sort_merge_node.get_exchange()?;
         let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
@@ -213,7 +213,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
         Ok(Box::new(MergeSortExchangeExecutor::<C> {
             context: source.context().clone(),
             source_inputs: vec![None; num_sources],
-            order_pairs,
+            column_orders,
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],
@@ -260,9 +260,9 @@ mod tests {
             proto_sources.push(ProstExchangeSource::default());
             source_creators.push(fake_create_source.clone());
         }
-        let order_pairs = Arc::new(vec![OrderPair {
-            column_idx: 0,
-            order_type: OrderType::Ascending,
+        let column_orders = Arc::new(vec![ColumnOrder {
+            column_index: 0,
+            order_type: OrderType::ascending(),
         }]);
 
         let executor = Box::new(MergeSortExchangeExecutorImpl::<
@@ -271,7 +271,7 @@ mod tests {
         > {
             context: ComputeNodeContext::for_test(),
             source_inputs: vec![None; proto_sources.len()],
-            order_pairs,
+            column_orders,
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],

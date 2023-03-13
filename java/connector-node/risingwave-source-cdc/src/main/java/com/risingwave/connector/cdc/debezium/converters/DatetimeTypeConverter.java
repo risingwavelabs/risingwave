@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector.cdc.debezium.converters;
 
 import io.debezium.spi.converter.CustomConverter;
@@ -12,7 +26,6 @@ import org.apache.kafka.connect.data.SchemaBuilder;
 public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
     private DateTimeFormatter dateFormatter = DateTimeFormatter.ISO_DATE;
-    private static final String EPOCH_DAY = "1970-01-01";
 
     @Override
     public void configure(Properties props) {
@@ -26,7 +39,7 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
         SchemaBuilder schemaBuilder = null;
         Converter converter = null;
         if ("DATE".equals(sqlType)) {
-            schemaBuilder = SchemaBuilder.string().name("risingwave.cdc.date.string");
+            schemaBuilder = SchemaBuilder.string().name("rw.cdc.date.string");
             converter = this::convertDate;
         }
         if (schemaBuilder != null) {
@@ -36,7 +49,7 @@ public class DatetimeTypeConverter implements CustomConverter<SchemaBuilder, Rel
 
     private String convertDate(Object input) {
         if (input == null) {
-            return EPOCH_DAY;
+            return null;
         }
         var epochDay = Date.toEpochDay(input, null);
         LocalDate date = LocalDate.ofEpochDay(epochDay);

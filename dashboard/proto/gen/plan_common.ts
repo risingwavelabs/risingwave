@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 
 export const protobufPackage = "plan_common";
@@ -79,47 +80,6 @@ export function joinTypeToJSON(object: JoinType): string {
     case JoinType.RIGHT_ANTI:
       return "RIGHT_ANTI";
     case JoinType.UNRECOGNIZED:
-    default:
-      return "UNRECOGNIZED";
-  }
-}
-
-export const OrderType = {
-  ORDER_UNSPECIFIED: "ORDER_UNSPECIFIED",
-  ASCENDING: "ASCENDING",
-  DESCENDING: "DESCENDING",
-  UNRECOGNIZED: "UNRECOGNIZED",
-} as const;
-
-export type OrderType = typeof OrderType[keyof typeof OrderType];
-
-export function orderTypeFromJSON(object: any): OrderType {
-  switch (object) {
-    case 0:
-    case "ORDER_UNSPECIFIED":
-      return OrderType.ORDER_UNSPECIFIED;
-    case 1:
-    case "ASCENDING":
-      return OrderType.ASCENDING;
-    case 2:
-    case "DESCENDING":
-      return OrderType.DESCENDING;
-    case -1:
-    case "UNRECOGNIZED":
-    default:
-      return OrderType.UNRECOGNIZED;
-  }
-}
-
-export function orderTypeToJSON(object: OrderType): string {
-  switch (object) {
-    case OrderType.ORDER_UNSPECIFIED:
-      return "ORDER_UNSPECIFIED";
-    case OrderType.ASCENDING:
-      return "ASCENDING";
-    case OrderType.DESCENDING:
-      return "DESCENDING";
-    case OrderType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -258,13 +218,11 @@ export interface StorageTableDesc {
   retentionSeconds: number;
   valueIndices: number[];
   readPrefixLenHint: number;
-}
-
-/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
-export interface ColumnOrder {
-  /** maybe other name */
-  orderType: OrderType;
-  index: number;
+  /**
+   * Whether the table is versioned. If `true`, column-aware row encoding will be used
+   * to be compatible with schema changes.
+   */
+  versioned: boolean;
 }
 
 function createBaseField(): Field {
@@ -378,6 +336,7 @@ function createBaseStorageTableDesc(): StorageTableDesc {
     retentionSeconds: 0,
     valueIndices: [],
     readPrefixLenHint: 0,
+    versioned: false,
   };
 }
 
@@ -391,6 +350,7 @@ export const StorageTableDesc = {
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
       valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
+      versioned: isSet(object.versioned) ? Boolean(object.versioned) : false,
     };
   },
 
@@ -419,6 +379,7 @@ export const StorageTableDesc = {
       obj.valueIndices = [];
     }
     message.readPrefixLenHint !== undefined && (obj.readPrefixLenHint = Math.round(message.readPrefixLenHint));
+    message.versioned !== undefined && (obj.versioned = message.versioned);
     return obj;
   },
 
@@ -431,33 +392,7 @@ export const StorageTableDesc = {
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
-    return message;
-  },
-};
-
-function createBaseColumnOrder(): ColumnOrder {
-  return { orderType: OrderType.ORDER_UNSPECIFIED, index: 0 };
-}
-
-export const ColumnOrder = {
-  fromJSON(object: any): ColumnOrder {
-    return {
-      orderType: isSet(object.orderType) ? orderTypeFromJSON(object.orderType) : OrderType.ORDER_UNSPECIFIED,
-      index: isSet(object.index) ? Number(object.index) : 0,
-    };
-  },
-
-  toJSON(message: ColumnOrder): unknown {
-    const obj: any = {};
-    message.orderType !== undefined && (obj.orderType = orderTypeToJSON(message.orderType));
-    message.index !== undefined && (obj.index = Math.round(message.index));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColumnOrder>, I>>(object: I): ColumnOrder {
-    const message = createBaseColumnOrder();
-    message.orderType = object.orderType ?? OrderType.ORDER_UNSPECIFIED;
-    message.index = object.index ?? 0;
+    message.versioned = object.versioned ?? false;
     return message;
   },
 };

@@ -32,7 +32,10 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::{
+    BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
+};
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -108,8 +111,9 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-/// `StorageTable` will use `BasicSerde` as default
-pub type StorageTable<S> = StorageTableInner<S, BasicSerde>;
+/// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
+/// non-versioned tables with the same type.
+pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -118,7 +122,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 }
 
 // init
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
@@ -134,6 +138,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         table_options: TableOption,
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
+        versioned: bool,
     ) -> Self {
         Self::new_inner(
             store,
@@ -146,6 +151,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_options,
             value_indices,
             read_prefix_len_hint,
+            versioned,
         )
     }
 
@@ -169,15 +175,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Default::default(),
             value_indices,
             0,
+            false,
         )
     }
 
-    pub fn pk_serializer(&self) -> &OrderedRowSerde {
-        &self.pk_serializer
-    }
-}
-
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
@@ -193,6 +194,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         table_option: TableOption,
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
+        versioned: bool,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -237,7 +239,15 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .map(|idx| table_columns[*idx].column_id)
             .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+
+        let row_serde = {
+            let schema = Arc::from(data_types.into_boxed_slice());
+            if versioned {
+                ColumnAwareSerde::new(&column_ids, schema).into()
+            } else {
+                BasicSerde::new(&column_ids, schema).into()
+            }
+        };
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let key_output_indices = match key_output_indices.is_empty() {
@@ -262,6 +272,12 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_option,
             read_prefix_len_hint,
         }
+    }
+}
+
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
     }
 
     pub fn schema(&self) -> &Schema {

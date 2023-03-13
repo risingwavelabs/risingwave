@@ -513,6 +513,7 @@ impl From<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::interval::test_utils::IntervalUnitTestExt;
     use crate::{array, empty_array};
 
     #[test]
