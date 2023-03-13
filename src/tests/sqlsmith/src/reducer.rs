@@ -359,11 +359,29 @@ SET RW_TWO_PHASE_AGG = true;
 
     #[test]
     fn test_shrink_subquery() {
-
+        let query = "SELECT * FROM (SELECT V1 AS K1 FROM T2);";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
+INSERT INTO T2 VALUES (0, 0, 3);
+INSERT INTO T2 VALUES (0, 0, 4);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
     }
 
     #[test]
     fn test_shrink_mview() {
-
+        let query = "CREATE MATERIALIZED VIEW m5 AS SELECT * FROM (SELECT V1 AS K1 FROM T2);";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
+INSERT INTO T2 VALUES (0, 0, 3);
+INSERT INTO T2 VALUES (0, 0, 4);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
     }
 }
