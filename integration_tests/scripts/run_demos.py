@@ -46,7 +46,7 @@ def run_demo(demo: str, format: str):
 def run_iceberg_demo():
     demo = "iceberg-sink"
     file_dir = dirname(abspath(__file__))
-    project_dir = dirname(dirname(file_dir))
+    project_dir = dirname(file_dir)
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-sink")
 
