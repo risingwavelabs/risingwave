@@ -32,13 +32,23 @@ type Result<A> = anyhow::Result<A>;
 
 /// Shrinks a given failing query file.
 /// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
-pub fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
+pub fn shrink_file(input_file_path: &str, outdir: &str) -> Result<()> {
+    // read failed sql
     let file_stem = Path::new(input_file_path)
         .file_stem()
         .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
     let output_file_path = format!("{outdir}/{}.reduced.sql", file_stem.to_string_lossy());
-
     let file_contents = read_file_contents(input_file_path)?;
+
+    // reduce failed sql
+    let reduced_sql = shrink(&file_contents)?;
+
+    // write reduced sql
+    let mut file = create_file(output_file_path).unwrap();
+    write_to_file(&mut file, reduced_sql)
+}
+
+fn shrink(file_contents: &str) -> Result<String> {
     let sql_statements = parse_sql(file_contents);
 
     // Session variable before the failing query.
@@ -90,8 +100,8 @@ pub fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
         .map(|s| format!("{s};\n"))
         .collect::<String>();
 
-    let mut file = create_file(output_file_path).unwrap();
-    write_to_file(&mut file, sql)
+    Ok(sql)
+
 }
 
 fn find_ddl_references(query: &Query, ddl_references: &mut HashSet<String>) {
@@ -151,5 +161,35 @@ fn find_ddl_references_in_table_factor(
         TableFactor::NestedJoin(table_with_joins) => {
             find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shrink_join() {
+
+    }
+
+    #[test]
+    fn test_shrink_tumble() {
+
+    }
+
+    #[test]
+    fn test_shrink_subquery() {
+
+    }
+
+    #[test]
+    fn test_shrink_simple_table() {
+
+    }
+
+    #[test]
+    fn test_shrink_mview_on_mview() {
+
     }
 }
