@@ -331,6 +331,7 @@ impl BlockBuilder {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.restart_points.clear();
+        self.table_id = None;
         self.last_key.clear();
         self.entry_count = 0;
     }
