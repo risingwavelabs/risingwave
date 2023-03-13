@@ -47,7 +47,10 @@ impl Drop for StreamChunkBuilder {
     fn drop(&mut self) {
         // Possible to fail when async task gets cancelled.
         if self.size != 0 {
-            tracing::warn!("dropping non-empty stream chunk builder");
+            tracing::warn!(
+                remaining = self.size,
+                "dropping non-empty stream chunk builder"
+            );
         }
     }
 }

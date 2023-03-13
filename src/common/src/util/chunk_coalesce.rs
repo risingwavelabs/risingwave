@@ -233,7 +233,10 @@ impl Drop for DataChunkBuilder {
     fn drop(&mut self) {
         // Possible to fail when async task gets cancelled.
         if self.buffered_count != 0 {
-            tracing::warn!("dropping non-empty data chunk builder");
+            tracing::warn!(
+                remaining = self.buffered_count,
+                "dropping non-empty data chunk builder"
+            );
         }
     }
 }
