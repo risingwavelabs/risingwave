@@ -19,7 +19,6 @@ import com.risingwave.connector.api.source.SourceConfig;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.sourcenode.common.DebeziumCdcUtils;
-import java.util.Map;
 import java.util.Properties;
 
 /** MySQL Source Config */
@@ -29,7 +28,7 @@ public class MySqlSourceConfig implements SourceConfig {
     private final long id;
     private final String sourceName;
 
-    public MySqlSourceConfig(long sourceId, String startOffset, Map<String, String> userProps) {
+    public MySqlSourceConfig(long sourceId, String startOffset, ConnectorConfig userProps) {
         id = sourceId;
         props.setProperty("connector.class", "io.debezium.connector.mysql.MySqlConnector");
         props.setProperty(
@@ -56,9 +55,9 @@ public class MySqlSourceConfig implements SourceConfig {
         props.setProperty("database.include.list", userProps.get(ConnectorConfig.DB_NAME));
         // only captures data of the specified table
         String tableFilter =
-                userProps.get(ConnectorConfig.DB_NAME)
+                userProps.getNonNull(ConnectorConfig.DB_NAME)
                         + "."
-                        + userProps.get(ConnectorConfig.TABLE_NAME);
+                        + userProps.getNonNull(ConnectorConfig.TABLE_NAME);
         props.setProperty("table.include.list", tableFilter);
 
         // disable schema change events for current stage

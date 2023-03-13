@@ -21,24 +21,23 @@ use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_expr::expr::BoxedExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
-use crate::common::StreamChunkBuilder;
+use crate::common::{InfallibleExpression, StreamChunkBuilder};
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
 use crate::task::AtomicU64Ref;
 
 pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
-    // TODO: update metrics
-    #[allow(dead_code)]
     ctx: ActorContextRef,
     left: BoxedExecutor,
     right: BoxedExecutor,
@@ -46,6 +45,7 @@ pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
     left_join_keys: Vec<usize>,
     right_join_keys: Vec<usize>,
     null_safe: Vec<bool>,
+    condition: Option<BoxedExpression>,
     output_indices: Vec<usize>,
     pk_indices: PkIndices,
     schema: Schema,
@@ -58,6 +58,7 @@ pub struct TemporalJoinExecutor<S: StateStore, const T: JoinTypePrimitive> {
 
 struct TemporalSide<S: StateStore> {
     source: StorageTable<S>,
+    table_output_indices: Vec<usize>,
     cache: ManagedLruCache<OwnedRow, Option<OwnedRow>, DefaultHasher, SharedStatsAlloc<Global>>,
 }
 
@@ -74,7 +75,8 @@ impl<S: StateStore> TemporalSide<S> {
                 let res = self
                     .source
                     .get_row(key.clone(), HummockReadEpoch::NoWait(epoch))
-                    .await?;
+                    .await?
+                    .map(|row| row.project(&self.table_output_indices).into_owned_row());
                 self.cache.put(key, res.clone());
                 res
             }
@@ -166,7 +168,6 @@ async fn align_input(left: Box<dyn Executor>, right: Box<dyn Executor>) {
 }
 
 impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
-    #[allow(dead_code)]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -176,8 +177,10 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
         left_join_keys: Vec<usize>,
         right_join_keys: Vec<usize>,
         null_safe: Vec<bool>,
+        condition: Option<BoxedExpression>,
         pk_indices: PkIndices,
         output_indices: Vec<usize>,
+        table_output_indices: Vec<usize>,
         executor_id: u64,
         watermark_epoch: AtomicU64Ref,
         metrics: Arc<StreamingMetrics>,
@@ -200,11 +203,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
             right,
             right_table: TemporalSide {
                 source: table,
+                table_output_indices,
                 cache,
             },
             left_join_keys,
             right_join_keys,
             null_safe,
+            condition,
             output_indices,
             schema,
             chunk_size,
@@ -222,6 +227,19 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
             self.right.schema().len(),
         );
 
+        let mut check_join_condition = |left_row: &RowRef<'_>, right_row: &OwnedRow| -> bool {
+            if let Some(ref mut cond) = self.condition {
+                let concat_row = left_row.chain(right_row).into_owned_row();
+                cond.eval_row_infallible(&concat_row, |err| {
+                    self.ctx.on_compute_error(err, self.identity.as_str())
+                })
+                .map(|s| *s.as_bool())
+                .unwrap_or(false)
+            } else {
+                true
+            }
+        };
+
         let mut prev_epoch = None;
         #[for_await]
         for msg in align_input(self.left, self.right) {
@@ -234,8 +252,8 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                         right_map.clone(),
                     );
                     let epoch = prev_epoch.expect("Chunk data should come after some barrier.");
-                    for (op, row) in chunk.rows() {
-                        let key = row.project(&self.left_join_keys);
+                    for (op, left_row) in chunk.rows() {
+                        let key = left_row.project(&self.left_join_keys);
                         if key
                             .iter()
                             .zip_eq_fast(self.null_safe.iter())
@@ -243,12 +261,12 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                         {
                             continue;
                         }
-                        if let Some(right_row) = self.right_table.lookup(key, epoch).await? {
-                            if let Some(chunk) = builder.append_row(op, row, &right_row) {
+                        if let Some(right_row) = self.right_table.lookup(key, epoch).await? && check_join_condition(&left_row, &right_row) {
+                            if let Some(chunk) = builder.append_row(op, left_row, &right_row) {
                                 yield Message::Chunk(chunk);
                             }
                         } else if T == JoinType::LeftOuter {
-                            if let Some(chunk) = builder.append_row_update(op, row) {
+                            if let Some(chunk) = builder.append_row_update(op, left_row) {
                                 yield Message::Chunk(chunk);
                             }
                         }

@@ -198,7 +198,10 @@ impl S3FileReader {
 
             let parser =
                 ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)?;
-            let msg_stream = if matches!(parser, ByteStreamSourceParserImpl::Json(_)) {
+            let msg_stream = if matches!(
+                parser,
+                ByteStreamSourceParserImpl::Json(_) | ByteStreamSourceParserImpl::Csv(_)
+            ) {
                 NdByteStreamWrapper::new(parser).into_stream(Box::pin(data_stream))
             } else {
                 parser.into_stream(Box::pin(data_stream))
