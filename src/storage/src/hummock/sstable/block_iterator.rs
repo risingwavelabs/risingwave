@@ -243,7 +243,6 @@ impl BlockIterator {
     /// Seeks to the restart point that the given `key` belongs to.
     fn seek_restart_point_by_key(&mut self, key: &[u8]) {
         let index = self.search_restart_point_index_by_key(key);
-        println!("index = {:?}", index);
         self.seek_restart_point_by_index(index)
     }
 
