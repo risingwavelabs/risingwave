@@ -180,28 +180,30 @@ pub fn make_hop_window_expression(
 
     let mut window_start_exprs = Vec::with_capacity(units);
     let mut window_end_exprs = Vec::with_capacity(units);
-    for slide_idx in 0..units {
-        let slide_offset =
+    for i in 0..units {
+        let window_start_offset =
             window_slide
-                .checked_mul_int(slide_idx)
+                .checked_mul_int(i)
                 .ok_or_else(|| ExprError::InvalidParam {
                     name: "window",
                     reason: format!(
                         "window_slide {} cannot be multiplied by {}",
-                        window_slide, slide_idx
+                        window_slide, i
                     ),
                 })?;
-        let window_start_offset_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(slide_offset)))
-                .boxed();
+        let window_start_offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_start_offset)),
+        )
+        .boxed();
         let window_end_offset =
             window_slide
-                .checked_mul_int(slide_idx + units)
+                .checked_mul_int(i + units)
                 .ok_or_else(|| ExprError::InvalidParam {
                     name: "window",
                     reason: format!(
                         "window_slide {} cannot be multiplied by {}",
-                        window_slide, slide_idx
+                        window_slide, i
                     ),
                 })?;
         let window_end_offset_expr = LiteralExpression::new(
