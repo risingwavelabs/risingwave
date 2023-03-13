@@ -55,7 +55,11 @@ impl BackwardSstableIterator {
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: isize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         if idx >= self.sst.value().block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
@@ -104,7 +108,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -148,7 +152,7 @@ impl HummockIterator for BackwardSstableIterator {
                 .saturating_sub(1); // considering the boundary of 0
             let block_idx = block_idx as isize;
 
-            self.seek_idx(block_idx, Some(encoded_key_slice)).await?;
+            self.seek_idx(block_idx, Some(key)).await?;
             if !self.is_valid() {
                 // Seek to prev block
                 self.seek_idx(block_idx - 1, None).await?;
