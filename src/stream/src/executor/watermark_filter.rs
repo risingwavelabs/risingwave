@@ -337,7 +337,9 @@ mod tests {
             InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
             LiteralExpression::new(
                 interval_type,
-                Some(ScalarImpl::Interval(IntervalUnit::new(0, 1, 0))),
+                Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                    0, 1, 0,
+                ))),
             )
             .boxed(),
         )

@@ -20,6 +20,7 @@
 #[macro_use]
 mod test_utils;
 use matches::assert_matches;
+use risingwave_sqlparser::ast::JoinOperator::Inner;
 use risingwave_sqlparser::ast::*;
 use risingwave_sqlparser::keywords::ALL_KEYWORDS;
 use risingwave_sqlparser::parser::ParserError;
@@ -2149,12 +2150,17 @@ fn parse_delimited_identifiers() {
     );
     // check FROM
     match only(select.from).relation {
-        TableFactor::Table { name, alias } => {
+        TableFactor::Table {
+            name,
+            alias,
+            for_system_time_as_of_now,
+        } => {
             assert_eq!(vec![Ident::with_quote_unchecked('"', "a table")], name.0);
             assert_eq!(
                 Ident::with_quote_unchecked('"', "alias"),
                 alias.unwrap().name
             );
+            assert!(!for_system_time_as_of_now);
         }
         _ => panic!("Expecting TableFactor::Table"),
     }
@@ -2281,6 +2287,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1".into()]),
                     alias: None,
+                    for_system_time_as_of_now: false,
                 },
                 joins: vec![],
             },
@@ -2288,6 +2295,7 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
+                    for_system_time_as_of_now: false,
                 },
                 joins: vec![],
             }
@@ -2303,11 +2311,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t1a".into()]),
                     alias: None,
+                    for_system_time_as_of_now: false,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t1b".into()]),
                         alias: None,
+                        for_system_time_as_of_now: false,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2316,11 +2326,13 @@ fn parse_implicit_join() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2a".into()]),
                     alias: None,
+                    for_system_time_as_of_now: false,
                 },
                 joins: vec![Join {
                     relation: TableFactor::Table {
                         name: ObjectName(vec!["t2b".into()]),
                         alias: None,
+                        for_system_time_as_of_now: false,
                     },
                     join_operator: JoinOperator::Inner(JoinConstraint::Natural),
                 }]
@@ -2339,8 +2351,30 @@ fn parse_cross_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
+                for_system_time_as_of_now: false,
             },
             join_operator: JoinOperator::CrossJoin
+        },
+        only(only(select.from).joins),
+    );
+}
+
+#[test]
+fn parse_temporal_join() {
+    let sql = "SELECT * FROM t1 JOIN t2 FOR SYSTEM_TIME AS OF NOW() ON c1 = c2";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        Join {
+            relation: TableFactor::Table {
+                name: ObjectName(vec![Ident::new_unchecked("t2")]),
+                alias: None,
+                for_system_time_as_of_now: true,
+            },
+            join_operator: Inner(JoinConstraint::On(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("c1".into())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Identifier("c2".into())),
+            }))
         },
         only(only(select.from).joins),
     );
@@ -2357,6 +2391,7 @@ fn parse_joins_on() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
+                for_system_time_as_of_now: false,
             },
             join_operator: f(JoinConstraint::On(Expr::BinaryOp {
                 left: Box::new(Expr::Identifier("c1".into())),
@@ -2408,6 +2443,7 @@ fn parse_joins_using() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked(relation.into())]),
                 alias,
+                for_system_time_as_of_now: false,
             },
             join_operator: f(JoinConstraint::Using(vec!["c1".into()])),
         }
@@ -2451,6 +2487,7 @@ fn parse_natural_join() {
             relation: TableFactor::Table {
                 name: ObjectName(vec![Ident::new_unchecked("t2")]),
                 alias: None,
+                for_system_time_as_of_now: false,
             },
             join_operator: f(JoinConstraint::Natural),
         }
@@ -2677,6 +2714,7 @@ fn parse_derived_tables() {
                 relation: TableFactor::Table {
                     name: ObjectName(vec!["t2".into()]),
                     alias: None,
+                    for_system_time_as_of_now: false,
                 },
                 join_operator: JoinOperator::Inner(JoinConstraint::Natural),
             }],
