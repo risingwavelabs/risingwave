@@ -2,7 +2,7 @@ This demo shows how to ingest Avro data into RisingWave with [Schema Registry](h
 
 At the beginning, there's a datagen process that ingests Avro data into Redpanda (a Kafka-compatible message queue). The Avro schema is as follows:
 
-- ** Version 1 **
+- **Version 1**
 
     ```json
     {
@@ -38,8 +38,7 @@ At the beginning, there's a datagen process that ingests Avro data into Redpanda
     }
     ```
 
-
-- ** Version 2 **
+- **Version 2**
 
     ```json
     {
@@ -91,6 +90,6 @@ CREATE SOURCE student WITH (
     properties.bootstrap.server = 'message_queue:29092',
     scan.startup.mode = 'earliest'
 )
-ROW FORMAT avro message 'student'
+ROW FORMAT avro
 row schema location confluent schema registry 'http://message_queue:8081';
 ```
