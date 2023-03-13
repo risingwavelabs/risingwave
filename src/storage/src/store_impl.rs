@@ -23,7 +23,7 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
-use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
@@ -599,17 +599,9 @@ impl StateStoreImpl {
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-
-                let backup_store = parse_meta_snapshot_storage(
-                    &opts.backup_storage_url,
-                    &opts.backup_storage_directory,
-                )
-                .await?;
-                let backup_reader = BackupReader::new(backup_store);
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
-                    backup_reader,
                     hummock_meta_client.clone(),
                     notification_client,
                     state_store_metrics.clone(),
@@ -645,6 +637,7 @@ pub trait HummockTrait {
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
 
@@ -663,6 +656,10 @@ impl HummockTrait for HummockStorage {
 
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.get_memory_limiter()
+    }
+
+    fn backup_reader(&self) -> BackupReaderRef {
+        self.backup_reader()
     }
 
     fn as_hummock(&self) -> Option<&HummockStorage> {
