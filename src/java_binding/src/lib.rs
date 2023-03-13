@@ -26,7 +26,7 @@ use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::LazyLock;
 
-use iterator::{Iterator, KeyedRow};
+use iterator::{Iterator, KeyedRow, StreamChunkIterator};
 use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
@@ -245,10 +245,12 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew<'a>(
     env: EnvParam<'a>,
     stream_chunk: JByteArray<'a>,
-) -> Pointer<'static, Iterator> {
+) -> Pointer<'static, StreamChunkRefIter> {
     execute_and_catch(env, move || {
+        // bincode::deserialize(stream_chunk);
+        // Message::from_protobuf
         let stream_chunk = Message::decode(stream_chunk.to_guarded_slice(*env)?.deref())?;
-        let iter = RUNTIME.block_on(Iterator::new(stream_chunk))?;
+        let iter = RUNTIME.block_on(stream_chunk.records)?;
         Ok(iter.into())
     })
 }
@@ -256,7 +258,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkItera
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext<'a>(
     env: EnvParam<'a>,
-    mut pointer: Pointer<'a, Iterator>,
+    mut pointer: Pointer<'a, StreamChunkIterator>,
 ) -> Pointer<'static, KeyedRow> {
     execute_and_catch(env, move || {
         match RUNTIME.block_on(pointer.as_mut().next())? {

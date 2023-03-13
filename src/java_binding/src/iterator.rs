@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures::TryStreamExt;
+use risingwave_common::array::StreamChunk;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowDeserializer};
 use risingwave_common::types::ScalarImpl;
@@ -45,6 +46,12 @@ fn select_all_vnode_stream(
 pub struct Iterator {
     row_serializer: RowDeserializer,
     stream: SelectAllIterStream,
+}
+
+
+// StreamChunkRefIter?
+pub struct StreamChunkIterator {
+    stream: Iterator<Item = (Op, RowRef<'_>)>
 }
 
 pub struct KeyedRow {
@@ -184,6 +191,25 @@ impl Iterator {
         })
     }
 }
+
+
+impl StreamChunkIterator {
+    pub async fn new(stream_chunk: StreamChunk) -> StorageResult<Self> {
+         let mut steam =  stream_chunk.rows();
+         OK(Self{stream})
+    }
+
+    pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {
+        // convert Item = (Op, RowRef<'_>) into KeyedRow
+        let item = self.stream.next();
+        Ok(match item {
+            Some((key, value)) => Some(KeyedRow {}),
+            None => None,
+        })
+    }
+}
+
+
 
 fn table_key_range_from_prost(vnode: VirtualNode, r: KeyRange) -> TableKeyRange {
     let map_bound = |b, v| match b {
