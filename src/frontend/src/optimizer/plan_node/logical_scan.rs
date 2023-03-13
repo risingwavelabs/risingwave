@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -581,15 +581,36 @@ impl LogicalScan {
             return None;
         }
 
+        let output_col_map = self
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = output_col_map.len();
         let index = self.indexes().iter().find(|idx| {
+            let s2p_mapping = idx.secondary_to_primary_mapping();
             Order {
                 column_orders: idx
-                    .index_item
+                    .index_table
+                    .pk()
                     .iter()
-                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::ascending()))
+                    .map(|idx_item| {
+                        ColumnOrder::new(
+                            *output_col_map
+                                .get(
+                                    s2p_mapping
+                                        .get(&idx_item.column_index)
+                                        .expect("should be in s2p mapping"),
+                                )
+                                .unwrap_or(&unmatched_idx),
+                            idx_item.order_type,
+                        )
+                    })
                     .collect(),
             }
-            .satisfies(required_order)
+                .satisfies(required_order)
         })?;
 
         let p2s_mapping = index.primary_to_secondary_mapping();

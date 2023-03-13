@@ -1230,3 +1230,23 @@
           └─StreamHashAgg { group_key: [idx.col1, $expr1], aggs: [count] }
             └─StreamProject { exprs: [idx.col1, idx.id, Vnode(idx.id) as $expr1] }
               └─StreamTableScan { table: idx, columns: [idx.col1, idx.id], pk: [idx.id], dist: UpstreamHashShard(idx.id) }
+- name: sort agg on an ascending index
+  sql: |
+    create table t (a int, b int);
+    create index idx_asc on t(a asc);
+    create index idx_desc on t(a desc);
+    select a, count(*) cnt from t group by a order by a asc;
+  batch_plan: |
+    BatchExchange { order: [idx_asc.a ASC], dist: Single }
+    └─BatchSortAgg { group_key: [idx_asc.a], aggs: [count] }
+      └─BatchScan { table: idx_asc, columns: [idx_asc.a], distribution: UpstreamHashShard(idx_asc.a) }
+- name: sort agg on an descending index
+  sql: |
+    create table t (a int, b int);
+    create index idx_asc on t(a asc);
+    create index idx_desc on t(a desc);
+    select a, count(*) cnt from t group by a order by a desc;
+  batch_plan: |
+    BatchExchange { order: [idx_desc.a DESC], dist: Single }
+    └─BatchSortAgg { group_key: [idx_desc.a], aggs: [count] }
+      └─BatchScan { table: idx_desc, columns: [idx_desc.a], distribution: UpstreamHashShard(idx_desc.a) }
