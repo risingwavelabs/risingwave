@@ -37,8 +37,8 @@ impl PlanVisitor<bool> for TemporalJoinValidator {
         stream_table_scan.logical().for_system_time_as_of_now()
     }
 
-    fn visit_batch_seq_scan(&mut self, bathc_seq_scan: &BatchSeqScan) -> bool {
-        bathc_seq_scan.logical().for_system_time_as_of_now()
+    fn visit_batch_seq_scan(&mut self, batch_seq_scan: &BatchSeqScan) -> bool {
+        batch_seq_scan.logical().for_system_time_as_of_now()
     }
 
     fn visit_logical_scan(&mut self, logical_scan: &LogicalScan) -> bool {
