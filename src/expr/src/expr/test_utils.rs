@@ -191,45 +191,38 @@ pub fn make_hop_window_expression(
                         window_slide, slide_idx
                     ),
                 })?;
-        {
-            let window_start_offset_expr = LiteralExpression::new(
-                DataType::Interval,
-                Some(ScalarImpl::Interval(slide_offset)),
-            )
-            .boxed();
-            let window_start_expr = new_binary_expr(
-                expr_node::Type::Subtract,
-                output_type.clone(),
-                get_hop_window_start.clone()()?,
-                window_start_offset_expr,
-            )?;
-            window_start_exprs.push(window_start_expr);
-        }
-        {
-            let window_start_offset_expr = LiteralExpression::new(
-                DataType::Interval,
-                Some(ScalarImpl::Interval(slide_offset)),
-            )
-            .boxed();
-            let window_start_expr = new_binary_expr(
-                expr_node::Type::Subtract,
-                output_type.clone(),
-                get_hop_window_start.clone()()?,
-                window_start_offset_expr,
-            )?;
-
-            let window_size_expr =
-                LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
-                    .boxed();
-
-            let window_end_expr = new_binary_expr(
-                expr_node::Type::Add,
-                output_type.clone(),
-                window_start_expr,
-                window_size_expr,
-            )?;
-            window_end_exprs.push(window_end_expr);
-        }
+        let window_start_offset_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(slide_offset)))
+                .boxed();
+        let window_end_offset =
+            window_slide
+                .checked_mul_int(slide_idx + units)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_slide {} cannot be multiplied by {}",
+                        window_slide, slide_idx
+                    ),
+                })?;
+        let window_end_offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_end_offset)),
+        )
+        .boxed();
+        let window_start_expr = new_binary_expr(
+            expr_node::Type::Add,
+            output_type.clone(),
+            get_hop_window_start.clone()()?,
+            window_start_offset_expr,
+        )?;
+        window_start_exprs.push(window_start_expr);
+        let window_end_expr = new_binary_expr(
+            expr_node::Type::Add,
+            output_type.clone(),
+            get_hop_window_start.clone()()?,
+            window_end_offset_expr,
+        )?;
+        window_end_exprs.push(window_end_expr);
     }
     Ok((window_start_exprs, window_end_exprs))
 }
