@@ -119,18 +119,18 @@ pub fn make_hop_window_expression(
     let get_hop_window_start = || -> Result<BoxedExpression> {
         let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
 
-        // let window_size_expr =
-        //     LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
-        //         .boxed();
+        let window_size_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
+                .boxed();
         let window_slide_expr =
             LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
                 .boxed();
 
-        // let offset_expr = LiteralExpression::new(
-        //     DataType::Interval,
-        //     Some(ScalarImpl::Interval(window_offset)),
-        // )
-        // .boxed();
+        let offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_offset)),
+        )
+        .boxed();
 
         // The first window_start of hop window should be:
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`) + offset %
@@ -151,12 +151,12 @@ pub fn make_hop_window_expression(
         )
         .boxed();
 
-        // let offset_mod_size = new_binary_expr(
-        //     Type::Modulus,
-        //     DataType::Interval,
-        //     offset_expr,
-        //     window_size_expr,
-        // )?;
+        let offset_mod_size = new_binary_expr(
+            Type::Modulus,
+            DataType::Interval,
+            offset_expr,
+            window_size_expr,
+        )?;
         let hop_start = new_binary_expr(
             expr_node::Type::TumbleStart,
             output_type.clone(),
@@ -168,13 +168,9 @@ pub fn make_hop_window_expression(
             )?,
             window_slide_expr,
         )?;
-        // let hop_start_with_offset = new_binary_expr(
-        //     Type::Modulus,
-        //     output_type.clone(),
-        //     hop_start,
-        //     offset_mod_size,
-        // )?;
-        Ok(hop_start)
+        let hop_start_with_offset =
+            new_binary_expr(Type::Add, output_type.clone(), hop_start, offset_mod_size)?;
+        Ok(hop_start_with_offset)
     };
 
     let mut window_start_exprs = Vec::with_capacity(units);
