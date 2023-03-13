@@ -121,11 +121,11 @@ pub fn make_hop_window_expression(
     let get_hop_window_start = || -> Result<BoxedExpression> {
         let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
 
-        let window_slide_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
+        let window_size_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
                 .boxed();
 
-        let window_offset_expr = LiteralExpression::new(
+        let offset_expr = LiteralExpression::new(
             DataType::Interval,
             Some(ScalarImpl::Interval(window_offset)),
         )
@@ -133,8 +133,8 @@ pub fn make_hop_window_expression(
 
         let hop_start = new_tumble_start_offset(
             time_col_ref,
-            window_slide_expr,
-            window_offset_expr,
+            window_size_expr,
+            offset_expr,
             output_type.clone(),
         )?;
         Ok(hop_start)
@@ -174,19 +174,19 @@ pub fn make_hop_window_expression(
         )
         .boxed();
         let window_start_expr = new_binary_expr(
-            expr_node::Type::Add,
+            expr_node::Type::Subtract,
             output_type.clone(),
             get_hop_window_start.clone()()?,
             window_start_offset_expr,
         )?;
-        window_start_exprs.push(window_start_expr);
+        window_start_exprs.push(get_hop_window_start.clone()()?);
         let window_end_expr = new_binary_expr(
-            expr_node::Type::Add,
+            expr_node::Type::Subtract,
             output_type.clone(),
             get_hop_window_start.clone()()?,
             window_end_offset_expr,
         )?;
-        window_end_exprs.push(window_end_expr);
+        window_end_exprs.push(get_hop_window_start.clone()()?);
     }
     Ok((window_start_exprs, window_end_exprs))
 }

@@ -179,7 +179,6 @@ impl HopWindowExecutor {
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
             assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
-            // print!("{}", data_chunk.to_pretty_string());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
@@ -206,11 +205,6 @@ impl HopWindowExecutor {
                         }
                     })
                     .collect_vec();
-                // print!(
-                //     "{}",
-                //     DataChunk::new(new_cols.clone(), len).to_pretty_string()
-                // );
-                let a = 2;
                 yield DataChunk::new(new_cols, len);
             }
         }
@@ -254,7 +248,6 @@ mod tests {
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
         let window_offset = IntervalUnit::from_minutes(0);
-
         let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
             DataType::Timestamp,
             2,
@@ -303,7 +296,6 @@ mod tests {
         // TODO: add more test infra to reduce the duplicated codes below.
 
         let chunk = stream.next().await.unwrap().unwrap();
-
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
