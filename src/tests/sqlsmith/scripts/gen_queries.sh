@@ -125,12 +125,17 @@ extract_ddl_by_names() {
   done
 }
 
+# Shrink a [`queries.sql`] file containing a failing query.
+# It removes DML and DDL statements independent of the query.
+# Instead of using in-built parser,
+# we opt for an approach independent of RisingWave functionality.
+# Then, if the failure is triggered in frontend we can still shrink.
 shrink_query() {
   FROM_NAMES=$(extract_from "$1")
   extract_ddl_by_names "$FROM_NAMES"
 }
 
-# Extract fail info from logs in log dir
+# Extract fail info from [`generate-*.log`] in log dir
 # Also shrinks query.
 extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
