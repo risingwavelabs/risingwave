@@ -30,7 +30,6 @@ pub struct HopWindowExecutor {
     ctx: ActorContextRef,
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,
-
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
