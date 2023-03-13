@@ -66,7 +66,7 @@ pub fn to_timestamp_const_tmpl(s: &str, tmpl: &ChronoPattern) -> Result<NaiveDat
     ))
 }
 
-#[function("to_timestamp(varchar, varchar) -> timestamp")]
+// #[function("to_timestamp(varchar, varchar) -> timestamp")]
 pub fn to_timestamp(s: &str, tmpl: &str) -> Result<NaiveDateTimeWrapper> {
     let pattern = compile_pattern_to_chrono(tmpl);
     to_timestamp_const_tmpl(s, &pattern)

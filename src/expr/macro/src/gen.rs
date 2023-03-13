@@ -25,7 +25,7 @@ impl FunctionAttr {
     ///
     /// If the function arguments or return type contains wildcard, it will generate descriptors for
     /// each of them.
-    pub fn generate_descriptors(&self) -> Result<TokenStream2> {
+    pub fn generate_descriptors(&self, build_fn: bool) -> Result<TokenStream2> {
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(&ty));
         let ret = types::expand_type_wildcard(&self.ret);
         let mut tokens = TokenStream2::new();
@@ -40,7 +40,7 @@ impl FunctionAttr {
                 batch: self.batch.clone(),
                 user_fn: self.user_fn.clone(),
             };
-            tokens.extend(attr.generate_descriptor_one()?);
+            tokens.extend(attr.generate_descriptor_one(build_fn)?);
         }
         Ok(tokens)
     }
@@ -48,7 +48,7 @@ impl FunctionAttr {
     /// Generate a descriptor of the function.
     ///
     /// The types of arguments and return value should not contain wildcard.
-    fn generate_descriptor_one(&self) -> Result<TokenStream2> {
+    fn generate_descriptor_one(&self, build_fn: bool) -> Result<TokenStream2> {
         let name = self.name.clone();
 
         fn to_data_type_name(ty: &str) -> Result<TokenStream2> {
@@ -68,17 +68,25 @@ impl FunctionAttr {
         let ret = to_data_type_name(&self.ret)?;
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
-        let descriptor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
+        let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
         let descriptor_type = quote! { crate::sig::func::FunctionDescriptor };
-        let build_fn = self.generate_build_fn()?;
+        let build_fn = if build_fn {
+            let name = format_ident!("{}", self.user_fn.name);
+            quote! { #name }
+        } else {
+            self.generate_build_fn()?
+        };
         Ok(quote! {
-            static #descriptor_name: #descriptor_type = #descriptor_type {
-                name: #name,
-                ty: risingwave_pb::expr::expr_node::Type::#pb_type,
-                args: &[#(#args),*],
-                ret: #ret,
-                build_from_prost: #build_fn,
-            };
+            #[ctor::ctor]
+            fn #ctor_name() {
+                crate::sig::func::register(#descriptor_type {
+                    name: #name,
+                    ty: risingwave_pb::expr::expr_node::Type::#pb_type,
+                    args: &[#(#args),*],
+                    ret: #ret,
+                    build_from_prost: #build_fn,
+                });
+            }
         })
     }
 

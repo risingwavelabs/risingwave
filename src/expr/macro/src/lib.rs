@@ -26,18 +26,36 @@ mod utils;
 pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as syn::AttributeArgs);
     let item = parse_macro_input!(item as syn::ItemFn);
-    match parse_function(attr, item) {
+
+    fn inner(attr: syn::AttributeArgs, item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &item)?;
+
+        let mut tokens = item.into_token_stream();
+        tokens.extend(fn_attr.generate_descriptors(false)?);
+        Ok(tokens)
+    }
+    match inner(attr, item) {
         Ok(tokens) => tokens.into(),
         Err(e) => e.to_compile_error().into(),
     }
 }
 
-fn parse_function(attr: syn::AttributeArgs, item: syn::ItemFn) -> Result<TokenStream2> {
-    let fn_attr = FunctionAttr::parse(&attr, &item)?;
+#[proc_macro_attribute]
+pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let attr = parse_macro_input!(attr as syn::AttributeArgs);
+    let item = parse_macro_input!(item as syn::ItemFn);
 
-    let mut tokens = item.into_token_stream();
-    tokens.extend(fn_attr.generate_descriptors()?);
-    Ok(tokens)
+    fn inner(attr: syn::AttributeArgs, item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &item)?;
+
+        let mut tokens = item.into_token_stream();
+        tokens.extend(fn_attr.generate_descriptors(true)?);
+        Ok(tokens)
+    }
+    match inner(attr, item) {
+        Ok(tokens) => tokens.into(),
+        Err(e) => e.to_compile_error().into(),
+    }
 }
 
 #[derive(Debug)]

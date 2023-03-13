@@ -71,7 +71,7 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     .build()
 }
 
-#[function("to_char(timestamp, varchar) -> varchar")]
+// #[function("to_char(timestamp, varchar) -> varchar")]
 pub fn to_char_timestamp(
     data: NaiveDateTimeWrapper,
     tmpl: &str,

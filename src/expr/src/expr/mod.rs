@@ -61,8 +61,8 @@ mod expr_vnode;
 mod agg;
 mod build_expr_from_prost;
 pub(crate) mod data_types;
-mod template;
-mod template_fast;
+pub(crate) mod template;
+pub(crate) mod template_fast;
 pub mod test_utils;
 
 use std::sync::Arc;
@@ -76,7 +76,6 @@ pub use self::build_expr_from_prost::build_from_prost;
 pub use self::expr_binary_nonnull::new_binary_expr;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
-pub use self::expr_unary::new_unary_expr;
 use super::Result;
 
 /// Instance of an expression
@@ -118,10 +117,3 @@ pub type BoxedExpression = Box<dyn Expression>;
 
 /// A reference to a dynamically typed [`Expression`].
 pub type ExpressionRef = Arc<dyn Expression>;
-
-struct FunctionDescriptor {
-    name: &'static str,
-    args: Vec<DataType>,
-    ret: DataType,
-    build: fn(&[BoxedExpression]) -> BoxedExpression,
-}

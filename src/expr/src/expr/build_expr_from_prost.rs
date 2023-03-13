@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
-use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall};
+use risingwave_expr_macro::build_function;
+use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
 use super::expr_case::CaseExpression;
@@ -33,38 +35,50 @@ use super::expr_to_timestamp_const_tmpl::{
 };
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
 };
-use crate::vector_op::to_char::compile_pattern_to_chrono;
+use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ensure, ExprError, Result};
 
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    use risingwave_pb::expr::expr_node::Type::*;
+    use risingwave_pb::expr::expr_node::Type as E;
 
-    match prost.get_expr_type().unwrap() {
+    if let Some(RexNode::FuncCall(call)) = &prost.rex_node {
+        let args = call
+            .children
+            .iter()
+            .map(|c| DataType::from(c.get_return_type().unwrap()).into())
+            .collect_vec();
+        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args) {
+            return (desc.build_from_prost)(prost);
+        }
+    }
+
+    match prost.expr_type() {
         // Dedicated types
-        All | Some => SomeAllExpression::try_from(prost).map(Expression::boxed),
-        In => InExpression::try_from(prost).map(Expression::boxed),
-        Case => CaseExpression::try_from(prost).map(Expression::boxed),
-        Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
-        ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
-        ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
-        InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
-        Field => FieldExpression::try_from(prost).map(Expression::boxed),
-        Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
-        RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
-        ArrayCat | ArrayAppend | ArrayPrepend => {
+        E::All | E::Some => SomeAllExpression::try_from(prost).map(Expression::boxed),
+        E::In => InExpression::try_from(prost).map(Expression::boxed),
+        E::Case => CaseExpression::try_from(prost).map(Expression::boxed),
+        E::Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
+        E::ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
+        E::ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
+        E::InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
+        E::Field => FieldExpression::try_from(prost).map(Expression::boxed),
+        E::Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        E::Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        E::RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
+        E::ArrayCat | E::ArrayAppend | E::ArrayPrepend => {
             // Now we implement these three functions as a single expression for the
             // sake of simplicity. If performance matters at some time, we can split
             // the implementation to improve performance.
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
-        Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        Now => build_now_expr(prost),
-        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
+        E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
+        E::Now => build_now_expr(prost),
+        E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
             prost.get_expr_type()
@@ -72,7 +86,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
+pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());
     if let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() {
         Ok((func_call.get_children().to_vec(), ret_type))
@@ -81,7 +95,12 @@ fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, Data
     }
 }
 
+#[build_function("to_char(timestamp, varchar) -> varchar")]
 fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    use risingwave_common::array::*;
+
+    use crate::vector_op::to_char::{compile_pattern_to_chrono, to_char_timestamp};
+
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let data_expr = expr_build_from_prost(&children[0])?;
@@ -100,7 +119,13 @@ fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         }.boxed())
     } else {
         let tmpl_expr = expr_build_from_prost(&children[1])?;
-        Ok(new_to_char(data_expr, tmpl_expr, ret_type))
+        Ok(BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
+            data_expr,
+            tmpl_expr,
+            ret_type,
+            to_char_timestamp,
+        )
+        .boxed())
     }
 }
 
@@ -115,7 +140,13 @@ pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
 }
 
+#[build_function("to_timestamp(varchar, varchar) -> timestamp")]
 pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    use risingwave_common::array::*;
+
+    use crate::vector_op::to_char::compile_pattern_to_chrono;
+    use crate::vector_op::to_timestamp::to_timestamp;
+
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let data_expr = expr_build_from_prost(&children[0])?;
@@ -134,7 +165,13 @@ pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         }.boxed())
     } else {
         let tmpl_expr = expr_build_from_prost(&children[1])?;
-        Ok(new_to_timestamp(data_expr, tmpl_expr, ret_type))
+        Ok(BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+            data_expr,
+            tmpl_expr,
+            ret_type,
+            to_timestamp,
+        )
+        .boxed())
     }
 }
 
