@@ -520,13 +520,14 @@ impl LogicalMultiJoin {
             .clone()
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
-        for ((src, dst), _) in eq_join_conditions {
+        for ((src, dst), _) in eq_join_conditions.clone() {
             nodes.get_mut(&src).unwrap().relations.insert(dst);
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
 
         let mut optimized_bushy_tree = None;
         let mut que = VecDeque::from([nodes]);
+        let mut isolated = HashSet::new();
 
         while let Some(mut nodes) = que.pop_front() {
             if nodes.len() == 1 {
@@ -549,9 +550,9 @@ impl LogicalMultiJoin {
             let n = nodes.remove(&idx.clone()).unwrap();
 
             if n.relations.is_empty() {
-                return Err(RwError::from(ErrorCode::InternalError(
-                    "Connecting edge not found in join connected subgraph".into(),
-                )));
+                isolated.insert(n.id);
+                que.push_back(nodes);
+                continue;
             }
 
             for merge_node in &n.relations {
@@ -590,9 +591,6 @@ impl LogicalMultiJoin {
             }
         }
 
-        eprintln!("74741: {:?}", optimized_bushy_tree);
-        eprintln!("{:?}", self.heuristic_ordering().unwrap());
-
         fn create_logical_join(
             s: &LogicalMultiJoin,
             mut join_tree: JoinTreeNode,
@@ -623,15 +621,44 @@ impl LogicalMultiJoin {
                 }
             })
         }
-        let mut join_ordering = vec![];
-        let mut output = create_logical_join(
-            self,
-            optimized_bushy_tree
-                .expect("no optimized bushy tree node")
-                .join_tree,
-            &mut join_ordering,
-        )?;
 
+        let isolated = isolated.into_iter().collect_vec();
+        let mut join_ordering = vec![];
+        let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
+            let mut output =
+                create_logical_join(self, optimized_bushy_tree.join_tree, &mut join_ordering)?;
+
+            output = isolated.into_iter().fold(output, |chain, n| {
+                join_ordering.push(n);
+                LogicalJoin::new(
+                    chain,
+                    self.inputs[n].clone(),
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into()
+            });
+            output
+        } else if !isolated.is_empty() {
+            let base = isolated[0];
+            join_ordering.push(isolated[0]);
+            isolated[1..]
+                .iter()
+                .fold(self.inputs[base].clone(), |chain, n| {
+                    join_ordering.push(*n);
+                    LogicalJoin::new(
+                        chain,
+                        self.inputs[*n].clone(),
+                        JoinType::Inner,
+                        Condition::true_cond(),
+                    )
+                    .into()
+                })
+        } else {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "no plan remain".into(),
+            )));
+        };
         let total_col_num = self.inner2output.source_size();
         let reorder_mapping = {
             let mut reorder_mapping = vec![None; total_col_num];
@@ -656,7 +683,6 @@ impl LogicalMultiJoin {
         output = LogicalFilter::create(output, self.on.clone());
         output =
             LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
-
         Ok(output)
     }
 

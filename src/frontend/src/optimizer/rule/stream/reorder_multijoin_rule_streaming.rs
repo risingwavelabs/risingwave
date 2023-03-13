@@ -28,7 +28,13 @@ impl Rule for ReorderMultiJoinRuleStreaming {
         //     .get_streaming_enable_bushy_join()
         // {
         let join = plan.as_logical_multi_join()?;
-        join.as_bushy_tree_join().ok()
+        match join.as_bushy_tree_join() {
+            Ok(plan) => Some(plan),
+            Err(e) => {
+                eprintln!("{}", e);
+                None
+            }
+        }
         // } else {
         // let join = plan.as_logical_multi_join()?;
         // // check if join is inner and can be merged into multijoin
