@@ -31,7 +31,6 @@ jobs:
           - ad-ctr
           - cdn-metrics
           - clickstream
-          - docker
           - livestream
           - twitter
           - prometheus
@@ -50,8 +49,6 @@ jobs:
           - testcase: cdn-metrics
             format: protobuf
           - testcase: clickstream
-            format: protobuf
-          - testcase: docker
             format: protobuf
           - testcase: prometheus
             format: protobuf

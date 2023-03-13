@@ -41,7 +41,7 @@ if format not in ["json", "protobuf", "avro"]:
     sys.exit(1)
 
 file_dir = dirname(abspath(__file__))
-project_dir = dirname(dirname(file_dir))
+project_dir = dirname(file_dir)
 demo_dir = os.path.join(project_dir, demo)
 demo_compose = os.path.join(demo_dir, 'docker-compose.yml')
 

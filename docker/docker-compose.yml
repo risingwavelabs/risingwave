@@ -327,7 +327,7 @@ services:
       - "9644:9644"
     depends_on: []
     volumes:
-      - "redpanda:/var/lib/redpanda/data"
+      - "message_queue:/var/lib/redpanda/data"
     environment: {}
     container_name: message_queue
     healthcheck:
@@ -348,6 +348,6 @@ volumes:
     external: false
   prometheus-0:
     external: false
-  redpanda:
+  message_queue:
     external: false
 name: risingwave-compose
