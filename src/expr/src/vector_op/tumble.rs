@@ -159,6 +159,7 @@ mod tests {
         let mut window_start_timestamp_micro_second = timestamp_micro_second
             - (timestamp_micro_second - offset_micro_second + window_size_micro_second)
                 % window_size_micro_second;
+
         // which is wrong
         assert!(window_start_timestamp_micro_second > timestamp_micro_second);
 
@@ -169,6 +170,7 @@ mod tests {
         } else {
             window_start_timestamp_micro_second = timestamp_micro_second - remainder;
         }
+
         // which is right
         assert!(window_start_timestamp_micro_second <= timestamp_micro_second);
     }
