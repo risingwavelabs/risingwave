@@ -88,8 +88,7 @@ impl Block {
         for _ in 0..n_restarts {
             restart_points.push(restart_points_buf.get_u32_le());
         }
-        
-        
+
         Block {
             data: buf,
             data_len,
@@ -109,10 +108,10 @@ impl Block {
         self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>() + 4
     }
 
-
     pub fn table_id(&self) -> u32 {
         self.table_id
     }
+
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
         self.restart_points[index]
@@ -285,7 +284,7 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        if self.table_id.is_none(){
+        if self.table_id.is_none() {
             self.table_id = Some(full_key.user_key.table_id.table_id());
         }
         let mut key: BytesMut = Default::default();
@@ -293,7 +292,7 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
                 Ordering::Less
             );
         }
@@ -302,7 +301,7 @@ impl BlockBuilder {
             self.restart_points.push(self.buf.len() as u32);
             key.as_ref()
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, &key)
+            bytes_diff_below_max_key_length(&self.last_key, &key[..])
         };
 
         let prefix = KeyPrefix {
@@ -338,7 +337,7 @@ impl BlockBuilder {
 
     /// Calculate block size without compression.
     pub fn uncompressed_block_size(&mut self) -> usize {
-        self.buf.len() +4 + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
+        self.buf.len() + 4 + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
     }
 
     /// Finishes building block.
@@ -355,7 +354,7 @@ impl BlockBuilder {
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
-        
+
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
@@ -397,13 +396,14 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
-        
+
         self.buf.as_ref()
     }
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        // block + restart_points + restart_points.len + compression_algorithm + checksum  + table_id
+        // block + restart_points + restart_points.len + compression_algorithm + checksum  +
+        // table_id
         self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8 + 4
     }
 }

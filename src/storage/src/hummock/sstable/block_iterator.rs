@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::{cmp::Ordering, ops::Deref};
+use std::cmp::Ordering;
 use std::ops::Range;
 
-use bytes::{BytesMut, Buf, BufMut};
-use futures::executor::block_on;
+use bytes::{Buf, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, UserKey, EPOCH_LEN, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
@@ -74,13 +73,11 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        let table_id = TableId::new(self.block.deref().table_id());
-        let epoch_pos = &self.key[..].len() - EPOCH_LEN;
+        let table_id = TableId::new(self.block.table_id());
+        let epoch_pos = self.key[..].len() - EPOCH_LEN;
         let epoch = (&self.key[epoch_pos..]).get_u64();
         let user_key = UserKey::new(table_id, TableKey(&self.key[..epoch_pos]));
-        let full_key = FullKey::from_user_key(user_key, epoch);
-
-        full_key
+        FullKey::from_user_key(user_key, epoch)
     }
 
     pub fn value(&self) -> &[u8] {
@@ -104,19 +101,19 @@ impl BlockIterator {
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
         let mut full_key_encoded_without_table_id: BytesMut = Default::default();
         key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
-        self.seek_restart_point_by_key(&full_key_encoded_without_table_id);
-        self.next_until_key(&full_key_encoded_without_table_id);
+        self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+        self.next_until_key(&full_key_encoded_without_table_id[..]);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
         let mut full_key_encoded_without_table_id: BytesMut = Default::default();
         key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
-        self.seek_restart_point_by_key(&full_key_encoded_without_table_id);
-        self.next_until_key(&full_key_encoded_without_table_id);
+        self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+        self.next_until_key(&full_key_encoded_without_table_id[..]);
         if !self.is_valid() {
             self.seek_to_last();
         }
-        self.prev_until_key(&full_key_encoded_without_table_id);
+        self.prev_until_key(&full_key_encoded_without_table_id[..]);
     }
 }
 
