@@ -25,7 +25,10 @@ use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
-use risingwave_sqlparser::ast::{Query, Statement};
+use risingwave_sqlparser::ast::{
+    Cte, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
+    TableWithJoins, With,
+};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
@@ -40,7 +43,7 @@ type Result<A> = anyhow::Result<A>;
 
 /// Shrinks a given failing query file.
 /// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
-pub async fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
+pub fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
     let file_stem = Path::new(input_file_path)
         .file_stem()
         .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
@@ -58,9 +61,12 @@ pub async fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
         .last()
         .ok_or_else(|| anyhow!("Could not get last sql statement"))?;
 
-    let ddl_references = match failing_query {
-        Statement::Query(ref query) => Ok(find_ddl_references(query)),
-        Statement::CreateView { .. } => todo!(),
+    let mut ddl_references = HashSet::new();
+    match failing_query {
+        Statement::Query(query) | Statement::CreateView { query, .. } => {
+            find_ddl_references(query.as_ref(), &mut ddl_references);
+            Ok(())
+        }
         _ => Err(anyhow!("Last statement was not a query, can't shrink")),
     }?;
 
@@ -99,8 +105,64 @@ pub async fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
     write_to_file(&mut file, sql)
 }
 
-fn find_ddl_references(query: &Query) -> HashSet<String> {
-    todo!()
+fn find_ddl_references(query: &Query, ddl_references: &mut HashSet<String>) {
+    let Query { with, body, .. } = query;
+    if let Some(With { cte_tables, .. }) = with {
+        for Cte { query, .. } in cte_tables {
+            find_ddl_references(query, ddl_references)
+        }
+        find_ddl_references_in_set_expr(body, ddl_references);
+    }
+}
+
+fn find_ddl_references_in_set_expr(set_expr: &SetExpr, ddl_references: &mut HashSet<String>) {
+    match set_expr {
+        SetExpr::Select(box Select { from, .. }) => {
+            for table_with_joins in from {
+                find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
+            }
+        }
+        SetExpr::Query(q) => find_ddl_references(q, ddl_references),
+        SetExpr::SetOperation { left, right, .. } => {
+            find_ddl_references_in_set_expr(left, ddl_references);
+            find_ddl_references_in_set_expr(right, ddl_references);
+        }
+        SetExpr::Values(_) => {}
+    }
+}
+
+fn find_ddl_references_in_table_with_joins(
+    TableWithJoins { relation, joins }: &TableWithJoins,
+    ddl_references: &mut HashSet<String>,
+) {
+    find_ddl_references_in_table_factor(relation, ddl_references);
+    for Join { relation, .. } in joins {
+        find_ddl_references_in_table_factor(relation, ddl_references);
+    }
+}
+
+fn find_ddl_references_in_table_factor(
+    table_factor: &TableFactor,
+    ddl_references: &mut HashSet<String>,
+) {
+    match table_factor {
+        TableFactor::Table { name, .. } => {
+            ddl_references.insert(name.real_value());
+        }
+        TableFactor::Derived { subquery, .. } => find_ddl_references(subquery, ddl_references),
+        TableFactor::TableFunction { name, args, .. } => {
+            let name = name.real_value();
+            if (name == "hop" || name == "tumble") && args.len() > 2 {
+                let table_name = &args[0];
+                if let FunctionArgExpr::Expr(Expr::Identifier(table_name)) = table_name.get_expr() {
+                    ddl_references.insert(table_name.to_string());
+                }
+            }
+        }
+        TableFactor::NestedJoin(table_with_joins) => {
+            find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
+        }
+    }
 }
 
 /// e2e test runner for pre-generated queries from sqlsmith
