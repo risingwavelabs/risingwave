@@ -221,6 +221,7 @@ impl TaskOutput {
                 // Error happened
                 Err(e) => {
                     writer.write(Err(tonic::Status::from(&*e))).await?;
+                    break;
                 }
             }
             cnt += 1;
