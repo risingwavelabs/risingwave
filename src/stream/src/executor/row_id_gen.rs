@@ -15,7 +15,7 @@
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::column::Column;
-use risingwave_common::array::serial_array::SerialArrayBuilder;
+use risingwave_common::array::serial_array::{Serial, SerialArrayBuilder};
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
@@ -84,7 +84,7 @@ impl RowIdGenExecutor {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().await.into())),
-                _ => builder.append(Some(i64::try_from(datum.unwrap()).unwrap().into())),
+                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap().into())),
             }
         }
 

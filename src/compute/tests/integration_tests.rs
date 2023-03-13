@@ -57,6 +57,7 @@ use risingwave_stream::executor::{
     ActorContext, Barrier, Executor, MaterializeExecutor, Message, PkIndices,
 };
 use tokio::sync::mpsc::unbounded_channel;
+use risingwave_common::array::serial_array::SerialArray;
 
 struct SingleChunkExecutor {
     chunk: Option<DataChunk>,
@@ -106,7 +107,7 @@ async fn test_table_materialize() -> StreamResult<()> {
     let table_id = TableId::default();
     let schema = Schema {
         fields: vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Float64),
         ],
     };
@@ -292,7 +293,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_serial();
             col_row_ids.push(col_row_id.value_at(0).unwrap());
             col_row_ids.push(col_row_id.value_at(1).unwrap());
 
@@ -343,7 +344,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     // Delete some data using `DeleteExecutor`, assuming we are inserting into the "mv".
     let columns = vec![
-        column_nonnull! { I64Array, [ col_row_ids[0]] }, // row id column
+        column_nonnull! { SerialArray, [ col_row_ids[0]] }, // row id column
         column_nonnull! { F64Array, [1.14] },
     ];
     let chunk = DataChunk::new(columns.clone(), 1);
@@ -371,7 +372,7 @@ async fn test_table_materialize() -> StreamResult<()> {
             todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
         }
         Message::Chunk(c) => {
-            let col_row_id = c.columns()[0].array_ref().as_int64();
+            let col_row_id = c.columns()[0].array_ref().as_serial();
             assert_eq!(col_row_id.value_at(0).unwrap(), col_row_ids[0]);
 
             let col_data = c.columns()[1].array_ref().as_float64();

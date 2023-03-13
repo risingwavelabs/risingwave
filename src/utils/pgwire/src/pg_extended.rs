@@ -415,7 +415,6 @@ impl PreparedStatement {
                     };
                     format!("{}::INT8", tmp)
                 }
-                DataType::Serial => todo!("SERIAL"),
                 DataType::Int16 => {
                     let tmp = match param_format {
                         Format::Binary => {
