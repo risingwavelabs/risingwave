@@ -29,7 +29,7 @@ use risingwave_pb::catalog::{
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
-    TableConstraint,
+    TableConstraint, ColumnOptionDef,
 };
 
 use super::create_source::resolve_source_schema;
@@ -42,6 +42,7 @@ use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::{Binder, TableCatalog, WithOptions};
 
@@ -145,55 +146,69 @@ pub fn bind_sql_columns(
             )
             .into());
         }
-        for option_def in options {
-            match option_def.option {
-                ColumnOption::Unique { is_primary: true } => {
-                    if pk_column_id.is_some() {
-                        return Err(ErrorCode::BindError(
-                            "multiple primary keys are not allowed".into(),
-                        )
-                        .into());
-                    }
-                    pk_column_id = Some(column_id);
-                }
-                _ => {
-                    return Err(ErrorCode::NotImplemented(
-                        format!("column constraints \"{}\"", option_def),
-                        None.into(),
-                    )
-                    .into())
-                }
-            }
-        }
-        check_valid_column_name(&name.real_value())?;
-        let field_descs = if let AstDataType::Struct(fields) = &data_type {
-            fields
-                .iter()
-                .map(bind_struct_field)
-                .collect::<Result<Vec<_>>>()?
-        } else {
-            vec![]
-        };
-        column_descs.push(ColumnDesc {
-            data_type: bind_data_type(&data_type)?,
-            column_id,
-            name: name.real_value(),
-            field_descs,
-            type_name: "".to_string(),
-        });
+        
     }
 
     Ok((column_descs, pk_column_id))
 }
 
-/// Binds table constraints given the binding results from column definitions.
+/// Binds constraits that can be only specified in column definitions.
+pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, column_catalogs: Vec<ColumnCatalog>, column_constrains: Vec<ColumnOptionDef>) {
+    let binder = Binder::new(session);
+    binder.bind_columns_to_context(table_name, column_catalogs);
+    for option_def in column_constrains {
+        match option_def.option {
+            ColumnOption::GeneratedColumns(expr) => {
+                
+            }
+            ColumnOption::Unique { is_primary: true } => {
+                // Bind primary key in `bind_sql_table_column_constraints`
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("column constraints \"{}\"", option_def),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+}
+
+/// Binds constraints that can be specified in both column definitions and table definition.
+/// 
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
-pub fn bind_sql_table_constraints(
+pub fn bind_sql_table_column_constraints(
     column_descs: Vec<ColumnDesc>,
-    pk_column_id_from_columns: Option<ColumnId>,
-    constraints: Vec<TableConstraint>,
+    column_constrains: Vec<ColumnOptionDef>,
+    table_constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
+    let mut pk_column_id_from_columns = None;
+    for option_def in options {
+        match option_def.option {
+            ColumnOption::Unique { is_primary: true } => {
+                if pk_column_id_from_columns.is_some() {
+                    return Err(ErrorCode::BindError(
+                        "multiple primary keys are not allowed".into(),
+                    )
+                    .into());
+                }
+                pk_column_id_from_columns = Some(column_id);
+            }
+            ColumnOption::GeneratedColumns(_) => {
+                // Bind generated columns in `bind_sql_column_constraints`
+            }
+            _ => {
+                return Err(ErrorCode::NotImplemented(
+                    format!("column constraints \"{}\"", option_def),
+                    None.into(),
+                )
+                .into())
+            }
+        }
+    }
+
     let mut pk_column_names = vec![];
     for constraint in constraints {
         match constraint {
@@ -291,14 +306,15 @@ pub(crate) async fn gen_create_table_plan_with_source(
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+    let session = context.session_ctx();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
     let properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+        bind_pk_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     let watermark_descs = bind_source_watermark(
-        context.session_ctx(),
+        session,
         table_name.real_value(),
         source_watermarks,
         &columns,
@@ -372,7 +388,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
-        bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+        bind_sql_table_column_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -705,6 +721,7 @@ mod tests {
                 Err("column \"v3\" named in key does not exist"),
             ),
         ] {
+            let session = SessionImpl::mock();
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
                     columns,
@@ -713,8 +730,8 @@ mod tests {
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
                 let (column_descs, pk_column_id_from_columns) =
-                    bind_sql_columns(columns, &mut ColumnIdGenerator::new_initial())?;
-                let (_, pk_column_ids, _) = bind_sql_table_constraints(
+                    bind_sql_columns(&session, columns, &mut ColumnIdGenerator::new_initial())?;
+                let (_, pk_column_ids, _) = bind_sql_table_column_constraints(
                     column_descs,
                     pk_column_id_from_columns,
                     constraints,

@@ -382,46 +382,22 @@ mod tests {
 
         assert_eq!(columns.len(), 4);
         assert_eq!(
-            CatColumnDesc {
-                data_type: DataType::Int32,
-                column_id: 1.into(),
-                name: "id".to_owned(),
-                field_descs: Vec::new(),
-                type_name: "".to_owned()
-            },
+            CatColumnDesc::new_atomic(DataType::Int32, "id", 1),
             columns[0]
         );
 
         assert_eq!(
-            CatColumnDesc {
-                data_type: DataType::Varchar,
-                column_id: 2.into(),
-                name: "first_name".to_owned(),
-                field_descs: Vec::new(),
-                type_name: "".to_owned()
-            },
+            CatColumnDesc::new_atomic(DataType::Varchar, "first_name", 2),
             columns[1]
         );
 
         assert_eq!(
-            CatColumnDesc {
-                data_type: DataType::Varchar,
-                column_id: 3.into(),
-                name: "last_name".to_owned(),
-                field_descs: Vec::new(),
-                type_name: "".to_owned()
-            },
+            CatColumnDesc::new_atomic(DataType::Varchar, "last_name", 3),
             columns[2]
         );
 
         assert_eq!(
-            CatColumnDesc {
-                data_type: DataType::Varchar,
-                column_id: 4.into(),
-                name: "email".to_owned(),
-                field_descs: Vec::new(),
-                type_name: "".to_owned()
-            },
+            CatColumnDesc::new_atomic(DataType::Varchar, "email", 4),
             columns[3]
         );
     }

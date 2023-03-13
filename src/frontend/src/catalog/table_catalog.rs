@@ -548,22 +548,11 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            generated_column: None,
                         },
                         is_hidden: false
                     }

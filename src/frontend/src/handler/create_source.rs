@@ -41,7 +41,7 @@ use risingwave_sqlparser::ast::{
     SourceWatermark,
 };
 
-use super::create_table::bind_sql_table_constraints;
+use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::ColumnId;
@@ -460,6 +460,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -590,7 +591,7 @@ pub async fn handle_create_source(
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
-    let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_constraints(
+    let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_column_constraints(
         column_descs.clone(),
         pk_column_id_from_columns,
         stmt.constraints,
@@ -614,6 +615,8 @@ pub async fn handle_create_source(
     .await?;
 
     debug_assert!(is_column_ids_dedup(&columns));
+
+    
 
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;

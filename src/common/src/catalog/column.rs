@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc, GeneratedColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
@@ -88,6 +88,7 @@ pub struct ColumnDesc {
     pub name: String,
     pub field_descs: Vec<ColumnDesc>,
     pub type_name: String,
+    pub generated_column: Option<GeneratedColumnDesc>,
 }
 
 impl ColumnDesc {
@@ -98,6 +99,7 @@ impl ColumnDesc {
             name: String::new(),
             field_descs: vec![],
             type_name: String::new(),
+            generated_column: None,
         }
     }
 
@@ -114,6 +116,7 @@ impl ColumnDesc {
                 .map(|f| f.to_protobuf())
                 .collect_vec(),
             type_name: self.type_name.clone(),
+            generated_column: self.generated_column.clone(),
         }
     }
 
@@ -156,6 +159,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_column: None,
         }
     }
 
@@ -175,6 +179,7 @@ impl ColumnDesc {
             name: name.to_string(),
             field_descs: fields,
             type_name: type_name.to_string(),
+            generated_column: None,
         }
     }
 
@@ -189,6 +194,7 @@ impl ColumnDesc {
                 .map(Self::from_field_without_column_id)
                 .collect_vec(),
             type_name: field.type_name.clone(),
+            generated_column: None,
         }
     }
 
@@ -210,6 +216,7 @@ impl From<PbColumnDesc> for ColumnDesc {
             name: prost.name,
             type_name: prost.type_name,
             field_descs,
+            generated_column: prost.generated_column,
         }
     }
 }
@@ -228,6 +235,7 @@ impl From<&ColumnDesc> for PbColumnDesc {
             name: c.name.clone(),
             field_descs: c.field_descs.iter().map(ColumnDesc::to_protobuf).collect(),
             type_name: c.type_name.clone(),
+            generated_column: c.generated_column.clone(),
         }
     }
 }

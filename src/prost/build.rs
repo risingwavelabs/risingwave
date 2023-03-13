@@ -64,6 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
         .type_attribute("catalog.StreamSourceInfo", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.GeneratedColumnDesc", "#[derive(Eq, Hash)]")
         .out_dir(out_dir.as_path())
         .compile(&protos, &[proto_dir.to_string()])
         .expect("Failed to compile grpc!");

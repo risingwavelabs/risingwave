@@ -385,53 +385,40 @@ mod tests {
             columns: vec![
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Int64,
-                            column_id: ColumnId::new(0),
-                            name: "_row_id".to_string(),
-                            field_descs: vec![],
-                            type_name: "".to_string(),
-                        })
+                        (
+                            &ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)
+                            )
                             .into(),
                     ),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Int64,
-                            column_id: ColumnId::new(0),
-                            name: "col_1".to_string(),
-                            field_descs: vec![],
-                            type_name: "Int64".to_string(),
-                        })
+                        (
+                            &ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)
+                            )
                             .into(),
+                       
                     ),
                     is_hidden: false,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Float64,
-                            column_id: ColumnId::new(0),
-                            name: "col_2".to_string(),
-                            field_descs: vec![],
-                            type_name: "Float64".to_string(),
-                        })
+                        (
+                            &ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)
+                            )
                             .into(),
+                        
                     ),
                     is_hidden: false,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (&ColumnDesc {
-                            data_type: DataType::Varchar,
-                            column_id: ColumnId::new(0),
-                            name: "col_3".to_string(),
-                            field_descs: vec![],
-                            type_name: "Varchar".to_string(),
-                        })
+                        (
+                            &ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)
+                            )
                             .into(),
+                        
                     ),
                     is_hidden: false,
                 },

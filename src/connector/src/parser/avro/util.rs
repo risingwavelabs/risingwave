@@ -50,6 +50,7 @@ pub(crate) fn avro_field_to_column_desc(
                 name: name.to_owned(),
                 field_descs: vec_column,
                 type_name: schema_name.to_string(),
+                generated_column: None,
             })
         }
         _ => {
