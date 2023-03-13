@@ -1,30 +1,27 @@
 package com.risingwave.java.binding;
 
-import com.risingwave.proto.ConnectorServiceProto;
-import com.risingwave.proto.JavaBinding.ReadPlan;
-
 public class StreamChunkIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public StreamChunkIterator(byte[] data) {
-        this.pointer = Binding.streamChunkIteratorNew(data);
+    public StreamChunkIterator(byte[] streamChunkPayload) {
+        this.pointer = Binding.streamChunkIteratorNew(streamChunkPayload);
         this.isClosed = false;
     }
 
-    public KeyedRow next() {
+    public StreamChunkRow next() {
         long pointer = Binding.streamChunkIteratorNext(this.pointer);
         if (pointer == 0) {
             return null;
         }
-        return new KeyedRow(pointer);
+        return new StreamChunkRow(pointer);
     }
 
     @Override
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.iteratorClose(pointer);
+            Binding.streamChunkIteratorClose(pointer);
         }
     }
 }

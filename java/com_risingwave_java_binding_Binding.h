@@ -49,6 +49,14 @@ JNIEXPORT jbyteArray JNICALL Java_com_risingwave_java_binding_Binding_rowGetKey
 
 /*
  * Class:     com_risingwave_java_binding_Binding
+ * Method:    rowGetOp
+ * Signature: (J)I
+ */
+JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_rowGetOp
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
  * Method:    rowIsNull
  * Signature: (JI)Z
  */
@@ -117,6 +125,30 @@ JNIEXPORT jstring JNICALL Java_com_risingwave_java_binding_Binding_rowGetStringV
  * Signature: (J)V
  */
 JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_rowClose
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    streamChunkIteratorNew
+ * Signature: ([B)J
+ */
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew
+  (JNIEnv *, jclass, jbyteArray);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    streamChunkIteratorNext
+ * Signature: (J)J
+ */
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext
+  (JNIEnv *, jclass, jlong);
+
+/*
+ * Class:     com_risingwave_java_binding_Binding
+ * Method:    streamChunkIteratorClose
+ * Signature: (J)V
+ */
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose
   (JNIEnv *, jclass, jlong);
 
 #ifdef __cplusplus

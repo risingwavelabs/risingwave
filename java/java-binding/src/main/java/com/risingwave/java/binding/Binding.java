@@ -44,6 +44,8 @@ public class Binding {
     // row method
     static native byte[] rowGetKey(long pointer);
 
+    static native int rowGetOp(long pointer);
+
     static native boolean rowIsNull(long pointer, int index);
 
     static native short rowGetInt16Value(long pointer, int index);
@@ -63,4 +65,11 @@ public class Binding {
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the row to release the row instance pointed by the pointer.
     static native void rowClose(long pointer);
+
+    // stream chunk iterator method
+    static native long streamChunkIteratorNew(byte[] streamChunkPayload);
+
+    static native long streamChunkIteratorNext(long pointer);
+
+    static native void streamChunkIteratorClose(long pointer);
 }
