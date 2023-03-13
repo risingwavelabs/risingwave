@@ -33,6 +33,27 @@ use crate::{
 type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
 
+/// e2e test runner for pre-generated queries from sqlsmith
+pub async fn run_pre_generated(client: &Client, outdir: &str) {
+    let queries_path = format!("{}/queries.sql", outdir);
+    let queries = std::fs::read_to_string(queries_path).unwrap();
+    let ddl = queries
+        .lines()
+        .filter(|s| s.starts_with("CREATE"))
+        .collect::<String>();
+    tracing::info!("[DDL]: {}", ddl);
+    let dml = queries
+        .lines()
+        .filter(|s| s.starts_with("INSERT"))
+        .collect::<String>();
+    tracing::info!("[DML]: {}", dml);
+    for statement in parse_sql(&queries) {
+        let sql = statement.to_string();
+        tracing::info!("[EXECUTING STATEMENT]: {}", sql);
+        validate_response(client.simple_query(&sql).await).unwrap();
+    }
+}
+
 /// Query Generator
 /// If we encounter an expected error, just skip.
 /// If we encounter an unexpected error,
