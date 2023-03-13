@@ -69,7 +69,6 @@ extract_failing_query() {
 }
 
 # Extract fail info from [`generate-*.log`] in log dir
-# Also shrinks query.
 extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
   do
@@ -260,4 +259,4 @@ main() {
   cleanup
 }
 
-# main
+main
