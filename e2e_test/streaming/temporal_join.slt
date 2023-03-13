@@ -2,13 +2,13 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
-create table stream(id int, a int, b int) APPEND ONLY;
+create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
 
 statement ok
-create table version(id int, a int, b int, primary key (id));
+create table version(id2 int, a2 int, b2 int, primary key (id2));
 
 statement ok
-create materialized view v as select stream.id as id1, stream.a as a1, version.id as id2, version.a as a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on stream.id = version.id;
+create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2
 
 statement ok
 insert into stream values(1, 11, 111);
@@ -45,7 +45,7 @@ statement ok
 drop materialized view v;
 
 statement ok
-create materialized view v as select stream.id as id1, stream.a as a1, version.id as id2, version.a as a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on stream.id = version.id;
+create materialized view v as select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF NOW() on id1 = id2
 
 query IIII rowsort
 select * from v;
