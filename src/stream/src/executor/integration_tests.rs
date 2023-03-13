@@ -124,7 +124,9 @@ async fn test_merger_sum_aggr() {
     let dispatcher = DispatchExecutor::new(
         receiver_op,
         vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
-            inputs, 0,
+            inputs,
+            vec![0],
+            0,
         ))],
         0,
         ctx,

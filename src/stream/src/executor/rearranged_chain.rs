@@ -71,10 +71,7 @@ fn mapping(upstream_indices: &[usize], msg: Message) -> Option<Message> {
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    upstream_indices
-        .iter()
-        .position(|&idx| idx == watermark.col_idx)
-        .map(|idx| watermark.with_idx(idx))
+    watermark.transform_with_indices(upstream_indices)
 }
 
 #[derive(Debug)]
