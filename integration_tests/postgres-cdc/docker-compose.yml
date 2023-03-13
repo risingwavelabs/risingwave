@@ -68,7 +68,7 @@ services:
     container_name: postgres_prepare
     restart: on-failure
   datagen:
-    image: ghcr.io/risingwavelabs/demo-datagen:v1.1.0
+    build: ../datagen
     depends_on: [message_queue]
     command:
       - /bin/sh

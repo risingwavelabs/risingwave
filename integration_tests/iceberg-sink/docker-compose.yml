@@ -76,7 +76,7 @@ services:
     container_name: prepare_mysql
     restart: on-failure
   datagen:
-    image: ghcr.io/risingwavelabs/demo-datagen:v1.1.1
+    build: ../datagen
     depends_on: [mysql]
     command:
       - /bin/sh
