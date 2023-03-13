@@ -14,9 +14,6 @@
 
 package com.risingwave.java.binding;
 
-import java.util.Iterator;
-import com.risingwave.connector.api.sink.SinkRow;
-
 public class Binding {
     static {
         System.loadLibrary("risingwave_java_binding");
@@ -30,12 +27,6 @@ public class Binding {
 
     // return a pointer to the next row
     static native long iteratorNext(long pointer);
-
-    // Return a pointer to the stream chunk iterator
-    static native long  streamChunkIteratorNew(byte[] streamChunk);
-
-    // return a pointer to the next row
-    static native long streamChunkIteratorNext(long pointer);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the iterator to release the iterator instance pointed by the pointer.
@@ -67,8 +58,10 @@ public class Binding {
     static native void rowClose(long pointer);
 
     // stream chunk iterator method
+    // Return a pointer to the stream chunk iterator
     static native long streamChunkIteratorNew(byte[] streamChunkPayload);
 
+    // return a pointer to the next row
     static native long streamChunkIteratorNext(long pointer);
 
     static native void streamChunkIteratorClose(long pointer);
