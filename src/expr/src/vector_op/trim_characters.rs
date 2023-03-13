@@ -42,7 +42,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim_characters() -> Result<()> {
+    fn test_trim_characters() {
         let cases = [
             ("Hello world", "Hdl", "ello wor"),
             ("abcde", "aae", "bcd"),
@@ -51,14 +51,13 @@ mod tests {
 
         for (s, characters, expected) in cases {
             let mut writer = String::new();
-            trim_characters(s, characters, &mut writer)?;
+            trim_characters(s, characters, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 
     #[test]
-    fn test_ltrim_characters() -> Result<()> {
+    fn test_ltrim_characters() {
         let cases = [
             ("Hello world", "Hdl", "ello world"),
             ("abcde", "aae", "bcde"),
@@ -67,14 +66,13 @@ mod tests {
 
         for (s, characters, expected) in cases {
             let mut writer = String::new();
-            ltrim_characters(s, characters, &mut writer)?;
+            ltrim_characters(s, characters, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 
     #[test]
-    fn test_rtrim_characters() -> Result<()> {
+    fn test_rtrim_characters() {
         let cases = [
             ("Hello world", "Hdl", "Hello wor"),
             ("abcde", "aae", "abcd"),
@@ -83,9 +81,8 @@ mod tests {
 
         for (s, characters, expected) in cases {
             let mut writer = String::new();
-            rtrim_characters(s, characters, &mut writer)?;
+            rtrim_characters(s, characters, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

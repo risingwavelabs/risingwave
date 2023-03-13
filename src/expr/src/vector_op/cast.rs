@@ -654,7 +654,7 @@ fn unnest(input: &str) -> Result<Vec<String>> {
     Ok(items)
 }
 
-#[function("cast(varchar) -> list")]
+// #[function("cast(varchar) -> list")]
 pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
     // Return a new ListValue.
     // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
@@ -678,7 +678,7 @@ pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
 ///
 /// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
-#[function("cast(list) -> list")]
+// #[function("cast(list) -> list")]
 pub fn list_cast(
     input: ListRef<'_>,
     source_elem_type: &DataType,
@@ -698,7 +698,7 @@ pub fn list_cast(
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
-#[function("cast(struct) -> struct")]
+// #[function("cast(struct) -> struct")]
 pub fn struct_cast(
     input: StructRef<'_>,
     source_elem_type: &StructType,

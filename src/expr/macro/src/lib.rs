@@ -27,8 +27,8 @@ pub fn function(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as syn::AttributeArgs);
     let item = parse_macro_input!(item as syn::ItemFn);
 
-    fn inner(attr: syn::AttributeArgs, item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &item)?;
+    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
 
         let mut tokens = item.into_token_stream();
         tokens.extend(fn_attr.generate_descriptors(false)?);
@@ -45,8 +45,8 @@ pub fn build_function(attr: TokenStream, item: TokenStream) -> TokenStream {
     let attr = parse_macro_input!(attr as syn::AttributeArgs);
     let item = parse_macro_input!(item as syn::ItemFn);
 
-    fn inner(attr: syn::AttributeArgs, item: syn::ItemFn) -> Result<TokenStream2> {
-        let fn_attr = FunctionAttr::parse(&attr, &item)?;
+    fn inner(attr: syn::AttributeArgs, mut item: syn::ItemFn) -> Result<TokenStream2> {
+        let fn_attr = FunctionAttr::parse(&attr, &mut item)?;
 
         let mut tokens = item.into_token_stream();
         tokens.extend(fn_attr.generate_descriptors(true)?);
@@ -79,6 +79,12 @@ struct UserFunctionAttr {
     return_option: bool,
     /// The return type is `Result`.
     return_result: bool,
+    /// The number of generic types.
+    generic: usize,
+    // /// `#[list(0)]` in arguments.
+    // list: Vec<(usize, usize)>,
+    // /// `#[struct(0)]` in arguments.
+    // struct_: Vec<(usize, usize)>,
 }
 
 impl UserFunctionAttr {

@@ -16,12 +16,9 @@ use std::fmt::Write;
 
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
 #[function("trim(varchar) -> varchar")]
-pub fn trim(s: &str, writer: &mut dyn Write) -> Result<()> {
+pub fn trim(s: &str, writer: &mut dyn Write) {
     writer.write_str(s.trim()).unwrap();
-    Ok(())
 }
 
 #[cfg(test)]
@@ -29,7 +26,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_trim() -> Result<()> {
+    fn test_trim() {
         let cases = [
             (" Hello\tworld\t", "Hello\tworld"),
             (" 空I ❤️ databases空 ", "空I ❤️ databases空"),
@@ -37,9 +34,8 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            trim(s, &mut writer)?;
+            trim(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

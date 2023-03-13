@@ -20,7 +20,7 @@ use super::*;
 
 impl FunctionAttr {
     /// Parse the attribute of the function macro.
-    pub fn parse(attr: &syn::AttributeArgs, item: &syn::ItemFn) -> Result<Self> {
+    pub fn parse(attr: &syn::AttributeArgs, item: &mut syn::ItemFn) -> Result<Self> {
         let sig = attr.get(0).ok_or_else(|| {
             Error::new(
                 Span::call_site(),
@@ -66,13 +66,15 @@ impl FunctionAttr {
 }
 
 impl UserFunctionAttr {
-    fn parse(item: &syn::ItemFn) -> Result<Self> {
+    fn parse(item: &mut syn::ItemFn) -> Result<Self> {
         Ok(UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
             arg_option: args_are_all_option(item),
             return_option: return_value_is(item, "Option"),
             return_result: return_value_is(item, "Result"),
+            generic: item.sig.generics.params.len(),
+            // prebuild: extract_prebuild_arg(item),
         })
     }
 }
@@ -105,4 +107,23 @@ fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::Type::Path(path) = ty.as_ref() else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == type_
+}
+
+/// Extract `#[prebuild("function_name")]` from arguments.
+fn extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
+    for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
+        let syn::FnArg::Typed(arg) = arg else { continue };
+        if let Some(idx) = arg
+            .attrs
+            .iter_mut()
+            .position(|att| att.path.is_ident("prebuild"))
+        {
+            let attr = arg.attrs.remove(idx);
+            // XXX: this is a hack to parse a string literal from token stream
+            let s = attr.tokens.to_string();
+            let s = s.trim_start_matches("(\"").trim_end_matches("\")");
+            return Some((i, s.to_string()));
+        }
+    }
+    None
 }

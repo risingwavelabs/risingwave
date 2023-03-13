@@ -14,21 +14,19 @@
 
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
 #[function("length(varchar) -> int32")]
-pub fn length(s: &str) -> Result<i32> {
-    Ok(s.chars().count() as i32)
+pub fn length(s: &str) -> i32 {
+    s.chars().count() as i32
 }
 
 #[function("octet_length(varchar) -> int32")]
-pub fn octet_length(s: &str) -> Result<i32> {
-    Ok(s.as_bytes().len() as i32)
+pub fn octet_length(s: &str) -> i32 {
+    s.as_bytes().len() as i32
 }
 
 #[function("bit_length(varchar) -> int32")]
-pub fn bit_length(s: &str) -> Result<i32> {
-    octet_length(s).map(|n| n * 8)
+pub fn bit_length(s: &str) -> i32 {
+    octet_length(s) * 8
 }
 
 #[cfg(test)]
@@ -41,7 +39,7 @@ mod tests {
         let cases = [("hello world", 11), ("hello rust", 10)];
 
         for (s, expected) in cases {
-            assert_eq!(length(s).unwrap(), expected)
+            assert_eq!(length(s), expected);
         }
     }
 
@@ -50,7 +48,7 @@ mod tests {
         let cases = [("hello world", 11), ("你好", 6), ("😇哈哈hhh", 13)];
 
         for (s, expected) in cases {
-            assert_eq!(octet_length(s).unwrap(), expected)
+            assert_eq!(octet_length(s), expected);
         }
     }
 
@@ -63,7 +61,7 @@ mod tests {
         ];
 
         for (s, expected) in cases {
-            assert_eq!(bit_length(s).unwrap(), expected)
+            assert_eq!(bit_length(s), expected);
         }
     }
 }

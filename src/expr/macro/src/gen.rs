@@ -185,10 +185,16 @@ impl FunctionAttr {
                 .unwrap();
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
+            let generic = if self.user_fn.generic == 3 {
+                // XXX: for generic compare functions, we need to specify the compatible type
+                quote! { ::<_, _, #compatible_type> }
+            } else {
+                quote! {}
+            };
             quote! {
                 Ok(Box::new(crate::expr::template_fast::CompareExpression::<_, #(#arg_arrays),*>::new(
                     #(#exprs),*,
-                    |#(#args),*| #fn_name::<#(#arg_types),*, #compatible_type>(#(#args1),*),
+                    |#(#args),*| #fn_name #generic(#(#args1),*),
                 )))
             }
         } else if self.args.iter().all(|t| types::is_primitive(t)) && self.user_fn.is_pure() {

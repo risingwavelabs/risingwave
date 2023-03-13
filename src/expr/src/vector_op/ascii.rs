@@ -14,11 +14,9 @@
 
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
 #[function("ascii(varchar) -> int32")]
-pub fn ascii(s: &str) -> Result<i32> {
-    Ok(s.as_bytes().first().map(|x| *x as i32).unwrap_or(0))
+pub fn ascii(s: &str) -> i32 {
+    s.as_bytes().first().map(|x| *x as i32).unwrap_or(0)
 }
 
 #[cfg(test)]
@@ -29,7 +27,7 @@ mod tests {
     fn test_ascii() {
         let cases = [("hello", 104), ("你好", 228), ("", 0)];
         for (s, expected) in cases {
-            assert_eq!(ascii(s).unwrap(), expected)
+            assert_eq!(ascii(s), expected)
         }
     }
 }

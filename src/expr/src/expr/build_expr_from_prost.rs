@@ -123,7 +123,7 @@ fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
             data_expr,
             tmpl_expr,
             ret_type,
-            to_char_timestamp,
+            |a, b, w| Ok(to_char_timestamp(a, b, w)),
         )
         .boxed())
     }

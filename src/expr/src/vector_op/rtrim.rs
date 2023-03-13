@@ -16,15 +16,12 @@ use std::fmt::Write;
 
 use risingwave_expr_macro::function;
 
-use crate::Result;
-
 /// Note: the behavior of `rtrim` in `PostgreSQL` and `trim_end` (or `trim_right`) in Rust
 /// are actually different when the string is in right-to-left languages like Arabic or Hebrew.
 /// Since we would like to simplify the implementation, currently we omit this case.
 #[function("rtrim(varchar) -> varchar")]
-pub fn rtrim(s: &str, writer: &mut dyn Write) -> Result<()> {
+pub fn rtrim(s: &str, writer: &mut dyn Write) {
     writer.write_str(s.trim_end()).unwrap();
-    Ok(())
 }
 
 #[cfg(test)]
@@ -32,7 +29,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_rtrim() -> Result<()> {
+    fn test_rtrim() {
         let cases = [
             (" \tHello\tworld\t ", " \tHello\tworld"),
             (" \t空I ❤️ databases空\t ", " \t空I ❤️ databases空"),
@@ -40,9 +37,8 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            rtrim(s, &mut writer)?;
+            rtrim(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }
