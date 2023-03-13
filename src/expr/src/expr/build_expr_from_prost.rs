@@ -86,10 +86,10 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
+pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());
     if let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() {
-        Ok((func_call.get_children().to_vec(), ret_type))
+        Ok((func_call.get_children(), ret_type))
     } else {
         bail!("Expected RexNode::FuncCall");
     }

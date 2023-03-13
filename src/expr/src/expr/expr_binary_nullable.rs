@@ -20,11 +20,14 @@ use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
+use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::Type;
+use risingwave_pb::expr::ExprNode;
 
-use super::{BoxedExpression, Expression};
+use super::build_expr_from_prost::get_children_and_return_type;
+use super::{build_from_prost, BoxedExpression, Expression};
 use crate::vector_op::conjunction::{and, or};
-use crate::{ExprError, Result};
+use crate::Result;
 
 pub struct BinaryShortCircuitExpression {
     expr_ia1: BoxedExpression,
@@ -108,35 +111,24 @@ impl Expression for BinaryShortCircuitExpression {
     }
 }
 
-impl BinaryShortCircuitExpression {
-    pub fn new(expr_ia1: BoxedExpression, expr_ia2: BoxedExpression, expr_type: Type) -> Self {
-        Self {
-            expr_ia1,
-            expr_ia2,
-            expr_type,
-        }
-    }
+#[build_function("and(boolean, boolean) -> boolean")]
+fn build_and_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, _) = get_children_and_return_type(prost)?;
+    Ok(Box::new(BinaryShortCircuitExpression {
+        expr_ia1: build_from_prost(&children[0])?,
+        expr_ia2: build_from_prost(&children[1])?,
+        expr_type: Type::And,
+    }))
 }
 
-pub fn new_nullable_binary_expr(
-    expr_type: Type,
-    ret: DataType,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> Result<BoxedExpression> {
-    let expr = match expr_type {
-        Type::And => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
-        Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
-        tp => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}({:?}, {:?})",
-                tp,
-                l.return_type(),
-                r.return_type(),
-            )));
-        }
-    };
-    Ok(expr)
+#[build_function("or(boolean, boolean) -> boolean")]
+fn build_or_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, _) = get_children_and_return_type(prost)?;
+    Ok(Box::new(BinaryShortCircuitExpression {
+        expr_ia1: build_from_prost(&children[0])?,
+        expr_ia2: build_from_prost(&children[1])?,
+        expr_type: Type::Or,
+    }))
 }
 
 #[cfg(test)]

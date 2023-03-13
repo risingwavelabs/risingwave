@@ -215,9 +215,8 @@ impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
             (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
         }
 
-        let [left_child, right_child]: [_; 2] = inner_children.try_into().unwrap();
-        let left_expr = build_from_prost(&left_child)?;
-        let right_expr = build_from_prost(&right_child)?;
+        let left_expr = build_from_prost(&inner_children[0])?;
+        let right_expr = build_from_prost(&inner_children[1])?;
 
         let DataType::List { datatype: right_expr_return_type } = right_expr.return_type() else {
         bail!("Expect Array Type");
