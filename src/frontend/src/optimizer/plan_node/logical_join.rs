@@ -1460,8 +1460,37 @@ impl ToStream for LogicalJoin {
         }
 
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
+
+        let plan = if join_with_pk.join_type() == JoinType::FullOuter {
+            // ignore the all NULL to maintain the stream key's uniqueness, see https://github.com/risingwavelabs/risingwave/issues/8084 for more information
+
+            let l2o = join_with_pk
+                .l2i_col_mapping()
+                .composite(&join_with_pk.i2o_col_mapping());
+            let r2o = join_with_pk
+                .r2i_col_mapping()
+                .composite(&join_with_pk.i2o_col_mapping());
+            let left_right_stream_keys = join_with_pk
+                .left()
+                .logical_pk()
+                .iter()
+                .map(|i| l2o.map(*i))
+                .chain(
+                    join_with_pk
+                        .right()
+                        .logical_pk()
+                        .iter()
+                        .map(|i| r2o.map(*i)),
+                )
+                .collect_vec();
+            let plan: PlanRef = join_with_pk.into();
+            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+        } else {
+            join_with_pk.into()
+        };
+
         // the added columns is at the end, so it will not change the exists column index
-        Ok((join_with_pk.into(), out_col_change))
+        Ok((plan, out_col_change))
     }
 }
 
