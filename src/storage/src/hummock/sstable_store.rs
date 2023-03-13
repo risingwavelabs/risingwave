@@ -208,13 +208,12 @@ impl SstableStore {
             .map_err(HummockError::object_io_error)
     }
 
-    pub fn prefetch(&self, sst: &Sstable, block_index: u64) {
-        let block_meta = sst
-            .meta
-            .block_metas
-            .get(block_index as usize)
-            .ok_or_else(HummockError::invalid_block)
-            .unwrap(); // FIXME: don't unwrap here.
+    pub fn prefetch(
+        &self,
+        sst: &Sstable,
+        block_index: u64,
+    ) -> Option<JoinHandle<HummockResult<()>>> {
+        let block_meta = &sst.meta.block_metas[block_index as usize];
         let block_loc = BlockLocation {
             offset: block_meta.offset as usize,
             size: block_meta.len as usize,
@@ -228,9 +227,8 @@ impl SstableStore {
                 let block = Block::decode(block_data, uncompressed_capacity)?;
                 Ok(Box::new(block))
             }
-        });
+        })
     }
-
 
     pub async fn get_block_response(
         &self,

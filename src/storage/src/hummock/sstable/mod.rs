@@ -40,7 +40,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{next_full_key, KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -393,35 +393,64 @@ impl SstableMeta {
 pub struct SstableBlockIterator<'a> {
     pub sstable: &'a Sstable,
     pub current_block_id: usize,
+    pub largest_key: Vec<u8>,
 }
 
 impl<'a> SstableBlockIterator<'a> {
     pub fn new(sstable: &'a Sstable) -> Self {
         Self {
-            sstable,
             current_block_id: 0,
+            largest_key: next_full_key(&sstable.meta.largest_key),
+            sstable,
         }
     }
 
+    /// Moves a valid iterator to the next block.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - After calling this function, you may first check whether the iterator `is_valid` again,
+    ///   then get the new data by calling `current_block_smallest` and `current_block_largest`.
+    /// - If the position after calling this is invalid, this function WON'T return an `Err`. You
+    ///   should check `is_valid` before continuing the iteration.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
     #[inline(always)]
     pub fn next(&mut self) {
         self.current_block_id += 1;
     }
 
     #[inline(always)]
-    pub fn valid(&self) -> bool {
+    pub fn is_valid(&self) -> bool {
         self.current_block_id < self.sstable.block_count()
     }
 
+    /// Retrieves the smallest key of the current block.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - This function should be straightforward and return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
     pub fn current_block_smallest(&self) -> &[u8] {
         &self.sstable.meta.block_metas[self.current_block_id].smallest_key
     }
 
+    /// Retrieves the largest key of the current block. This value represents right open interval.
+    ///
+    /// Note:
+    /// - Before calling this function, makes sure the iterator `is_valid`.
+    /// - This function should be straightforward and return immediately.
+    ///
+    /// # Panics
+    /// This function will panic if the iterator is invalid.
     pub fn current_block_largest(&self) -> &[u8] {
         if self.current_block_id + 1 < self.sstable.block_count() {
             &self.sstable.meta.block_metas[self.current_block_id + 1].smallest_key
         } else {
-            &self.sstable.meta.largest_key
+            &self.largest_key
         }
     }
 }

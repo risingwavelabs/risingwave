@@ -383,6 +383,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
+    #[serde(default = "default::storage::cache_refill_max_io_count")]
+    pub cache_refill_max_io_count: usize,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -651,6 +654,10 @@ mod default {
 
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
+        }
+
+        pub fn cache_refill_max_io_count() -> usize {
+            64
         }
     }
 

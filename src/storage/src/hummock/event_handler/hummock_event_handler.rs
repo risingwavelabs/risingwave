@@ -16,10 +16,11 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
-use futures::future::{select, Either};
+use futures::future::{select, try_join_all, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
@@ -28,6 +29,7 @@ use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
@@ -114,6 +116,7 @@ pub struct HummockEventHandler {
 
     sstable_id_manager: SstableIdManagerRef,
     sstable_store: SstableStoreRef,
+    cache_refill_io_count_limit: usize,
 }
 
 async fn flush_imms(
@@ -147,6 +150,7 @@ impl HummockEventHandler {
         let version_update_notifier_tx = Arc::new(version_update_notifier_tx);
         let read_version_mapping = Arc::new(RwLock::new(HashMap::default()));
         let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
+        let cache_refill_io_count_limit = compactor_context.storage_opts.cache_refill_max_io_count;
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
@@ -171,6 +175,7 @@ impl HummockEventHandler {
             last_instance_id: 0,
             sstable_id_manager,
             sstable_store,
+            cache_refill_io_count_limit,
         }
     }
 
@@ -379,7 +384,8 @@ impl HummockEventHandler {
 
     async fn fill_cache(&mut self, delta: &HummockVersionDelta) -> HummockResult<()> {
         let stats = StoreLocalStatistic::default();
-        for (_group_id, group_delta) in &delta.group_deltas {
+        let mut prefetch_requests = vec![];
+        for group_delta in delta.group_deltas.values() {
             for d in &group_delta.group_deltas {
                 let mut flatten_reqs = vec![];
                 if let Some(group_delta::DeltaType::IntraLevel(level_delta)) = d.delta_type.as_ref()
@@ -389,6 +395,9 @@ impl HummockEventHandler {
                     }
 
                     let flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
+                    if prefetch_requests.len() >= self.cache_refill_io_count_limit {
+                        return Ok(());
+                    }
                     let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
                     for (sst, _) in flatten_resp {
                         sstables.push(sst);
@@ -410,24 +419,31 @@ impl HummockEventHandler {
                     }
                     for remove_sst_id in &level_delta.removed_table_ids {
                         if let Some(sst) = self.sstable_store.lookup_sstable(*remove_sst_id) {
-                            self.refill_sstable(sst.value(), &sstables);
+                            prefetch_requests.extend(self.refill_sstable(sst.value(), &sstables));
                         }
                     }
                 }
             }
         }
+        let _ =
+            tokio::time::timeout(Duration::from_millis(100), try_join_all(prefetch_requests)).await;
         Ok(())
     }
 
-    fn refill_sstable(&self, remove_sst: &Sstable, sstables: &[TableHolder]) {
+    fn refill_sstable(
+        &self,
+        remove_sst: &Sstable,
+        sstables: &[TableHolder],
+    ) -> Vec<JoinHandle<HummockResult<()>>> {
         let mut start_idx = sstables.partition_point(|sst| {
             KeyComparator::compare_encoded_full_key(
                 &sst.value().meta.largest_key,
                 &remove_sst.meta.smallest_key,
             ) == std::cmp::Ordering::Less
         });
+        let mut requests = vec![];
         if start_idx == sstables.len() {
-            return;
+            return requests;
         }
         let end_idx = sstables.partition_point(|sst| {
             KeyComparator::compare_encoded_full_key(
@@ -436,10 +452,10 @@ impl HummockEventHandler {
             ) == std::cmp::Ordering::Less
         });
         if start_idx >= end_idx {
-            return;
+            return requests;
         }
         let mut remove_block_iter = SstableBlockIterator::new(remove_sst);
-        while remove_block_iter.valid() {
+        while remove_block_iter.is_valid() {
             if self.sstable_store.exists_block(
                 remove_block_iter.sstable.id,
                 remove_block_iter.current_block_id as u64,
@@ -448,18 +464,18 @@ impl HummockEventHandler {
             }
             remove_block_iter.next();
         }
-        if !remove_block_iter.valid() {
-            return;
+        if !remove_block_iter.is_valid() {
+            return requests;
         }
 
         while start_idx < end_idx {
             let mut insert_block_iter =
                 SstableBlockIterator::new(sstables[start_idx].value().as_ref());
-            while insert_block_iter.valid() {
+            while insert_block_iter.is_valid() {
                 if KeyComparator::compare_encoded_full_key(
                     insert_block_iter.current_block_largest(),
                     remove_block_iter.current_block_smallest(),
-                ) == std::cmp::Ordering::Less
+                ) != std::cmp::Ordering::Greater
                 {
                     insert_block_iter.next();
                     continue;
@@ -474,30 +490,36 @@ impl HummockEventHandler {
                         break;
                     }
                     remove_block_iter.next();
-                    if remove_block_iter.valid() {
+                    if remove_block_iter.is_valid() {
                         exist_in_cache = self.sstable_store.exists_block(
                             remove_block_iter.sstable.id,
                             remove_block_iter.current_block_id as u64,
                         );
                     } else {
-                        return;
+                        return requests;
                     }
                 }
                 // make sure that remove_block_iter.current_block_largest() >
-                // insert_block_iter.current_block_smallest()  and
+                // insert_block_iter.current_block_smallest()
                 if KeyComparator::encoded_full_key_less_than(
                     remove_block_iter.current_block_smallest(),
                     insert_block_iter.current_block_largest(),
                 ) {
-                    self.sstable_store.prefetch(
-                        &insert_block_iter.sstable,
+                    if let Some(handle) = self.sstable_store.prefetch(
+                        insert_block_iter.sstable,
                         insert_block_iter.current_block_id as u64,
-                    );
+                    ) {
+                        requests.push(handle);
+                        if requests.len() >= self.cache_refill_io_count_limit {
+                            return requests;
+                        }
+                    }
                 }
                 insert_block_iter.next();
             }
             start_idx += 1;
         }
+        requests
     }
 
     async fn handle_version_update(&mut self, version_payload: Payload) {

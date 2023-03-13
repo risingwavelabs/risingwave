@@ -180,7 +180,8 @@ impl BlockCache {
         sst_id: HummockSstableId,
         block_idx: u64,
         mut fetch_block: F,
-    ) where
+    ) -> Option<JoinHandle<HummockResult<()>>>
+    where
         F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
@@ -194,9 +195,8 @@ impl BlockCache {
                     let len = block.capacity();
                     Ok((block, len))
                 }
-            });
+            })
     }
-
 
     pub fn get_or_insert_with<F, Fut>(
         &self,

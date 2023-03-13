@@ -895,7 +895,8 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         hash: u64,
         key: K,
         fetch_value: F,
-    ) where
+    ) -> Option<JoinHandle<Result<(), E>>>
+    where
         F: FnOnce() -> VC,
         E: Error + Send + 'static + From<RecvError>,
         VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
@@ -904,16 +905,16 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
         unsafe {
             let ptr = shard.lookup(hash, &key);
             if !ptr.is_null() {
-                return;
+                return None;
             }
             if shard.write_request.contains_key(&key) {
-                return;
+                return None;
             }
             shard.write_request.insert(key.clone(), vec![]);
             let this = self.clone();
             let fetch_value = fetch_value();
             let key2 = key;
-            tokio::spawn(async move {
+            let handle = tokio::spawn(async move {
                 let guard = CleanCacheGuard {
                     cache: &this,
                     key: Some(key2),
@@ -924,6 +925,7 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                 this.insert(key2, hash, charge, value);
                 Ok::<(), E>(())
             });
+            Some(handle)
         }
     }
 }
