@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -28,13 +29,14 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
 use risingwave_pb::catalog::Table;
 use risingwave_storage::mem_table::KeyOp;
 use risingwave_storage::StateStore;
 
 use crate::cache::{new_unbounded, ExecutorCache};
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableInner;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{
     expect_first_barrier, ActorContext, ActorContextRef, BoxedExecutor, BoxedMessageStream,
@@ -43,10 +45,10 @@ use crate::executor::{
 use crate::task::AtomicU64Ref;
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
-pub struct MaterializeExecutor<S: StateStore> {
+pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
     input: BoxedExecutor,
 
-    state_table: StateTable<S>,
+    state_table: StateTableInner<S, SD>,
 
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_columns: Vec<usize>,
@@ -55,11 +57,11 @@ pub struct MaterializeExecutor<S: StateStore> {
 
     info: ExecutorInfo,
 
-    materialize_cache: MaterializeCache,
+    materialize_cache: MaterializeCache<SD>,
     conflict_behavior: ConflictBehavior,
 }
 
-impl<S: StateStore> MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     /// Create a new `MaterializeExecutor` with distribution specified with `distribution_keys` and
     /// `vnodes`. For singleton distribution, `distribution_keys` should be empty and `vnodes`
     /// should be `None`.
@@ -67,7 +69,7 @@ impl<S: StateStore> MaterializeExecutor<S> {
     pub async fn new(
         input: BoxedExecutor,
         store: S,
-        key: Vec<OrderPair>,
+        key: Vec<ColumnOrder>,
         executor_id: u64,
         actor_context: ActorContextRef,
         vnodes: Option<Arc<Bitmap>>,
@@ -75,62 +77,23 @@ impl<S: StateStore> MaterializeExecutor<S> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
-        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_idx).collect();
+        let arrange_columns: Vec<usize> = key.iter().map(|k| k.column_index).collect();
 
         let schema = input.schema().clone();
 
-        let state_table = StateTable::from_table_catalog(table_catalog, store, vnodes).await;
+        // TODO: If we do some `Delete` after schema change, we cannot ensure the encoded value
+        // with the new version of serializer is the same as the old one, even if they can be
+        // decoded into the same value. The table is now performing consistency check on the raw
+        // bytes, so we need to turn off the check here. We may turn it on if we can compare the
+        // decoded row.
+        let state_table =
+            StateTableInner::from_table_catalog_inconsistent_op(table_catalog, store, vnodes).await;
 
         Self {
             input,
             state_table,
             arrange_columns: arrange_columns.clone(),
             actor_context,
-            info: ExecutorInfo {
-                schema,
-                pk_indices: arrange_columns,
-                identity: format!("MaterializeExecutor {:X}", executor_id),
-            },
-            materialize_cache: MaterializeCache::new(watermark_epoch),
-            conflict_behavior,
-        }
-    }
-
-    /// Create a new `MaterializeExecutor` without distribution info for test purpose.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn for_test(
-        input: BoxedExecutor,
-        store: S,
-        table_id: TableId,
-        keys: Vec<OrderPair>,
-        column_ids: Vec<ColumnId>,
-        executor_id: u64,
-        watermark_epoch: AtomicU64Ref,
-        conflict_behavior: ConflictBehavior,
-    ) -> Self {
-        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_idx).collect();
-        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
-        let schema = input.schema().clone();
-        let columns = column_ids
-            .into_iter()
-            .zip_eq_fast(schema.fields.iter())
-            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
-            .collect_vec();
-
-        let state_table = StateTable::new_without_distribution(
-            store,
-            table_id,
-            columns,
-            arrange_order_types,
-            arrange_columns.clone(),
-        )
-        .await;
-
-        Self {
-            input,
-            state_table,
-            arrange_columns: arrange_columns.clone(),
-            actor_context: ActorContext::create(0),
             info: ExecutorInfo {
                 schema,
                 pk_indices: arrange_columns,
@@ -214,6 +177,53 @@ impl<S: StateStore> MaterializeExecutor<S> {
                     Message::Barrier(b)
                 }
             }
+        }
+    }
+}
+
+impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
+    /// Create a new `MaterializeExecutor` without distribution info for test purpose.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn for_test(
+        input: BoxedExecutor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<ColumnOrder>,
+        column_ids: Vec<ColumnId>,
+        executor_id: u64,
+        watermark_epoch: AtomicU64Ref,
+        conflict_behavior: ConflictBehavior,
+    ) -> Self {
+        let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
+        let arrange_order_types = keys.iter().map(|k| k.order_type).collect();
+        let schema = input.schema().clone();
+        let columns = column_ids
+            .into_iter()
+            .zip_eq_fast(schema.fields.iter())
+            .map(|(column_id, field)| ColumnDesc::unnamed(column_id, field.data_type()))
+            .collect_vec();
+
+        let state_table = StateTableInner::new_without_distribution(
+            store,
+            table_id,
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+        )
+        .await;
+
+        Self {
+            input,
+            state_table,
+            arrange_columns: arrange_columns.clone(),
+            actor_context: ActorContext::create(0),
+            info: ExecutorInfo {
+                schema,
+                pk_indices: arrange_columns,
+                identity: format!("MaterializeExecutor {:X}", executor_id),
+            },
+            materialize_cache: MaterializeCache::new(watermark_epoch),
+            conflict_behavior,
         }
     }
 }
@@ -374,7 +384,7 @@ impl MaterializeBuffer {
         self.buffer
     }
 }
-impl<S: StateStore> Executor for MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> Executor for MaterializeExecutor<S, SD> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -396,7 +406,7 @@ impl<S: StateStore> Executor for MaterializeExecutor<S> {
     }
 }
 
-impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
+impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("input info", &self.info())
@@ -406,20 +416,24 @@ impl<S: StateStore> std::fmt::Debug for MaterializeExecutor<S> {
 }
 
 /// A cache for materialize executors.
-pub struct MaterializeCache {
+pub struct MaterializeCache<SD> {
     data: ExecutorCache<Vec<u8>, Option<CompactedRow>>,
+    _serde: PhantomData<SD>,
 }
 
-impl MaterializeCache {
+impl<SD: ValueRowSerde> MaterializeCache<SD> {
     pub fn new(watermark_epoch: AtomicU64Ref) -> Self {
         let cache = ExecutorCache::new(new_unbounded(watermark_epoch));
-        Self { data: cache }
+        Self {
+            data: cache,
+            _serde: PhantomData,
+        }
     }
 
     pub async fn handlle_conflict<'a, S: StateStore>(
         &mut self,
         buffer: MaterializeBuffer,
-        table: &StateTable<S>,
+        table: &StateTableInner<S, SD>,
         conflict_behavior: &ConflictBehavior,
     ) -> StreamExecutorResult<Vec<(Vec<u8>, KeyOp)>> {
         // fill cache
@@ -518,7 +532,7 @@ impl MaterializeCache {
     async fn fetch_keys<'a, S: StateStore>(
         &mut self,
         keys: impl Iterator<Item = &'a [u8]>,
-        table: &StateTable<S>,
+        table: &StateTableInner<S, SD>,
     ) -> StreamExecutorResult<()> {
         let mut futures = vec![];
         for key in keys {
@@ -569,7 +583,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -615,7 +629,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -635,7 +649,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -732,7 +746,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -752,7 +766,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -865,7 +879,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -885,7 +899,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1048,7 +1062,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1068,7 +1082,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1181,7 +1195,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1201,7 +1215,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![OrderPair::new(0, OrderType::Ascending)],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),

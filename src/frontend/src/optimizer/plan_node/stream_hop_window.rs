@@ -53,8 +53,8 @@ impl StreamHopWindow {
 
         if watermark_columns.contains(logical.core.time_col.index) {
             // Watermark on `time_col` indicates watermark on both `window_start` and `window_end`.
-            watermark_columns.insert(logical.window_start_col_idx());
-            watermark_columns.insert(logical.window_end_col_idx());
+            watermark_columns.insert(logical.internal_window_start_col_idx());
+            watermark_columns.insert(logical.internal_window_end_col_idx());
         }
         let watermark_columns = ColIndexMapping::with_remaining_columns(
             logical.output_indices(),

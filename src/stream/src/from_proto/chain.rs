@@ -90,9 +90,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let order_types = table_desc
                     .pk
                     .iter()
-                    .map(|desc| {
-                        OrderType::from_protobuf(&desc.get_order_type().unwrap().direction())
-                    })
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                     .collect_vec();
 
                 let column_descs = table_desc
@@ -135,6 +133,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .map(|&k| k as usize)
                     .collect_vec();
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+                let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
@@ -147,6 +146,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     table_option,
                     value_indices,
                     prefix_hint_len,
+                    versioned,
                 );
 
                 BackfillExecutor::new(

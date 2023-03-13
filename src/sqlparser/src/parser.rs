@@ -1475,7 +1475,24 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        parser_err!(format!("Expected {}, found: {}", expected, found))
+        let start_off = self.index.saturating_sub(10);
+        let end_off = self.index.min(self.tokens.len());
+        let near_tokens = &self.tokens[start_off..end_off];
+        struct TokensDisplay<'a>(&'a [Token]);
+        impl<'a> fmt::Display for TokensDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for token in self.0 {
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
+            }
+        }
+        parser_err!(format!(
+            "Expected {}, found: {}\nNear \"{}\"",
+            expected,
+            found,
+            TokensDisplay(near_tokens),
+        ))
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -2750,6 +2767,22 @@ impl Parser {
         }
     }
 
+    pub fn parse_for_system_time_as_of_now(&mut self) -> Result<bool, ParserError> {
+        let after_for = self.parse_keyword(Keyword::FOR);
+        if after_for {
+            self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
+            let ident = self.parse_identifier()?;
+            if ident.real_value() != "now" {
+                return parser_err!(format!("Expected now, found: {}", ident.real_value()));
+            }
+            self.expect_token(&Token::LParen)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Parse a possibly qualified, possibly quoted identifier, e.g.
     /// `foo` or `myschema."table"
     pub fn parse_object_name(&mut self) -> Result<ObjectName, ParserError> {
@@ -3529,8 +3562,13 @@ impl Parser {
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::TableFunction { name, alias, args })
             } else {
+                let for_system_time_as_of_now = self.parse_for_system_time_as_of_now()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table { name, alias })
+                Ok(TableFactor::Table {
+                    name,
+                    alias,
+                    for_system_time_as_of_now,
+                })
             }
         }
     }
