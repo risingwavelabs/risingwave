@@ -1067,7 +1067,7 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
-            Ty::Serial => todo!("SERIAL"),
+            Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
