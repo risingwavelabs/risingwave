@@ -16,7 +16,7 @@
 
 use std::num::NonZeroUsize;
 
-use num_traits::CheckedSub;
+use num_traits::{CheckedAdd, CheckedSub};
 use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -118,7 +118,7 @@ pub fn make_hop_window_expression(
         .get();
 
     let output_type = DataType::window_of(&time_col_data_type).unwrap();
-    let get_hop_window_start = || -> Result<BoxedExpression> {
+    let get_hop_window_last_start = || -> Result<BoxedExpression> {
         let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
 
         let window_size_expr =
@@ -142,51 +142,56 @@ pub fn make_hop_window_expression(
 
     let mut window_start_exprs = Vec::with_capacity(units);
     let mut window_end_exprs = Vec::with_capacity(units);
-    for i in 0..units {
-        let window_start_offset =
+    for slide_idx in 0..units {
+        let slide_offset =
             window_slide
-                .checked_mul_int(i)
+                .checked_mul_int(slide_idx)
                 .ok_or_else(|| ExprError::InvalidParam {
                     name: "window",
                     reason: format!(
                         "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
+                        window_slide, slide_idx
                     ),
                 })?;
-        let window_start_offset_expr = LiteralExpression::new(
-            DataType::Interval,
-            Some(ScalarImpl::Interval(window_start_offset)),
-        )
-        .boxed();
-        let window_end_offset =
-            window_slide
-                .checked_mul_int(i + units)
-                .ok_or_else(|| ExprError::InvalidParam {
-                    name: "window",
-                    reason: format!(
-                        "window_slide {} cannot be multiplied by {}",
-                        window_slide, i
-                    ),
-                })?;
-        let window_end_offset_expr = LiteralExpression::new(
-            DataType::Interval,
-            Some(ScalarImpl::Interval(window_end_offset)),
-        )
-        .boxed();
-        let window_start_expr = new_binary_expr(
-            expr_node::Type::Subtract,
-            output_type.clone(),
-            get_hop_window_start.clone()()?,
-            window_start_offset_expr,
-        )?;
-        window_start_exprs.push(get_hop_window_start.clone()()?);
-        let window_end_expr = new_binary_expr(
-            expr_node::Type::Subtract,
-            output_type.clone(),
-            get_hop_window_start.clone()()?,
-            window_end_offset_expr,
-        )?;
-        window_end_exprs.push(get_hop_window_start.clone()()?);
+        {
+            let window_start_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(slide_offset)),
+            )
+            .boxed();
+            let window_start_expr = new_binary_expr(
+                expr_node::Type::Subtract,
+                output_type.clone(),
+                get_hop_window_last_start.clone()()?,
+                window_start_offset_expr,
+            )?;
+            window_start_exprs.push(window_start_expr);
+        }
+        {
+            let window_start_offset_expr = LiteralExpression::new(
+                DataType::Interval,
+                Some(ScalarImpl::Interval(slide_offset)),
+            )
+            .boxed();
+            let window_start_expr = new_binary_expr(
+                expr_node::Type::Subtract,
+                output_type.clone(),
+                get_hop_window_last_start.clone()()?,
+                window_start_offset_expr,
+            )?;
+
+            let window_size_expr =
+                LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
+                    .boxed();
+
+            let window_end_expr = new_binary_expr(
+                expr_node::Type::Add,
+                output_type.clone(),
+                window_start_expr,
+                window_size_expr,
+            )?;
+            window_end_exprs.push(window_end_expr);
+        }
     }
     Ok((window_start_exprs, window_end_exprs))
 }
