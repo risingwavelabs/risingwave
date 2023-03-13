@@ -76,8 +76,8 @@ pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
 
 /// Parse SQL
 /// FIXME(Noel): Introduce error type for sqlsmith for this.
-pub fn parse_sql(sql: &str) -> Vec<Statement> {
-    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
+pub fn parse_sql<S: AsRef<str>>(sql: S) -> Vec<Statement> {
+    Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql.as_ref()))
 }
 
 /// Extract relevant info from CREATE TABLE statement, to construct a Table

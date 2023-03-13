@@ -34,9 +34,13 @@ use crate::{
 type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
 
+/// Shrinks a given failing query file
 pub async fn shrink(input_file_path: &str, outdir: &str) {
     let file_stem = Path::new(input_file_path).file_stem().unwrap_or_else(|| panic!("Failed to stem input file path: {input_file_path}"));
     let output_file_path = format!("{outdir}/{file_stem}.reduced.sql");
+
+    let file_contents = read_file_contents(input_file_path).unwrap();
+    let sql_statements = parse_sql(file_contents);
 }
 
 /// e2e test runner for pre-generated queries from sqlsmith
@@ -53,7 +57,7 @@ pub async fn run_pre_generated(client: &Client, outdir: &str) {
         .filter(|s| s.starts_with("INSERT"))
         .collect::<String>();
     tracing::info!("[DML]: {}", dml);
-    for statement in parse_sql(&queries) {
+    for statement in parse_sql(queries) {
         let sql = statement.to_string();
         tracing::info!("[EXECUTING STATEMENT]: {}", sql);
         validate_response(client.simple_query(&sql).await).unwrap();
@@ -351,7 +355,7 @@ async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table
     tracing::info!("Preparing tables...");
 
     let sql = get_seed_table_sql(testdata);
-    let statements = parse_sql(&sql);
+    let statements = parse_sql(sql);
     let mut mvs_and_base_tables = vec![];
     let base_tables = statements
         .iter()
