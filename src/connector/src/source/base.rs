@@ -25,7 +25,7 @@ use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, ErrorSuppressor, RwError, Result as RwResult};
+use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
