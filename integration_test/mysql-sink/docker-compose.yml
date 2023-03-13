@@ -57,7 +57,7 @@ services:
       file: ../../docker/docker-compose.yml
       service: connector-node
   datagen:
-    image: ghcr.io/risingwavelabs/demo-datagen:v1.0.9
+    build: ../datagen
     depends_on: [message_queue]
     command:
       - /bin/sh
