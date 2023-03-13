@@ -158,7 +158,7 @@ impl BlockCache {
 
     pub fn exists_block(&self, sst_id: HummockSstableId, block_idx: u64) -> bool {
         self.inner
-            .get_request_count(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
     }
 
     pub fn insert(
