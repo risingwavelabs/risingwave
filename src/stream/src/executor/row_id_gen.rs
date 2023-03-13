@@ -160,7 +160,7 @@ mod tests {
     #[tokio::test]
     async fn test_row_id_gen_executor() {
         let schema = Schema::new(vec![
-            Field::unnamed(DataType::Int64),
+            Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
         let pk_indices = vec![0];
@@ -185,7 +185,7 @@ mod tests {
 
         // Insert operation
         let chunk1 = StreamChunk::from_pretty(
-            " I I
+            " SRL I
             + . 1
             + . 2
             + . 6
@@ -199,7 +199,7 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
         row_id_col.iter().for_each(|row_id| {
             // Should generate row id for insert operations.
             assert!(row_id.is_some());
@@ -207,7 +207,7 @@ mod tests {
 
         // Update operation
         let chunk2 = StreamChunk::from_pretty(
-            "      I        I
+            "      SRL        I
             U- 32874283748  1
             U+ 32874283748 999",
         );
@@ -219,14 +219,14 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
         // Should not generate row id for update operations.
-        assert_eq!(row_id_col.value_at(0).unwrap(), 32874283748);
-        assert_eq!(row_id_col.value_at(1).unwrap(), 32874283748);
+        assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(32874283748));
+        assert_eq!(row_id_col.value_at(1).unwrap(), Serial::from(32874283748));
 
         // Delete operation
         let chunk3 = StreamChunk::from_pretty(
-            "      I       I
+            "      SRL       I
             - 84629409685  1",
         );
         tx.push_chunk(chunk3);
@@ -237,8 +237,8 @@ mod tests {
             .unwrap()
             .into_chunk()
             .unwrap();
-        let row_id_col: &PrimitiveArray<i64> = chunk.column_at(row_id_index).array_ref().into();
+        let row_id_col: &PrimitiveArray<Serial> = chunk.column_at(row_id_index).array_ref().into();
         // Should not generate row id for delete operations.
-        assert_eq!(row_id_col.value_at(0).unwrap(), 84629409685);
+        assert_eq!(row_id_col.value_at(0).unwrap(), Serial::from(84629409685));
     }
 }

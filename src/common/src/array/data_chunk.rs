@@ -511,6 +511,7 @@ impl DataChunkTestExt for DataChunk {
                 "TS" => DataType::Timestamp,
                 "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
+                "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
                         fields: array[1..array.len() - 1]
@@ -572,6 +573,12 @@ impl DataChunkTestExt for DataChunk {
                             ))
                         }
                         ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
+                        ArrayBuilderImpl::Serial(_) => ScalarImpl::Serial(
+                            s.parse::<i64>()
+                                .map_err(|_| panic!("invalid serial: {s:?}"))
+                                .unwrap()
+                                .into(),
+                        ),
                         ArrayBuilderImpl::Struct(builder) => {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
