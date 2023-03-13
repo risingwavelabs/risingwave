@@ -111,7 +111,7 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 			return nil
 		case <-ticker.C:
 			if time.Since(prevTime) >= 10*time.Second {
-				log.Printf("Sent %d records in total (Elasped: %s)", count, time.Since(initTime).String())
+				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
 				prevTime = time.Now()
 			}
 		case record := <-outCh:
@@ -125,7 +125,7 @@ func generateLoad(ctx context.Context, cfg gen.GeneratorConfig) error {
 			_ = rl.Take()
 			count++
 			if time.Since(prevTime) >= 10*time.Second {
-				log.Printf("Sent %d records in total (Elasped: %s)", count, time.Since(initTime).String())
+				log.Printf("Sent %d records in total (Elapsed: %s)", count, time.Since(initTime).String())
 				prevTime = time.Now()
 			}
 		}
