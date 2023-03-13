@@ -120,7 +120,9 @@ select_materialized_view_by_name() {
 
 # Extract dml by names
 select_dml_by_names() {
-  for TABLE_NAME in $1
+  QUERY_FILE="$1"
+  TABLE_NAMES="$2"
+  for TABLE_NAME in $TABLE_NAMES
   do
     select_inserts_by_name "$TABLE_NAME"
   done
@@ -162,8 +164,12 @@ select_ddl_by_names() {
 # we opt for an approach independent of RisingWave functionality.
 # Then, if the failure is triggered in frontend we can still shrink.
 shrink_query() {
-  FROM_NAMES=$(select_from "$1")
-  select_ddl_by_names "$FROM_NAMES"
+  QUERY_FILE="$1"
+  QUERY=$(tail -n 1 "$QUERY_FILE")
+  SESSION_VAR=$(tail -n 2 "$QUERY_FILE" | head -1)
+  FROM_NAMES=$(select_from "$QUERY")
+  DDL=$(select_ddl_by_names "$FROM_NAMES")
+  DML=$(select_dml_by_names "$FROM_NAMES")
 }
 
 ################# Generate
@@ -314,9 +320,6 @@ cleanup() {
   popd
   echo_err "[INFO] Success!"
 }
-
-
-################### TESTS
 
 ################### MAIN
 
