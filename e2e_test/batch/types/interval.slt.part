@@ -109,8 +109,13 @@ select interval '1 year 1 month 1 day 1:1:1.009';
 ----
 1 year 1 mon 1 day 01:01:01.009
 
-# issue#7059, if we improve precision, then this should be removed.
-query TTTTTT
+# issue #7059
+query T
 select '1 mons 1 days 00:00:00.000001'::INTERVAL;
+----
+1 mon 1 day 00:00:00.000001
+
+query T
+select '1 mons 1 days 00:00:00.0000001'::INTERVAL;
 ----
 1 mon 1 day

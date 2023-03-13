@@ -442,8 +442,8 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
             None,
         )
         .into();
@@ -497,8 +497,8 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
             None,
         )
         .into();
