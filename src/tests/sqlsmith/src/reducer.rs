@@ -189,20 +189,20 @@ mod tests {
     use super::*;
 
     const DDL_AND_DML: &str = "
-CREATE TABLE t1 (v1 int, v2 int, v3 int);
-CREATE TABLE t2 (v1 int, v2 int, v3 int);
-CREATE TABLE t3 (v1 int, v2 int, v3 int);
-CREATE MATERIALIZED VIEW m1 as SELECT * from t1;
-CREATE MATERIALIZED VIEW m2 as SELECT * from t2 left join t3 on t2.v1 = t3.v2;
-CREATE MATERIALIZED VIEW m3 as SELECT * from t1 left join t2;
-CREATE MATERIALIZED VIEW m4 as SELECT * from m3;
-INSERT INTO t1 values(0, 0, 1);
-INSERT INTO t1 values(0, 0, 2);
-INSERT INTO t2 values(0, 0, 3);
-INSERT INTO t2 values(0, 0, 4);
-INSERT INTO t3 values(0, 0, 5);
-INSERT INTO t3 values(0, 0, 6);
-SET RW_TWO_PHASE_AGG=true;
+CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T3 (V1 INT, V2 INT, V3 INT);
+CREATE MATERIALIZED VIEW M1 AS SELECT * FROM T1;
+CREATE MATERIALIZED VIEW M2 AS SELECT * FROM T2 LEFT JOIN T3 ON T2.V1 = T3.V2;
+CREATE MATERIALIZED VIEW M3 AS SELECT * FROM T1 LEFT JOIN T2;
+CREATE MATERIALIZED VIEW M4 AS SELECT * FROM M3;
+INSERT INTO T1 VALUES(0, 0, 1);
+INSERT INTO T1 VALUES(0, 0, 2);
+INSERT INTO T2 VALUES(0, 0, 3);
+INSERT INTO T2 VALUES(0, 0, 4);
+INSERT INTO T3 VALUES(0, 0, 5);
+INSERT INTO T3 VALUES(0, 0, 6);
+SET RW_TWO_PHASE_AGG=TRUE;
     ";
 
     fn sql_to_query(sql: &str) -> Box<Query> {
@@ -215,7 +215,7 @@ SET RW_TWO_PHASE_AGG=true;
 
     #[test]
     fn test_find_ddl_references_for_query_simple() {
-        let sql = "SELECT * from t1;";
+        let sql = "SELECT * FROM T1;";
         let query = sql_to_query(sql);
         let mut ddl_references = HashSet::new();
         find_ddl_references_for_query(&query, &mut ddl_references);
@@ -225,7 +225,7 @@ SET RW_TWO_PHASE_AGG=true;
 
     #[test]
     fn test_find_ddl_references_for_query_with_cte() {
-        let sql = "WITH with0 AS (select * from m3) SELECT * from with0";
+        let sql = "WITH WITH0 AS (SELECT * FROM M3) SELECT * FROM WITH0";
         let sql_statements = DDL_AND_DML.to_owned() + sql;
         let sql_statements = parse_sql(sql_statements);
         let ddl_references = find_ddl_references(&sql_statements);
@@ -241,7 +241,7 @@ SET RW_TWO_PHASE_AGG=true;
 
     #[test]
     fn test_find_ddl_references_for_query_with_mv_on_mv() {
-        let sql = "WITH with0 AS (select * from m4) SELECT * from with0";
+        let sql = "WITH WITH0 AS (SELECT * FROM M4) SELECT * FROM WITH0";
         let sql_statements = DDL_AND_DML.to_owned() + sql;
         let sql_statements = parse_sql(sql_statements);
         let ddl_references = find_ddl_references(&sql_statements);
@@ -257,7 +257,7 @@ SET RW_TWO_PHASE_AGG=true;
 
     #[test]
     fn test_find_ddl_references_for_query_joins() {
-        let sql = "SELECT * from (t1 join t2 on t1.v1 = t2.v2) join t3 on t1.v1 = t2.v2";
+        let sql = "SELECT * FROM (T1 JOIN T2 ON T1.V1 = T2.V2) JOIN T3 ON T2.V1 = T3.V2";
         let sql_statements = DDL_AND_DML.to_owned() + sql;
         let sql_statements = parse_sql(sql_statements);
         let ddl_references = find_ddl_references(&sql_statements);
@@ -287,9 +287,9 @@ SET RW_TWO_PHASE_AGG = true;
         let query = "SELECT * FROM t1;";
         let sql = DDL_AND_DML.to_owned() + query;
         let expected = format!("\
-CREATE TABLE t1 (v1 INT, v2 INT, v3 INT);
-INSERT INTO t1 VALUES (0, 0, 1);
-INSERT INTO t1 VALUES (0, 0, 2);
+CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
+INSERT INTO T1 VALUES (0, 0, 1);
+INSERT INTO T1 VALUES (0, 0, 2);
 SET RW_TWO_PHASE_AGG = true;
 {query}
 ");
@@ -301,9 +301,9 @@ SET RW_TWO_PHASE_AGG = true;
         let query = "SELECT * FROM t1 AS s1;";
         let sql = DDL_AND_DML.to_owned() + query;
         let expected = format!("\
-CREATE TABLE t1 (v1 INT, v2 INT, v3 INT);
-INSERT INTO t1 VALUES (0, 0, 1);
-INSERT INTO t1 VALUES (0, 0, 2);
+CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
+INSERT INTO T1 VALUES (0, 0, 1);
+INSERT INTO T1 VALUES (0, 0, 2);
 SET RW_TWO_PHASE_AGG = true;
 {query}
 ");
@@ -312,7 +312,22 @@ SET RW_TWO_PHASE_AGG = true;
 
     #[test]
     fn test_shrink_join() {
-
+        let query = "SELECT * FROM (T1 JOIN T2 ON T1.V1 = T2.V2) JOIN T3 ON T2.V1 = T3.V2;";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T3 (V1 INT, V2 INT, V3 INT);
+INSERT INTO T1 VALUES (0, 0, 1);
+INSERT INTO T1 VALUES (0, 0, 2);
+INSERT INTO T2 VALUES (0, 0, 3);
+INSERT INTO T2 VALUES (0, 0, 4);
+INSERT INTO T3 VALUES (0, 0, 5);
+INSERT INTO T3 VALUES (0, 0, 6);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
     }
 
     #[test]
