@@ -41,7 +41,6 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
@@ -130,6 +129,7 @@ async fn compaction_test(
         row_id_index: None,
         version: None,
         watermark_indices: vec![],
+        dist_key_in_pk: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -184,7 +184,6 @@ async fn compaction_test(
     let store = HummockStorage::new(
         storage_opts.clone(),
         sstable_store.clone(),
-        BackupReader::unused(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),

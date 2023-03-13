@@ -26,12 +26,12 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
@@ -188,17 +188,19 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
         let pk_types = table_desc
             .pk
             .iter()
-            .map(|order| column_descs[order.index as usize].clone().data_type)
+            .map(|order| column_descs[order.column_index as usize].clone().data_type)
             .collect_vec();
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -228,6 +230,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         let scan_ranges = {
             let scan_ranges = &seq_scan_node.scan_ranges;
             if scan_ranges.is_empty() {
@@ -263,6 +266,7 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
             Ok(Box::new(RowSeqScanExecutor::new(
                 table,
@@ -402,9 +406,9 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         let (start_bound, end_bound) =
-            match table.pk_serializer().get_order_types()[pk_prefix.len()] {
-                OrderType::Ascending => (next_col_bounds.0, next_col_bounds.1),
-                OrderType::Descending => (next_col_bounds.1, next_col_bounds.0),
+            match table.pk_serializer().get_order_types()[pk_prefix.len()].direction() {
+                Direction::Ascending => (next_col_bounds.0, next_col_bounds.1),
+                Direction::Descending => (next_col_bounds.1, next_col_bounds.0),
             };
 
         // Range Scan.

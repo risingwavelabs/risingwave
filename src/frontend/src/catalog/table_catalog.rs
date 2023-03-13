@@ -19,13 +19,13 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::table::{
     OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
 };
 use risingwave_pb::catalog::Table as ProstTable;
 
 use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
-use crate::optimizer::property::FieldOrder;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -75,7 +75,7 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
-    pub pk: Vec<FieldOrder>,
+    pub pk: Vec<ColumnOrder>,
 
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
@@ -122,8 +122,12 @@ pub struct TableCatalog {
     /// Per-table catalog version, used by schema change. `None` for internal tables and tests.
     pub version: Option<TableVersion>,
 
-    /// the column indices which could receive watermarks.
+    /// The column indices which could receive watermarks.
     pub watermark_columns: FixedBitSet,
+
+    /// Optional field specifies the distribution key indices in pk.
+    /// See https://github.com/risingwavelabs/risingwave/issues/8377 for more information.
+    pub dist_key_in_pk: Vec<usize>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
@@ -266,7 +270,7 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn pk(&self) -> &[FieldOrder] {
+    pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()
     }
 
@@ -274,7 +278,7 @@ impl TableCatalog {
     pub fn pk_column_ids(&self) -> Vec<ColumnId> {
         self.pk
             .iter()
-            .map(|f| self.columns[f.index].column_id())
+            .map(|x| self.columns[x.column_index].column_id())
             .collect()
     }
 
@@ -287,7 +291,7 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
-            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
+            pk: self.pk.clone(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
@@ -298,6 +302,7 @@ impl TableCatalog {
             value_indices: self.value_indices.clone(),
             read_prefix_len_hint: self.read_prefix_len_hint,
             watermark_columns: self.watermark_columns.clone(),
+            versioned: self.version.is_some(),
         }
     }
 
@@ -363,6 +368,7 @@ impl TableCatalog {
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
             version: self.version.as_ref().map(TableVersion::to_prost),
             watermark_indices: self.watermark_columns.ones().map(|x| x as _).collect_vec(),
+            dist_key_in_pk: self.dist_key_in_pk.iter().map(|x| *x as _).collect(),
             handle_pk_conflict_behavior: self.conflict_behavior_type,
         }
     }
@@ -389,7 +395,7 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let pk = tb.pk.iter().map(FieldOrder::from_protobuf).collect();
+        let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
         let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
         for idx in tb.watermark_indices {
             watermark_columns.insert(idx as _);
@@ -422,6 +428,7 @@ impl From<ProstTable> for TableCatalog {
             read_prefix_len_hint: tb.read_prefix_len_hint as usize,
             version: tb.version.map(TableVersion::from_prost),
             watermark_columns,
+            dist_key_in_pk: tb.dist_key_in_pk.iter().map(|x| *x as _).collect(),
         }
     }
 }
@@ -448,6 +455,7 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
+    use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::Table as ProstTable;
     use risingwave_pb::plan_common::{
         ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
@@ -455,7 +463,6 @@ mod tests {
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
-    use crate::optimizer::property::{Direction, FieldOrder};
     use crate::WithOptions;
 
     #[test]
@@ -492,11 +499,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            pk: vec![FieldOrder {
-                index: 0,
-                direct: Direction::Asc,
-            }
-            .to_protobuf()],
+            pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
@@ -520,6 +523,7 @@ mod tests {
             }),
             watermark_indices: vec![],
             handle_pk_conflict_behavior: 0,
+            dist_key_in_pk: vec![],
         }
         .into();
 
@@ -562,10 +566,7 @@ mod tests {
                     }
                 ],
                 stream_key: vec![0],
-                pk: vec![FieldOrder {
-                    index: 0,
-                    direct: Direction::Asc,
-                }],
+                pk: vec![ColumnOrder::new(0, OrderType::ascending())],
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
@@ -582,6 +583,7 @@ mod tests {
                 read_prefix_len_hint: 0,
                 version: Some(TableVersion::new_initial_for_test(ColumnId::new(1))),
                 watermark_columns: FixedBitSet::with_capacity(2),
+                dist_key_in_pk: vec![],
             }
         );
         assert_eq!(table, TableCatalog::from(table.to_prost(0, 0)));

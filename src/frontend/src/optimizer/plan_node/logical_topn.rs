@@ -17,6 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -29,7 +30,7 @@ use crate::optimizer::plan_node::{
     BatchTopN, ColumnPruningContext, LogicalProject, PredicatePushdownContext,
     RewriteStreamContext, StreamTopN, ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, FieldOrder, Order, OrderDisplay, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, OrderDisplay, RequiredDist};
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 use crate::TableCatalog;
@@ -287,9 +288,9 @@ impl ColPrunable for LogicalTopN {
         let order_required_cols = {
             let mut order_required_cols = FixedBitSet::with_capacity(self.input().schema().len());
             self.topn_order()
-                .field_order
+                .column_orders
                 .iter()
-                .for_each(|fo| order_required_cols.insert(fo.index));
+                .for_each(|o| order_required_cols.insert(o.column_index));
             order_required_cols
         };
         let group_required_cols = {
@@ -311,14 +312,11 @@ impl ColPrunable for LogicalTopN {
             self.input().schema().len(),
         );
         let new_order = Order {
-            field_order: self
+            column_orders: self
                 .topn_order()
-                .field_order
+                .column_orders
                 .iter()
-                .map(|fo| FieldOrder {
-                    index: mapping.map(fo.index),
-                    direct: fo.direct,
-                })
+                .map(|o| ColumnOrder::new(mapping.map(o.column_index), o.order_type))
                 .collect(),
         };
         let new_group_key = self

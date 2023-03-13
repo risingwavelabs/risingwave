@@ -55,6 +55,7 @@ impl Planner {
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
+            false,
         )
         .into())
     }
@@ -70,6 +71,7 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
+            base_table.for_system_time_as_of_now,
         )
         .into())
     }

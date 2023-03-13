@@ -54,6 +54,7 @@ use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
+use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
@@ -159,6 +160,14 @@ impl PlanRoot {
     pub fn gen_batch_plan(&mut self) -> Result<PlanRef> {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan_for_batch()?;
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "do not support temporal join for batch queries".to_string(),
+                "please use temporal join in streaming queries".to_string(),
+            )
+            .into());
+        }
 
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
@@ -348,6 +357,13 @@ impl PlanRoot {
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "exist dangling temporal scan".to_string(),
+                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
 
         Ok(plan)
     }

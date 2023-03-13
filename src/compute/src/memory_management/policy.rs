@@ -22,6 +22,8 @@ use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 
+use crate::ComputeNodeOpts;
+
 /// `MemoryControlStats` contains the necessary information for memory control, including both batch
 /// and streaming.
 pub struct MemoryControlStats {
@@ -49,6 +51,27 @@ pub trait MemoryControl: Send + Sync {
     fn describe(&self, total_compute_memory_bytes: usize) -> String;
 }
 
+pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
+    let input_policy = &opts.memory_control_policy;
+    if input_policy == FixedProportionPolicy::CONFIG_STR {
+        Ok(Box::new(FixedProportionPolicy::new(
+            opts.streaming_memory_proportion,
+        )?))
+    } else if input_policy == StreamingOnlyPolicy::CONFIG_STR {
+        Ok(Box::new(StreamingOnlyPolicy {}))
+    } else {
+        let valid_values = [
+            FixedProportionPolicy::CONFIG_STR,
+            StreamingOnlyPolicy::CONFIG_STR,
+        ];
+        Err(anyhow!(format!(
+            "invalid memory control policy in configuration: {}, valid values: {:?}",
+            input_policy, valid_values,
+        ))
+        .into())
+    }
+}
+
 /// `FixedProportionPolicy` performs memory control by limiting the memory usage of both batch and
 /// streaming to a fixed proportion.
 pub struct FixedProportionPolicy {
@@ -60,6 +83,7 @@ pub struct FixedProportionPolicy {
 
 impl FixedProportionPolicy {
     const BATCH_KILL_QUERY_THRESHOLD: f64 = 0.8;
+    const CONFIG_STR: &str = "streaming-batch";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
@@ -70,16 +94,6 @@ impl FixedProportionPolicy {
         Ok(Self {
             streaming_memory_proportion,
         })
-    }
-}
-
-impl Default for FixedProportionPolicy {
-    fn default() -> Self {
-        Self {
-            // The default streaming memory proportion is 70%. That for batch is correspondingly
-            // 30%.
-            streaming_memory_proportion: 0.7,
-        }
     }
 }
 
@@ -158,10 +172,10 @@ impl MemoryControl for FixedProportionPolicy {
 /// `FixedProportionPolicy` in that it calculates the memory usage based on jemalloc statistics,
 /// which actually contains system usage other than computing tasks. This is the default memory
 /// control policy.
-#[derive(Default)]
 pub struct StreamingOnlyPolicy {}
 
 impl StreamingOnlyPolicy {
+    const CONFIG_STR: &str = "streaming-only";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 }

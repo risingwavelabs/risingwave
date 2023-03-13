@@ -592,7 +592,7 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(&iter_key, value, is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
@@ -748,6 +748,7 @@ impl Compactor {
             task_progress,
             del_agg,
             self.task_config.key_range.clone(),
+            self.task_config.split_by_table,
         );
         let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,

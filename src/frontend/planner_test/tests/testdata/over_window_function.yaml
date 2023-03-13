@@ -18,7 +18,7 @@
     select row_number() over(PARTITION BY x ORDER BY x) from t;
   logical_plan: |
     LogicalProject { exprs: [ROW_NUMBER] }
-    └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+    └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC) }
       └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -36,7 +36,7 @@
     create table t(x int);
     select 1+row_number() over(ORDER BY x) from t;
   planner_error: |-
-    Feature is not yet implemented: window function in expression: (1:Int32 + ROW_NUMBER() OVER(ORDER BY $0))
+    Feature is not yet implemented: window function in expression: (1:Int32 + ROW_NUMBER() OVER(ORDER BY $0 ASC))
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
     create table t(x int);
@@ -44,7 +44,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.x] }
     └─LogicalProject { exprs: [t.x, ROW_NUMBER] }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC) }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - sql: |
     create table t(x int);
@@ -72,13 +72,13 @@
     LogicalProject { exprs: [t.x, ROW_NUMBER] }
     └─LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
       └─LogicalProject { exprs: [t.x, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC) }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: |
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, ROW_NUMBER] }
     └─LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC NULLS LAST) }
+      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.x ASC) }
         └─LogicalScan { table: t, columns: [t.x, t._row_id] }
 - name: TopN without rank output
   sql: |
@@ -90,7 +90,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (ROW_NUMBER < 3:Int32) AND (t.x > t.y) }
       └─LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC) }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }
@@ -148,7 +148,7 @@
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (RANK <= 3:Int32) AND (RANK > 1:Int32) }
-      └─LogicalOverAgg { window_function: RANK() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+      └─LogicalOverAgg { window_function: RANK() OVER(PARTITION BY t.y ORDER BY t.x ASC) }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - sql: |
     create table t(x int, y int);
@@ -241,7 +241,7 @@
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (3:Int32 < ROW_NUMBER) AND (ROW_NUMBER = 6:Int32) AND (ROW_NUMBER <= 5:Int32) }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC NULLS LAST) }
+      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.y ORDER BY t.x ASC) }
         └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
 - id: create_bid
   sql: |
@@ -324,7 +324,7 @@
     LogicalProject { exprs: [t.x, t.y] }
     └─LogicalFilter { predicate: (ROW_NUMBER = 1:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.y ASC NULLS LAST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY t.x ORDER BY t.y ASC) }
           └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, t.y] }

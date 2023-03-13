@@ -27,6 +27,8 @@ pub use input_ref_validator::*;
 
 mod execution_mode_decider;
 pub use execution_mode_decider::*;
+mod temporal_join_validator;
+pub use temporal_join_validator::*;
 
 use crate::for_all_plan_nodes;
 use crate::optimizer::plan_node::*;

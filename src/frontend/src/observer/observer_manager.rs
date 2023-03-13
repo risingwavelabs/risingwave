@@ -81,6 +81,9 @@ impl ObserverState for FrontendObserverNode {
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
             }
+            Info::HummockWriteLimits(_) => {
+                panic!("frontend node should not receive HummockWriteLimits");
+            }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }

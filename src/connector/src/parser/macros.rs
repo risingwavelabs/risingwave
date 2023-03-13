@@ -35,7 +35,23 @@ macro_rules! simd_json_ensure_float {
 }
 
 #[macro_export]
-macro_rules! ensure_int {
+macro_rules! ensure_i16 {
+    ($v:ident, $t:ty) => {
+        $v.as_i16()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_i32 {
+    ($v:ident, $t:ty) => {
+        $v.as_i32()
+            .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?
+    };
+}
+
+#[macro_export]
+macro_rules! ensure_i64 {
     ($v:ident, $t:ty) => {
         $v.as_i64()
             .ok_or_else(|| anyhow!(concat!("expect ", stringify!($t), ", but found {}"), $v))?

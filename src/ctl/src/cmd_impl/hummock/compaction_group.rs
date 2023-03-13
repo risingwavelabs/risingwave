@@ -51,6 +51,7 @@ pub fn build_compaction_config_vec(
     target_file_size_base: Option<u64>,
     compaction_filter_mask: Option<u32>,
     max_sub_compaction: Option<u32>,
+    level0_stop_write_threshold_sub_level_number: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -76,6 +77,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = max_sub_compaction {
         configs.push(MutableConfig::MaxSubCompaction(c));
+    }
+    if let Some(c) = level0_stop_write_threshold_sub_level_number {
+        configs.push(MutableConfig::Level0StopWriteThresholdSubLevelNumber(c));
     }
     configs
 }

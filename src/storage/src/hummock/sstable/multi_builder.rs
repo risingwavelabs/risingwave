@@ -70,6 +70,8 @@ where
     last_sealed_key: UserKey<Vec<u8>>,
     pub del_agg: Arc<RangeTombstonesCollector>,
     key_range: KeyRange,
+    last_table_id: u32,
+    split_by_table: bool,
 }
 
 impl<F> CapacitySplitTableBuilder<F>
@@ -83,6 +85,7 @@ where
         task_progress: Option<Arc<TaskProgress>>,
         del_agg: Arc<RangeTombstonesCollector>,
         key_range: KeyRange,
+        split_by_table: bool,
     ) -> Self {
         let start_key = if key_range.left.is_empty() {
             UserKey::default()
@@ -99,6 +102,8 @@ where
             del_agg,
             last_sealed_key: start_key,
             key_range,
+            last_table_id: 0,
+            split_by_table,
         }
     }
 
@@ -112,6 +117,8 @@ where
             last_sealed_key: UserKey::default(),
             del_agg: Arc::new(RangeTombstonesCollector::for_test()),
             key_range: KeyRange::inf(),
+            last_table_id: 0,
+            split_by_table: false,
         }
     }
 
@@ -134,12 +141,17 @@ where
     /// allowed, where `allow_split` should be `false`.
     pub async fn add_full_key(
         &mut self,
-        full_key: &FullKey<&[u8]>,
+        full_key: FullKey<&[u8]>,
         value: HummockValue<&[u8]>,
         is_new_user_key: bool,
     ) -> HummockResult<()> {
+        let mut switch_builder = false;
+        if self.split_by_table && full_key.user_key.table_id.table_id != self.last_table_id {
+            self.last_table_id = full_key.user_key.table_id.table_id;
+            switch_builder = true;
+        }
         if let Some(builder) = self.current_builder.as_ref() {
-            if is_new_user_key && builder.reach_capacity() {
+            if is_new_user_key && (switch_builder || builder.reach_capacity()) {
                 let delete_ranges = self
                     .del_agg
                     .get_tombstone_between(&self.last_sealed_key.as_ref(), &full_key.user_key);
@@ -197,6 +209,12 @@ where
                     self.compactor_metrics
                         .sstable_avg_value_size
                         .observe(builder_output.avg_value_size as _);
+                }
+
+                if builder_output.epoch_count != 0 {
+                    self.compactor_metrics
+                        .sstable_distinct_epoch_count
+                        .observe(builder_output.epoch_count as _);
                 }
             }
             self.sst_outputs.push(SplitTableOutput {
@@ -322,7 +340,7 @@ mod tests {
         for i in 0..table_capacity {
             builder
                 .add_full_key(
-                    &FullKey::from_user_key(
+                    FullKey::from_user_key(
                         test_user_key_of(i).as_ref(),
                         (table_capacity - i) as u64,
                     ),
@@ -352,7 +370,7 @@ mod tests {
                 epoch -= 1;
                 builder
                     .add_full_key(
-                        &FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
+                        FullKey::from_user_key(test_user_key_of(1).as_ref(), epoch),
                         HummockValue::put(b"v"),
                         true,
                     )
@@ -390,7 +408,7 @@ mod tests {
             opts,
         ));
         builder
-            .add_full_key(&test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
+            .add_full_key(test_key_of(0).to_ref(), HummockValue::put(b"v"), false)
             .await
             .unwrap();
     }
@@ -410,10 +428,11 @@ mod tests {
             None,
             builder.build(0, false),
             KeyRange::inf(),
+            false,
         );
         builder
             .add_full_key(
-                &FullKey::for_test(table_id, b"k", 233),
+                FullKey::for_test(table_id, b"k", 233),
                 HummockValue::put(b"v"),
                 false,
             )
@@ -460,6 +479,7 @@ mod tests {
             None,
             builder.build(0, false),
             KeyRange::inf(),
+            false,
         );
         let results = builder.finish().await.unwrap();
         assert_eq!(results[0].sst_info.sst_info.table_ids, vec![1]);
