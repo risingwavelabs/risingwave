@@ -17,7 +17,7 @@ type userBehavior struct {
 	UserId         string `json:"user_id"`
 	TargetId       string `json:"target_id"`
 	TargetType     string `json:"target_type"`
-	EventTimestmap string `json:"event_timestamp"`
+	EventTimestamp string `json:"event_timestamp"`
 	BehaviorType   string `json:"behavior_type"`
 
 	// The two fields are used to express the following behaviors:
@@ -32,7 +32,7 @@ func (r *userBehavior) ToPostgresSql() string {
 	return fmt.Sprintf(`INSERT INTO %s
 (user_id, target_id, target_type, event_timestamp, behavior_type, parent_target_type, parent_target_id)
 values ('%s', '%s', '%s', '%s', '%s', '%s', '%s')`,
-		"user_behaviors", r.UserId, r.TargetId, r.TargetType, r.EventTimestmap, r.BehaviorType, r.ParentTargetType, r.ParentTargetId)
+		"user_behaviors", r.UserId, r.TargetId, r.TargetType, r.EventTimestamp, r.BehaviorType, r.ParentTargetType, r.ParentTargetId)
 }
 
 func (r *userBehavior) ToJson() (topic string, key string, data []byte) {
@@ -130,7 +130,7 @@ func (g *clickStreamGen) generate() sink.SinkRecord {
 		UserId:           fmt.Sprint(userId),
 		TargetId:         string(target) + fmt.Sprint(targetId),
 		TargetType:       string(target),
-		EventTimestmap:   time.Now().Format(gen.RwTimestampLayout),
+		EventTimestamp:   time.Now().Format(gen.RwTimestampLayout),
 		BehaviorType:     behavior,
 		ParentTargetType: parentTargetType,
 		ParentTargetId:   parentTargetId,
