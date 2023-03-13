@@ -240,7 +240,7 @@ fn build_type_derive_map() -> FuncSigMap {
     }
     map.insert(
         E::TumbleStart,
-        vec![T::Timestamptz, T::Interval],
+        vec![T::Timestamptz, T::Interval, T::Interval],
         T::Timestamptz,
     );
     map.insert(E::ToTimestamp, vec![T::Float64], T::Timestamptz);

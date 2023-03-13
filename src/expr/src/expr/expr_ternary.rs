@@ -70,7 +70,7 @@ pub(crate) fn new_tumble_start_offset(
         )),
         _ => {
             return Err(ExprError::UnsupportedFunction(format!(
-                "tumble_start is not supported for {:?}",
+                "tumble_start_offset is not supported for {:?}",
                 time.return_type()
             )))
         }

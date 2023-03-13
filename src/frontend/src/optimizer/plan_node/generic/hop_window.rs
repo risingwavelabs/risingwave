@@ -194,12 +194,6 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         )?
         .into();
 
-        let window_size_sub_slide = FunctionCall::new(
-            ExprType::Subtract,
-            vec![window_size_sub_slide, window_offset_expr],
-        )?
-        .into();
-
         let time_col_shifted = FunctionCall::new(
             ExprType::Subtract,
             vec![
