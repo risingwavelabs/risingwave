@@ -117,7 +117,7 @@ impl IntervalUnit {
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
-        output.write_i64::<BigEndian>(self.usecs / 1000)?;
+        output.write_i64::<BigEndian>(self.usecs)?;
         Ok(16)
     }
 
@@ -523,7 +523,7 @@ impl Into<IntervalUnitProto> for IntervalUnit {
         IntervalUnitProto {
             months: self.months,
             days: self.days,
-            ms: self.usecs / 1000,
+            usecs: self.usecs,
         }
     }
 }
@@ -533,7 +533,7 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
         Self {
             months: p.months,
             days: p.days,
-            usecs: p.ms.checked_mul(1000).unwrap(),
+            usecs: p.usecs,
         }
     }
 }
