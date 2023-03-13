@@ -1,0 +1,32 @@
+statement ok
+create table f64_table (a double);
+
+statement ok
+insert into f64_table values(pi());
+
+statement ok
+insert into f64_table values(1.618033);
+
+statement ok
+create table f32_table (a real);
+
+statement ok
+insert into f32_table values(pi());
+
+query I
+SELECT pi() 
+----
+3.141592653589793
+
+query I
+SELECT pi(), a from f64_table
+----
+3.141592653589793   3.141592653589793
+3.141592653589793   1.618033
+
+
+statement ok
+drop table f64_table
+
+statement ok
+drop table f32_table
