@@ -92,8 +92,6 @@ extract_fail_info_from_logs() {
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
 
-      FROM_TABLE_NAMES=$(extract_from "$QUERY")
-
       cp "$LOGFILE" "$FAIL_DIR/$LOGFILENAME"
     fi
   done
@@ -101,58 +99,58 @@ extract_fail_info_from_logs() {
 
 ################# Shrink
 
-extract_from() {
+select_from() {
   echo "$1" \
    | sed -E "s/^.*FROM (([[:alnum:]]( AS [[:alnum:]])?, )*[[:alnum:]]( AS [[:alnum:]])?).*;?$/\1/" \
    | sed -E "s/, /\n/g" \
    | sed -E "s/([[:alnum:]]) AS [[:alnum:]]/\1/"
 }
 
-extract_inserts_by_name() {
+select_inserts_by_name() {
   grep "INSERT INTO $1 .*"
 }
 
-extract_table_by_name() {
+select_table_by_name() {
   grep "CREATE TABLE $1 .*"
 }
 
-extract_materialized_view_by_name() {
+select_materialized_view_by_name() {
   grep "CREATE MATERIALIZED VIEW $1 .*"
 }
 
 # Extract dml by names
-extract_dml_by_names() {
+select_dml_by_names() {
   for TABLE_NAME in $1
   do
-    extract_inserts_by_name "$TABLE_NAME"
+    select_inserts_by_name "$TABLE_NAME"
   done
 }
 
 # Extract ddl names only
-extract_ddl_names() {
+select_ddl_names() {
   for TABLE_NAME in $1
   do
     echo "$TABLE_NAME"
-    CREATE_MVIEW=$(extract_materialized_view_by_name "$TABLE_NAME")
+    CREATE_MVIEW=$(select_materialized_view_by_name "$TABLE_NAME")
     if [[ -n "$CREATE_MVIEW" ]]; then
       TABLE_NAMES=$(select_mview_dependencies "$CREATE_MVIEW")
-      extract_ddl_names "$TABLE_NAMES"
+      select_ddl_names "$TABLE_NAMES"
     fi
   done
 }
 
 # Extract ddl, echo ddl to stdout
-extract_ddl_by_names() {
+select_ddl_by_names() {
   for TABLE_NAME in $1
   do
-    CREATE_TABLE=$(extract_table_by_name "$TABLE_NAME")
-    CREATE_MVIEW=$(extract_materialized_view_by_name "$TABLE_NAME")
+    CREATE_TABLE=$(select_table_by_name "$TABLE_NAME")
+    CREATE_MVIEW=$(select_materialized_view_by_name "$TABLE_NAME")
     if [[ -n "$CREATE_TABLE" ]]; then
       echo "$CREATE_TABLE"
     fi
     if [[ -n "$CREATE_MVIEW" ]]; then
       TABLE_NAMES=$(select_mview_dependencies "$CREATE_MVIEW")
-      extract_ddl_by_names "$TABLE_NAMES"
+      select_ddl_by_names "$TABLE_NAMES"
       echo "$CREATE_MVIEW"
     fi
   done
@@ -164,8 +162,8 @@ extract_ddl_by_names() {
 # we opt for an approach independent of RisingWave functionality.
 # Then, if the failure is triggered in frontend we can still shrink.
 shrink_query() {
-  FROM_NAMES=$(extract_from "$1")
-  extract_ddl_by_names "$FROM_NAMES"
+  FROM_NAMES=$(select_from "$1")
+  select_ddl_by_names "$FROM_NAMES"
 }
 
 ################# Generate
