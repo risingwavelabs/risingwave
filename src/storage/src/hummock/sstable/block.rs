@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::Range;
@@ -132,7 +131,7 @@ impl LenType {
 }
 
 pub trait BufMutExt: BufMut {
-    fn put_var_var_var(&mut self, v1: usize, v2: usize, v3: usize, encoder: LenType) {
+    fn put_key_prefix(&mut self, v1: usize, v2: usize, v3: usize, encoder: LenType) {
         put_fn!(
             encoder,
             self, v1, v2, v3,
@@ -150,7 +149,7 @@ pub trait BufMutExt: BufMut {
 }
 
 pub trait BufExt: Buf {
-    fn get_var_var_var(&mut self, decoder: LenType) -> (usize, usize, usize) {
+    fn get_key_prefix(&mut self, decoder: LenType) -> (usize, usize, usize) {
         get_fn!(
             decoder, self,
             (U8U8 => (get_u8, get_u8)),
@@ -173,13 +172,11 @@ impl<T: Buf + ?Sized> BufExt for &mut T {}
 #[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
-    data: Bytes,
+    pub data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
-    /// Restart points.
-    restart_points: Vec<(usize, u32)>,
-
-    restart_points_type_index: Vec<(u32, LenType)>,
+    /// Restart points. (offset, k-v-type)
+    restart_points: Vec<(u32, LenType)>,
 }
 
 impl Block {
@@ -226,16 +223,12 @@ impl Block {
         let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 4];
 
         let mut index_key_vec = Vec::with_capacity(n_index);
-        let mut index_value_vec = Vec::with_capacity(n_index);
-        let mut restart_points_type_index = Vec::with_capacity(n_index);
+        // let mut index_value_vec = Vec::with_capacity(n_index);
         for _ in 0..n_index {
             let offset = restart_points_type_index_buf.get_u32_le();
-            index_key_vec.push(offset);
-        }
-
-        for _ in 0..n_index {
             let value = restart_points_type_index_buf.get_u8();
-            index_value_vec.push(LenType::from(value));
+
+            index_key_vec.push((offset, LenType::from(value)));
         }
 
         // Decode restart points.
@@ -247,25 +240,19 @@ impl Block {
         let mut restart_points_buf = &buf[data_len..restarts_end];
 
         let mut type_index: usize = 0;
-        for index in 0..n_restarts {
+        for _ in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
-            restart_points.push((index, offset));
-
-            if type_index < n_index - 1 && offset >= index_key_vec[type_index + 1] {
+            if type_index < index_key_vec.len() - 1 && offset >= index_key_vec[type_index + 1].0 {
                 type_index += 1;
             }
 
-            // expand restart_points_type_index
-            restart_points_type_index.push((offset, index_value_vec[type_index]));
+            restart_points.push((offset, index_key_vec[type_index].1));
         }
-
-        assert_eq!(restart_points_type_index.len(), n_restarts);
 
         Block {
             data: buf,
             data_len,
             restart_points,
-            restart_points_type_index,
         }
     }
 
@@ -282,7 +269,7 @@ impl Block {
 
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
-        self.restart_points[index].1
+        self.restart_points[index].0
     }
 
     /// Gets restart point len.
@@ -293,7 +280,7 @@ impl Block {
     /// Searches the index of the restart point by partition point.
     pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
     where
-        P: FnMut(&(usize, u32)) -> bool,
+        P: FnMut(&(u32, LenType)) -> bool,
     {
         self.restart_points.partition_point(pred)
     }
@@ -307,7 +294,7 @@ impl Block {
     }
 
     pub fn restart_points_type_index(&self, index: usize) -> LenType {
-        self.restart_points_type_index[index].1
+        self.restart_points[index].1
     }
 }
 
@@ -324,12 +311,26 @@ pub struct KeyPrefix {
 }
 
 impl KeyPrefix {
+    // This function is used in BlockBuilder::add to provide a wrapper for encode since the
+    // KeyPrefix len field is only useful in the decode phase
+    pub fn new_without_len(overlap: usize, diff: usize, value: usize, offset: usize) -> Self {
+        KeyPrefix {
+            overlap,
+            diff,
+            value,
+            offset,
+            len: 0, // not used when encode
+        }
+    }
+}
+
+impl KeyPrefix {
     pub fn encode(&self, mut buf: &mut impl BufMut, encoder: LenType) {
-        buf.put_var_var_var(self.overlap, self.diff, self.value, encoder)
+        buf.put_key_prefix(self.overlap, self.diff, self.value, encoder)
     }
 
     pub fn decode(mut buf: &mut impl Buf, offset: usize, decoder: LenType) -> Self {
-        let (overlap, diff, value) = buf.get_var_var_var(decoder);
+        let (overlap, diff, value) = buf.get_key_prefix(decoder);
         let (k_len, v_len) = decoder.len();
         let len = k_len * 2 + v_len;
 
@@ -402,7 +403,8 @@ pub struct BlockBuilder {
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 
-    restart_points_type_index: BTreeMap<u32, LenType>,
+    // (offset, LenType)
+    restart_points_type_index: Vec<(u32, LenType)>,
 }
 
 impl BlockBuilder {
@@ -417,7 +419,7 @@ impl BlockBuilder {
             last_key: vec![],
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
-            restart_points_type_index: BTreeMap::default(),
+            restart_points_type_index: Vec::default(),
         }
     }
 
@@ -445,12 +447,11 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let len_type = LenType::new(key.len(), value.len());
 
-        let type_mismatch =
-            if let Some((_, last_type)) = self.restart_points_type_index.last_key_value() {
-                len_type != *last_type
-            } else {
-                false
-            };
+        let type_mismatch = if let Some((_, last_type)) = self.restart_points_type_index.last() {
+            len_type != *last_type
+        } else {
+            false
+        };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
             let offset = self.buf.len() as u32;
@@ -458,7 +459,7 @@ impl BlockBuilder {
             self.restart_points.push(offset);
 
             if type_mismatch || self.restart_points_type_index.is_empty() {
-                self.restart_points_type_index.insert(offset, len_type);
+                self.restart_points_type_index.push((offset, len_type));
             }
 
             key
@@ -466,15 +467,12 @@ impl BlockBuilder {
             bytes_diff_below_max_key_length(&self.last_key, key)
         };
 
-        assert!(key.len() > 8);
-
-        let prefix = KeyPrefix {
-            overlap: key.len() - diff_key.len(),
-            diff: diff_key.len(),
-            value: value.len(),
-            offset: self.buf.len(),
-            len: 0, // not used when encode
-        };
+        let prefix = KeyPrefix::new_without_len(
+            key.len() - diff_key.len(),
+            diff_key.len(),
+            value.len(),
+            self.buf.len(),
+        );
 
         prefix.encode(&mut self.buf, len_type);
         self.buf.put_slice(diff_key);
@@ -504,8 +502,9 @@ impl BlockBuilder {
     pub fn uncompressed_block_size(&mut self) -> usize {
         self.buf.len()
             + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
-            + (4 + 1) * self.restart_points_type_index.len()
-            + 4
+            + (std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()) // (offset + len_type(u8)) * len
+                * self.restart_points_type_index.len()
+            + std::mem::size_of::<u32>() // restart_points_type_index len
     }
 
     /// Finishes building block.
@@ -528,13 +527,14 @@ impl BlockBuilder {
         }
 
         self.buf.put_u32_le(self.restart_points.len() as u32);
-        for restart_point in self.restart_points_type_index.keys() {
-            self.buf.put_u32_le(*restart_point);
-        }
-
-        for len_type in self.restart_points_type_index.values() {
+        for (offset, len_type) in &self.restart_points_type_index {
+            self.buf.put_u32_le(*offset);
             self.buf.put_u8(*len_type as u8);
         }
+
+        // for len_type in self.restart_points_type_index.values() {
+        //     self.buf.put_u8(*len_type as u8);
+        // }
 
         self.buf
             .put_u32_le(self.restart_points_type_index.len() as u32);
@@ -580,13 +580,15 @@ impl BlockBuilder {
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        // block + restart_points + restart_points.len + compression_algorithm + checksum
+        // block + restart_points + restart_points.len + restart_points_type_indexs +
+        // restart_points_type_indexs.len compression_algorithm + checksum
         self.buf.len()
-            + 4 * self.restart_points.len()
-            + 4
-            + 1
-            + 8
-            + (4 + 2) * self.restart_points_type_index.len()
+            + std::mem::size_of::<u32>() * self.restart_points.len() // restart_points
+            + std::mem::size_of::<u32>() // restart_points.len
+            + (std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()) * self.restart_points_type_index.len() // restart_points_type_indexs
+            + std::mem::size_of::<u32>() // restart_points_type_indexs.len
+            + 1 // compression_algorithm
+            + 8 // checksum
     }
 }
 

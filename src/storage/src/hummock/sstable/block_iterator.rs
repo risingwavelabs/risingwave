@@ -74,6 +74,18 @@ impl BlockIterator {
 
     pub fn key(&self) -> &[u8] {
         assert!(self.is_valid());
+
+        if self.key.len() < 8 {
+            unsafe {
+                tracing::info!(
+                    "INVALIDA offset {} type {:?} block_data {:?}",
+                    self.offset,
+                    self.last_len_type,
+                    (*self.block.block).data,
+                )
+            }
+        }
+
         &self.key[..]
     }
 
@@ -223,8 +235,7 @@ impl BlockIterator {
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
-            .search_restart_partition_point(|&(index, probe)| {
-                let decoder = self.block.restart_points_type_index(index);
+            .search_restart_partition_point(|&(probe, decoder)| {
                 let prefix = self.decode_prefix_at(probe as usize, decoder);
                 let probe_key = &self.block.data()[prefix.diff_key_range()];
                 match KeyComparator::compare_encoded_full_key(probe_key, key) {
@@ -243,7 +254,6 @@ impl BlockIterator {
 
     /// Seeks to the restart point by given restart point index.
     fn seek_restart_point_by_index(&mut self, index: usize) {
-        // self.update_restart_point(index);
         let restart_point_len_type = self.block.restart_points_type_index(index);
         let offset = self.block.restart_point(index) as usize;
         let prefix = self.decode_prefix_at(offset, restart_point_len_type);
@@ -256,7 +266,7 @@ impl BlockIterator {
 
     fn update_restart_point(&mut self, index: usize) {
         self.restart_point_index = index;
-        (self.last_len_type) = self.block.restart_points_type_index(index);
+        self.last_len_type = self.block.restart_points_type_index(index);
     }
 }
 
