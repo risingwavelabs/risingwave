@@ -309,6 +309,7 @@ impl Binder {
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,
+            false,
         )?);
         let where_clause = Some(
             FunctionCall::new(

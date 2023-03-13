@@ -219,7 +219,11 @@ impl SstableIterator {
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: usize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
             "table iterator seek: sstable_id = {}, block_id = {}",
@@ -275,7 +279,7 @@ impl HummockIterator for SstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -316,8 +320,7 @@ impl HummockIterator for SstableIterator {
                 .saturating_sub(1); // considering the boundary of 0
             self.init_block_fetcher(block_idx);
 
-            self.seek_idx(block_idx, Some(encoded_key.as_slice()))
-                .await?;
+            self.seek_idx(block_idx, Some(key)).await?;
             if !self.is_valid() {
                 // seek to next block
                 self.seek_idx(block_idx + 1, None).await?;

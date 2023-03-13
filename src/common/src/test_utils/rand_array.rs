@@ -78,8 +78,8 @@ impl RandValue for IntervalUnit {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let months = rand.gen_range(0..100);
         let days = rand.gen_range(0..200);
-        let ms = rand.gen_range(0..100_000);
-        IntervalUnit::new(months, days, ms)
+        let usecs = rand.gen_range(0..100_000);
+        IntervalUnit::from_month_day_usec(months, days, usecs)
     }
 }
 

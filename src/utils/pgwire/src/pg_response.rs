@@ -82,6 +82,7 @@ pub enum StatementType {
     BEGIN,
     COMMIT,
     ROLLBACK,
+    SET_TRANSACTION,
 }
 
 impl std::fmt::Display for StatementType {

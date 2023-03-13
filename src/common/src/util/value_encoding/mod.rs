@@ -254,7 +254,7 @@ fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
 fn serialize_interval(interval: &IntervalUnit, buf: &mut impl BufMut) {
     buf.put_i32_le(interval.get_months());
     buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_ms());
+    buf.put_i64_le(interval.get_usecs());
 }
 
 fn serialize_naivedate(days: i32, buf: &mut impl BufMut) {
@@ -348,8 +348,8 @@ fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
 fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
     let months = data.get_i32_le();
     let days = data.get_i32_le();
-    let ms = data.get_i64_le();
-    Ok(IntervalUnit::new(months, days, ms))
+    let usecs = data.get_i64_le();
+    Ok(IntervalUnit::from_month_day_usec(months, days, usecs))
 }
 
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {

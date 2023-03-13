@@ -228,7 +228,9 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                7, 8, 9,
+            ))),
         ]);
         let value_indices = (0..9).collect_vec();
         let bytes = (&row).project(&value_indices).value_serialize();
@@ -261,10 +263,14 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                7, 8, 9,
+            ))),
         ]);
         let row2 = OwnedRow::new(vec![
-            Some(ScalarImpl::Interval(IntervalUnit::new(7, 8, 9))),
+            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                7, 8, 9,
+            ))),
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),
