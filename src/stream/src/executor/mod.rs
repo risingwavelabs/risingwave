@@ -615,6 +615,15 @@ impl Watermark {
         })
     }
 
+    /// Transform the watermark with the given output indices. If this watermark is not in the
+    /// output, return `None`.
+    pub fn transform_with_indices(self, output_indices: &[usize]) -> Option<Self> {
+        output_indices
+            .iter()
+            .position(|p| *p == self.col_idx)
+            .map(|new_col_idx| self.with_idx(new_col_idx))
+    }
+
     pub fn to_protobuf(&self) -> ProstWatermark {
         ProstWatermark {
             column: Some(ProstInputRef {
