@@ -182,8 +182,9 @@ macro_rules! impl_common_parser_logic {
                             if let Err(e) = self.parse_inner(content.as_ref(), builder.row_writer())
                                 .await
                             {
-                                self.source_ctx.report_stream_source_error(&e);
                                 tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                                // This will throw an error for batch
+                                self.source_ctx.report_user_source_error(e)?;
                                 continue;
                             }
 
