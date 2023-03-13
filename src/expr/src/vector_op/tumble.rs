@@ -91,7 +91,7 @@ mod tests {
     fn test_remainder_necessary() {
         let mut wrong_cnt = 0;
         for i in -30..30 {
-            let timestamp_micro_second = i * IntervalUnit::from_minutes(1).get_ms() * 1000;
+            let timestamp_micro_second = IntervalUnit::from_minutes(i).get_ms() * 1000;
             let window_size = IntervalUnit::from_minutes(5);
             let window_start = get_window_start(timestamp_micro_second, window_size).unwrap();
 
@@ -113,5 +113,55 @@ mod tests {
             assert!(timestamp_micro_second >= window_start)
         }
         assert_ne!(wrong_cnt, 0);
+    }
+
+    #[test]
+    fn test_mul() {
+        // The first window_start of hop window should be:
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`) + offset %
+        // window_slide. Let's pre calculate (`window_size` - `window_slide`).
+        for t in [-40, -35, -20, 0, 20, 35, 40] {
+            for slide in [1, 2, 4, 5] {
+                for size in [slide, 2 * slide, 3 * slide] {
+                    for offset in -3 * slide..3 * slide {
+                        let timestamp_micro_second = IntervalUnit::from_minutes(t).get_ms() * 1000;
+                        let t_hr = NaiveDateTimeWrapper::from_timestamp_uncheck(
+                            timestamp_micro_second / 1_000_000,
+                            (timestamp_micro_second % 1_000_000 * 1000) as u32,
+                        );
+                        let window_slide = IntervalUnit::from_minutes(slide);
+                        let window_size = IntervalUnit::from_minutes(size);
+                        let window_offset = IntervalUnit::from_minutes(offset);
+                        let a_window_start = get_window_start(
+                            timestamp_micro_second - window_size.get_ms() * 1000
+                                + window_slide.get_ms() * 1000,
+                            window_slide,
+                        )
+                        .unwrap()
+                            + (window_offset.get_ms() * 1000) % (window_size.get_ms() * 1000);
+                        let a_hr = NaiveDateTimeWrapper::from_timestamp_uncheck(
+                            a_window_start / 1_000_000,
+                            (a_window_start % 1_000_000 * 1000) as u32,
+                        );
+                        // let b_window_start = get_window_start(
+                        //     timestamp_micro_second
+                        //         - (window_size.get_ms() * 1000
+                        //             - window_slide.get_ms() * 1000
+                        //             - window_offset.get_ms() * 1000)
+                        //             % (window_slide.get_ms() * 1000),
+                        //     window_slide,
+                        // )
+                        // .unwrap();
+                        // let b_hr = NaiveDateTimeWrapper::from_timestamp_uncheck(
+                        //     b_window_start / 1_000_000,
+                        //     (b_window_start % 1_000_000 * 1000) as u32,
+                        // );
+                        println!("timestamp_micro_second = {}, window_size = {} , window_slide = {} , window_offset = {}",t_hr,window_size,window_slide,window_offset);
+                        println!("a_window_start = {}", a_hr);
+                        // assert_eq!(a_hr, b_hr);
+                    }
+                }
+            }
+        }
     }
 }
