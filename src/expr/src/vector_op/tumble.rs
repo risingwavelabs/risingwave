@@ -123,16 +123,13 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
-    use crate::vector_op::tumble::get_window_start;
+    use crate::vector_op::tumble::tumble_start_date_time;
 
     #[test]
     fn test_tumble_start_date_time() {
         let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let interval = IntervalUnit::from_minutes(30);
-        println!("{}", dt);
-        println!("{}", interval);
-        let w = get_window_start(dt, interval).unwrap().0;
-        println!("{}", w);
+        let w = tumble_start_date_time(dt, interval).unwrap().0;
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
         assert_eq!(w.day(), 22);
@@ -142,19 +139,37 @@ mod tests {
     }
 
     #[test]
-    fn test_tm_subtracts() {
-        let time = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22)
-            .and_hms_uncheck(22, 22, 22)
-            .0
-            .timestamp_micros();
-        let offset = IntervalUnit::from_minutes(30);
+    fn test_remainder_necessary() {
+        // Inspired by https://issues.apache.org/jira/browse/FLINK-26334
+        const DAY_MICOR_SECOND: i64 = 86400000000;
+        const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
 
-        assert_eq!(
-            tm_subtracts(time, offset).unwrap(),
-            NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22)
-                .and_hms_uncheck(21, 52, 22)
-                .0
-                .timestamp_micros()
-        )
+        let timestamp_micro_second: i64 = 0;
+
+        let window_size: IntervalUnit = IntervalUnit::from_minutes(10);
+        let offset: IntervalUnit = IntervalUnit::from_minutes(15);
+
+        let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
+            + window_size.get_days() as i64 * DAY_MICOR_SECOND
+            + window_size.get_ms() * 1000;
+
+        let offset_micro_second =
+            offset.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + offset.get_ms() * 1000;
+
+        let mut ret_timestamp_micro_second = timestamp_micro_second
+            - (timestamp_micro_second - offset_micro_second + window_size_micro_second)
+                % window_size_micro_second;
+
+        assert!(ret_timestamp_micro_second > timestamp_micro_second);
+
+        let remainder = (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
+        if remainder < 0 {
+            ret_timestamp_micro_second =
+                timestamp_micro_second - (remainder + window_size_micro_second);
+        } else {
+            ret_timestamp_micro_second = timestamp_micro_second - remainder;
+        }
+
+        assert!(ret_timestamp_micro_second <= timestamp_micro_second);
     }
 }
