@@ -170,7 +170,7 @@ impl ActorBuilder {
 
                 // Index the upstreams by the an external edge ID.
                 let upstreams = &self.upstreams[&EdgeId::UpstreamExternal {
-                    upstream_table_id: chain_node.table_id,
+                    upstream_table_id: chain_node.table_id.into(),
                     downstream_fragment_id: self.fragment_id,
                 }];
 
