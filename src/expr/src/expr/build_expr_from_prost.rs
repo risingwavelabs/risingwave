@@ -25,7 +25,7 @@ use super::expr_binary_bytes::{
     new_trim_characters,
 };
 use super::expr_binary_nonnull::{
-    new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp, new_tumble_start,
+    new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp,
 };
 use super::expr_binary_nullable::new_nullable_binary_expr;
 use super::expr_case::CaseExpression;
@@ -52,7 +52,6 @@ use super::expr_unary::{
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
-use crate::expr::expr_ternary::new_tumble_start_offset;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,

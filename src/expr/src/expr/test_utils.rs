@@ -27,7 +27,6 @@ use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::expr_ternary::new_tumble_start_offset;
 use super::{
     new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression, Result,
 };
@@ -149,11 +148,16 @@ pub fn make_hop_window_expression(
         )
         .boxed();
 
-        let hop_start = new_tumble_start_offset(
-            time_col_ref,
-            window_slide_expr,
-            offset_expr,
+        let hop_start = new_binary_expr(
+            expr_node::Type::TumbleStart,
             output_type.clone(),
+            new_binary_expr(
+                expr_node::Type::Subtract,
+                output_type.clone(),
+                time_col_ref,
+                window_size_sub_slide_expr,
+            )?,
+            window_slide_expr,
         )?;
         Ok(hop_start)
     };

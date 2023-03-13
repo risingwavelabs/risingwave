@@ -42,13 +42,28 @@ pub fn tumble_start_timestamptz(
     timestamp_micro_second: i64,
     window_size: IntervalUnit,
 ) -> Result<i64> {
+    let timestamp_micro_second = timestamp_micro_second;
+    let window_size = window_size;
     Ok(get_window_start(timestamp_micro_second, window_size)?)
 }
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
 #[inline(always)]
 fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> Result<i64> {
-    Ok(get_window_start(timestamp_micro_second, window_size)?)
+    const DAY_MICOR_SECOND: i64 = 86400000000;
+    const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
+
+    let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
+        + window_size.get_days() as i64 * DAY_MICOR_SECOND
+        + window_size.get_ms() * 1000;
+
+    // Inspired by https://issues.apache.org/jira/browse/FLINK-26334
+    let remainder = (timestamp_micro_second + window_size_micro_second) % window_size_micro_second;
+    if remainder < 0 {
+        Ok(timestamp_micro_second - (remainder + window_size_micro_second))
+    } else {
+        Ok(timestamp_micro_second - remainder)
+    }
 }
 
 #[cfg(test)]
@@ -57,7 +72,7 @@ mod tests {
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-    use crate::vector_op::tumble::tumble_start_date_time;
+    use crate::vector_op::tumble::{get_window_start, tumble_start_date_time};
 
     #[test]
     fn test_tumble_start_date_time() {
@@ -74,36 +89,29 @@ mod tests {
 
     #[test]
     fn test_remainder_necessary() {
+        let mut wrong_cnt = 0;
         for i in -30..30 {
-            for offset in [-15, 0, 15] {
-                let timestamp_micro_second = i * IntervalUnit::from_minutes(1).get_ms() * 1000;
-                let window_size = IntervalUnit::from_minutes(30);
-                let offset = IntervalUnit::from_minutes(offset);
-                let window_start =
-                    get_window_start_with_offset(timestamp_micro_second, window_size, offset)
-                        .unwrap();
+            let timestamp_micro_second = i * IntervalUnit::from_minutes(1).get_ms() * 1000;
+            let window_size = IntervalUnit::from_minutes(5);
+            let window_start = get_window_start(timestamp_micro_second, window_size).unwrap();
 
-                const DAY_MICOR_SECOND: i64 = 86400000000;
-                const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
+            const DAY_MICOR_SECOND: i64 = 86400000000;
+            const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
 
-                let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
-                    + window_size.get_days() as i64 * DAY_MICOR_SECOND
-                    + window_size.get_ms() * 1000;
+            let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
+                + window_size.get_days() as i64 * DAY_MICOR_SECOND
+                + window_size.get_ms() * 1000;
 
-                let offset_micro_second =
-                    offset.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + offset.get_ms() * 1000;
-                let remainder =
-                    (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
-                let default_window_start = timestamp_micro_second
-                    - (timestamp_micro_second - offset_micro_second) % window_size_micro_second;
-                if remainder < 0 {
-                    // which is wrong
-                    assert!(timestamp_micro_second < default_window_start)
-                } else {
-                    assert!(timestamp_micro_second >= default_window_start)
-                }
-                assert!(timestamp_micro_second >= window_start)
+            let default_window_start = timestamp_micro_second
+                - (timestamp_micro_second + window_size_micro_second) % window_size_micro_second;
+
+            if timestamp_micro_second < default_window_start {
+                // which is wrong
+                wrong_cnt = wrong_cnt + 1;
             }
+
+            assert!(timestamp_micro_second >= window_start)
         }
+        assert_ne!(wrong_cnt, 0);
     }
 }
