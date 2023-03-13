@@ -140,7 +140,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                         break;
                     case STREAM_CHUNK_PAYLOAD:
                         if (deserializer == null){
-                            deserializer = new StreamChunkDeserializer();
+                            deserializer = new StreamChunkDeserializer(tableSchema);
                         }
 
                         if (deserializer instanceof StreamChunkDeserializer){
