@@ -28,6 +28,7 @@ use risingwave_sqlparser::ast::{
 use crate::parse_sql;
 use crate::utils::{create_file, read_file_contents, write_to_file};
 use itertools::Itertools;
+use regex::Regex;
 
 type Result<A> = anyhow::Result<A>;
 
@@ -171,10 +172,12 @@ fn find_ddl_references_for_query_in_table_factor(
         TableFactor::Derived { subquery, .. } => find_ddl_references_for_query(subquery, ddl_references),
         TableFactor::TableFunction { name, args, .. } => {
             let name = name.real_value();
-            if (name == "hop" || name == "tumble") && args.len() > 2 {
+            // https://docs.rs/regex/latest/regex/#grouping-and-flags
+            let regex = Regex::new(r"(?i)(tumble|hop)").unwrap();
+            if regex.is_match(&name) && args.len() >= 3 {
                 let table_name = &args[0];
                 if let FunctionArgExpr::Expr(Expr::Identifier(table_name)) = table_name.get_expr() {
-                    ddl_references.insert(table_name.to_string());
+                    ddl_references.insert(table_name.to_string().to_lowercase());
                 }
             }
         }
@@ -191,7 +194,7 @@ mod tests {
     const DDL_AND_DML: &str = "
 CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
 CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
-CREATE TABLE T3 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T3 (V1 timestamp, V2 INT, V3 INT);
 CREATE MATERIALIZED VIEW M1 AS SELECT * FROM T1;
 CREATE MATERIALIZED VIEW M2 AS SELECT * FROM T2 LEFT JOIN T3 ON T2.V1 = T3.V2;
 CREATE MATERIALIZED VIEW M3 AS SELECT * FROM T1 LEFT JOIN T2;
@@ -200,8 +203,8 @@ INSERT INTO T1 VALUES(0, 0, 1);
 INSERT INTO T1 VALUES(0, 0, 2);
 INSERT INTO T2 VALUES(0, 0, 3);
 INSERT INTO T2 VALUES(0, 0, 4);
-INSERT INTO T3 VALUES(0, 0, 5);
-INSERT INTO T3 VALUES(0, 0, 6);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 5);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 6);
 SET RW_TWO_PHASE_AGG=TRUE;
     ";
 
@@ -221,6 +224,16 @@ SET RW_TWO_PHASE_AGG=TRUE;
         find_ddl_references_for_query(&query, &mut ddl_references);
         println!("{:#?}", ddl_references);
         assert!(ddl_references.contains("t1"));
+    }
+
+    #[test]
+    fn test_find_ddl_references_for_tumble() {
+        let sql = "SELECT * FROM TUMBLE(T3, V1, INTERVAL '3' DAY);";
+        let query = sql_to_query(sql);
+        let mut ddl_references = HashSet::new();
+        find_ddl_references_for_query(&query, &mut ddl_references);
+        println!("{:#?}", ddl_references);
+        assert!(ddl_references.contains("t3"));
     }
 
     #[test]
@@ -317,13 +330,13 @@ SET RW_TWO_PHASE_AGG = true;
         let expected = format!("\
 CREATE TABLE T1 (V1 INT, V2 INT, V3 INT);
 CREATE TABLE T2 (V1 INT, V2 INT, V3 INT);
-CREATE TABLE T3 (V1 INT, V2 INT, V3 INT);
+CREATE TABLE T3 (V1 TIMESTAMP, V2 INT, V3 INT);
 INSERT INTO T1 VALUES (0, 0, 1);
 INSERT INTO T1 VALUES (0, 0, 2);
 INSERT INTO T2 VALUES (0, 0, 3);
 INSERT INTO T2 VALUES (0, 0, 4);
-INSERT INTO T3 VALUES (0, 0, 5);
-INSERT INTO T3 VALUES (0, 0, 6);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 5);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 6);
 SET RW_TWO_PHASE_AGG = true;
 {query}
 ");
@@ -331,13 +344,17 @@ SET RW_TWO_PHASE_AGG = true;
     }
 
     #[test]
-    fn test_shrink_nested_join() {
-
-    }
-
-    #[test]
     fn test_shrink_tumble() {
-
+        let query = "SELECT * FROM TUMBLE(T3, V1, INTERVAL '3' DAY);";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE T3 (V1 TIMESTAMP, V2 INT, V3 INT);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 5);
+INSERT INTO T3 VALUES (TIMESTAMP '00:00:00', 0, 6);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
     }
 
     #[test]
