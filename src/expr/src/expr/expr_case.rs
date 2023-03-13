@@ -25,15 +25,9 @@ use crate::expr::{build_from_prost, BoxedExpression, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]
-pub struct WhenClause {
-    pub when: BoxedExpression,
-    pub then: BoxedExpression,
-}
-
-impl WhenClause {
-    pub fn new(when: BoxedExpression, then: BoxedExpression) -> Self {
-        WhenClause { when, then }
-    }
+struct WhenClause {
+    when: BoxedExpression,
+    then: BoxedExpression,
 }
 
 #[derive(Debug)]
@@ -146,7 +140,10 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
             if then_expr.return_type() != ret_type {
                 bail!("Type mismatched between then clause and case");
             }
-            let when_clause = WhenClause::new(when_expr, then_expr);
+            let when_clause = WhenClause {
+                when: when_expr,
+                then: then_expr,
+            };
             when_clauses.push(when_clause);
         }
         Ok(CaseExpression::new(ret_type, when_clauses, else_clause))

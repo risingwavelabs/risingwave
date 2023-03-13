@@ -19,10 +19,13 @@ use risingwave_common::array::{Array, ArrayMeta, ArrayRef, BoolArray, DataChunk}
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::expr::expr_node::Type;
+use risingwave_common::{bail, ensure};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::{BoxedExpression, Expression};
-use crate::Result;
+use super::build_expr_from_prost::get_children_and_return_type;
+use super::{build_from_prost, BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub struct SomeAllExpression {
@@ -191,5 +194,70 @@ impl Expression for SomeAllExpression {
         } else {
             Ok(None)
         }
+    }
+}
+
+impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
+    type Error = ExprError;
+
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        let outer_expr_type = prost.get_expr_type().unwrap();
+        let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;
+        ensure!(matches!(outer_return_type, DataType::Boolean));
+
+        let mut inner_expr_type = outer_children[0].get_expr_type().unwrap();
+        let (mut inner_children, mut inner_return_type) =
+            get_children_and_return_type(&outer_children[0])?;
+        let mut stack = vec![];
+        while inner_children.len() != 2 {
+            stack.push((inner_expr_type, inner_return_type));
+            inner_expr_type = inner_children[0].get_expr_type().unwrap();
+            (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
+        }
+
+        let [left_child, right_child]: [_; 2] = inner_children.try_into().unwrap();
+        let left_expr = build_from_prost(&left_child)?;
+        let right_expr = build_from_prost(&right_child)?;
+
+        let DataType::List { datatype: right_expr_return_type } = right_expr.return_type() else {
+        bail!("Expect Array Type");
+    };
+
+        let eval_func = {
+            let left_expr_input_ref = ExprNode {
+                expr_type: Type::InputRef as i32,
+                return_type: Some(left_expr.return_type().to_protobuf()),
+                rex_node: Some(RexNode::InputRef(0)),
+            };
+            let right_expr_input_ref = ExprNode {
+                expr_type: Type::InputRef as i32,
+                return_type: Some(right_expr_return_type.to_protobuf()),
+                rex_node: Some(RexNode::InputRef(1)),
+            };
+            let mut root_expr_node = ExprNode {
+                expr_type: inner_expr_type as i32,
+                return_type: Some(inner_return_type.to_protobuf()),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left_expr_input_ref, right_expr_input_ref],
+                })),
+            };
+            while let Some((expr_type, return_type)) = stack.pop() {
+                root_expr_node = ExprNode {
+                    expr_type: expr_type as i32,
+                    return_type: Some(return_type.to_protobuf()),
+                    rex_node: Some(RexNode::FuncCall(FunctionCall {
+                        children: vec![root_expr_node],
+                    })),
+                }
+            }
+            build_from_prost(&root_expr_node)?
+        };
+
+        Ok(SomeAllExpression::new(
+            left_expr,
+            right_expr,
+            outer_expr_type,
+            eval_func,
+        ))
     }
 }
