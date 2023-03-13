@@ -48,8 +48,8 @@ pub fn shrink_file(input_file_path: &str, outdir: &str) -> Result<()> {
     write_to_file(&mut file, reduced_sql)
 }
 
-fn shrink(file_contents: &str) -> Result<String> {
-    let sql_statements = parse_sql(file_contents);
+fn shrink(sql: &str) -> Result<String> {
+    let sql_statements = parse_sql(sql);
 
     // Session variable before the failing query.
     let session_variable = sql_statements
@@ -168,8 +168,46 @@ fn find_ddl_references_in_table_factor(
 mod tests {
     use super::*;
 
+    const DDL_AND_DML: &str = "
+CREATE TABLE t1 (v1 int, v2 int, v3 int);
+CREATE TABLE t2 (v1 int, v2 int, v3 int);
+CREATE TABLE t3 (v1 int, v2 int, v3 int);
+CREATE MATERIALIZED VIEW m1 as SELECT * from t1;
+CREATE MATERIALIZED VIEW m2 as SELECT * from t2 left join t3 on t2.v1 = t3.v2;
+CREATE MATERIALIZED VIEW m3 as SELECT * from t1 left join t2;
+CREATE MATERIALIZED VIEW m4 as SELECT * from m3;
+INSERT INTO t1 values(0, 0, 1);
+INSERT INTO t1 values(0, 0, 2);
+INSERT INTO t2 values(0, 0, 3);
+INSERT INTO t2 values(0, 0, 4);
+INSERT INTO t3 values(0, 0, 5);
+INSERT INTO t3 values(0, 0, 6);
+SET RW_TWO_PHASE_AGG=true;
+    ";
+
+    #[test]
+    fn test_shrink_values() {
+        let query = "SELECT 1;";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
+    }
+
+    #[test]
+    fn test_shrink_simple_table() {
+
+    }
+
     #[test]
     fn test_shrink_join() {
+
+    }
+
+    #[test]
+    fn test_shrink_nested_join() {
 
     }
 
@@ -184,12 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shrink_simple_table() {
-
-    }
-
-    #[test]
-    fn test_shrink_mview_on_mview() {
+    fn test_shrink_mview() {
 
     }
 }
