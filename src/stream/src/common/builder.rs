@@ -45,8 +45,10 @@ pub struct StreamChunkBuilder {
 
 impl Drop for StreamChunkBuilder {
     fn drop(&mut self) {
-        // Possible to fail in some corner cases but should not in unit tests
-        debug_assert_eq!(self.size, 0, "dropping non-empty stream chunk builder");
+        // Possible to fail when async task gets cancelled.
+        if self.size != 0 {
+            tracing::warn!("dropping non-empty stream chunk builder");
+        }
     }
 }
 

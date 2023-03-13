@@ -229,6 +229,15 @@ impl DataChunkBuilder {
     }
 }
 
+impl Drop for DataChunkBuilder {
+    fn drop(&mut self) {
+        // Possible to fail when async task gets cancelled.
+        if self.buffered_count != 0 {
+            tracing::warn!("dropping non-empty data chunk builder");
+        }
+    }
+}
+
 /// The iterator that yields data chunks during appending a data chunk to a [`DataChunkBuilder`].
 pub struct AppendDataChunk<'a> {
     builder: &'a mut DataChunkBuilder,
@@ -249,6 +258,7 @@ impl FusedIterator for AppendDataChunk<'_> {}
 
 impl Drop for AppendDataChunk<'_> {
     fn drop(&mut self) {
+        // Possible to fail when async task gets cancelled.
         if self.remaining.is_some() {
             tracing::warn!("dropping `AppendDataChunk` without exhausting it");
         }
