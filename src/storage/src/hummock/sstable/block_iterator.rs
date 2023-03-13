@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BytesMut, BufMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::KeyComparator;
@@ -101,8 +101,12 @@ impl BlockIterator {
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
         let mut full_key_encoded_without_table_id: BytesMut = Default::default();
         key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
-        self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
-        self.next_until_key(&full_key_encoded_without_table_id[..]);
+        if key.user_key.table_id.table_id()==self.block.table_id(){
+        
+            self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+        }
+        let full_key_encoded = key.encode();
+        self.next_until_key(&full_key_encoded);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
@@ -163,8 +167,11 @@ impl BlockIterator {
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
+        let mut buf: BytesMut = BytesMut::default();
+        buf.put_u32(self.block.table_id());
+        buf.put_slice(&&self.key);
         while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
+            && KeyComparator::compare_encoded_full_key(&buf[..], key) == Ordering::Less
         {
             self.next_inner();
         }
