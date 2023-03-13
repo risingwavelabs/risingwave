@@ -610,7 +610,7 @@ impl LogicalScan {
                     })
                     .collect(),
             }
-                .satisfies(required_order)
+            .satisfies(required_order)
         })?;
 
         let p2s_mapping = index.primary_to_secondary_mapping();

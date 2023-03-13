@@ -1240,7 +1240,7 @@
     BatchExchange { order: [idx_asc.a ASC], dist: Single }
     └─BatchSortAgg { group_key: [idx_asc.a], aggs: [count] }
       └─BatchScan { table: idx_asc, columns: [idx_asc.a], distribution: UpstreamHashShard(idx_asc.a) }
-- name: sort agg on an descending index
+- name: sort agg on a descending index
   sql: |
     create table t (a int, b int);
     create index idx_asc on t(a asc);
