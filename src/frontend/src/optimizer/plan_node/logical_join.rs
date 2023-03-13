@@ -1054,7 +1054,15 @@ impl LogicalJoin {
         }
     }
 
-    #[allow(dead_code)]
+    fn should_be_temporal_join(&self) -> bool {
+        let right = self.right();
+        if let Some(logical_scan) = right.as_logical_scan() {
+            logical_scan.for_system_time_as_of_now()
+        } else {
+            false
+        }
+    }
+
     fn to_stream_temporal_join(
         &self,
         predicate: EqJoinPredicate,
@@ -1069,7 +1077,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join needs a append-only left input".into(),
+                "Temporal join requires a append-only left input".into(),
                 "Please ensure your left input is append-only".into(),
             )));
         }
@@ -1077,10 +1085,17 @@ impl LogicalJoin {
         let right = self.right();
         let Some(logical_scan) = right.as_logical_scan() else {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join needs a table scan as its lookup table".into(),
+                "Temporal join requires a table scan as its lookup table".into(),
                 "Please provide a table scan".into(),
             )));
         };
+
+        if !logical_scan.for_system_time_as_of_now() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires a table defined as temporal table".into(),
+                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+            )));
+        }
 
         let table_desc = logical_scan.table_desc();
 
@@ -1364,7 +1379,12 @@ impl ToStream for LogicalJoin {
                 ))
                 .into());
             }
-            self.to_stream_hash_join(predicate, ctx)
+
+            if self.should_be_temporal_join() {
+                self.to_stream_temporal_join(predicate, ctx)
+            } else {
+                self.to_stream_hash_join(predicate, ctx)
+            }
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {

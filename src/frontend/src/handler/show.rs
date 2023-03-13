@@ -33,7 +33,7 @@ pub fn get_columns_from_table(
     table_name: ObjectName,
 ) -> Result<Vec<ColumnDesc>> {
     let mut binder = Binder::new(session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     let catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns,

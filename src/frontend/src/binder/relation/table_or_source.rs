@@ -37,6 +37,7 @@ pub struct BoundBaseTable {
     pub table_id: TableId,
     pub table_catalog: TableCatalog,
     pub table_indexes: Vec<Arc<IndexCatalog>>,
+    pub for_system_time_as_of_now: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -63,6 +64,7 @@ impl Binder {
         schema_name: Option<&str>,
         table_name: &str,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     ) -> Result<Relation> {
         fn is_system_schema(schema_name: &str) -> bool {
             SYSTEM_SCHEMAS.iter().any(|s| *s == schema_name)
@@ -126,7 +128,11 @@ impl Binder {
                         self.catalog
                             .get_table_by_name(&self.db_name, schema_path, table_name)
                     {
-                        self.resolve_table_relation(table_catalog, schema_name)?
+                        self.resolve_table_relation(
+                            table_catalog,
+                            schema_name,
+                            for_system_time_as_of_now,
+                        )?
                     } else if let Ok((source_catalog, _)) =
                         self.catalog
                             .get_source_by_name(&self.db_name, schema_path, table_name)
@@ -167,7 +173,11 @@ impl Binder {
                                 self.catalog.get_schema_by_name(&self.db_name, schema_name)
                             {
                                 if let Some(table_catalog) = schema.get_table_by_name(table_name) {
-                                    return self.resolve_table_relation(table_catalog, schema_name);
+                                    return self.resolve_table_relation(
+                                        table_catalog,
+                                        schema_name,
+                                        for_system_time_as_of_now,
+                                    );
                                 } else if let Some(source_catalog) =
                                     schema.get_source_by_name(table_name)
                                 {
@@ -194,6 +204,7 @@ impl Binder {
         &self,
         table_catalog: &TableCatalog,
         schema_name: &str,
+        for_system_time_as_of_now: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
         let table_id = table_catalog.id();
         let table_catalog = table_catalog.clone();
@@ -208,6 +219,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
+            for_system_time_as_of_now,
         };
 
         Ok::<_, RwError>((Relation::BaseTable(Box::new(table)), columns))
@@ -291,6 +303,7 @@ impl Binder {
             table_id,
             table_catalog,
             table_indexes,
+            for_system_time_as_of_now: false,
         })
     }
 

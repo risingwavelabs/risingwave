@@ -41,14 +41,23 @@ pub struct StreamTemporalJoin {
 
 impl StreamTemporalJoin {
     pub fn new(logical: LogicalJoin, eq_join_predicate: EqJoinPredicate) -> Self {
-        let ctx = logical.base.ctx.clone();
-
         assert!(
             logical.join_type() == JoinType::Inner || logical.join_type() == JoinType::LeftOuter
         );
         assert!(logical.left().append_only());
         assert!(logical.right().logical_pk() == eq_join_predicate.right_eq_indexes());
+        let right = logical.right();
+        let exchange: &StreamExchange = right
+            .as_stream_exchange()
+            .expect("should be a no shuffle stream exchange");
+        assert!(exchange.no_shuffle());
+        let exchange_input = exchange.input();
+        let scan: &StreamTableScan = exchange_input
+            .as_stream_table_scan()
+            .expect("should be a stream table scan");
+        assert!(scan.logical().for_system_time_as_of_now());
 
+        let ctx = logical.base.ctx.clone();
         let l2o = logical
             .l2i_col_mapping()
             .composite(&logical.i2o_col_mapping());

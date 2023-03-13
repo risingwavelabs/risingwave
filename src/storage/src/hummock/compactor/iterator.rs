@@ -233,15 +233,10 @@ impl ConcatSstableIterator {
     ) -> HummockResult<()> {
         self.sstable_iter.take();
         let seek_key: Option<FullKey<&[u8]>> = match (seek_key, self.key_range.left.is_empty()) {
-            (Some(seek_key), false) => {
-                match KeyComparator::compare_encoded_full_key(
-                    &seek_key.encode(),
-                    &self.key_range.left,
-                ) {
-                    Ordering::Less | Ordering::Equal => Some(FullKey::decode(&self.key_range.left)),
-                    Ordering::Greater => Some(seek_key),
-                }
-            }
+            (Some(seek_key), false) => match seek_key.cmp(&FullKey::decode(&self.key_range.left)) {
+                Ordering::Less | Ordering::Equal => Some(FullKey::decode(&self.key_range.left)),
+                Ordering::Greater => Some(seek_key),
+            },
             (Some(seek_key), true) => Some(seek_key),
             (None, true) => None,
             (None, false) => Some(FullKey::decode(&self.key_range.left)),
@@ -260,10 +255,7 @@ impl ConcatSstableIterator {
                     // start_index points to the greatest block whose smallest_key <= seek_key.
                     block_metas
                         .partition_point(|block| {
-                            KeyComparator::compare_encoded_full_key(
-                                &block.smallest_key,
-                                &seek_key.encode(),
-                            ) != Ordering::Greater
+                            seek_key.cmp(&FullKey::decode(&block.smallest_key)) != Ordering::Less
                         })
                         .saturating_sub(1)
                 }

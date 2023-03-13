@@ -18,7 +18,9 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{
+    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
+};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -408,6 +410,10 @@ pub async fn handle(
         )),
         Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
             ROLLBACK,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
+            SET_TRANSACTION,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => Err(
