@@ -312,8 +312,7 @@ mod tests {
             )
         );
 
-        let chunk = stream.next().await.unwrap().unwrap();
-        // print!("{}", chunk.to_pretty_string());
+        print!("{}", chunk.to_pretty_string());
         assert_eq!(
             chunk,
             DataChunk::from_pretty(

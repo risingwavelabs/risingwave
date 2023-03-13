@@ -116,13 +116,12 @@ pub fn make_hop_window_expression(
             ),
         })?
         .get();
-
     let output_type = DataType::window_of(&time_col_data_type).unwrap();
     let get_hop_window_last_start = || -> Result<BoxedExpression> {
         let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
 
-        let window_size_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
+        let window_slide_expr =
+            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
                 .boxed();
 
         let offset_expr = LiteralExpression::new(
@@ -133,7 +132,7 @@ pub fn make_hop_window_expression(
 
         let hop_start = new_tumble_start_offset(
             time_col_ref,
-            window_size_expr,
+            window_slide_expr,
             offset_expr,
             output_type.clone(),
         )?;

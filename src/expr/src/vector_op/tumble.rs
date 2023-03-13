@@ -174,4 +174,13 @@ mod tests {
         // which is right
         assert!(window_start_timestamp_micro_second <= timestamp_micro_second);
     }
+
+    #[test]
+    fn test_time() {
+        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 02).and_hms_uncheck(10, 51, 0);
+        let interval = IntervalUnit::from_minutes(30);
+        let w = tumble_start_date_time(dt, interval).unwrap().0;
+        // 2022-02-22 22:00:00
+        println!("{}", w);
+    }
 }
