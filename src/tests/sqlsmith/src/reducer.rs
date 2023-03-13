@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
 
 use crate::parse_sql;
 use crate::utils::{create_file, read_file_contents, write_to_file};
+use itertools::Itertools;
 
 type Result<A> = anyhow::Result<A>;
 
@@ -60,14 +61,9 @@ fn shrink(sql: &str) -> Result<String> {
         .last()
         .ok_or_else(|| anyhow!("Could not get last sql statement"))?;
 
-    let mut ddl_references = HashSet::new();
-    match failing_query {
-        Statement::Query(query) | Statement::CreateView { query, .. } => {
-            find_ddl_references(query.as_ref(), &mut ddl_references);
-            Ok(())
-        }
-        _ => Err(anyhow!("Last statement was not a query, can't shrink")),
-    }?;
+    let ddl_references = find_ddl_references(&sql_statements);
+
+    tracing::info!("[DDL REFERENCES]: {}", ddl_references.iter().join(", "));
 
     let mut ddl = sql_statements
         .iter()
@@ -104,43 +100,67 @@ fn shrink(sql: &str) -> Result<String> {
 
 }
 
-fn find_ddl_references(query: &Query, ddl_references: &mut HashSet<String>) {
+pub(crate) fn find_ddl_references(sql_statements: &Vec<Statement>) -> HashSet<String> {
+    let mut ddl_references = HashSet::new();
+    let mut sql_statements = sql_statements.iter().rev();
+    let failing = sql_statements.next().unwrap();
+    match failing {
+        Statement::Query(query) | Statement::CreateView { query, .. } => {
+            find_ddl_references_for_query(query.as_ref(), &mut ddl_references);
+        },
+        _ => {}
+    };
+    for sql_statement in sql_statements {
+         match sql_statement {
+            Statement::Query(query) => {
+                find_ddl_references_for_query(query.as_ref(), &mut ddl_references);
+            },
+            Statement::CreateView { query, name, .. } if ddl_references.contains(&name.real_value()) => {
+                find_ddl_references_for_query(query.as_ref(), &mut ddl_references);
+            }
+            _ => {}
+        };
+    }
+    ddl_references
+}
+
+pub(crate) fn find_ddl_references_for_query(query: &Query, ddl_references: &mut HashSet<String>) {
     let Query { with, body, .. } = query;
     if let Some(With { cte_tables, .. }) = with {
         for Cte { query, .. } in cte_tables {
-            find_ddl_references(query, ddl_references)
+            find_ddl_references_for_query(&query, ddl_references)
         }
-        find_ddl_references_in_set_expr(body, ddl_references);
     }
+    find_ddl_references_for_query_in_set_expr(body, ddl_references);
 }
 
-fn find_ddl_references_in_set_expr(set_expr: &SetExpr, ddl_references: &mut HashSet<String>) {
+fn find_ddl_references_for_query_in_set_expr(set_expr: &SetExpr, ddl_references: &mut HashSet<String>) {
     match set_expr {
         SetExpr::Select(box Select { from, .. }) => {
             for table_with_joins in from {
-                find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
+                find_ddl_references_for_query_in_table_with_joins(table_with_joins, ddl_references);
             }
         }
-        SetExpr::Query(q) => find_ddl_references(q, ddl_references),
+        SetExpr::Query(q) => find_ddl_references_for_query(q, ddl_references),
         SetExpr::SetOperation { left, right, .. } => {
-            find_ddl_references_in_set_expr(left, ddl_references);
-            find_ddl_references_in_set_expr(right, ddl_references);
+            find_ddl_references_for_query_in_set_expr(left, ddl_references);
+            find_ddl_references_for_query_in_set_expr(right, ddl_references);
         }
         SetExpr::Values(_) => {}
     }
 }
 
-fn find_ddl_references_in_table_with_joins(
+fn find_ddl_references_for_query_in_table_with_joins(
     TableWithJoins { relation, joins }: &TableWithJoins,
     ddl_references: &mut HashSet<String>,
 ) {
-    find_ddl_references_in_table_factor(relation, ddl_references);
+    find_ddl_references_for_query_in_table_factor(relation, ddl_references);
     for Join { relation, .. } in joins {
-        find_ddl_references_in_table_factor(relation, ddl_references);
+        find_ddl_references_for_query_in_table_factor(&relation, ddl_references);
     }
 }
 
-fn find_ddl_references_in_table_factor(
+fn find_ddl_references_for_query_in_table_factor(
     table_factor: &TableFactor,
     ddl_references: &mut HashSet<String>,
 ) {
@@ -148,7 +168,7 @@ fn find_ddl_references_in_table_factor(
         TableFactor::Table { name, .. } => {
             ddl_references.insert(name.real_value());
         }
-        TableFactor::Derived { subquery, .. } => find_ddl_references(subquery, ddl_references),
+        TableFactor::Derived { subquery, .. } => find_ddl_references_for_query(subquery, ddl_references),
         TableFactor::TableFunction { name, args, .. } => {
             let name = name.real_value();
             if (name == "hop" || name == "tumble") && args.len() > 2 {
@@ -159,7 +179,7 @@ fn find_ddl_references_in_table_factor(
             }
         }
         TableFactor::NestedJoin(table_with_joins) => {
-            find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
+            find_ddl_references_for_query_in_table_with_joins(table_with_joins, ddl_references);
         }
     }
 }
@@ -185,6 +205,72 @@ INSERT INTO t3 values(0, 0, 6);
 SET RW_TWO_PHASE_AGG=true;
     ";
 
+    fn sql_to_query(sql: &str) -> Box<Query> {
+        let sql_statement = parse_sql(sql).into_iter().next().unwrap();
+        match sql_statement {
+            Statement::Query(query) | Statement::CreateView { query, .. } => query,
+            _ => panic!("Last statement was not a query, can't shrink"),
+        }
+    }
+
+    #[test]
+    fn test_find_ddl_references_for_query_simple() {
+        let sql = "SELECT * from t1;";
+        let query = sql_to_query(sql);
+        let mut ddl_references = HashSet::new();
+        find_ddl_references_for_query(&query, &mut ddl_references);
+        println!("{:#?}", ddl_references);
+        assert!(ddl_references.contains("t1"));
+    }
+
+    #[test]
+    fn test_find_ddl_references_for_query_with_cte() {
+        let sql = "WITH with0 AS (select * from m3) SELECT * from with0";
+        let sql_statements = DDL_AND_DML.to_owned() + sql;
+        let sql_statements = parse_sql(sql_statements);
+        let ddl_references = find_ddl_references(&sql_statements);
+        assert!(ddl_references.contains("m3"));
+        assert!(ddl_references.contains("t1"));
+        assert!(ddl_references.contains("t2"));
+
+        assert!(!ddl_references.contains("m4"));
+        assert!(!ddl_references.contains("t3"));
+        assert!(!ddl_references.contains("m1"));
+        assert!(!ddl_references.contains("m2"));
+    }
+
+    #[test]
+    fn test_find_ddl_references_for_query_with_mv_on_mv() {
+        let sql = "WITH with0 AS (select * from m4) SELECT * from with0";
+        let sql_statements = DDL_AND_DML.to_owned() + sql;
+        let sql_statements = parse_sql(sql_statements);
+        let ddl_references = find_ddl_references(&sql_statements);
+        assert!(ddl_references.contains("m4"));
+        assert!(ddl_references.contains("m3"));
+        assert!(ddl_references.contains("t1"));
+        assert!(ddl_references.contains("t2"));
+
+        assert!(!ddl_references.contains("t3"));
+        assert!(!ddl_references.contains("m1"));
+        assert!(!ddl_references.contains("m2"));
+    }
+
+    #[test]
+    fn test_find_ddl_references_for_query_joins() {
+        let sql = "SELECT * from (t1 join t2 on t1.v1 = t2.v2) join t3 on t1.v1 = t2.v2";
+        let sql_statements = DDL_AND_DML.to_owned() + sql;
+        let sql_statements = parse_sql(sql_statements);
+        let ddl_references = find_ddl_references(&sql_statements);
+        assert!(ddl_references.contains("t1"));
+        assert!(ddl_references.contains("t2"));
+        assert!(ddl_references.contains("t3"));
+
+        assert!(!ddl_references.contains("m1"));
+        assert!(!ddl_references.contains("m2"));
+        assert!(!ddl_references.contains("m3"));
+        assert!(!ddl_references.contains("m4"));
+    }
+
     #[test]
     fn test_shrink_values() {
         let query = "SELECT 1;";
@@ -198,7 +284,30 @@ SET RW_TWO_PHASE_AGG = true;
 
     #[test]
     fn test_shrink_simple_table() {
+        let query = "SELECT * FROM t1;";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE t1 (v1 INT, v2 INT, v3 INT);
+INSERT INTO t1 VALUES (0, 0, 1);
+INSERT INTO t1 VALUES (0, 0, 2);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
+    }
 
+    #[test]
+    fn test_shrink_simple_table_with_alias() {
+        let query = "SELECT * FROM t1 AS s1;";
+        let sql = DDL_AND_DML.to_owned() + query;
+        let expected = format!("\
+CREATE TABLE t1 (v1 INT, v2 INT, v3 INT);
+INSERT INTO t1 VALUES (0, 0, 1);
+INSERT INTO t1 VALUES (0, 0, 2);
+SET RW_TWO_PHASE_AGG = true;
+{query}
+");
+        assert_eq!(expected, shrink(&sql).unwrap());
     }
 
     #[test]
