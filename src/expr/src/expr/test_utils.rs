@@ -130,6 +130,25 @@ pub fn make_hop_window_expression(
         )
         .boxed();
 
+        // The first window_start of hop window should be:
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`).
+        // Let's pre calculate (`window_size` - `window_slide`).
+        let window_size_sub_slide =
+            window_size
+                .checked_sub(&window_slide)
+                .ok_or_else(|| ExprError::InvalidParam {
+                    name: "window",
+                    reason: format!(
+                        "window_size {} cannot be subtracted by window_slide {}",
+                        window_size, window_slide
+                    ),
+                })?;
+        let window_size_sub_slide_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_size_sub_slide)),
+        )
+        .boxed();
+
         let hop_start = new_tumble_start_offset(
             time_col_ref,
             window_slide_expr,
