@@ -486,7 +486,7 @@ impl LogicalMultiJoin {
 
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         // Join tree internal representation
-        #[derive(Clone, Default)]
+        #[derive(Clone, Default, Debug)]
         struct JoinTreeNode {
             idx: Option<usize>,
             left: Option<Box<JoinTreeNode>>,
@@ -495,7 +495,7 @@ impl LogicalMultiJoin {
         }
 
         // join graph internal representation
-        #[derive(Clone)]
+        #[derive(Clone, Debug)]
         struct GraphNode {
             id: usize,
             join_tree: JoinTreeNode,
@@ -568,6 +568,11 @@ impl LogicalMultiJoin {
                             .unwrap()
                             .relations
                             .insert(*merge_node);
+                        nodes
+                            .get_mut(merge_node)
+                            .unwrap()
+                            .relations
+                            .insert(*adjacent_node);
                     }
                 }
                 let mut merge_graph_node = nodes.get_mut(merge_node).unwrap();
@@ -584,6 +589,9 @@ impl LogicalMultiJoin {
                 que.push_back(nodes);
             }
         }
+
+        eprintln!("74741: {:?}", optimized_bushy_tree);
+        eprintln!("{:?}", self.heuristic_ordering().unwrap());
 
         fn create_logical_join(
             s: &LogicalMultiJoin,
