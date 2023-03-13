@@ -228,6 +228,9 @@ impl BackupReader {
                 p.backup_storage_url().to_string(),
                 p.backup_storage_directory().to_string(),
             );
+            if config == self.store.load().1 {
+                continue;
+            }
             if let Err(e) = self.set_store(config.clone()).await {
                 // Retry is driven by periodic system params notification.
                 tracing::warn!(
