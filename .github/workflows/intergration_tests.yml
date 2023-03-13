@@ -1,7 +1,9 @@
 name: Integration Tests CI
 
 on:
-  pull_request:
+  schedule:
+  # Currently we build docker images at 12:00 (UTC), so run this at 13:00
+  - cron: '0 13 * * *'
 
 jobs:
   golangci:
