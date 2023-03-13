@@ -14,24 +14,16 @@
 
 //! Provides E2E Test runner functionality.
 
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
-
 use anyhow::anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
-use risingwave_sqlparser::ast::{
-    Cte, Expr, FunctionArgExpr, Join, Query, Select, SetExpr, Statement, TableFactor,
-    TableWithJoins, With,
-};
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
+use crate::utils::read_file_contents;
 use crate::validation::is_permissible_error;
 use crate::{
     create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
@@ -40,151 +32,6 @@ use crate::{
 
 type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
-
-/// Shrinks a given failing query file.
-/// The shrunk query will be written to [`{outdir}/{filename}.reduced.sql`].
-pub fn shrink(input_file_path: &str, outdir: &str) -> Result<()> {
-    let file_stem = Path::new(input_file_path)
-        .file_stem()
-        .ok_or_else(|| anyhow!("Failed to stem input file path: {input_file_path}"))?;
-    let output_file_path = format!("{outdir}/{}.reduced.sql", file_stem.to_string_lossy());
-
-    let file_contents = read_file_contents(input_file_path)?;
-    let sql_statements = parse_sql(file_contents);
-
-    // Session variable before the failing query.
-    let session_variable = sql_statements
-        .get(sql_statements.len() - 2)
-        .filter(|statement| matches!(statement, Statement::SetVariable { .. }));
-
-    let failing_query = sql_statements
-        .last()
-        .ok_or_else(|| anyhow!("Could not get last sql statement"))?;
-
-    let mut ddl_references = HashSet::new();
-    match failing_query {
-        Statement::Query(query) | Statement::CreateView { query, .. } => {
-            find_ddl_references(query.as_ref(), &mut ddl_references);
-            Ok(())
-        }
-        _ => Err(anyhow!("Last statement was not a query, can't shrink")),
-    }?;
-
-    let mut ddl = sql_statements
-        .iter()
-        .filter(|s| {
-            matches!(*s,
-            Statement::CreateView { name, .. } | Statement::CreateTable { name, .. }
-                if ddl_references.contains(&name.real_value()))
-        })
-        .collect();
-
-    let mut dml = sql_statements
-        .iter()
-        .filter(|s| {
-            matches!(*s,
-            Statement::Insert { table_name, .. }
-                if ddl_references.contains(&table_name.real_value()))
-        })
-        .collect();
-
-    let mut reduced_statements = vec![];
-    reduced_statements.append(&mut ddl);
-    reduced_statements.append(&mut dml);
-    if let Some(session_variable) = session_variable {
-        reduced_statements.push(session_variable);
-    }
-    reduced_statements.push(failing_query);
-
-    let sql = reduced_statements
-        .iter()
-        .map(|s| format!("{s};\n"))
-        .collect::<String>();
-
-    let mut file = create_file(output_file_path).unwrap();
-    write_to_file(&mut file, sql)
-}
-
-fn find_ddl_references(query: &Query, ddl_references: &mut HashSet<String>) {
-    let Query { with, body, .. } = query;
-    if let Some(With { cte_tables, .. }) = with {
-        for Cte { query, .. } in cte_tables {
-            find_ddl_references(query, ddl_references)
-        }
-        find_ddl_references_in_set_expr(body, ddl_references);
-    }
-}
-
-fn find_ddl_references_in_set_expr(set_expr: &SetExpr, ddl_references: &mut HashSet<String>) {
-    match set_expr {
-        SetExpr::Select(box Select { from, .. }) => {
-            for table_with_joins in from {
-                find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
-            }
-        }
-        SetExpr::Query(q) => find_ddl_references(q, ddl_references),
-        SetExpr::SetOperation { left, right, .. } => {
-            find_ddl_references_in_set_expr(left, ddl_references);
-            find_ddl_references_in_set_expr(right, ddl_references);
-        }
-        SetExpr::Values(_) => {}
-    }
-}
-
-fn find_ddl_references_in_table_with_joins(
-    TableWithJoins { relation, joins }: &TableWithJoins,
-    ddl_references: &mut HashSet<String>,
-) {
-    find_ddl_references_in_table_factor(relation, ddl_references);
-    for Join { relation, .. } in joins {
-        find_ddl_references_in_table_factor(relation, ddl_references);
-    }
-}
-
-fn find_ddl_references_in_table_factor(
-    table_factor: &TableFactor,
-    ddl_references: &mut HashSet<String>,
-) {
-    match table_factor {
-        TableFactor::Table { name, .. } => {
-            ddl_references.insert(name.real_value());
-        }
-        TableFactor::Derived { subquery, .. } => find_ddl_references(subquery, ddl_references),
-        TableFactor::TableFunction { name, args, .. } => {
-            let name = name.real_value();
-            if (name == "hop" || name == "tumble") && args.len() > 2 {
-                let table_name = &args[0];
-                if let FunctionArgExpr::Expr(Expr::Identifier(table_name)) = table_name.get_expr() {
-                    ddl_references.insert(table_name.to_string());
-                }
-            }
-        }
-        TableFactor::NestedJoin(table_with_joins) => {
-            find_ddl_references_in_table_with_joins(table_with_joins, ddl_references);
-        }
-    }
-}
-
-/// e2e test runner for pre-generated queries from sqlsmith
-pub async fn run_pre_generated(client: &Client, outdir: &str) {
-    let queries_path = format!("{}/queries.sql", outdir);
-    let queries = read_file_contents(queries_path).unwrap();
-    let ddl = queries
-        .lines()
-        .filter(|s| s.starts_with("CREATE"))
-        .collect::<String>();
-    tracing::info!("[DDL]: {}", ddl);
-    let dml = queries
-        .lines()
-        .filter(|s| s.starts_with("INSERT"))
-        .collect::<String>();
-    tracing::info!("[DML]: {}", dml);
-    for statement in parse_sql(queries) {
-        let sql = statement.to_string();
-        tracing::info!("[EXECUTING STATEMENT]: {}", sql);
-        validate_response(client.simple_query(&sql).await).unwrap();
-    }
-}
 
 /// Query Generator
 /// If we encounter an expected error, just skip.
@@ -547,30 +394,6 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     for stmt in sql.lines() {
         client.simple_query(stmt).await.unwrap();
     }
-}
-
-fn read_file_contents<P: AsRef<Path>>(filepath: P) -> Result<String> {
-    std::fs::read_to_string(filepath.as_ref()).map_err(|e| {
-        anyhow!(
-            "Failed to read contents from {} due to {e}",
-            filepath.as_ref().display()
-        )
-    })
-}
-
-fn create_file<P: AsRef<Path>>(filepath: P) -> Result<File> {
-    std::fs::File::create(filepath.as_ref()).map_err(|e| {
-        anyhow!(
-            "Failed to create file: {} due to {e}",
-            filepath.as_ref().display()
-        )
-    })
-}
-
-fn write_to_file<S: AsRef<str>>(file: &mut File, contents: S) -> Result<()> {
-    let s = contents.as_ref().as_bytes();
-    file.write_all(s)
-        .map_err(|e| anyhow!("Failed to write file due to {e}"))
 }
 
 /// Validate client responses, returning a count of skipped queries.
