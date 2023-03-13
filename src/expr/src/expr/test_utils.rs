@@ -126,11 +126,11 @@ pub fn make_hop_window_expression(
             LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
                 .boxed();
 
-        let offset_expr = LiteralExpression::new(
-            DataType::Interval,
-            Some(ScalarImpl::Interval(window_offset)),
-        )
-        .boxed();
+        // let offset_expr = LiteralExpression::new(
+        //     DataType::Interval,
+        //     Some(ScalarImpl::Interval(window_offset)),
+        // )
+        // .boxed();
 
         // The first window_start of hop window should be:
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`) + offset %
