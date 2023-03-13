@@ -60,7 +60,7 @@ use tokio::task::JoinHandle;
 use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
-use crate::memory_management::policy::StreamingOnlyPolicy;
+use crate::memory_management::policy::memory_control_policy_from_config;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
@@ -79,7 +79,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config));
+    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -105,7 +105,10 @@ pub async fn compute_node_serve(
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
 
     let state_store_url = {
-        let from_local = opts.state_store.unwrap_or("hummock+memory".to_string());
+        let from_local = opts
+            .state_store
+            .clone()
+            .unwrap_or_else(|| "hummock+memory".to_string());
         system_params.state_store(from_local)
     };
 
@@ -115,6 +118,7 @@ pub async fn compute_node_serve(
         total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
     let compute_memory_bytes =
         validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
+    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -239,7 +243,7 @@ pub async fn compute_node_serve(
         compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
-        Box::new(StreamingOnlyPolicy {}),
+        memory_control_policy,
     );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));

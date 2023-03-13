@@ -737,6 +737,13 @@ template:
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
 
+    # The policy for compute node memory control.
+    memory-control-policy: streaming-only
+
+    #  The proportion of streaming memory to all available memory for computing. Only works when
+    # `memory_control_policy` is set to "streaming-batch".
+    streaming-memory-proportion: 0.7
+
     # Parallelism of tasks per compute node
     parallelism: 4
 
