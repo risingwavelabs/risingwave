@@ -20,6 +20,7 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -57,7 +58,8 @@ public class JDBCSink extends SinkBase {
         }
     }
 
-    private List<String> getPkColumnNames(Connection conn, String tableName) {
+    private static List<String> getPkColumnNames(Connection conn, String tableName) {
+        List<String> pkColumnNames = new ArrayList<>();
         try {
             var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
             while (pks.next()) {
@@ -66,7 +68,7 @@ public class JDBCSink extends SinkBase {
         } catch (SQLException e) {
             throw Status.INTERNAL.withCause(e).asRuntimeException();
         }
-        LOG.info("detected pk {}", this.pkColumnNames);
+        LOG.info("detected pk {}", pkColumnNames);
         return pkColumnNames;
     }
 
