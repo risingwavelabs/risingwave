@@ -640,7 +640,7 @@
     LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time] }
     └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
       └─LogicalProject { exprs: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, date_time, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY id ORDER BY price DESC NULLS FIRST, date_time ASC NULLS LAST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY id ORDER BY price DESC, date_time ASC) }
           └─LogicalFilter { predicate: (id = auction) AND (date_time >= date_time) AND (date_time <= expires) }
             └─LogicalJoin { type: Inner, on: true, output: all }
               ├─LogicalSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, _row_id], time_range: [(Unbounded, Unbounded)] }
@@ -1000,7 +1000,7 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
     └─LogicalFilter { predicate: (ROW_NUMBER <= 1:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC NULLS FIRST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC) }
           └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
@@ -1047,13 +1047,13 @@
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
     └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
       └─LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
-        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC NULLS FIRST) }
+        └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC) }
           └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
   optimizer_error: |
     internal error: OverAgg can not be transformed. Plan:
     LogicalProject { exprs: [auction, bidder, price, channel, url, date_time, extra, ROW_NUMBER] }
     └─LogicalFilter { predicate: (ROW_NUMBER <= 10:Int32) }
-      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC NULLS FIRST) }
+      └─LogicalOverAgg { window_function: ROW_NUMBER() OVER(PARTITION BY auction ORDER BY price DESC) }
         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id], time_range: [(Unbounded, Unbounded)] }
 - id: nexmark_q20
   before:

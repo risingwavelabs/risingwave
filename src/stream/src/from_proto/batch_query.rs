@@ -44,7 +44,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let order_types = table_desc
             .pk
             .iter()
-            .map(|desc| OrderType::from_protobuf(&desc.get_order_type().unwrap().direction()))
+            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
             .collect_vec();
 
         let column_descs = table_desc

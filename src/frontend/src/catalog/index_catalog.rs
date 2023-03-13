@@ -18,13 +18,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::Index as ProstIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
-use crate::optimizer::property::FieldOrder;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
@@ -98,16 +98,13 @@ impl IndexCatalog {
         }
     }
 
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<FieldOrder> {
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| FieldOrder {
-                index: *mapping.get(&x.index).unwrap(),
-                direct: x.direct,
-            })
+            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
             .collect_vec()
     }
 

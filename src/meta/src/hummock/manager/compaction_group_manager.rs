@@ -34,7 +34,9 @@ use risingwave_pb::hummock::{
 use tokio::sync::{OnceCell, RwLock};
 
 use super::write_lock;
-use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+use crate::hummock::compaction::compaction_config::{
+    validate_compaction_config, CompactionConfigBuilder,
+};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::{drop_sst, read_lock, HummockManager};
 use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
@@ -59,7 +61,7 @@ impl<S: MetaStore> HummockManager<S> {
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
-            default_config: config,
+            provided_default_config_for_test: config,
         });
         compaction_group_manager
             .write()
@@ -69,23 +71,14 @@ impl<S: MetaStore> HummockManager<S> {
         Ok(compaction_group_manager)
     }
 
-    /// Gets compaction group config for `compaction_group_id` if exists, or returns default.
-    pub async fn get_compaction_group_config(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> CompactionGroup {
-        self.compaction_group_manager
-            .read()
-            .await
-            .get_compaction_group_config(compaction_group_id)
-    }
-
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
+    /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
         get_compaction_group_ids(&read_lock!(self, versioning).await.current_version)
     }
 
+    /// The implementation acquires `compaction_group_manager` lock.
     pub async fn get_compaction_group_map(&self) -> BTreeMap<CompactionGroupId, CompactionGroup> {
         self.compaction_group_manager
             .read()
@@ -167,6 +160,7 @@ impl<S: MetaStore> HummockManager<S> {
 
     /// Prefer using [`register_table_fragments`].
     /// Use [`register_table_ids`] only when [`TableFragments`] is unavailable.
+    /// The implementation acquires `versioning` lock.
     #[named]
     pub async fn register_table_ids(
         &self,
@@ -222,8 +216,10 @@ impl<S: MetaStore> HummockManager<S> {
                     // The config for inexistent group may have been created in
                     // compaction test.
                     let config = self
-                        .get_compaction_group_config(group_id)
+                        .compaction_group_manager
+                        .read()
                         .await
+                        .get_compaction_group_config(group_id)
                         .compaction_config
                         .as_ref()
                         .clone();
@@ -265,6 +261,7 @@ impl<S: MetaStore> HummockManager<S> {
 
     /// Prefer using [`unregister_table_fragments_vec`].
     /// Only Use [`unregister_table_ids`] only when [`TableFragments`] is unavailable.
+    /// The implementation acquires `versioning` lock and `compaction_group_manager` lock.
     #[named]
     pub async fn unregister_table_ids(&self, table_ids: &[StateTableId]) -> Result<()> {
         if table_ids.is_empty() {
@@ -386,7 +383,14 @@ impl<S: MetaStore> HummockManager<S> {
                 config_to_update,
                 self.env.meta_store(),
             )
-            .await
+            .await?;
+        if config_to_update
+            .iter()
+            .any(|c| matches!(c, MutableConfig::Level0StopWriteThresholdSubLevelNumber(_)))
+        {
+            self.try_update_write_limits(compaction_group_ids).await;
+        }
+        Ok(())
     }
 
     /// Gets complete compaction group info.
@@ -483,8 +487,10 @@ impl<S: MetaStore> HummockManager<S> {
             .or_default()
             .group_deltas;
         let config = self
-            .get_compaction_group_config(new_group_id)
+            .compaction_group_manager
+            .read()
             .await
+            .get_compaction_group_config(new_group_id)
             .compaction_config
             .as_ref()
             .clone();
@@ -540,7 +546,8 @@ impl<S: MetaStore> HummockManager<S> {
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
-    default_config: CompactionConfig,
+    /// Provided default config, only used in test.
+    provided_default_config_for_test: CompactionConfig,
 }
 
 impl CompactionGroupManager {
@@ -557,16 +564,31 @@ impl CompactionGroupManager {
         Ok(())
     }
 
-    fn get_compaction_group_config(
+    /// Gets compaction group config for `compaction_group_id` if exists, or returns default.
+    pub(super) fn get_compaction_group_config(
         &self,
         compaction_group_id: CompactionGroupId,
     ) -> CompactionGroup {
-        self.compaction_groups
-            .get(&compaction_group_id)
-            .cloned()
-            .unwrap_or_else(|| {
-                CompactionGroup::new(compaction_group_id, self.default_config.clone())
+        self.get_compaction_group_configs(&[compaction_group_id])
+            .into_values()
+            .next()
+            .unwrap()
+    }
+
+    /// Gets compaction group configs for `compaction_group_ids` if exists, or returns default.
+    pub(super) fn get_compaction_group_configs(
+        &self,
+        compaction_group_ids: &[CompactionGroupId],
+    ) -> HashMap<CompactionGroupId, CompactionGroup> {
+        compaction_group_ids
+            .iter()
+            .map(|id| {
+                let group = self.compaction_groups.get(id).cloned().unwrap_or_else(|| {
+                    CompactionGroup::new(*id, self.provided_default_config_for_test.clone())
+                });
+                (*id, group)
             })
+            .collect()
     }
 
     async fn update_compaction_config<S: MetaStore>(
@@ -580,16 +602,23 @@ impl CompactionGroupManager {
             if !compaction_groups.contains_key(compaction_group_id) {
                 compaction_groups.insert(
                     *compaction_group_id,
-                    CompactionGroup::new(*compaction_group_id, self.default_config.clone()),
+                    CompactionGroup::new(
+                        *compaction_group_id,
+                        self.provided_default_config_for_test.clone(),
+                    ),
                 );
             }
             let group = compaction_groups.get(compaction_group_id).unwrap();
             let mut config = group.compaction_config.as_ref().clone();
             update_compaction_config(&mut config, config_to_update);
+            if let Err(reason) = validate_compaction_config(&config) {
+                return Err(Error::CompactionGroup(reason));
+            }
             let mut new_group = group.clone();
             new_group.compaction_config = Arc::new(config);
             compaction_groups.insert(*compaction_group_id, new_group);
         }
+
         let mut trx = Transaction::default();
         compaction_groups.apply_to_txn(&mut trx)?;
         meta_store.txn(trx).await?;
@@ -673,6 +702,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             }
             MutableConfig::MaxSubCompaction(c) => {
                 target.max_sub_compaction = *c;
+            }
+            MutableConfig::Level0StopWriteThresholdSubLevelNumber(c) => {
+                target.level0_stop_write_threshold_sub_level_number = *c;
             }
         }
     }

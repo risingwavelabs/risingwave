@@ -229,7 +229,7 @@ fn print_kv_pairs(
 
     while block_iter.is_valid() {
         let raw_full_key = block_iter.key();
-        let full_key = FullKey::decode(block_iter.key());
+        let full_key = block_iter.key();
         let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();
@@ -245,7 +245,7 @@ fn print_kv_pairs(
         println!(
             "\t\t  full key: {:02x?}, len={}",
             raw_full_key,
-            raw_full_key.len()
+            raw_full_key.encoded_len()
         );
         println!("\t\tfull value: {:02x?}, len={}", full_val, full_val.len());
         println!("\t\t  user key: {:02x?}", raw_user_key);
