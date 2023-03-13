@@ -125,16 +125,18 @@ pub fn make_hop_window_expression(
             LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
                 .boxed();
 
-        let window_slide_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
-                .boxed();
+        let window_offset_expr = LiteralExpression::new(
+            DataType::Interval,
+            Some(ScalarImpl::Interval(window_offset)),
+        )
+        .boxed();
 
         let hop_start = new_tumble_start_offset(
             time_col_ref,
             window_slide_expr,
-            offset_expr,
+            window_offset_expr,
             output_type.clone(),
-        );
+        )?;
         Ok(hop_start)
     };
 
