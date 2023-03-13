@@ -251,7 +251,7 @@ mod tests {
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
 
-        let window_slide = IntervalUnit::from_minutes(10);
+        let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
         let window_offset = IntervalUnit::from_minutes(0);
 
