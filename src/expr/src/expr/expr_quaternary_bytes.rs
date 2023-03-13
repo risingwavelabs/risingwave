@@ -14,31 +14,6 @@
 
 //! For expression that accept 4 arguments + 1 bytes writer as input.
 
-use risingwave_common::array::{I32Array, Utf8Array};
-use risingwave_common::types::DataType;
-
-use crate::expr::template::QuaternaryBytesExpression;
-use crate::expr::BoxedExpression;
-use crate::vector_op::overlay::overlay_for;
-
-pub fn new_overlay_for_exp(
-    s: BoxedExpression,
-    new_sub_str: BoxedExpression,
-    start: BoxedExpression,
-    count: BoxedExpression,
-    return_type: DataType,
-) -> BoxedExpression {
-    Box::new(QuaternaryBytesExpression::<
-        Utf8Array,
-        Utf8Array,
-        I32Array,
-        I32Array,
-        _,
-    >::new(
-        s, new_sub_str, start, count, return_type, overlay_for
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::DataChunk;
