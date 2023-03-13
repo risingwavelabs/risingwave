@@ -169,13 +169,13 @@ pub fn make_hop_window_expression(
             )?,
             window_slide_expr,
         )?;
-        let hop_start_with_offset = new_binary_expr(
-            Type::Modulus,
-            output_type.clone(),
-            hop_start,
-            offset_mod_size,
-        )?;
-        Ok(hop_start_with_offset)
+        // let hop_start_with_offset = new_binary_expr(
+        //     Type::Modulus,
+        //     output_type.clone(),
+        //     hop_start,
+        //     offset_mod_size,
+        // )?;
+        Ok(hop_start)
     };
 
     let mut window_start_exprs = Vec::with_capacity(units);
