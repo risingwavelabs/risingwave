@@ -18,7 +18,7 @@ use anyhow::Context;
 use futures::future::try_join_all;
 use futures_async_stream::try_stream;
 use risingwave_common::array::{
-    ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
+    ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
 };
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
@@ -245,7 +245,7 @@ mod tests {
         // Schema of the table
         let mut schema = schema_test_utils::ii();
         schema.fields.push(struct_field);
-        schema.fields.push(Field::unnamed(DataType::Int64)); // row_id column
+        schema.fields.push(Field::unnamed(DataType::Serial)); // row_id column
 
         let row_id_index = Some(3);
 
