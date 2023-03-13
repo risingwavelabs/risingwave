@@ -68,6 +68,39 @@ extract_failing_query() {
   grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' || true
 }
 
+# Extract fail info from [`generate-*.log`] in log dir
+# Also shrinks query.
+extract_fail_info_from_logs() {
+  for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
+  do
+    LOGFILE="$LOGDIR/$LOGFILENAME"
+    REASON=$(get_failure_reason < "$LOGFILE")
+    if [[ -n "$REASON" ]]; then
+      echo_err "[INFO] $LOGFILE Encountered bug due to $REASON"
+
+      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
+      SEED=$(echo "$LOGFILENAME" | sed -E 's/generate\-(.*)\.log/\1/')
+      DDL=$(extract_ddl < "$LOGFILE")
+      GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
+      DML=$(extract_dml < "$LOGFILE")
+      TEST_SESSION=$(extract_last_session < "$LOGFILE")
+      QUERY=$(extract_failing_query < "$LOGFILE")
+      FAIL_DIR="$OUTDIR/failed/$SEED"
+      mkdir -p "$FAIL_DIR"
+      echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
+      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
+      echo -e "$REASON" > "$FAIL_DIR/fail.log"
+      echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
+
+      FROM_TABLE_NAMES=$(extract_from "$QUERY")
+
+      cp "$LOGFILE" "$FAIL_DIR/$LOGFILENAME"
+    fi
+  done
+}
+
+################# Shrink
+
 extract_from() {
   echo "$1" \
    | sed -E "s/^.*FROM (([[:alnum:]]( AS [[:alnum:]])?, )*[[:alnum:]]( AS [[:alnum:]])?).*;?$/\1/" \
@@ -133,37 +166,6 @@ extract_ddl_by_names() {
 shrink_query() {
   FROM_NAMES=$(extract_from "$1")
   extract_ddl_by_names "$FROM_NAMES"
-}
-
-# Extract fail info from [`generate-*.log`] in log dir
-# Also shrinks query.
-extract_fail_info_from_logs() {
-  for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
-  do
-    LOGFILE="$LOGDIR/$LOGFILENAME"
-    REASON=$(get_failure_reason < "$LOGFILE")
-    if [[ -n "$REASON" ]]; then
-      echo_err "[INFO] $LOGFILE Encountered bug due to $REASON"
-
-      # TODO(Noel): Perhaps add verbose logs here, if any part is missing.
-      SEED=$(echo "$LOGFILENAME" | sed -E 's/generate\-(.*)\.log/\1/')
-      DDL=$(extract_ddl < "$LOGFILE")
-      GLOBAL_SESSION=$(extract_global_session < "$LOGFILE")
-      DML=$(extract_dml < "$LOGFILE")
-      TEST_SESSION=$(extract_last_session < "$LOGFILE")
-      QUERY=$(extract_failing_query < "$LOGFILE")
-      FAIL_DIR="$OUTDIR/failed/$SEED"
-      mkdir -p "$FAIL_DIR"
-      echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
-      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
-      echo -e "$REASON" > "$FAIL_DIR/fail.log"
-      echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
-
-      FROM_TABLE_NAMES=$(extract_from "$QUERY")
-
-      cp "$LOGFILE" "$FAIL_DIR/$LOGFILENAME"
-    fi
-  done
 }
 
 ################# Generate
