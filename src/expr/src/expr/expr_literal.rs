@@ -120,6 +120,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};

@@ -524,44 +524,6 @@
         └─StreamExchange { dist: Single }
           └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: order by NULLS FIRST/LAST and default
-  sql: |
-    create table t(v1 int, v2 varchar, v3 int);
-    select sum(v1 order by v1, v2 NULLS FIRST, v3 NULLS LAST) as s1 from t;
-  logical_plan: |
-    LogicalProject { exprs: [sum(t.v1)] }
-    └─LogicalAgg { aggs: [sum(t.v1)] }
-      └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan_for_batch: |
-    LogicalAgg { aggs: [sum(t.v1)] }
-    └─LogicalScan { table: t, columns: [t.v1] }
-  stream_plan: |
-    StreamMaterialize { columns: [s1], pk_columns: [], pk_conflict: "no check" }
-    └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
-- name: order by complex expressions
-  sql: |
-    create table t(v1 int, v2 varchar, v3 int);
-    select sum(v1 order by v1 + v3 ASC, length(v2) * v3 DESC NULLS FIRST) as s1 from t;
-  logical_plan: |
-    LogicalProject { exprs: [sum(t.v1)] }
-    └─LogicalAgg { aggs: [sum(t.v1)] }
-      └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
-  optimized_logical_plan_for_batch: |
-    LogicalAgg { aggs: [sum(t.v1)] }
-    └─LogicalScan { table: t, columns: [t.v1] }
-  stream_plan: |
-    StreamMaterialize { columns: [s1], pk_columns: [], pk_conflict: "no check" }
-    └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(t.v1)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(t.v1)] }
-            └─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - name: filter clause
   sql: |
     create table t(v1 int);

@@ -13,19 +13,19 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Formatter};
+use std::sync::Arc;
 
+use anyhow::anyhow;
 use risingwave_common::array::DataChunk;
-use risingwave_common::error::ErrorCode::InternalError;
-use risingwave_common::error::Result;
 use tokio::sync::mpsc;
 
-use crate::error::BatchError::SenderError;
-use crate::error::Result as BatchResult;
+use crate::error::BatchError::{Internal, SenderError};
+use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
 use crate::task::channel::{ChanReceiver, ChanReceiverImpl, ChanSender, ChanSenderImpl};
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
 #[derive(Clone)]
 pub struct FifoSender {
-    sender: mpsc::Sender<Option<DataChunkInChannel>>,
+    sender: mpsc::Sender<BatchSharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl Debug for FifoSender {
@@ -35,24 +35,30 @@ impl Debug for FifoSender {
 }
 
 pub struct FifoReceiver {
-    receiver: mpsc::Receiver<Option<DataChunkInChannel>>,
+    receiver: mpsc::Receiver<BatchSharedResult<Option<DataChunkInChannel>>>,
 }
 
 impl ChanSender for FifoSender {
-    async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
+    async fn send(&mut self, chunk: DataChunk) -> BatchResult<()> {
+        let data = DataChunkInChannel::new(chunk);
         self.sender
-            .send(chunk.map(DataChunkInChannel::new))
+            .send(Ok(Some(data)))
             .await
             .map_err(|_| SenderError)
+    }
+
+    async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
+        let result = error.map(Err).unwrap_or(Ok(None));
+        self.sender.send(result).await.map_err(|_| SenderError)
     }
 }
 
 impl ChanReceiver for FifoReceiver {
-    async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
+    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
         match self.receiver.recv().await {
-            Some(data_chunk) => Ok(data_chunk),
+            Some(data_chunk) => data_chunk,
             // Early close should be treated as error.
-            None => Err(InternalError("broken fifo_channel".to_string()).into()),
+            None => Err(Arc::new(Internal(anyhow!("broken fifo_channel")))),
         }
     }
 }

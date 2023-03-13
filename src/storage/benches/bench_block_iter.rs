@@ -14,6 +14,7 @@
 
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_storage::hummock::{
     Block, BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
 };
@@ -88,7 +89,7 @@ fn bench_block_iter(c: &mut Criterion) {
     iter.seek_to_first();
     for t in 1..=TABLES_PER_SSTABLE {
         for i in 1..=KEYS_PER_TABLE {
-            assert_eq!(iter.key(), key(t, i).to_vec());
+            assert_eq!(iter.key(), FullKey::decode(&key(t, i)));
             assert_eq!(iter.value(), value(i).to_vec());
             iter.next();
         }
@@ -108,7 +109,7 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
     let mut builder = BlockBuilder::new(options);
     for tt in 1..=t {
         for ii in 1..=i {
-            builder.add(&key(tt, ii), &value(ii));
+            builder.add(FullKey::decode(&key(tt, ii)), &value(ii));
         }
     }
     Bytes::from(builder.build().to_vec())

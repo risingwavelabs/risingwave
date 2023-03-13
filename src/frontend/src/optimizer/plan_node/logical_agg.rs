@@ -19,11 +19,11 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
 use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
-    ProjectBuilder,
+    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, ProjectBuilder,
 };
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
@@ -39,10 +39,7 @@ use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::{Asc, Desc};
-use crate::optimizer::property::{
-    Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
-};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -334,29 +331,26 @@ impl LogicalAgg {
     // aggregation and use sort aggregation. The data type of the columns need to be int32
     fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
         let group_key_order = Order {
-            field_order: self
+            column_orders: self
                 .group_key()
                 .iter()
                 .map(|group_by_idx| {
-                    let direct = if required_order.field_order.contains(&FieldOrder {
-                        index: *group_by_idx,
-                        direct: Desc,
-                    }) {
+                    let order_type = if required_order
+                        .column_orders
+                        .contains(&ColumnOrder::new(*group_by_idx, OrderType::descending()))
+                    {
                         // If output requires descending order, use descending order
-                        Desc
+                        OrderType::descending()
                     } else {
                         // In all other cases use ascending order
-                        Asc
+                        OrderType::ascending()
                     };
-                    FieldOrder {
-                        index: *group_by_idx,
-                        direct,
-                    }
+                    ColumnOrder::new(*group_by_idx, order_type)
                 })
                 .collect(),
         };
         return (
-            !required_order.field_order.is_empty()
+            !required_order.column_orders.is_empty()
                 && group_key_order.satisfies(required_order)
                 && self.group_key().iter().all(|group_by_idx| {
                     self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
@@ -373,9 +367,9 @@ impl LogicalAgg {
             new_logical
                 .input()
                 .order()
-                .field_order
+                .column_orders
                 .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
+                .any(|order| order.column_index == *group_by_idx)
                 && new_logical
                     .input()
                     .schema()
@@ -594,11 +588,7 @@ impl LogicalAggBuilder {
             .iter()
             .map(|e| {
                 let index = self.input_proj_builder.add_expr(&e.expr)?;
-                Ok(PlanAggOrderByField {
-                    input: InputRef::new(index, e.expr.return_type()),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                })
+                Ok(ColumnOrder::new(index, e.order_type))
             })
             .try_collect()
             .map_err(|err: &'static str| {
@@ -1005,9 +995,8 @@ impl LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
-                agg_call.order_by.iter_mut().for_each(|field| {
-                    let i = &mut field.input;
-                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                agg_call.order_by.iter_mut().for_each(|o| {
+                    o.column_index = input_col_change.map(o.column_index);
                 });
                 agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
@@ -1097,7 +1086,7 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_key().len();
                     let agg_call = self.agg_calls()[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
-                    tmp.extend(agg_call.order_by.iter().map(|x| x.input.index()));
+                    tmp.extend(agg_call.order_by.iter().map(|x| x.column_index));
                     // collect columns used in aggregate filter expressions
                     for i in &agg_call.filter.conjunctions {
                         tmp.union_with(&i.collect_input_refs(input_cnt));

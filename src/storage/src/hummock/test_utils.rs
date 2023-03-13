@@ -148,7 +148,7 @@ pub async fn gen_test_sstable_data(
 ) -> (Bytes, SstableMeta) {
     let mut b = SstableBuilder::for_test(0, mock_sst_writer(&opts), opts);
     for (key, value) in kv_iter {
-        b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
+        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
     }
     let output = b.finish().await.unwrap();
     output.writer_output
@@ -211,7 +211,7 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
     let mut b = SstableBuilder::for_test(sst_id, writer, opts);
     for (key, value) in kv_iter {
-        b.add(&key.to_ref(), value.as_slice(), true).await.unwrap();
+        b.add(key.to_ref(), value.as_slice(), true).await.unwrap();
     }
     b.add_delete_range(range_tombstones);
     let output = b.finish().await.unwrap();

@@ -251,7 +251,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     // use std::collections::BTreeMap;
     use super::*;
@@ -264,11 +264,11 @@ mod tests {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let schema = Schema::new(data_types.into_iter().map(Field::unnamed).collect());
         let storage_key = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
         ];
         let pk = vec![0, 1];
-        let order_by = vec![OrderPair::new(0, OrderType::Ascending)];
+        let order_by = vec![ColumnOrder::new(0, OrderType::ascending())];
 
         create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
     }
@@ -278,7 +278,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;
@@ -357,7 +357,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;

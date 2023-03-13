@@ -13,78 +13,179 @@
 // limitations under the License.
 
 use std::cmp::{Ord, Ordering};
+use std::fmt;
 use std::sync::Arc;
 
+use parse_display::Display;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 
 use crate::array::{Array, ArrayImpl, DataChunk};
+use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-pub enum OrderType {
+// TODO(rc): to support `NULLS FIRST | LAST`, we may need to hide this enum, forcing developers use
+// `OrderType` instead.
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
+pub enum Direction {
+    #[default]
+    #[display("ASC")]
     Ascending,
+    #[display("DESC")]
     Descending,
 }
 
-impl OrderType {
-    // TODO(rc): from `PbOrderType`
-    pub fn from_protobuf(order_type: &PbDirection) -> OrderType {
+impl Direction {
+    pub fn from_protobuf(order_type: &PbDirection) -> Direction {
         match order_type {
-            PbDirection::Ascending => OrderType::Ascending,
-            PbDirection::Descending => OrderType::Descending,
+            PbDirection::Ascending => Direction::Ascending,
+            PbDirection::Descending => Direction::Descending,
             PbDirection::Unspecified => unreachable!(),
         }
     }
 
-    // TODO(rc): to `PbOrderType`
     pub fn to_protobuf(self) -> PbDirection {
         match self {
-            OrderType::Ascending => PbDirection::Ascending,
-            OrderType::Descending => PbDirection::Descending,
+            Direction::Ascending => PbDirection::Ascending,
+            Direction::Descending => PbDirection::Descending,
         }
     }
 }
 
-/// Column index with an order type (ASC or DESC). Used to represent a sort key (`Vec<OrderPair>`).
+#[allow(dead_code)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
+pub enum NullsAre {
+    #[default]
+    #[display("LARGEST")]
+    Largest,
+    #[display("SMALLEST")]
+    Smallest,
+}
+
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
+pub struct OrderType {
+    direction: Direction,
+    // TODO(rc): enable `NULLS FIRST | LAST`
+    // nulls_are: NullsAre,
+}
+
+impl OrderType {
+    pub fn from_protobuf(order_type: &PbOrderType) -> OrderType {
+        OrderType {
+            direction: Direction::from_protobuf(&order_type.direction()),
+        }
+    }
+
+    pub fn to_protobuf(self) -> PbOrderType {
+        PbOrderType {
+            direction: self.direction.to_protobuf() as _,
+        }
+    }
+}
+
+impl OrderType {
+    pub const fn new(direction: Direction) -> Self {
+        Self { direction }
+    }
+
+    /// Create an ascending order type, with other options set to default.
+    pub const fn ascending() -> Self {
+        Self {
+            direction: Direction::Ascending,
+        }
+    }
+
+    /// Create an descending order type, with other options set to default.
+    pub const fn descending() -> Self {
+        Self {
+            direction: Direction::Descending,
+        }
+    }
+
+    /// Get the order direction.
+    pub fn direction(&self) -> Direction {
+        self.direction
+    }
+}
+
+impl fmt::Display for OrderType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.direction)
+    }
+}
+
+/// Column index with an order type (ASC or DESC). Used to represent a sort key
+/// (`Vec<ColumnOrder>`).
 ///
 /// Corresponds to protobuf [`PbColumnOrder`].
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct OrderPair {
-    pub column_idx: usize,
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub struct ColumnOrder {
+    pub column_index: usize,
     pub order_type: OrderType,
 }
 
-impl OrderPair {
-    pub fn new(column_idx: usize, order_type: OrderType) -> Self {
+impl ColumnOrder {
+    pub fn new(column_index: usize, order_type: OrderType) -> Self {
         Self {
-            column_idx,
+            column_index,
             order_type,
         }
     }
 
+    /// Shift the column index with offset.
+    pub fn shift_with_offset(&mut self, offset: isize) {
+        self.column_index = (self.column_index as isize + offset) as usize;
+    }
+}
+
+impl ColumnOrder {
     pub fn from_protobuf(column_order: &PbColumnOrder) -> Self {
-        OrderPair {
-            column_idx: column_order.column_index as _,
-            order_type: OrderType::from_protobuf(
-                &column_order.get_order_type().unwrap().direction(),
-            ),
+        ColumnOrder {
+            column_index: column_order.column_index as _,
+            order_type: OrderType::from_protobuf(column_order.get_order_type().unwrap()),
         }
     }
 
     pub fn to_protobuf(&self) -> PbColumnOrder {
         PbColumnOrder {
-            column_index: self.column_idx as _,
-            order_type: Some(PbOrderType {
-                direction: self.order_type.to_protobuf() as _,
-            }),
+            column_index: self.column_index as _,
+            order_type: Some(self.order_type.to_protobuf()),
         }
+    }
+}
+
+impl fmt::Display for ColumnOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "${} {}", self.column_index, self.order_type)
+    }
+}
+
+impl fmt::Debug for ColumnOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
+pub struct ColumnOrderDisplay<'a> {
+    pub column_order: &'a ColumnOrder,
+    pub input_schema: &'a Schema,
+}
+
+impl fmt::Display for ColumnOrderDisplay<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let that = self.column_order;
+        write!(
+            f,
+            "{} {}",
+            FieldDisplay(self.input_schema.fields.get(that.column_index).unwrap()),
+            that.order_type
+        )
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct HeapElem {
-    pub order_pairs: Arc<Vec<OrderPair>>,
+    pub column_orders: Arc<Vec<ColumnOrder>>,
     pub chunk: DataChunk,
     pub chunk_idx: usize,
     pub elem_idx: usize,
@@ -109,7 +210,7 @@ impl Ord for HeapElem {
                 self.elem_idx,
                 &other.chunk,
                 other.elem_idx,
-                self.order_pairs.as_ref(),
+                self.column_orders.as_ref(),
             )
             .unwrap()
         };
@@ -142,7 +243,7 @@ where
         (Some(_), None) => Ordering::Less,
         (None, Some(_)) => Ordering::Greater,
     };
-    if *order_type == OrderType::Descending {
+    if order_type.direction == Direction::Descending {
         ord.reverse()
     } else {
         ord
@@ -172,15 +273,15 @@ pub fn compare_rows_in_chunk(
     lhs_idx: usize,
     rhs_data_chunk: &DataChunk,
     rhs_idx: usize,
-    order_pairs: &[OrderPair],
+    column_orders: &[ColumnOrder],
 ) -> Result<Ordering> {
-    for order_pair in order_pairs.iter() {
-        let lhs_array = lhs_data_chunk.column_at(order_pair.column_idx).array();
-        let rhs_array = rhs_data_chunk.column_at(order_pair.column_idx).array();
+    for column_order in column_orders.iter() {
+        let lhs_array = lhs_data_chunk.column_at(column_order.column_index).array();
+        let rhs_array = rhs_data_chunk.column_at(column_order.column_index).array();
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &order_pair.order_type)),)*
+                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &column_order.order_type)),)*
                     (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
                 }?
             }
@@ -199,7 +300,7 @@ mod tests {
 
     use itertools::Itertools;
 
-    use super::{OrderPair, OrderType};
+    use super::{ColumnOrder, OrderType};
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
@@ -220,18 +321,18 @@ mod tests {
             &[row1, row2],
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
-        let order_pairs = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Descending),
+        let column_orders = vec![
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
         );
     }
 
@@ -282,8 +383,8 @@ mod tests {
             ]))),
         ]);
 
-        let order_pairs = (0..row1.len())
-            .map(|i| OrderPair::new(i, OrderType::Ascending))
+        let column_orders = (0..row1.len())
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
             .collect_vec();
 
         let chunk = DataChunk::from_rows(
@@ -309,11 +410,11 @@ mod tests {
         );
         assert_eq!(
             Ordering::Equal,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 0, &column_orders).unwrap()
         );
         assert_eq!(
             Ordering::Less,
-            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &order_pairs).unwrap()
+            compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
         );
     }
 }

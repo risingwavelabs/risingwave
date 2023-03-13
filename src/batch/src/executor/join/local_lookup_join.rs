@@ -465,7 +465,7 @@ mod tests {
     use risingwave_common::hash::HashKeyDispatcher;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{
         new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
     };
@@ -557,20 +557,20 @@ mod tests {
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
         ];
 
         Box::new(SortExecutor::new(
             child,
-            order_pairs,
+            column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
         ))

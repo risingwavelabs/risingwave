@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
@@ -41,9 +41,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, false> {
     pub fn new_without_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -69,9 +69,9 @@ impl<S: StateStore> AppendOnlyTopNExecutor<S, true> {
     pub fn new_with_ties(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -113,9 +113,9 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         state_table: StateTable<S>,
     ) -> StreamResult<Self> {
@@ -137,7 +137,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
                 identity: format!("AppendOnlyTopNExecutor {:X}", executor_id),
             },
             managed_state,
-            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit),
             cache_key_serde,
         })
@@ -203,7 +203,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
@@ -246,14 +246,14 @@ mod tests {
         }
     }
 
-    fn storage_key() -> Vec<OrderPair> {
+    fn storage_key() -> Vec<ColumnOrder> {
         order_by()
     }
 
-    fn order_by() -> Vec<OrderPair> {
+    fn order_by() -> Vec<ColumnOrder> {
         vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
         ]
     }
 
@@ -284,7 +284,7 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &pk_indices(),
         )
         .await;
@@ -366,7 +366,7 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &pk_indices(),
         )
         .await;

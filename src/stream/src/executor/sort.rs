@@ -504,7 +504,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let pk_indices = create_pk_indices();
         StateTable::new_without_distribution(
             memory_state_store,

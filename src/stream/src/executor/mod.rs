@@ -88,6 +88,7 @@ mod sort_buffer;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
+mod temporal_join;
 mod top_n;
 mod union;
 mod watermark;
@@ -129,6 +130,7 @@ use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use sort::SortExecutor;
 pub use source::*;
+pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };

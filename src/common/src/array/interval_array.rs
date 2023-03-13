@@ -23,6 +23,7 @@ mod tests {
     use super::IntervalArray;
     use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
     use crate::array::{Array, ArrayBuilder};
+    use crate::types::interval::test_utils::IntervalUnitTestExt;
 
     #[test]
     fn test_interval_array() {
@@ -34,19 +35,16 @@ mod tests {
         }
         let ret_arr = array_builder.finish();
         for v in ret_arr.iter().flatten() {
-            assert_eq!(v.get_years(), 1);
             assert_eq!(v.get_months(), 12);
             assert_eq!(v.get_days(), 0);
         }
         let ret_arr = IntervalArray::from_iter([Some(IntervalUnit::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
-        assert_eq!(v.get_years(), 1);
         assert_eq!(v.get_months(), 12);
         assert_eq!(v.get_days(), 0);
         let v = ret_arr.value_at(1);
         assert_eq!(v, None);
         let v = unsafe { ret_arr.value_at_unchecked(0).unwrap() };
-        assert_eq!(v.get_years(), 1);
         assert_eq!(v.get_months(), 12);
         assert_eq!(v.get_days(), 0);
     }
