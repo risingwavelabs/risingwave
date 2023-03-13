@@ -170,13 +170,25 @@ impl<T: BufMut + ?Sized> BufMutExt for &mut T {}
 impl<T: Buf + ?Sized> BufExt for &mut T {}
 
 #[derive(Clone)]
+pub struct RestartPoint {
+    pub offset: u32,
+    pub len_type: LenType,
+}
+
+impl RestartPoint {
+    fn size_of() -> usize {
+        std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
+    }
+}
+
+#[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
     pub data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
-    /// Restart points. (offset, k-v-type)
-    restart_points: Vec<(u32, LenType)>,
+    /// Restart points.
+    restart_points: Vec<RestartPoint>,
 }
 
 impl Block {
@@ -188,6 +200,7 @@ impl Block {
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
+
         let buf = match compression {
             CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
             CompressionAlgorithm::Lz4 => {
@@ -218,7 +231,7 @@ impl Block {
     pub fn decode_from_raw(buf: Bytes) -> Self {
         // decode restart_points_type_index
         let n_index = ((&buf[buf.len() - 4..]).get_u32_le()) as usize;
-        let index_data_len = size_of::<u32>() + n_index * (size_of::<u32>() + size_of::<u8>());
+        let index_data_len = size_of::<u32>() + n_index * RestartPoint::size_of();
         let data_len = buf.len() - index_data_len;
         let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 4];
 
@@ -228,7 +241,10 @@ impl Block {
             let offset = restart_points_type_index_buf.get_u32_le();
             let value = restart_points_type_index_buf.get_u8();
 
-            index_key_vec.push((offset, LenType::from(value)));
+            index_key_vec.push(RestartPoint {
+                offset,
+                len_type: LenType::from(value),
+            });
         }
 
         // Decode restart points.
@@ -242,11 +258,16 @@ impl Block {
         let mut type_index: usize = 0;
         for _ in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
-            if type_index < index_key_vec.len() - 1 && offset >= index_key_vec[type_index + 1].0 {
+            if type_index < index_key_vec.len() - 1
+                && offset >= index_key_vec[type_index + 1].offset
+            {
                 type_index += 1;
             }
 
-            restart_points.push((offset, index_key_vec[type_index].1));
+            restart_points.push(RestartPoint {
+                offset,
+                len_type: index_key_vec[type_index].len_type,
+            });
         }
 
         Block {
@@ -269,7 +290,7 @@ impl Block {
 
     /// Gets restart point by index.
     pub fn restart_point(&self, index: usize) -> u32 {
-        self.restart_points[index].0
+        self.restart_points[index].offset
     }
 
     /// Gets restart point len.
@@ -280,7 +301,7 @@ impl Block {
     /// Searches the index of the restart point by partition point.
     pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
     where
-        P: FnMut(&(u32, LenType)) -> bool,
+        P: FnMut(&RestartPoint) -> bool,
     {
         self.restart_points.partition_point(pred)
     }
@@ -294,7 +315,7 @@ impl Block {
     }
 
     pub fn restart_points_type_index(&self, index: usize) -> LenType {
-        self.restart_points[index].1
+        self.restart_points[index].len_type
     }
 }
 
@@ -403,8 +424,9 @@ pub struct BlockBuilder {
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 
-    // (offset, LenType)
-    restart_points_type_index: Vec<(u32, LenType)>,
+    // restart_points_type_index stores only the restart_point corresponding to each type change,
+    // as an index, in order to reduce space usage
+    restart_points_type_index: Vec<RestartPoint>,
 }
 
 impl BlockBuilder {
@@ -437,6 +459,8 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, key: &[u8], value: &[u8]) {
+        self.debug_valid();
+
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
@@ -447,10 +471,14 @@ impl BlockBuilder {
         // Update restart point if needed and calculate diff key.
         let len_type = LenType::new(key.len(), value.len());
 
-        let type_mismatch = if let Some((_, last_type)) = self.restart_points_type_index.last() {
-            len_type != *last_type
+        let type_mismatch = if let Some(RestartPoint {
+            offset: _,
+            len_type: last_len_type,
+        }) = self.restart_points_type_index.last()
+        {
+            len_type != *last_len_type
         } else {
-            false
+            true
         };
 
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
@@ -458,8 +486,9 @@ impl BlockBuilder {
 
             self.restart_points.push(offset);
 
-            if type_mismatch || self.restart_points_type_index.is_empty() {
-                self.restart_points_type_index.push((offset, len_type));
+            if type_mismatch {
+                self.restart_points_type_index
+                    .push(RestartPoint { offset, len_type });
             }
 
             key
@@ -494,6 +523,7 @@ impl BlockBuilder {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.restart_points.clear();
+        self.restart_points_type_index.clear();
         self.last_key.clear();
         self.entry_count = 0;
     }
@@ -502,7 +532,7 @@ impl BlockBuilder {
     pub fn uncompressed_block_size(&mut self) -> usize {
         self.buf.len()
             + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
-            + (std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()) // (offset + len_type(u8)) * len
+            + RestartPoint::size_of() // (offset + len_type(u8)) * len
                 * self.restart_points_type_index.len()
             + std::mem::size_of::<u32>() // restart_points_type_index len
     }
@@ -527,14 +557,10 @@ impl BlockBuilder {
         }
 
         self.buf.put_u32_le(self.restart_points.len() as u32);
-        for (offset, len_type) in &self.restart_points_type_index {
+        for RestartPoint { offset, len_type } in &self.restart_points_type_index {
             self.buf.put_u32_le(*offset);
             self.buf.put_u8(*len_type as u8);
         }
-
-        // for len_type in self.restart_points_type_index.values() {
-        //     self.buf.put_u8(*len_type as u8);
-        // }
 
         self.buf
             .put_u32_le(self.restart_points_type_index.len() as u32);
@@ -580,15 +606,24 @@ impl BlockBuilder {
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        // block + restart_points + restart_points.len + restart_points_type_indexs +
-        // restart_points_type_indexs.len compression_algorithm + checksum
+        // block + restart_points + restart_points.len + restart_points_type_indices +
+        // restart_points_type_indics.len compression_algorithm + checksum
         self.buf.len()
             + std::mem::size_of::<u32>() * self.restart_points.len() // restart_points
             + std::mem::size_of::<u32>() // restart_points.len
-            + (std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()) * self.restart_points_type_index.len() // restart_points_type_indexs
-            + std::mem::size_of::<u32>() // restart_points_type_indexs.len
-            + 1 // compression_algorithm
-            + 8 // checksum
+            + RestartPoint::size_of() * self.restart_points_type_index.len() // restart_points_type_indics
+            + std::mem::size_of::<u32>() // restart_points_type_indics.len
+            + std::mem::size_of::<CompressionAlgorithm>() // compression_algorithm
+            + std::mem::size_of::<u64>() // checksum
+    }
+
+    pub fn debug_valid(&self) {
+        if self.entry_count == 0 {
+            debug_assert!(self.buf.is_empty());
+            debug_assert!(self.restart_points.is_empty());
+            debug_assert!(self.restart_points_type_index.is_empty());
+            debug_assert!(self.last_key.is_empty());
+        }
     }
 }
 
@@ -609,6 +644,7 @@ mod tests {
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
@@ -653,9 +689,11 @@ mod tests {
         builder.add(&full_key(b"k2", 2), b"v02");
         builder.add(&full_key(b"k3", 3), b"v03");
         builder.add(&full_key(b"k4", 4), b"v04");
-        let capcitiy = builder.uncompressed_block_size();
+        let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
+
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());
+        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
@@ -701,6 +739,7 @@ mod tests {
         builder.add(&full_key(&large_key, 2), b"v2");
         builder.add(&full_key(&xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
@@ -728,46 +767,57 @@ mod tests {
     fn test_block_restart_point() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        for index in 0..100 {
-            if index < 50 {
-                let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
-                medium_key.push(index);
-                builder.add(&full_key(&medium_key, 1), b"v1");
-            } else if index < 80 {
-                let mut large_key = vec![b'B'; MAX_KEY_LEN];
-                large_key.push(index);
-                builder.add(&full_key(&large_key, 2), b"v2");
-            } else {
-                let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
-                xlarge_key.push(index);
-                builder.add(&full_key(&xlarge_key, 3), b"v3");
+
+        const KEY_COUNT: u8 = 100;
+        const BUILDER_COUNT: u8 = 5;
+
+        for _ in 0..BUILDER_COUNT {
+            for index in 0..KEY_COUNT {
+                if index < 50 {
+                    let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
+                    medium_key.push(index);
+                    builder.add(&full_key(&medium_key, 1), b"v1");
+                } else if index < 80 {
+                    let mut large_key = vec![b'B'; MAX_KEY_LEN];
+                    large_key.push(index);
+                    builder.add(&full_key(&large_key, 2), b"v2");
+                } else {
+                    let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
+                    xlarge_key.push(index);
+                    builder.add(&full_key(&xlarge_key, 3), b"v3");
+                }
             }
-        }
 
-        let capacity = builder.uncompressed_block_size();
-        let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
-        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
-        bi.seek_to_first();
-        assert!(bi.is_valid());
+            let capacity = builder.uncompressed_block_size();
+            assert_eq!(capacity, builder.approximate_len() - 9);
+            let buf = builder.build().to_vec();
+            let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+            let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
+            bi.seek_to_first();
+            assert!(bi.is_valid());
 
-        for index in 0..100 {
-            if index < 50 {
-                let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
-                medium_key.push(index);
-                assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
-            } else if index < 80 {
-                let mut large_key = vec![b'B'; MAX_KEY_LEN];
-                large_key.push(index);
-                assert_eq!(&full_key(&large_key, 2)[..], bi.key());
-            } else {
-                let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
-                xlarge_key.push(index);
-                assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
+            let mut index: u8 = 0;
+            for _ in 0..KEY_COUNT {
+                index += 1;
+                if index < 50 {
+                    let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
+                    medium_key.push(index);
+                    // assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
+                } else if index < 80 {
+                    let mut large_key = vec![b'B'; MAX_KEY_LEN];
+                    large_key.push(index);
+                    // assert_eq!(&full_key(&large_key, 2)[..], bi.key());
+                } else {
+                    let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
+                    xlarge_key.push(index);
+                    // assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
+                }
+                bi.next();
             }
-            bi.next();
-        }
 
-        assert!(!bi.is_valid());
+            assert!(!bi.is_valid());
+            assert_eq!(KEY_COUNT, index);
+            builder.clear();
+        }
     }
 }

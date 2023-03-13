@@ -18,7 +18,7 @@ use std::ops::Range;
 use bytes::BytesMut;
 use risingwave_hummock_sdk::KeyComparator;
 
-use super::{KeyPrefix, LenType};
+use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
@@ -48,7 +48,7 @@ impl BlockIterator {
             key: BytesMut::default(),
             value_range: 0..0,
             entry_len: 0,
-            last_len_type: LenType::U16U32,
+            last_len_type: LenType::U8U8,
         }
     }
 
@@ -74,17 +74,6 @@ impl BlockIterator {
 
     pub fn key(&self) -> &[u8] {
         assert!(self.is_valid());
-
-        if self.key.len() < 8 {
-            unsafe {
-                tracing::info!(
-                    "INVALIDA offset {} type {:?} block_data {:?}",
-                    self.offset,
-                    self.last_len_type,
-                    (*self.block.block).data,
-                )
-            }
-        }
 
         &self.key[..]
     }
@@ -235,14 +224,19 @@ impl BlockIterator {
     fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
-            .search_restart_partition_point(|&(probe, decoder)| {
-                let prefix = self.decode_prefix_at(probe as usize, decoder);
-                let probe_key = &self.block.data()[prefix.diff_key_range()];
-                match KeyComparator::compare_encoded_full_key(probe_key, key) {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
-                }
-            })
+            .search_restart_partition_point(
+                |&RestartPoint {
+                     offset: probe,
+                     len_type: decoder,
+                 }| {
+                    let prefix = self.decode_prefix_at(probe as usize, decoder);
+                    let probe_key = &self.block.data()[prefix.diff_key_range()];
+                    match KeyComparator::compare_encoded_full_key(probe_key, key) {
+                        Ordering::Less | Ordering::Equal => true,
+                        Ordering::Greater => false,
+                    }
+                },
+            )
             .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
     }
 
