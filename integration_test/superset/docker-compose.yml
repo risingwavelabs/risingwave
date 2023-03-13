@@ -1,0 +1,135 @@
+x-superset-image: &superset-image apache/superset:${TAG:-latest-dev}
+x-superset-depends-on:
+  &superset-depends-on
+  - db
+  - redis
+x-superset-volumes:
+  # /app/pythonpath_docker will be appended to the PYTHONPATH in the final container
+  &superset-volumes
+  - ./docker:/app/docker
+  - superset_home:/app/superset_home
+
+version: "3.7"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  datagen:
+    image: ghcr.io/risingwavelabs/demo-datagen:v1.0.9
+    depends_on: [message_queue]
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode livestream --qps 2 kafka --brokers message_queue:29092
+    restart: always
+    container_name: datagen
+
+  # Superset-related services #
+
+  redis:
+    image: redis:latest
+    container_name: superset_cache
+    restart: unless-stopped
+    volumes:
+      - redis:/data
+
+  db:
+    env_file: docker/.env-non-dev
+    image: postgres:10
+    container_name: superset_db
+    restart: unless-stopped
+    volumes:
+      - db_home:/var/lib/postgresql/data
+
+  superset:
+    env_file: docker/.env-non-dev
+    image: *superset-image
+    container_name: superset_app
+    command: [ "/app/docker/docker-bootstrap.sh", "app-gunicorn" ]
+    user: "root"
+    restart: unless-stopped
+    ports:
+      - 8088:8088
+    depends_on: *superset-depends-on
+    volumes: *superset-volumes
+
+  superset-init:
+    image: *superset-image
+    container_name: superset_init
+    command: [ "/app/docker/docker-init.sh" ]
+    env_file: docker/.env-non-dev
+    depends_on: *superset-depends-on
+    user: "root"
+    volumes: *superset-volumes
+
+  superset-worker:
+    image: *superset-image
+    container_name: superset_worker
+    command: [ "/app/docker/docker-bootstrap.sh", "worker" ]
+    env_file: docker/.env-non-dev
+    restart: unless-stopped
+    depends_on: *superset-depends-on
+    user: "root"
+    volumes: *superset-volumes
+
+  superset-worker-beat:
+    image: *superset-image
+    container_name: superset_worker_beat
+    command: [ "/app/docker/docker-bootstrap.sh", "beat" ]
+    env_file: docker/.env-non-dev
+    restart: unless-stopped
+    depends_on: *superset-depends-on
+    user: "root"
+    volumes: *superset-volumes
+
+volumes:
+  superset_home:
+    external: false
+  db_home:
+    external: false
+  redis:
+    external: false
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+name: risingwave-compose
