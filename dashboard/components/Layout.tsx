@@ -15,10 +15,18 @@
  *
  */
 
-import { Box, Button, HStack, Image, Text, VStack } from "@chakra-ui/react"
+import {
+  Box,
+  Button,
+  Flex,
+  HStack,
+  Image,
+  Text,
+  VStack,
+} from "@chakra-ui/react"
 import Link from "next/link"
 import { useRouter } from "next/router"
-import React, { Fragment, useEffect, useState } from "react"
+import React, { useEffect, useState } from "react"
 import { UrlObject } from "url"
 import {
   IconArrowRightCircle,
@@ -77,34 +85,33 @@ function NavTitle({ children }: { children: React.ReactNode }) {
 
 function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <Fragment>
+    <Flex>
       <Box
-        position="fixed"
-        top={0}
-        bottom={0}
-        left={0}
+        height="100vh"
+        overflowY="scroll"
         width={NAVBAR_WIDTH}
+        minWidth={NAVBAR_WIDTH}
         bg="gray.50"
         py={3}
         px={3}
       >
-        <Box height="50px" width="full" mb={3}>
-          <HStack spacing={0}>
-            <Link href="/" passHref>
-              <a>
-                <Image
-                  boxSize="50px"
-                  src="/risingwave.svg"
-                  alt="RisingWave Logo"
-                />
-              </a>
-            </Link>
-            <Text fontSize="xl">
-              <b>RisingWave</b> Dashboard
-            </Text>
-          </HStack>
-        </Box>
         <VStack>
+          <Box height="50px" width="full">
+            <HStack spacing={0}>
+              <Link href="/" passHref>
+                <a>
+                  <Image
+                    boxSize="50px"
+                    src="/risingwave.svg"
+                    alt="RisingWave Logo"
+                  />
+                </a>
+              </Link>
+              <Text fontSize="xl">
+                <b>RisingWave</b> Dashboard
+              </Text>
+            </HStack>
+          </Box>
           <NavButton href="/cluster/" leftIcon={<IconServer />}>
             Cluster Overview
           </NavButton>
@@ -132,18 +139,18 @@ function Layout({ children }: { children: React.ReactNode }) {
             <NavTitle>Explain</NavTitle>
             <NavButton href="/explain_distsql/">Distributed Plan</NavButton>
           </VStack>
+          <VStack width="full" alignItems="flex-start" px={3}>
+            <NavTitle>Debug</NavTitle>
+            <NavButton href="/await_tree/">Await Tree Dump</NavButton>
+          </VStack>
           <VStack mb={3}></VStack>
           <NavButton href="/settings/">Settings</NavButton>
         </VStack>
       </Box>
-      <Box
-        ml={NAVBAR_WIDTH}
-        width={`calc(100vw - ${NAVBAR_WIDTH})`}
-        height="full"
-      >
+      <Box flex={1} overflowY="scroll">
         {children}
       </Box>
-    </Fragment>
+    </Flex>
   )
 }
 

@@ -668,7 +668,7 @@ mod tests {
     }
 
     impl MockServices {
-        async fn start(host: &str, port: u16) -> MetaResult<Self> {
+        async fn start(host: &str, port: u16, enable_recovery: bool) -> MetaResult<Self> {
             let addr = SocketAddr::new(host.parse().unwrap(), port);
             let state = Arc::new(FakeFragmentState {
                 actor_streams: Mutex::new(HashMap::new()),
@@ -692,8 +692,8 @@ mod tests {
 
             sleep(Duration::from_secs(1)).await;
 
-            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(true))).await;
-            let system_params = env.system_param_manager().get_params().await;
+            let env = MetaSrvEnv::for_test_opts(Arc::new(MetaOpts::test(enable_recovery))).await;
+            let system_params = env.system_params_manager().get_params().await;
             let meta_metrics = Arc::new(MetaMetrics::new());
             let cluster_manager =
                 Arc::new(ClusterManager::new(env.clone(), Duration::from_secs(3600)).await?);
@@ -868,7 +868,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_materialized_view() -> MetaResult<()> {
-        let services = MockServices::start("127.0.0.1", 12334).await?;
+        let services = MockServices::start("127.0.0.1", 12334, false).await?;
 
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);
@@ -926,7 +926,7 @@ mod tests {
     async fn test_failpoints_drop_mv_recovery() {
         let inject_barrier_err = "inject_barrier_err";
         let inject_barrier_err_success = "inject_barrier_err_success";
-        let services = MockServices::start("127.0.0.1", 12335).await.unwrap();
+        let services = MockServices::start("127.0.0.1", 12335, true).await.unwrap();
 
         let table_id = TableId::new(0);
         let actors = make_mview_stream_actors(&table_id, 4);

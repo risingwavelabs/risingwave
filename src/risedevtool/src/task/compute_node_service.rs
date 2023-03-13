@@ -162,7 +162,7 @@ impl Task for ComputeNodeService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 

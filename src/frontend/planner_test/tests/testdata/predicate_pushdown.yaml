@@ -20,7 +20,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-      └─LogicalShare { id = 9 }
+      └─LogicalShare { id = 3 }
         └─LogicalLimit { limit: 10, offset: 0 }
           └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
@@ -35,7 +35,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-      └─LogicalShare { id = 9 }
+      └─LogicalShare { id = 3 }
         └─LogicalTopN { order: "[t.v1 ASC]", limit: 10, offset: 0 }
           └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
@@ -54,7 +54,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, t.ts, window_start, window_end] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.ts >= '1997-07-01':Date) AND (window_start >= '1997-07-02':Date) AND (window_end >= '1997-07-03':Date) AND (window_start >= (t.ts + '1 day':Interval)) AND (window_end > (t.ts + '4 days':Interval)) }
-      └─LogicalShare { id = 11 }
+      └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, t.ts, window_start, window_end] }
           └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
             └─LogicalFilter { predicate: IsNotNull(t.ts) }
@@ -71,7 +71,7 @@
   logical_plan: |
     LogicalProject { exprs: [window_end, t.v4, t.v2] }
     └─LogicalFilter { predicate: (window_end > '2022-01-01':Date) AND (t.v4 = 10:Int32) AND (t.v2 > 20:Int32) }
-      └─LogicalShare { id = 11 }
+      └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [window_end, t.v4, t.v2] }
           └─LogicalHopWindow { time_col: t.ts, slide: 1 day, size: 3 days, output: all }
             └─LogicalFilter { predicate: IsNotNull(t.ts) }
@@ -89,7 +89,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t1.v3] }
     └─LogicalFilter { predicate: (t1.v1 = 10:Int32) AND (t1.v2 = 20:Int32) AND (t1.v3 = 30:Int32) }
-      └─LogicalShare { id = 12 }
+      └─LogicalShare { id = 4 }
         └─LogicalUnion { all: true }
           ├─LogicalProject { exprs: [t1.v1, t1.v2, t1.v3] }
           | └─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id] }
@@ -106,7 +106,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, $expr1, $expr2] }
     └─LogicalFilter { predicate: ($expr1 > 10:Int32) AND (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND ($expr1 > $expr2) AND ($expr1 > t.v1) }
-      └─LogicalShare { id = 7 }
+      └─LogicalShare { id = 2 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4, (t.v1 + t.v2) as $expr1, (t.v3 * t.v4) as $expr2] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.ts, t._row_id] }
   optimized_logical_plan_for_batch: |
@@ -119,7 +119,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, count, count(1:Int32)] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (count > t.v1) AND (t.v2 > t.v3) AND (count > count(1:Int32)) }
-      └─LogicalShare { id = 11 }
+      └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, count, count(1:Int32)] }
           └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count(1:Int32)] }
             └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32] }
@@ -136,7 +136,7 @@
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($3)] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (Unnest($3) = 30:Int32) }
-      └─LogicalShare { id = 9 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($3)] }
           └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($3)] }
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.arr, t._row_id] }
@@ -153,7 +153,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) AND IsNull(t2.v3) AND IsNull(t2.v4) }
-      └─LogicalShare { id = 10 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -170,7 +170,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) AND IsNull(t2.v3) AND IsNull(t2.v4) }
-      └─LogicalShare { id = 10 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
           └─LogicalJoin { type: LeftOuter, on: true, output: all }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -188,7 +188,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) AND IsNull(t2.v3) AND IsNull(t2.v4) }
-      └─LogicalShare { id = 10 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
           └─LogicalJoin { type: RightOuter, on: true, output: all }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -206,7 +206,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) AND IsNull(t2.v3) AND IsNull(t2.v4) }
-      └─LogicalShare { id = 10 }
+      └─LogicalShare { id = 3 }
         └─LogicalProject { exprs: [t1.v1, t1.v2, t2.v3, t2.v4] }
           └─LogicalJoin { type: FullOuter, on: true, output: all }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -224,7 +224,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) }
-      └─LogicalShare { id = 12 }
+      └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [t1.v1, t1.v2] }
           └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -242,7 +242,7 @@
   logical_plan: |
     LogicalProject { exprs: [t1.v1, t1.v2] }
     └─LogicalFilter { predicate: IsNull(t1.v1) AND IsNull(t1.v2) }
-      └─LogicalShare { id = 12 }
+      └─LogicalShare { id = 4 }
         └─LogicalProject { exprs: [t1.v1, t1.v2] }
           └─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
             ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id] }
@@ -263,13 +263,13 @@
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
-      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval)] }
+      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
       |       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -303,12 +303,12 @@
     LogicalFilter { predicate: (t1.v1 > (Now + '00:30:00':Interval)) }
     └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output: [t1.v1, t1.v2, t1._row_id] }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check", watermark_columns: [v1] }
+    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1.v2, t1._row_id] }
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval)] }
+        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], output_watermarks: [$expr1] }
           └─StreamNow { output: [now] }
 - name: eq-predicate derived condition other side pushdown in inner join
   sql: |
@@ -349,10 +349,10 @@
     | └─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1, v2], pk_conflict: "no check" }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
       |     └─StreamNow { output: [now] }

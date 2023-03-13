@@ -18,7 +18,7 @@
 mod block;
 
 use std::fmt::{Debug, Formatter};
-use std::ops::BitXor;
+use std::ops::{BitXor, Bound};
 
 pub use block::*;
 mod block_iterator;
@@ -32,6 +32,7 @@ pub mod builder;
 pub use builder::*;
 pub mod writer;
 use risingwave_common::catalog::TableId;
+use risingwave_object_store::object::BlockLocation;
 pub use writer::*;
 mod forward_sstable_iterator;
 pub mod multi_builder;
@@ -39,7 +40,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{TableKey, UserKey};
+use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -152,6 +153,16 @@ impl Sstable {
     #[inline(always)]
     pub fn has_bloom_filter(&self) -> bool {
         !self.filter_reader.is_empty()
+    }
+
+    pub fn calculate_block_info(&self, block_index: usize) -> (BlockLocation, usize) {
+        let block_meta = &self.meta.block_metas[block_index];
+        let block_loc = BlockLocation {
+            offset: block_meta.offset as usize,
+            size: block_meta.len as usize,
+        };
+        let uncompressed_capacity = block_meta.uncompressed_size as usize;
+        (block_loc, uncompressed_capacity)
     }
 
     #[inline(always)]
@@ -418,6 +429,7 @@ impl<'a> SstableBlockIterator<'a> {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub prefetch: bool,
+    pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
 }
 
 #[cfg(test)]

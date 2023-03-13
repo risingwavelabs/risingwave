@@ -1,0 +1,50 @@
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.1.1" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.1.1 https://maven.apache.org/xsd/assembly-2.1.1.xsd">
+    <id>assembly</id>
+    <formats>
+        <format>${assembly.format}</format>
+    </formats>
+    <includeBaseDirectory>false</includeBaseDirectory>
+    <fileSets>
+        <!--  Files needed to release to users -->
+        <fileSet>
+            <directory>${project.parent.basedir}</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>README*</include>
+                <include>LICENSE*</include>
+                <include>NOTICE*</include>
+            </includes>
+        </fileSet>
+
+        <!-- scripts -->
+        <fileSet>
+            <directory>${project.parent.basedir}/connector-node/assembly/scripts</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>*.sh</include>
+            </includes>
+        </fileSet>
+    </fileSets>
+
+    <dependencySets>
+        <dependencySet>
+            <outputDirectory>libs/</outputDirectory>
+            <!-- include compile & runtime dependencies of following components -->
+            <includes>
+                <!-- The connector service -->
+                <include>*:risingwave-connector-service</include>
+
+                <!-- Source connectors -->
+                <include>*:risingwave-source-cdc</include>
+
+                <!-- Sink connectors -->
+                <include>*:risingwave-sink-jdbc</include>
+                <include>*:risingwave-sink-iceberg</include>
+                <include>*:risingwave-sink-deltalake</include>
+            </includes>
+            <useTransitiveDependencies>true</useTransitiveDependencies>
+            <useTransitiveFiltering>true</useTransitiveFiltering>
+        </dependencySet>
+    </dependencySets>
+</assembly>

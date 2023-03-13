@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::{Bound, RangeBounds};
+use std::ops::Bound;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
 use minitrace::future::FutureExt;
 use parking_lot::RwLock;
@@ -41,6 +41,7 @@ use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
     filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{merge_stream, KeyOp, MemTable};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
@@ -75,6 +76,8 @@ pub struct LocalHummockStorage {
     tracing: Arc<risingwave_tracing::RwTracingService>,
 
     stats: Arc<HummockStateStoreMetrics>,
+
+    write_limiter: WriteLimiterRef,
 }
 
 impl LocalHummockStorage {
@@ -83,15 +86,15 @@ impl LocalHummockStorage {
         self.read_version.write().update(info)
     }
 
-    pub async fn get_inner<'a>(
-        &'a self,
-        table_key: TableKey<&'a [u8]>,
+    pub async fn get_inner(
+        &self,
+        table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let table_key_range = (
-            Bound::Included(TableKey(table_key.to_vec())),
-            Bound::Included(TableKey(table_key.to_vec())),
+            Bound::Included(table_key.clone()),
+            Bound::Included(table_key.clone()),
         );
 
         let read_snapshot = read_filter_for_local(
@@ -126,14 +129,10 @@ impl LocalHummockStorage {
 
     pub async fn may_exist_inner(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> StorageResult<bool> {
-        let bytes_key_range = (
-            key_range.start_bound().map(|v| Bytes::from(v.clone())),
-            key_range.end_bound().map(|v| Bytes::from(v.clone())),
-        );
-        if self.mem_table.iter(bytes_key_range).next().is_some() {
+        if self.mem_table.iter(key_range.clone()).next().is_some() {
             return Ok(true);
         }
 
@@ -157,19 +156,14 @@ impl StateStoreRead for LocalHummockStorage {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         assert!(epoch <= self.epoch());
         self.get_inner(TableKey(key), epoch, read_options)
     }
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -189,15 +183,15 @@ impl LocalStateStore for LocalHummockStorage {
 
     fn may_exist(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         self.may_exist_inner(key_range, read_options)
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            match self.mem_table.buffer.get(key) {
+            match self.mem_table.buffer.get(&key) {
                 None => {
                     self.get_inner(TableKey(key), self.epoch(), read_options)
                         .await
@@ -210,11 +204,7 @@ impl LocalStateStore for LocalHummockStorage {
         }
     }
 
-    fn iter(
-        &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             let stream = self
                 .iter_inner(
@@ -260,8 +250,8 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Insert(value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_insert_sanity_check(
-                                &key,
-                                &value,
+                                key.clone(),
+                                value.clone(),
                                 self,
                                 self.epoch(),
                                 self.table_id,
@@ -274,8 +264,8 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Delete(old_value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_delete_sanity_check(
-                                &key,
-                                &old_value,
+                                key.clone(),
+                                old_value,
                                 self,
                                 self.epoch(),
                                 self.table_id,
@@ -288,9 +278,9 @@ impl LocalStateStore for LocalHummockStorage {
                     KeyOp::Update((old_value, new_value)) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_update_sanity_check(
-                                &key,
-                                &old_value,
-                                &new_value,
+                                key.clone(),
+                                old_value,
+                                new_value.clone(),
                                 self,
                                 self.epoch(),
                                 self.table_id,
@@ -372,6 +362,7 @@ impl LocalHummockStorage {
 
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        self.write_limiter.wait_permission(self.table_id).await;
         let limiter = self.memory_limiter.as_ref();
         let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
             tracker
@@ -386,7 +377,7 @@ impl LocalHummockStorage {
                 .expect("should be able to send");
             let tracker = limiter
                 .require_memory(size as u64)
-                .verbose_stack_trace("hummock_require_memory")
+                .verbose_instrument_await("hummock_require_memory")
                 .await;
             warn!(
                 "successfully requiring memory: {}, current {}",
@@ -423,6 +414,7 @@ impl LocalHummockStorage {
 }
 
 impl LocalHummockStorage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
@@ -430,6 +422,7 @@ impl LocalHummockStorage {
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
+        write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
@@ -446,6 +439,7 @@ impl LocalHummockStorage {
             hummock_version_reader,
             tracing,
             stats,
+            write_limiter,
         }
     }
 

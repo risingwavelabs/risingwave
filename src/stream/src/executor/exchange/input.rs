@@ -17,7 +17,6 @@ use std::task::{Context, Poll};
 use std::time::Instant;
 
 use anyhow::Context as _;
-use async_stack_trace::{SpanValue, StackTrace};
 use futures::{pin_mut, Stream};
 use futures_async_stream::try_stream;
 use pin_project::pin_project;
@@ -78,8 +77,8 @@ impl LocalInput {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn run(mut channel: Receiver, actor_id: ActorId) {
-        let span: SpanValue = format!("LocalInput (actor {actor_id})").into();
-        while let Some(msg) = channel.recv().verbose_stack_trace(span.clone()).await {
+        let span: await_tree::Span = format!("LocalInput (actor {actor_id})").into();
+        while let Some(msg) = channel.recv().verbose_instrument_await(span.clone()).await {
             yield msg;
         }
     }
@@ -157,12 +156,12 @@ impl RemoteInput {
 
         let mut rr = 0;
         const SAMPLING_FREQUENCY: u64 = 100;
-        let span: SpanValue = format!("RemoteInput (actor {up_actor_id})").into();
+        let span: await_tree::Span = format!("RemoteInput (actor {up_actor_id})").into();
 
         let mut batched_permits_accumulated = 0;
 
         pin_mut!(stream);
-        while let Some(data_res) = stream.next().verbose_stack_trace(span.clone()).await {
+        while let Some(data_res) = stream.next().verbose_instrument_await(span.clone()).await {
             match data_res {
                 Ok(GetStreamResponse { message, permits }) => {
                     let msg = message.unwrap();

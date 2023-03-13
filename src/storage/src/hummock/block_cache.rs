@@ -17,18 +17,21 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
 use futures::Future;
-use risingwave_common::cache::{CacheableEntry, LruCache, LruCacheEventListener};
+use risingwave_common::cache::{CacheableEntry, LookupResponse, LruCache, LruCacheEventListener};
 use risingwave_hummock_sdk::HummockSstableId;
+use tokio::sync::oneshot::Receiver;
+use tokio::task::JoinHandle;
 
 use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
+type CachedBlockEntry = CacheableEntry<(HummockSstableId, u64), Box<Block>>;
+
 enum BlockEntry {
-    Cache(CacheableEntry<(HummockSstableId, u64), Box<Block>>),
+    Cache(CachedBlockEntry),
     Owned(Box<Block>),
     RefEntry(Arc<Block>),
 }
@@ -55,7 +58,7 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: CacheableEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+    pub fn from_cached_block(entry: CachedBlockEntry) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
@@ -88,6 +91,28 @@ type BlockCacheEventListener =
 #[derive(Clone)]
 pub struct BlockCache {
     inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
+}
+
+pub enum BlockResponse {
+    Block(BlockHolder),
+    WaitPendingRequest(Receiver<CachedBlockEntry>),
+    Miss(JoinHandle<Result<CachedBlockEntry, HummockError>>),
+}
+
+impl BlockResponse {
+    pub async fn wait(self) -> HummockResult<BlockHolder> {
+        match self {
+            BlockResponse::Block(block_holder) => Ok(block_holder),
+            BlockResponse::WaitPendingRequest(receiver) => receiver
+                .await
+                .map_err(|recv_error| recv_error.into())
+                .map(BlockHolder::from_cached_block),
+            BlockResponse::Miss(join_handle) => join_handle
+                .await
+                .unwrap()
+                .map(BlockHolder::from_cached_block),
+        }
+    }
 }
 
 impl BlockCache {
@@ -172,19 +197,20 @@ impl BlockCache {
             });
     }
 
-    pub async fn get_or_insert_with<F, Fut>(
+
+    pub fn get_or_insert_with<F, Fut>(
         &self,
         sst_id: HummockSstableId,
         block_idx: u64,
         mut fetch_block: F,
-    ) -> HummockResult<BlockHolder>
+    ) -> BlockResponse
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
         let h = Self::hash(sst_id, block_idx);
         let key = (sst_id, block_idx);
-        let block = self
+        match self
             .inner
             .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
                 let f = fetch_block();
@@ -193,10 +219,16 @@ impl BlockCache {
                     let len = block.capacity();
                     Ok((block, len))
                 }
-            })
-            .verbose_stack_trace("block_cache_lookup")
-            .await?;
-        Ok(BlockHolder::from_cached_block(block))
+            }) {
+            LookupResponse::Invalid => unreachable!(),
+            LookupResponse::Cached(entry) => {
+                BlockResponse::Block(BlockHolder::from_cached_block(entry))
+            }
+            LookupResponse::WaitPendingRequest(receiver) => {
+                BlockResponse::WaitPendingRequest(receiver)
+            }
+            LookupResponse::Miss(join_handle) => BlockResponse::Miss(join_handle),
+        }
     }
 
     fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {

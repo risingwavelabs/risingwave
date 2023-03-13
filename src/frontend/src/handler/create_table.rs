@@ -24,8 +24,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
-    WatermarkDesc,
+    Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -293,7 +292,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner().clone().into_iter().collect();
+    let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -312,7 +311,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        &properties,
+        &mut properties,
         &mut row_id_index,
         &mut pk_column_ids,
         true,
@@ -323,6 +322,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         Some(source_info),
@@ -347,12 +347,14 @@ pub(crate) fn gen_create_table_plan(
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
 
+    let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         column_descs,
         pk_column_id_from_columns,
         constraints,
+        properties,
         definition,
         source_watermarks,
         append_only,
@@ -367,6 +369,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
+    properties: HashMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
@@ -386,6 +389,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         None,
@@ -401,6 +405,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
+    properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -420,13 +425,13 @@ fn gen_table_plan_inner(
         schema_id,
         database_id,
         name: name.clone(),
-        row_id_index: row_id_index.map(|i| ProstColumnIndex { index: i as _ }),
+        row_id_index: row_id_index.map(|i| i as _),
         columns: columns
             .iter()
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone().into_iter().collect(),
+        properties,
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),

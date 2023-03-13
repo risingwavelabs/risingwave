@@ -22,9 +22,7 @@ use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, StreamSourceInfo as ProstStreamSourceInfo,
-};
+use risingwave_pb::catalog::StreamSourceInfo as ProstStreamSourceInfo;
 use risingwave_pb::plan_common::{
     ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
 };
@@ -59,7 +57,7 @@ pub struct SourceDescBuilder {
     columns: Vec<ProstColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     pk_column_ids: Vec<i32>,
-    row_id_index: Option<ProstColumnIndex>,
+    row_id_index: Option<usize>,
     properties: HashMap<String, String>,
     source_info: ProstStreamSourceInfo,
     connector_params: ConnectorParams,
@@ -72,7 +70,7 @@ impl SourceDescBuilder {
         columns: Vec<ProstColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         pk_column_ids: Vec<i32>,
-        row_id_index: Option<ProstColumnIndex>,
+        row_id_index: Option<usize>,
         properties: HashMap<String, String>,
         source_info: ProstStreamSourceInfo,
         connector_params: ConnectorParams,
@@ -114,8 +112,8 @@ impl SourceDescBuilder {
             .iter()
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
-        if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].is_row_id = true;
+        if let Some(row_id_index) = self.row_id_index {
+            columns[row_id_index].is_row_id = true;
         }
         assert!(
             !self.pk_column_ids.is_empty(),
@@ -159,8 +157,8 @@ impl SourceDescBuilder {
             .map(|c| SourceColumnDesc::from(&ColumnDesc::from(c.column_desc.as_ref().unwrap())))
             .collect();
 
-        if let Some(row_id_index) = self.row_id_index.as_ref() {
-            columns[row_id_index.index as usize].is_row_id = true;
+        if let Some(row_id_index) = self.row_id_index {
+            columns[row_id_index].is_row_id = true;
         }
 
         assert!(
@@ -192,7 +190,7 @@ pub mod test_utils {
     use std::collections::HashMap;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
-    use risingwave_pb::catalog::{ColumnIndex, StreamSourceInfo};
+    use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::ColumnCatalog;
 
     use super::{SourceDescBuilder, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
@@ -200,11 +198,10 @@ pub mod test_utils {
     pub fn create_source_desc_builder(
         schema: &Schema,
         pk_column_ids: Vec<i32>,
-        row_id_index: Option<u64>,
+        row_id_index: Option<usize>,
         source_info: StreamSourceInfo,
         properties: HashMap<String, String>,
     ) -> SourceDescBuilder {
-        let row_id_index = row_id_index.map(|index| ColumnIndex { index });
         let columns = schema
             .fields
             .iter()

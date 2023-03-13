@@ -26,6 +26,7 @@ use risingwave_common::types::{Datum, DatumRef, ScalarImpl};
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::AggKind;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 use smallvec::SmallVec;
 
@@ -80,22 +81,22 @@ impl<S: StateStore> MaterializedInputState<S> {
                 // `min`/`max` need not to order by any other columns, but have to
                 // order by the agg value implicitly.
                 let order_type = if agg_call.kind == AggKind::Min {
-                    OrderType::Ascending
+                    OrderType::ascending()
                 } else {
-                    OrderType::Descending
+                    OrderType::descending()
                 };
                 (vec![arg_col_indices[0]], vec![order_type])
             } else {
                 agg_call
-                    .order_pairs
+                    .column_orders
                     .iter()
-                    .map(|p| (p.column_idx, p.order_type))
+                    .map(|p| (p.column_index, p.order_type))
                     .unzip()
             };
 
         let pk_len = pk_indices.len();
         order_col_indices.extend(pk_indices.iter());
-        order_types.extend(itertools::repeat_n(OrderType::Ascending, pk_len));
+        order_types.extend(itertools::repeat_n(OrderType::ascending(), pk_len));
 
         // map argument columns to state table column indices
         let state_table_arg_col_indices = arg_col_indices
@@ -171,10 +172,18 @@ impl<S: StateStore> MaterializedInputState<S> {
         group_key: Option<&OwnedRow>,
     ) -> StreamExecutorResult<Datum> {
         if !self.cache.is_synced() {
-            let all_data_iter = state_table.iter_with_pk_prefix(&group_key).await?;
+            let mut cache_filler = self.cache.begin_syncing();
+
+            let all_data_iter = state_table
+                .iter_with_pk_prefix(
+                    &group_key,
+                    PrefetchOptions {
+                        exhaust_iter: cache_filler.capacity() == usize::MAX,
+                    },
+                )
+                .await?;
             pin_mut!(all_data_iter);
 
-            let mut cache_filler = self.cache.begin_syncing();
             #[for_await]
             for state_row in all_data_iter.take(cache_filler.capacity()) {
                 let state_row: OwnedRow = state_row?;
@@ -281,7 +290,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_common::util::iter_util::ZipEqFast;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::AggKind;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::StateStore;
@@ -341,7 +350,7 @@ mod tests {
             kind,
             args: AggArgs::Unary(arg_type.clone(), arg_idx),
             return_type: arg_type,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
             distinct: false,
@@ -367,8 +376,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -476,8 +485,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -586,8 +595,8 @@ mod tests {
             &input_schema,
             vec![0, 3],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -595,8 +604,8 @@ mod tests {
             &input_schema,
             vec![1, 3],
             vec![
-                OrderType::Descending, // for AggKind::Max
-                OrderType::Ascending,
+                OrderType::descending(), // for AggKind::Max
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -695,9 +704,9 @@ mod tests {
             &input_schema,
             vec![2, 1, 3],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // b DESC for AggKind::Max
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // b DESC for AggKind::Max
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -802,8 +811,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -916,8 +925,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::Ascending, // for AggKind::Min
-                OrderType::Ascending,
+                OrderType::ascending(), // for AggKind::Min
+                OrderType::ascending(),
             ],
         )
         .await;
@@ -1035,9 +1044,9 @@ mod tests {
             kind: AggKind::StringAgg,
             args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // b ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // b ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1049,9 +1058,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::Ascending,  // b ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // b ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -1137,9 +1146,9 @@ mod tests {
             kind: AggKind::ArrayAgg,
             args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
-            order_pairs: vec![
-                OrderPair::new(2, OrderType::Ascending),  // c ASC
-                OrderPair::new(0, OrderType::Descending), // a DESC
+            column_orders: vec![
+                ColumnOrder::new(2, OrderType::ascending()),  // c ASC
+                ColumnOrder::new(0, OrderType::descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1151,9 +1160,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 3, 1],
             vec![
-                OrderType::Ascending,  // c ASC
-                OrderType::Descending, // a DESC
-                OrderType::Ascending,  // _row_id ASC
+                OrderType::ascending(),  // c ASC
+                OrderType::descending(), // a DESC
+                OrderType::ascending(),  // _row_id ASC
             ],
         )
         .await;

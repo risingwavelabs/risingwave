@@ -15,6 +15,7 @@
     "@emotion/react": "^11.10.4",
     "@emotion/styled": "^11.10.4",
     "@loadable/component": "5.15.2",
+    "@monaco-editor/react": "^4.4.6",
     "@types/d3": "^7.4.0",
     "@types/lodash": "^4.14.184",
     "bootstrap-icons": "^1.9.1",

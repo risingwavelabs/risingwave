@@ -16,7 +16,6 @@ use std::time::Duration;
 
 use risingwave_common::bail;
 use risingwave_common::error::Result;
-use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::subscribe_response::Info;
 use risingwave_pb::meta::{SubscribeResponse, SubscribeType};
 use risingwave_rpc_client::error::RpcError;
@@ -46,6 +45,13 @@ pub struct SubscribeCompactor {}
 impl SubscribeTypeEnum for SubscribeCompactor {
     fn subscribe_type() -> SubscribeType {
         SubscribeType::Compactor
+    }
+}
+
+pub struct SubscribeCompute {}
+impl SubscribeTypeEnum for SubscribeCompute {
+    fn subscribe_type() -> SubscribeType {
+        SubscribeType::Compute
     }
 }
 
@@ -109,12 +115,6 @@ where
             unreachable!();
         };
 
-        let SnapshotVersion {
-            catalog_version,
-            parallel_unit_mapping_version,
-            worker_node_version,
-        } = info.version.clone().unwrap();
-
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
             Info::Database(_)
             | Info::Schema(_)
@@ -124,15 +124,22 @@ where
             | Info::Index(_)
             | Info::View(_)
             | Info::Function(_)
-            | Info::User(_) => notification.version > catalog_version,
-            Info::ParallelUnitMapping(_) => notification.version > parallel_unit_mapping_version,
-            Info::Node(_) => notification.version > worker_node_version,
+            | Info::User(_) => {
+                notification.version > info.version.as_ref().unwrap().catalog_version
+            }
+            Info::ParallelUnitMapping(_) => {
+                notification.version > info.version.as_ref().unwrap().parallel_unit_mapping_version
+            }
+            Info::Node(_) => {
+                notification.version > info.version.as_ref().unwrap().worker_node_version
+            }
             Info::HummockVersionDeltas(version_delta) => {
                 version_delta.version_deltas[0].id > info.hummock_version.as_ref().unwrap().id
             }
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
-            Info::Snapshot(_) => unreachable!(),
+            Info::SystemParams(_) => true,
+            Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
         });
 
         self.observer_states

@@ -14,12 +14,83 @@
 
 use std::time::Duration;
 
+use itertools::Itertools;
+use lru::{Iter, LruCache};
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
+
 /// A RisingWave client.
 pub struct RisingWave {
     client: tokio_postgres::Client,
     task: tokio::task::JoinHandle<()>,
     host: String,
     dbname: String,
+    /// The `SET` statements that have been executed on this client.
+    /// We need to replay them when reconnecting.
+    set_stmts: SetStmts,
+}
+
+/// `SetStmts` stores and compacts all `SET` statements that have been executed in the client
+/// history.
+pub struct SetStmts {
+    stmts_cache: LruCache<String, String>,
+}
+
+impl Default for SetStmts {
+    fn default() -> Self {
+        Self {
+            stmts_cache: LruCache::unbounded(),
+        }
+    }
+}
+
+struct SetStmtsIterator<'a, 'b>
+where
+    'a: 'b,
+{
+    _stmts: &'a SetStmts,
+    stmts_iter: core::iter::Rev<Iter<'b, String, String>>,
+}
+
+impl<'a, 'b> SetStmtsIterator<'a, 'b> {
+    fn new(stmts: &'a SetStmts) -> Self {
+        Self {
+            _stmts: stmts,
+            stmts_iter: stmts.stmts_cache.iter().rev(),
+        }
+    }
+}
+
+impl SetStmts {
+    fn push(&mut self, sql: &str) {
+        let ast = Parser::parse_sql(&sql).expect("a set statement should be parsed successfully");
+        match ast
+            .into_iter()
+            .exactly_one()
+            .expect("should contain only one statement")
+        {
+            // record `local` for variable and `SetTransaction` if supported in the future.
+            Statement::SetVariable {
+                local: _,
+                variable,
+                value: _,
+            } => {
+                let key = variable.real_value().to_lowercase();
+                // store complete sql as value.
+                self.stmts_cache.put(key, sql.to_string());
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl Iterator for SetStmtsIterator<'_, '_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (_, stmt) = self.stmts_iter.next()?;
+        Some(stmt.clone())
+    }
 }
 
 impl RisingWave {
@@ -27,10 +98,27 @@ impl RisingWave {
         host: String,
         dbname: String,
     ) -> Result<Self, tokio_postgres::error::Error> {
+        let set_stmts = SetStmts::default();
+        let (client, task) = Self::connect_inner(&host, &dbname, &set_stmts).await?;
+        Ok(Self {
+            client,
+            task,
+            host,
+            dbname,
+            set_stmts,
+        })
+    }
+
+    pub async fn connect_inner(
+        host: &str,
+        dbname: &str,
+        set_stmts: &SetStmts,
+    ) -> Result<(tokio_postgres::Client, tokio::task::JoinHandle<()>), tokio_postgres::error::Error>
+    {
         let (client, connection) = tokio_postgres::Config::new()
-            .host(&host)
+            .host(host)
             .port(4566)
-            .dbname(&dbname)
+            .dbname(dbname)
             .user("root")
             .connect_timeout(Duration::from_secs(5))
             .connect(tokio_postgres::NoTls)
@@ -52,12 +140,18 @@ impl RisingWave {
         client
             .simple_query("SET VISIBILITY_MODE TO checkpoint;")
             .await?;
-        Ok(RisingWave {
-            client,
-            task,
-            host,
-            dbname,
-        })
+        // replay all SET statements
+        for stmt in SetStmtsIterator::new(&set_stmts) {
+            client.simple_query(&stmt).await?;
+        }
+        Ok((client, task))
+    }
+
+    pub async fn reconnect(&mut self) -> Result<(), tokio_postgres::error::Error> {
+        let (client, task) = Self::connect_inner(&self.host, &self.dbname, &self.set_stmts).await?;
+        self.client = client;
+        self.task = task;
+        Ok(())
     }
 
     /// Returns a reference of the inner Postgres client.
@@ -81,7 +175,11 @@ impl sqllogictest::AsyncDB for RisingWave {
 
         if self.client.is_closed() {
             // connection error, reset the client
-            *self = Self::connect(self.host.clone(), self.dbname.clone()).await?;
+            self.reconnect().await?;
+        }
+
+        if sql.trim_start().to_lowercase().starts_with("set") {
+            self.set_stmts.push(sql);
         }
 
         let mut output = vec![];

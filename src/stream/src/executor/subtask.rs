@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use futures::{Future, StreamExt};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
@@ -86,7 +86,7 @@ pub fn wrap(input: BoxedExecutor) -> (SubtaskHandle, SubtaskRxExecutor) {
             }
         }
     }
-    .stack_trace("Subtask");
+    .instrument_await("Subtask");
 
     (handle, rx_executor)
 }

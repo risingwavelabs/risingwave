@@ -53,9 +53,10 @@ RUST_BACKTRACE=1 target/debug/risingwave_regress_test --host 127.0.0.1 \
   --output `pwd`/src/tests/regress/output \
   --schedule `pwd`/src/tests/regress/data/schedule \
   --mode postgres
-
 ```
+
 Please remove the `output` directory before running the test again.
+
 ```shell
 rm -rf `pwd`/src/tests/regress/output
 ```
