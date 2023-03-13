@@ -179,7 +179,7 @@ impl HopWindowExecutor {
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
             assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
-            print!("{}", data_chunk.to_pretty_string());
+            // print!("{}", data_chunk.to_pretty_string());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
@@ -206,10 +206,10 @@ impl HopWindowExecutor {
                         }
                     })
                     .collect_vec();
-                print!(
-                    "{}",
-                    DataChunk::new(new_cols.clone(), len).to_pretty_string()
-                );
+                // print!(
+                //     "{}",
+                //     DataChunk::new(new_cols.clone(), len).to_pretty_string()
+                // );
                 let a = 2;
                 yield DataChunk::new(new_cols, len);
             }
@@ -229,10 +229,7 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_executor(
-        output_indices: Vec<usize>,
-        window_offset: IntervalUnit,
-    ) -> Box<HopWindowExecutor> {
+    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -256,6 +253,8 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(10);
         let window_size = IntervalUnit::from_minutes(30);
+        let window_offset = IntervalUnit::from_minutes(0);
+
         let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
             DataType::Timestamp,
             2,
@@ -282,23 +281,23 @@ mod tests {
     #[tokio::test]
     async fn test_size_and_slide() {
         let default_indices = (0..3 + 2).collect_vec();
-        let executor = create_executor(default_indices, IntervalUnit::from_minutes(0));
+        let executor = create_executor(default_indices);
         let mut stream = executor.execute();
-        let chunk = stream.next().await.unwrap().unwrap();
-        print!("{}", chunk.to_pretty_string());
+        // let chunk = stream.next().await.unwrap().unwrap();
+        // print!("{}", chunk.to_pretty_string());
 
         let default_indices = (0..3 + 2).collect_vec();
-        let executor = create_executor(default_indices, IntervalUnit::from_minutes(5));
+        let executor = create_executor(default_indices);
         let mut stream = executor.execute();
-        let chunk = stream.next().await.unwrap().unwrap();
-        print!("{}", chunk.to_pretty_string());
+        // let chunk = stream.next().await.unwrap().unwrap();
+        // print!("{}", chunk.to_pretty_string());
     }
 
     #[tokio::test]
     async fn test_execute() {
         let default_indices = (0..3 + 2).collect_vec();
-        print!("{:?}", default_indices);
-        let executor = create_executor(default_indices, IntervalUnit::from_minutes(0));
+        // print!("{:?}", default_indices);
+        let executor = create_executor(default_indices);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
@@ -322,7 +321,7 @@ mod tests {
         );
 
         let chunk = stream.next().await.unwrap().unwrap();
-        print!("{}", chunk.to_pretty_string());
+        // print!("{}", chunk.to_pretty_string());
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
@@ -341,7 +340,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let executor = create_executor(vec![1, 3, 4, 2], IntervalUnit::from_minutes(0));
+        let executor = create_executor(vec![1, 3, 4, 2]);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
