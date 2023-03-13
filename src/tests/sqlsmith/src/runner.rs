@@ -14,6 +14,7 @@
 
 //! Provides E2E Test runner functionality.
 
+use std::path::Path;
 use anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
@@ -33,10 +34,15 @@ use crate::{
 type PgResult<A> = std::result::Result<A, PgError>;
 type Result<A> = anyhow::Result<A>;
 
+pub async fn shrink(input_file_path: &str, outdir: &str) {
+    let file_stem = Path::new(input_file_path).file_stem().unwrap_or_else(|| panic!("Failed to stem input file path: {input_file_path}"));
+    let output_file_path = format!("{outdir}/{file_stem}.reduced.sql");
+}
+
 /// e2e test runner for pre-generated queries from sqlsmith
 pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
-    let queries = std::fs::read_to_string(queries_path).unwrap();
+    let queries = read_file_contents(queries_path).unwrap();
     let ddl = queries
         .lines()
         .filter(|s| s.starts_with("CREATE"))
@@ -335,7 +341,7 @@ fn get_seed_table_sql(testdata: &str) -> String {
     let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>()
 }
 
@@ -409,11 +415,18 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>();
 
     for stmt in sql.lines() {
         client.simple_query(stmt).await.unwrap();
+    }
+}
+
+fn read_file_contents<P: AsRef<Path>>(filepath: P) -> Result<String> {
+    match std::fs::read_to_string(queries_path) {
+        Ok(s) => Ok(s),
+        Err(e) => unwrap_or_else(|| anyhow_error!("Failed to read contents from {filepath} due to {e}")),
     }
 }
 
@@ -426,11 +439,11 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(&e.to_string())
             {
-                tracing::info!("[SKIPPED ERROR]: {:?}", e);
+                tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok(1);
             }
             // consolidate error reason for deterministic test
-            tracing::info!("[UNEXPECTED ERROR]: {}", e);
+            tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
             Err(anyhow_error!(e))
         }
     }
