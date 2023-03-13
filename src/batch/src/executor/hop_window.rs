@@ -241,7 +241,6 @@ mod tests {
             8 3 ^11:02:00"
                 .replace('^', "2022-2-2T"),
         );
-        // print!("{}", chunk.to_pretty_string());
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
 
@@ -312,7 +311,7 @@ mod tests {
             )
         );
 
-        print!("{}", chunk.to_pretty_string());
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(
             chunk,
             DataChunk::from_pretty(
