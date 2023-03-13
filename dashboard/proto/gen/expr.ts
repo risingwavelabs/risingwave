@@ -137,9 +137,6 @@ export const ExprNode_Type = {
   JSONB_ACCESS_STR: "JSONB_ACCESS_STR",
   JSONB_TYPEOF: "JSONB_TYPEOF",
   JSONB_ARRAY_LENGTH: "JSONB_ARRAY_LENGTH",
-
-  // Functions that return a constant value
-  PI: "PI",
   /**
    * VNODE - Non-pure functions below (> 1000)
    * ------------------------
@@ -427,9 +424,6 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 603:
     case "JSONB_ARRAY_LENGTH":
       return ExprNode_Type.JSONB_ARRAY_LENGTH;
-    case 610:
-    case "PI":
-      return ExprNode_Type.PI;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -628,8 +622,6 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "JSONB_TYPEOF";
     case ExprNode_Type.JSONB_ARRAY_LENGTH:
       return "JSONB_ARRAY_LENGTH";
-    case ExprNode_Type.PI:
-      return "PI";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
