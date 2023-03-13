@@ -223,7 +223,7 @@ impl BackupReader {
             if rx.changed().await.is_err() {
                 break;
             }
-            let p = (*rx.borrow()).load();
+            let p = rx.borrow().load();
             let config = (
                 p.backup_storage_url().to_string(),
                 p.backup_storage_directory().to_string(),
