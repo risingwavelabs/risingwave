@@ -79,7 +79,7 @@ impl StreamGraphFormatter {
         Pretty::Array(pretties)
     }
 
-    fn explain_table<'a>(&mut self, tb: &Table) -> Pretty<'a> {
+    fn explain_table<'a>(&self, tb: &Table) -> Pretty<'a> {
         let tb = TableCatalog::from(tb.clone());
         let columns = Pretty::Array(
             tb.columns
@@ -148,13 +148,12 @@ impl StreamGraphFormatter {
 
         let mut fields = Vec::with_capacity(7);
         match node.get_node_body().unwrap() {
-            stream_node::NodeBody::Source(node) if let Some(source) = node.source_inner => {
+            stream_node::NodeBody::Source(node) if let Some(source) = &node.source_inner => {
                 fields.push((
                     "source state table",
                     self.pretty_add_table(source.get_state_table().unwrap()),
                 ));
             }
-            stream_node::NodeBody::Source(node) => {}
             stream_node::NodeBody::Materialize(node) => fields.push((
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
