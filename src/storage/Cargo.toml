@@ -33,6 +33,7 @@ memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
 parking_lot = "0.12"
+paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"

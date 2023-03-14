@@ -18,7 +18,7 @@ use std::ops::Range;
 use bytes::BytesMut;
 use risingwave_hummock_sdk::KeyComparator;
 
-use super::{KeyPrefix, LenType, RestartPoint};
+use super::{KeyPrefix, KeyPrefixLenType, RestartPoint};
 use crate::hummock::BlockHolder;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
@@ -36,7 +36,8 @@ pub struct BlockIterator {
     /// Current entry len.
     entry_len: usize,
 
-    last_len_type: LenType,
+    last_key_len_type: KeyPrefixLenType,
+    last_value_len_type: KeyPrefixLenType,
 }
 
 impl BlockIterator {
@@ -48,7 +49,8 @@ impl BlockIterator {
             key: BytesMut::default(),
             value_range: 0..0,
             entry_len: 0,
-            last_len_type: LenType::U8U8,
+            last_key_len_type: KeyPrefixLenType::u8,
+            last_value_len_type: KeyPrefixLenType::u8,
         }
     }
 
@@ -74,7 +76,6 @@ impl BlockIterator {
 
     pub fn key(&self) -> &[u8] {
         assert!(self.is_valid());
-
         &self.key[..]
     }
 
@@ -143,13 +144,18 @@ impl BlockIterator {
 
         // after seek, offset meet a new restart point we need to update it
         if self.restart_point_index + 1 < self.block.restart_point_len()
-            && offset >= self.block.restart_point(self.restart_point_index + 1) as usize
+            && offset
+                >= self
+                    .block
+                    .restart_point(self.restart_point_index + 1)
+                    .offset as usize
         {
             let new_restart_point_index = self.restart_point_index + 1;
             self.update_restart_point(new_restart_point_index);
         }
 
-        let prefix = self.decode_prefix_at(offset, self.last_len_type);
+        let prefix =
+            self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
@@ -206,7 +212,7 @@ impl BlockIterator {
             return false;
         }
 
-        if self.block.restart_point(self.restart_point_index) as usize == self.offset {
+        if self.block.restart_point(self.restart_point_index).offset as usize == self.offset {
             self.restart_point_index -= 1;
         }
         let origin_offset = self.offset;
@@ -216,8 +222,18 @@ impl BlockIterator {
     }
 
     /// Decodes [`KeyPrefix`] at given offset.
-    fn decode_prefix_at(&self, offset: usize, decoder: LenType) -> KeyPrefix {
-        KeyPrefix::decode(&mut &self.block.data()[offset..], offset, decoder)
+    fn decode_prefix_at(
+        &self,
+        offset: usize,
+        key_len_type: KeyPrefixLenType,
+        value_len_type: KeyPrefixLenType,
+    ) -> KeyPrefix {
+        KeyPrefix::decode(
+            &mut &self.block.data()[offset..],
+            offset,
+            key_len_type,
+            value_len_type,
+        )
     }
 
     /// Searches the restart point index that the given `key` belongs to.
@@ -227,9 +243,11 @@ impl BlockIterator {
             .search_restart_partition_point(
                 |&RestartPoint {
                      offset: probe,
-                     len_type: decoder,
+                     key_len_type,
+                     value_len_type,
                  }| {
-                    let prefix = self.decode_prefix_at(probe as usize, decoder);
+                    let prefix =
+                        self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
                     match KeyComparator::compare_encoded_full_key(probe_key, key) {
                         Ordering::Less | Ordering::Equal => true,
@@ -248,9 +266,14 @@ impl BlockIterator {
 
     /// Seeks to the restart point by given restart point index.
     fn seek_restart_point_by_index(&mut self, index: usize) {
-        let restart_point_len_type = self.block.restart_points_type_index(index);
-        let offset = self.block.restart_point(index) as usize;
-        let prefix = self.decode_prefix_at(offset, restart_point_len_type);
+        let restart_point = self.block.restart_point(index);
+        let offset = restart_point.offset as usize;
+        let prefix = self.decode_prefix_at(
+            offset,
+            restart_point.key_len_type,
+            restart_point.value_len_type,
+        );
+
         self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
         self.value_range = prefix.value_range();
         self.offset = offset;
@@ -260,7 +283,10 @@ impl BlockIterator {
 
     fn update_restart_point(&mut self, index: usize) {
         self.restart_point_index = index;
-        self.last_len_type = self.block.restart_points_type_index(index);
+        let restart_point = self.block.restart_point(index);
+
+        self.last_key_len_type = restart_point.key_len_type;
+        self.last_value_len_type = restart_point.value_len_type;
     }
 }
 
