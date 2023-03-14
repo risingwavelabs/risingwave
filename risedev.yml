@@ -499,14 +499,14 @@ profile:
         exporter-port: 2224
         health-check-port: 6788
 
-  ci-3cn-3fe-opendal-in-memory-backend:
+  ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
-      - use: etcd
-        unsafe-no-fsync: true
+      # - use: etcd
+      #   unsafe-no-fsync: true
       - use: meta-node
       - use: opendal
-        engine: memory
+        engine: fs
         bucket: ""
         root: "risingwave"
       - use: compute-node
@@ -530,6 +530,7 @@ profile:
         port: 4567
         exporter-port: 2224
         health-check-port: 6788
+      - use: compactor
 
   ci-pubsub:
     config-path: src/config/ci.toml
