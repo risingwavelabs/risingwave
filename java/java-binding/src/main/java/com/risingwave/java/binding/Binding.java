@@ -21,16 +21,16 @@ public class Binding {
 
     public static native int vnodeCount();
 
-    // iterator method
+    // hummock iterator method
     // Return a pointer to the iterator
-    static native long iteratorNew(byte[] readPlan);
+    static native long hummockIteratorNew(byte[] readPlan);
 
     // return a pointer to the next row
-    static native long iteratorNext(long pointer);
+    static native long hummockIteratorNext(long pointer);
 
     // Since the underlying rust does not have garbage collection, we will have to manually call
     // close on the iterator to release the iterator instance pointed by the pointer.
-    static native void iteratorClose(long pointer);
+    static native void hummockIteratorClose(long pointer);
 
     // row method
     static native byte[] rowGetKey(long pointer);

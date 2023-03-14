@@ -261,7 +261,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
 ) -> Pointer<'static, Iterator> {
@@ -273,7 +273,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
     mut pointer: Pointer<'a, Iterator>,
 ) -> Pointer<'static, JavaBindingRow> {
@@ -286,7 +286,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorClose(
     _env: EnvParam<'_>,
     pointer: Pointer<'_, Iterator>,
 ) {
