@@ -17,6 +17,7 @@ use std::sync::LazyLock;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_storage::hummock::{
     Block, BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
 };
@@ -103,7 +104,7 @@ fn bench_block_iter(c: &mut Criterion) {
                 (k_ext, v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
             }
 
-            assert_eq!(iter.key(), key(t, i, k_ext).to_vec());
+            assert_eq!(iter.key(), FullKey::decode(&key(t, i, k_ext)));
             assert_eq!(iter.value(), value(i, v_ext).to_vec());
             iter.next();
         }
@@ -148,7 +149,7 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
                 (k_ext, v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
             }
 
-            builder.add(&key(tt, ii, k_ext), &value(ii, v_ext));
+            builder.add(FullKey::decode(&key(tt, ii, k_ext)), &value(ii, v_ext));
         }
     }
     Bytes::from(builder.build().to_vec())

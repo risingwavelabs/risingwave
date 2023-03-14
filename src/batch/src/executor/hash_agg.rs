@@ -319,7 +319,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -387,7 +387,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 

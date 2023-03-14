@@ -482,6 +482,16 @@ where
             })
             .collect_vec();
 
+        let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
+        let configs = self
+            .compaction_group_manager
+            .read()
+            .await
+            .get_compaction_group_configs(&all_group_ids);
+        versioning_guard.write_limit =
+            calc_new_write_limits(configs, HashMap::new(), &versioning_guard.current_version);
+        tracing::info!("Hummock stopped write: {:#?}", versioning_guard.write_limit);
+
         Ok(())
     }
 
@@ -750,7 +760,11 @@ where
             .generate::<{ IdCategory::HummockCompactionTask }>()
             .await?;
 
-        let group_config = self.get_compaction_group_config(compaction_group_id).await;
+        let group_config = self
+            .compaction_group_manager
+            .read()
+            .await
+            .get_compaction_group_config(compaction_group_id);
         self.precheck_compaction_group(
             compaction_group_id,
             compaction_statuses,
@@ -1290,6 +1304,11 @@ where
             );
         }
 
+        if task_status == TaskStatus::Success {
+            self.try_update_write_limits(&[compact_task.compaction_group_id])
+                .await;
+        }
+
         #[cfg(test)]
         {
             drop(compaction_guard);
@@ -1501,9 +1520,13 @@ where
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
-            for id in modified_compaction_groups {
-                self.try_send_compaction_request(id, compact_task::TaskType::Dynamic);
+            for id in &modified_compaction_groups {
+                self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
             }
+        }
+        if !modified_compaction_groups.is_empty() {
+            self.try_update_write_limits(&modified_compaction_groups)
+                .await;
         }
         #[cfg(test)]
         {

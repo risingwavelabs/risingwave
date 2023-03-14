@@ -25,7 +25,7 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -372,9 +372,11 @@ where
                 .project(table_pk_indices)
                 .iter()
                 .zip_eq_fast(pk_order.iter())
-                .cmp_by(current_pos.iter(), |(x, order), y| match order {
-                    OrderType::Ascending => x.cmp(&y),
-                    OrderType::Descending => y.cmp(&x),
+                .cmp_by(current_pos.iter(), |(x, order), y| {
+                    match order.direction() {
+                        Direction::Ascending => x.cmp(&y),
+                        Direction::Descending => y.cmp(&x),
+                    }
                 }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
@@ -396,10 +398,7 @@ where
     }
 
     fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-        upstream_indices
-            .iter()
-            .position(|&idx| idx == watermark.col_idx)
-            .map(|idx| watermark.with_idx(idx))
+        watermark.transform_with_indices(upstream_indices)
     }
 
     fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Option<Message> {

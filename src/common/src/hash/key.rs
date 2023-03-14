@@ -365,14 +365,14 @@ impl HashKeySerDe<'_> for IntervalUnit {
         let mut ret = [0; 16];
         ret[0..4].copy_from_slice(&self.get_months().to_ne_bytes());
         ret[4..8].copy_from_slice(&self.get_days().to_ne_bytes());
-        ret[8..16].copy_from_slice(&self.get_ms().to_ne_bytes());
+        ret[8..16].copy_from_slice(&self.get_usecs().to_ne_bytes());
 
         ret
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        IntervalUnit::new(
+        IntervalUnit::from_month_day_usec(
             i32::from_ne_bytes(value[0..4].try_into().unwrap()),
             i32::from_ne_bytes(value[4..8].try_into().unwrap()),
             i64::from_ne_bytes(value[8..16].try_into().unwrap()),

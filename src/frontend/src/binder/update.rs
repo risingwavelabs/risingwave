@@ -73,7 +73,7 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let table = self.bind_relation_by_name(name, None)?;
+        let table = self.bind_relation_by_name(name, None, false)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 

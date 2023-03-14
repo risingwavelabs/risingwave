@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use chrono::{Datelike, Timelike};
+use either::{for_both, Either};
+use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
 use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
@@ -33,9 +35,20 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+
+use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
 
 pub type Result<T> = std::result::Result<T, ValueEncodingError>;
+
+/// The kind of all possible `ValueRowSerde`.
+#[derive(EnumAsInner)]
+pub enum ValueRowSerdeKind {
+    /// For `BasicSerde`, the value is encoded with value-encoding.
+    Basic,
+    /// For `ColumnAwareSerde`, the value is encoded with column-aware row encoding.
+    ColumnAware,
+}
 
 /// Part of `ValueRowSerde` that implements `serialize` a `Row` into bytes
 pub trait ValueRowSerializer: Clone {
@@ -54,8 +67,48 @@ pub trait ValueRowSerdeNew: Clone {
 
 /// The compound trait used in `StateTableInner`, implemented by `BasicSerde` and `ColumnAwareSerde`
 pub trait ValueRowSerde:
-    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send
+    ValueRowSerializer + ValueRowDeserializer + ValueRowSerdeNew + Sync + Send + 'static
 {
+    fn kind(&self) -> ValueRowSerdeKind;
+}
+
+/// The type-erased `ValueRowSerde`, used for simplifying the code.
+#[derive(Clone)]
+pub struct EitherSerde(Either<BasicSerde, ColumnAwareSerde>);
+
+impl From<BasicSerde> for EitherSerde {
+    fn from(value: BasicSerde) -> Self {
+        Self(Either::Left(value))
+    }
+}
+impl From<ColumnAwareSerde> for EitherSerde {
+    fn from(value: ColumnAwareSerde) -> Self {
+        Self(Either::Right(value))
+    }
+}
+
+impl ValueRowSerializer for EitherSerde {
+    fn serialize(&self, row: impl Row) -> Vec<u8> {
+        for_both!(&self.0, s => s.serialize(row))
+    }
+}
+
+impl ValueRowDeserializer for EitherSerde {
+    fn deserialize(&self, encoded_bytes: &[u8]) -> Result<Vec<Datum>> {
+        for_both!(&self.0, s => s.deserialize(encoded_bytes))
+    }
+}
+
+impl ValueRowSerdeNew for EitherSerde {
+    fn new(_column_ids: &[ColumnId], _schema: Arc<[DataType]>) -> EitherSerde {
+        unreachable!("should construct manually")
+    }
+}
+
+impl ValueRowSerde for EitherSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        for_both!(&self.0, s => s.kind())
+    }
 }
 
 /// Wrap of the original `Row` serializing function
@@ -106,7 +159,11 @@ impl ValueRowDeserializer for BasicSerde {
     }
 }
 
-impl ValueRowSerde for BasicSerde {}
+impl ValueRowSerde for BasicSerde {
+    fn kind(&self) -> ValueRowSerdeKind {
+        ValueRowSerdeKind::Basic
+    }
+}
 
 /// Serialize a datum into bytes and return (Not order guarantee, used in value encoding).
 pub fn serialize_datum(cell: impl ToDatumRef) -> Vec<u8> {
@@ -197,7 +254,7 @@ fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
 fn serialize_interval(interval: &IntervalUnit, buf: &mut impl BufMut) {
     buf.put_i32_le(interval.get_months());
     buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_ms());
+    buf.put_i64_le(interval.get_usecs());
 }
 
 fn serialize_naivedate(days: i32, buf: &mut impl BufMut) {
@@ -291,8 +348,8 @@ fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
 fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
     let months = data.get_i32_le();
     let days = data.get_i32_le();
-    let ms = data.get_i64_le();
-    Ok(IntervalUnit::new(months, days, ms))
+    let usecs = data.get_i64_le();
+    Ok(IntervalUnit::from_month_day_usec(months, days, usecs))
 }
 
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {

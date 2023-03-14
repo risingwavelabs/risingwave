@@ -1396,7 +1396,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .split_compaction_group(100, &[0])
         .await
         .unwrap_err();
-    assert_eq!("compaction group error invalid group 100", err.to_string());
+    assert_eq!("compaction group error: invalid group 100", err.to_string());
 
     hummock_manager
         .split_compaction_group(2, &[])
@@ -1408,7 +1408,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .await
         .unwrap_err();
     assert_eq!(
-        "compaction group error table 100 doesn't in group 2",
+        "compaction group error: table 100 doesn't in group 2",
         err.to_string()
     );
 
@@ -1460,7 +1460,7 @@ async fn test_split_compaction_group_on_demand_basic() {
         .await
         .unwrap_err();
     assert_eq!(
-        "compaction group error invalid split attempt for group 2: all member tables are moved",
+        "compaction group error: invalid split attempt for group 2: all member tables are moved",
         err.to_string()
     );
 
@@ -1510,8 +1510,8 @@ async fn test_split_compaction_group_on_demand_basic() {
                 .get(&new_group_id)
                 .cloned()
                 .unwrap(),
-            0,
-            "trivial adjust doesn't increase divide version"
+            1,
+            "trivial adjust should aoso increase divide version"
         );
     }
 }

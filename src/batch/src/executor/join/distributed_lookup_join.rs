@@ -29,7 +29,6 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::{Distribution, TableIter};
@@ -187,12 +186,14 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| {
-                OrderType::from_prost(&ProstOrderType::from_i32(order.order_type).unwrap())
-            })
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
-        let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+        let pk_indices = table_desc
+            .pk
+            .iter()
+            .map(|k| k.column_index as usize)
+            .collect_vec();
 
         let dist_key_indices = table_desc
             .dist_key_indices
@@ -214,6 +215,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|&k| k as usize)
             .collect_vec();
         let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+        let versioned = table_desc.versioned;
         dispatch_state_store!(source.context().state_store(), state_store, {
             let table = StorageTable::new_partial(
                 state_store,
@@ -226,6 +228,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
                 table_option,
                 value_indices,
                 prefix_hint_len,
+                versioned,
             );
 
             let inner_side_builder = InnerSideExecutorBuilder::new(

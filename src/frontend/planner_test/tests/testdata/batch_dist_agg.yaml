@@ -66,12 +66,12 @@
   sql: |
     select string_agg(s, ',' order by o) as a1 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.o, t.s], distribution: SomeShard }
@@ -95,12 +95,12 @@
   sql: |
     select count(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [count(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
@@ -110,12 +110,12 @@
   sql: |
     select max(v) as a1, string_agg(s, ',' order by o) as a2 from T;
   batch_plan: |
-    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }
   batch_local_plan: |
-    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC NULLS LAST))] }
+    BatchSimpleAgg { aggs: [max(t.v), string_agg(t.s, ',':Varchar order_by(t.o ASC))] }
     └─BatchExchange { order: [], dist: Single }
       └─BatchProject { exprs: [t.v, t.s, ',':Varchar, t.o] }
         └─BatchScan { table: t, columns: [t.v, t.o, t.s], distribution: SomeShard }

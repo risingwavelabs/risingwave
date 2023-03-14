@@ -309,6 +309,7 @@ impl Binder {
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,
+            false,
         )?);
         let where_clause = Some(
             FunctionCall::new(
@@ -408,6 +409,9 @@ fn derive_alias(expr: &Expr) -> Option<String> {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
         }
         Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
+        Expr::Value(risingwave_sqlparser::ast::Value::Interval { .. }) => {
+            Some("interval".to_string())
+        }
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),
         Expr::ArrayIndex { obj, index: _ } => derive_alias(&obj),

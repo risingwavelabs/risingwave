@@ -1,19 +1,24 @@
 /* eslint-disable */
 import { StreamSourceInfo } from "./catalog";
-import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
+import {
+  BatchQueryEpoch,
+  Buffer,
+  ColumnOrder,
+  Direction,
+  directionFromJSON,
+  directionToJSON,
+  HostAddress,
+  WorkerNode,
+} from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
   joinTypeToJSON,
-  OrderType,
-  orderTypeFromJSON,
-  orderTypeToJSON,
   StorageTableDesc,
 } from "./plan_common";
 
@@ -207,7 +212,7 @@ export interface SortMergeJoinNode {
   joinType: JoinType;
   leftKey: number[];
   rightKey: number[];
-  direction: OrderType;
+  direction: Direction;
   outputIndices: number[];
 }
 
@@ -1325,7 +1330,7 @@ function createBaseSortMergeJoinNode(): SortMergeJoinNode {
     joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
-    direction: OrderType.ORDER_UNSPECIFIED,
+    direction: Direction.DIRECTION_UNSPECIFIED,
     outputIndices: [],
   };
 }
@@ -1336,7 +1341,7 @@ export const SortMergeJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
+      direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1354,7 +1359,7 @@ export const SortMergeJoinNode = {
     } else {
       obj.rightKey = [];
     }
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
+    message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -1368,7 +1373,7 @@ export const SortMergeJoinNode = {
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
+    message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },

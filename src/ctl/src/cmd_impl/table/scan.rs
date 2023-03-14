@@ -63,8 +63,8 @@ pub async fn make_state_table<S: StateStore>(hummock: S, table: &TableCatalog) -
             .iter()
             .map(|x| x.column_desc.clone())
             .collect(),
-        table.pk().iter().map(|x| x.direct.to_order()).collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()), // scan all vnodes
         Some(table.value_indices.clone()),
     )
@@ -85,12 +85,13 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
             .iter()
             .map(|x| x.column_desc.column_id)
             .collect(),
-        table.pk().iter().map(|x| x.direct.to_order()).collect(),
-        table.pk().iter().map(|x| x.index).collect(),
+        table.pk().iter().map(|x| x.order_type).collect(),
+        table.pk().iter().map(|x| x.column_index).collect(),
         Distribution::all_vnodes(table.distribution_key().to_vec()),
         TableOption::build_table_option(&HashMap::new()),
         table.value_indices.clone(),
         table.read_prefix_len_hint,
+        table.version.is_some(),
     )
 }
 
