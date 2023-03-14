@@ -420,6 +420,7 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        #[cfg(debug_assertions)]
         self.debug_valid();
 
         let mut key: BytesMut = Default::default();
