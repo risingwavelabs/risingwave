@@ -35,6 +35,7 @@ pub mod error;
 pub mod meta_snapshot;
 pub mod storage;
 
+use std::collections::HashSet;
 use std::hash::Hasher;
 
 use itertools::Itertools;
@@ -67,7 +68,9 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_object_ids(),
+            ssts: HashSet::<HummockSstableObjectId>::from_iter(v.get_object_ids())
+                .into_iter()
+                .collect_vec(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
         }
