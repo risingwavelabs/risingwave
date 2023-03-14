@@ -101,9 +101,9 @@ pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUni
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
-        let ms = cursor.read_i64::<BigEndian>()?;
+        let usecs = cursor.read_i64::<BigEndian>()?;
 
-        Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
+        Ok::<_, std::io::Error>(IntervalUnit::from_month_day_usec(months, days, usecs))
     };
 
     match read() {

@@ -283,6 +283,16 @@ impl ValidateOnSet for OverrideValidateOnSet {
         Self::expect_range(*v, 1..)
     }
 
+    fn backup_storage_directory(_v: &String) -> Result<()> {
+        // TODO
+        Ok(())
+    }
+
+    fn backup_storage_url(_v: &String) -> Result<()> {
+        // TODO
+        Ok(())
+    }
+
     fn telemetry_enabled(_: &bool) -> Result<()> {
         Ok(())
     }

@@ -1760,6 +1760,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "csv-core"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4207,9 +4219,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.27.2"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef6f7b936f2f8483e19643357cb50d9ec9a49c506971ef69ca676913cf5afd91"
+checksum = "72b63493afc5a8fb8cafbfa87118ffd0aea076935a7ae2375da9e03c1f49aaf3"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -6007,7 +6019,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "csv-core",
+ "csv",
  "duration-str",
  "enum-as-inner",
  "futures",
@@ -6430,6 +6442,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
+ "lru",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6445,6 +6458,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "serde",
  "serde_derive",
@@ -6494,8 +6508,12 @@ name = "risingwave_sqlparser_test_runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console",
+ "futures",
+ "madsim-tokio",
  "risingwave_sqlparser",
  "serde",
+ "serde_with 2.2.0",
  "serde_yaml",
  "walkdir",
  "workspace-hack",

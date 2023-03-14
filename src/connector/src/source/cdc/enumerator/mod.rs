@@ -38,7 +38,7 @@ impl SplitEnumerator for DebeziumSplitEnumerator {
 
         // validate connector properties
         cdc_client
-            .validate_properties(
+            .validate_source_properties(
                 props.source_id as u64,
                 props.source_type_enum()?,
                 props.props,

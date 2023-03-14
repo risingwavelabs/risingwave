@@ -140,6 +140,8 @@ enum HummockCommands {
         compaction_filter_mask: Option<u32>,
         #[clap(long)]
         max_sub_compaction: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_sub_level_number: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -268,6 +270,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             target_file_size_base,
             compaction_filter_mask,
             max_sub_compaction,
+            level0_stop_write_threshold_sub_level_number,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -281,6 +284,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     target_file_size_base,
                     compaction_filter_mask,
                     max_sub_compaction,
+                    level0_stop_write_threshold_sub_level_number,
                 ),
             )
             .await?

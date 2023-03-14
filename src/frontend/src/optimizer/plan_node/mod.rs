@@ -671,6 +671,7 @@ mod stream_watermark_filter;
 
 mod derive;
 mod stream_share;
+mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
 
@@ -742,6 +743,7 @@ pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_watermark_filter::StreamWatermarkFilter;
@@ -840,6 +842,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }
@@ -940,6 +943,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }

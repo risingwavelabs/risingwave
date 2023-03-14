@@ -20,7 +20,7 @@ ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
-console = "0.15.2"
+console = "0.15"
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }

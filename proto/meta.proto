@@ -245,9 +245,10 @@ message MetaSnapshot {
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
+  hummock.WriteLimits hummock_write_limits = 16;
 
   SnapshotVersion version = 13;
-  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -278,6 +279,7 @@ message SubscribeResponse {
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
     SystemParams system_params = 19;
+    hummock.WriteLimits hummock_write_limits = 20;
   }
 }
 
