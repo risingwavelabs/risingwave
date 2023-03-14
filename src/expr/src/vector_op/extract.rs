@@ -15,61 +15,64 @@
 use chrono::{Datelike, Timelike};
 use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
-use crate::{bail, Result};
+use crate::{ExprError, Result};
 
-fn extract_time<T>(time: T, time_unit: &str) -> Result<Decimal>
+fn extract_time<T>(time: T, field: &str) -> Option<Decimal>
 where
     T: Timelike,
 {
-    match time_unit {
-        "HOUR" => Ok(time.hour().into()),
-        "MINUTE" => Ok(time.minute().into()),
-        "SECOND" => Ok(time.second().into()),
-        _ => bail!("Unsupported time unit {} in extract function", time_unit),
-    }
+    Some(match field {
+        "HOUR" => time.hour().into(),
+        "MINUTE" => time.minute().into(),
+        "SECOND" => time.second().into(),
+        _ => return None,
+    })
 }
 
-fn extract_date<T>(date: T, time_unit: &str) -> Result<Decimal>
+fn extract_date<T>(date: T, field: &str) -> Option<Decimal>
 where
     T: Datelike,
 {
-    match time_unit {
-        "DAY" => Ok(date.day().into()),
-        "MONTH" => Ok(date.month().into()),
-        "YEAR" => Ok(date.year().into()),
+    Some(match field {
+        "DAY" => date.day().into(),
+        "MONTH" => date.month().into(),
+        "YEAR" => date.year().into(),
         // Sun = 0 and Sat = 6
-        "DOW" => Ok(date.weekday().num_days_from_sunday().into()),
-        "DOY" => Ok(date.ordinal().into()),
-        _ => bail!("Unsupported time unit {} in extract function", time_unit),
+        "DOW" => date.weekday().num_days_from_sunday().into(),
+        "DOY" => date.ordinal().into(),
+        _ => return None,
+    })
+}
+
+fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
+    ExprError::InvalidParam {
+        name,
+        reason: format!("\"{unit}\" not recognized or supported"),
     }
 }
 
 pub fn extract_from_date(time_unit: &str, date: NaiveDateWrapper) -> Result<Decimal> {
-    extract_date(date.0, time_unit)
+    extract_date(date.0, time_unit).ok_or_else(|| invalid_unit("date unit", time_unit))
 }
 
 pub fn extract_from_timestamp(time_unit: &str, timestamp: NaiveDateTimeWrapper) -> Result<Decimal> {
     let time = timestamp.0;
-    let mut res = extract_date(time, time_unit);
-    if res.is_err() {
-        res = extract_time(time, time_unit);
-    }
-    res
+
+    extract_date(time, time_unit)
+        .or_else(|| extract_time(time, time_unit))
+        .ok_or_else(|| invalid_unit("timestamp unit", time_unit))
 }
 
 pub fn extract_from_timestamptz(time_unit: &str, usecs: i64) -> Result<Decimal> {
     match time_unit {
         "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
         // TODO(#5826): all other units depend on implicit session TimeZone
-        _ => bail!(
-            "Unsupported timestamp with time zone unit {} in extract function",
-            time_unit
-        ),
+        _ => Err(invalid_unit("timestamp with time zone units", time_unit)),
     }
 }
 
 pub fn extract_from_time(time_unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
-    extract_time(time.0, time_unit)
+    extract_time(time.0, time_unit).ok_or_else(|| invalid_unit("time unit", time_unit))
 }
 
 #[cfg(test)]
