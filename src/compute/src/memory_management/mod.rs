@@ -80,7 +80,7 @@ pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<Memor
 }
 
 #[cfg(not(target_os = "linux"))]
-pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
+pub fn memory_control_policy_from_config(_opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
     // We disable memory control on operating systems other than Linux now because jemalloc
     // stats do not work well.
     tracing::warn!("memory control is only enabled on Linux now");
