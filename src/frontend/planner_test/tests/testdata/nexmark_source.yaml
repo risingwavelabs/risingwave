@@ -870,7 +870,7 @@
       StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [day], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count(distinct bidder), count(distinct bidder) filter((price < 10000:Int32)), count(distinct bidder) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct bidder) filter((price >= 1000000:Int32)), count(distinct auction), count(distinct auction) filter((price < 10000:Int32)), count(distinct auction) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct auction) filter((price >= 1000000:Int32))] }
-            result table: 0, state tables: [], distinct_tables: [(distinct key: bidder, table_id: 2), (distinct key: auction, table_id: 1)]
+            result table: 0, state tables: [], distinct_tables: [(distinct key: bidder, table_id: 1), (distinct key: auction, table_id: 2)]
           StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -880,8 +880,8 @@
               source state table: 3
 
      Table 0 { columns: [$expr1, count, count filter((price < 10000:Int32)), count filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count filter((price >= 1000000:Int32)), count(distinct bidder), count(distinct bidder) filter((price < 10000:Int32)), count(distinct bidder) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct bidder) filter((price >= 1000000:Int32)), count(distinct auction), count(distinct auction) filter((price < 10000:Int32)), count(distinct auction) filter((price >= 10000:Int32) AND (price < 1000000:Int32)), count(distinct auction) filter((price >= 1000000:Int32))], primary key: [$0 ASC], value indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0], read_pk_prefix_len_hint: 1 }
-     Table 1 { columns: [$expr1, auction, count_for_agg_call_8, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
-     Table 2 { columns: [$expr1, bidder, count_for_agg_call_4, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
+     Table 1 { columns: [$expr1, bidder, count_for_agg_call_4, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
+     Table 2 { columns: [$expr1, auction, count_for_agg_call_8, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
      Table 3 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], read_pk_prefix_len_hint: 0 }
      Table 4294967294 { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q16

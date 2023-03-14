@@ -15,6 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -131,6 +132,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
             ),
             distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
+                .sorted_by_key(|(i, _)| *i)
                 .map(|(key_idx, table)| {
                     (
                         key_idx as u32,
