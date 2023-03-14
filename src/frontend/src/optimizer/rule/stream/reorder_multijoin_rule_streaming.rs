@@ -21,27 +21,27 @@ pub struct ReorderMultiJoinRuleStreaming {}
 
 impl Rule for ReorderMultiJoinRuleStreaming {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
-        // if plan
-        //     .ctx()
-        //     .session_ctx()
-        //     .config()
-        //     .get_streaming_enable_bushy_join()
-        // {
-        let join = plan.as_logical_multi_join()?;
-        match join.as_bushy_tree_join() {
-            Ok(plan) => Some(plan),
-            Err(e) => {
-                eprintln!("{}", e);
-                None
+        if plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_streaming_enable_bushy_join()
+        {
+            let join = plan.as_logical_multi_join()?;
+            match join.as_bushy_tree_join() {
+                Ok(plan) => Some(plan),
+                Err(e) => {
+                    eprintln!("{}", e);
+                    None
+                }
             }
+        } else {
+            let join = plan.as_logical_multi_join()?;
+            // check if join is inner and can be merged into multijoin
+            let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
+            let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
+            Some(left_deep_join)
         }
-        // } else {
-        // let join = plan.as_logical_multi_join()?;
-        // // check if join is inner and can be merged into multijoin
-        // let join_ordering = join.heuristic_ordering().ok()?; // maybe panic here instead?
-        // let left_deep_join = join.as_reordered_left_deep_join(&join_ordering);
-        // Some(left_deep_join)
-        // }
     }
 }
 
