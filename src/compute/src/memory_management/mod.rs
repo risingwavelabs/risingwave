@@ -87,8 +87,8 @@ pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<Memor
     Ok(Box::new(DummyPolicy))
 }
 
-// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
-// is disabled on non-Linux OS.
+/// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
+/// is disabled on non-Linux OS.
 pub struct DummyPolicy;
 
 impl MemoryControl for DummyPolicy {
