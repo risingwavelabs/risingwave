@@ -252,13 +252,13 @@ pub async fn gen_test_sstable<B: AsRef<[u8]>>(
 /// Generate a test table from the given `kv_iter` and put the kv value to `sstable_store`
 pub async fn gen_test_sstable_and_info<B: AsRef<[u8]>>(
     opts: SstableBuilderOptions,
-    sst_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
     kv_iter: impl Iterator<Item = (FullKey<B>, HummockValue<B>)>,
     sstable_store: SstableStoreRef,
 ) -> (Sstable, SstableInfo) {
     gen_test_sstable_inner(
         opts,
-        sst_id,
+        object_id,
         kv_iter,
         vec![],
         sstable_store,

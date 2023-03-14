@@ -82,7 +82,7 @@ impl SstableStreamIterator {
             if self
                 .sstable_info
                 .get_table_ids()
-                .binary_search(&FullKey::decode(block_iter.key()).user_key.table_id.table_id)
+                .binary_search(&block_iter.key().user_key.table_id.table_id)
                 .is_ok()
             {
                 return Ok(());
@@ -247,7 +247,8 @@ impl ConcatSstableIterator {
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
         self.sstable_iter.take();
-        let seek_key: Option<FullKey<&[u8]>> = match (seek_key, self.key_range.left.is_empty()) {
+        let mut seek_key: Option<FullKey<&[u8]>> = match (seek_key, self.key_range.left.is_empty())
+        {
             (Some(seek_key), false) => match seek_key.cmp(&FullKey::decode(&self.key_range.left)) {
                 Ordering::Less | Ordering::Equal => Some(FullKey::decode(&self.key_range.left)),
                 Ordering::Greater => Some(seek_key),
@@ -560,7 +561,9 @@ mod tests {
         let block_1_second_key = iter.key().to_vec();
         // Use a big enough seek key and result in invalid iterator.
         let seek_key = test_key_of(30001);
-        iter.seek_idx(table_infos.len() - 1, Some(seek_key.to_ref())).await.unwrap();
+        iter.seek_idx(table_infos.len() - 1, Some(seek_key.to_ref()))
+            .await
+            .unwrap();
         assert!(!iter.is_valid());
 
         // Test seek_idx. Result is dominated by key range rather than given seek key.
