@@ -17,17 +17,12 @@ package com.risingwave.connector;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkrow;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.java.binding.KeyedRow;
 import com.risingwave.java.binding.StreamChunkIterator;
 import com.risingwave.java.binding.StreamChunkRow;
-import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.StreamChunkPayload;
 import com.risingwave.proto.Data;
-import com.risingwave.java.binding;
-import scala.None;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 
@@ -40,6 +35,16 @@ public class StreamChunkDeserializer implements Deserializer {
         this.tableSchema = tableSchema;
     }
 
+    public Iterator<SinkRow> deserializeByIterator(Object payload){
+        if (!(payload instanceof StreamChunkPayload)) {
+            throw INVALID_ARGUMENT
+                    .withDescription("expected StreamChunkPayload, got " + payload.getClass().getName())
+                    .asRuntimeException();
+        }
+        StreamChunkPayload streamChunkPayload = (StreamChunkPayload)  payload;
+        return new MyIterator(tableSchema,new StreamChunkIterator(streamChunkPayload.toByteArray()));
+    }
+
     @Override
     public Iterator<SinkRow> deserialize(Object payload){
         if (!(payload instanceof StreamChunkPayload)) {
@@ -48,7 +53,7 @@ public class StreamChunkDeserializer implements Deserializer {
                     .asRuntimeException();
         }
         StreamChunkPayload streamChunkPayload = (StreamChunkPayload)  payload;
-        List<SinkRow> sinkRowList = new ArrayList<SinkRow>();
+        List<SinkRow> sinkRowList = new ArrayList<>();
         try (StreamChunkIterator iter = new StreamChunkIterator(streamChunkPayload.toByteArray())){
             while(true){
                 try(StreamChunkRow row = iter.next()){
@@ -91,6 +96,37 @@ public class StreamChunkDeserializer implements Deserializer {
                 throw io.grpc.Status.INVALID_ARGUMENT
                         .withDescription("unsupported type " + typeName)
                         .asRuntimeException();
+        }
+    }
+
+    static class MyIterator implements Iterator<SinkRow>{
+        private final TableSchema tableSchema;
+        private final StreamChunkIterator iter;
+        private StreamChunkRow row;
+        public MyIterator(TableSchema tableSchema, StreamChunkIterator iter){
+            this.tableSchema = tableSchema;
+            this.iter = iter;
+            this.row = null;
+        }
+
+        @Override
+        public boolean hasNext() {
+            row = iter.next();
+            return row != null;
+        }
+
+        @Override
+        public SinkRow next() {
+            Object[] values = new Object[tableSchema.getNumColumns()];
+            for(String columnName : tableSchema.getColumnNames()){
+                int columnIdx = tableSchema.getColumnIndex(columnName);
+                Data.DataType.TypeName typeName =
+                        tableSchema.getColumnType(columnName);
+                values[tableSchema.getColumnIndex(columnName)] =
+                        validateStreamChunkDataTypes(
+                                typeName, columnIdx, row);
+            }
+            return new ArraySinkrow(row.getOp(),values);
         }
     }
 }
