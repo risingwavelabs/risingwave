@@ -33,7 +33,7 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
     config.need_boundaries = false;
     config.width = 120;
     config.unicode(&mut output, &pretty);
-    Ok(output)
+    output
 }
 
 /// A formatter to display the final stream plan graph, used for `explain (distsql) create
