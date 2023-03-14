@@ -45,6 +45,9 @@ enum MetaErrorInner {
     #[error("Invalid worker: {0}")]
     InvalidWorker(WorkerId),
 
+    #[error("Invalid parameter: {0}")]
+    InvalidParameter(String),
+
     // Used for catalog errors.
     #[error("{0} id not found: {1}")]
     CatalogIdNotFound(&'static str, u32),
@@ -112,6 +115,10 @@ impl MetaError {
     pub fn is_invalid_worker(&self) -> bool {
         use std::borrow::Borrow;
         std::matches!(self.inner.borrow(), &MetaErrorInner::InvalidWorker(_))
+    }
+
+    pub fn invalid_parameter(s: impl Into<String>) -> Self {
+        MetaErrorInner::InvalidParameter(s.into()).into()
     }
 
     pub fn catalog_id_not_found<T: Into<u32>>(relation: &'static str, id: T) -> Self {
@@ -184,6 +191,9 @@ impl From<MetaError> for tonic::Status {
             MetaErrorInner::Duplicated(_, _) => tonic::Status::already_exists(err.to_string()),
             MetaErrorInner::Unavailable(_) => tonic::Status::unavailable(err.to_string()),
             MetaErrorInner::Cancelled(_) => tonic::Status::cancelled(err.to_string()),
+            MetaErrorInner::InvalidParameter(msg) => {
+                tonic::Status::invalid_argument(msg.to_owned())
+            }
             _ => tonic::Status::internal(err.to_string()),
         }
     }

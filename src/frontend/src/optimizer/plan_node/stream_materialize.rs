@@ -20,15 +20,16 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::derive::derive_columns;
-use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::catalog::table_catalog::{TableCatalog, TableType, TableVersion};
 use crate::catalog::FragmentId;
 use crate::optimizer::plan_node::derive::derive_pk;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -63,6 +64,8 @@ impl StreamMaterialize {
         table_type: TableType,
     ) -> Result<Self> {
         let input = Self::rewrite_input(input, user_distributed_by, table_type)?;
+        // the hidden column name might refer some expr id
+        let input = reorganize_elements_id(input);
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 
         let table = Self::derive_table_catalog(
@@ -196,6 +199,7 @@ impl StreamMaterialize {
             read_prefix_len_hint,
             version,
             watermark_columns,
+            dist_key_in_pk: vec![],
         })
     }
 
@@ -229,7 +233,7 @@ impl fmt::Display for StreamMaterialize {
         let order_descs = table
             .pk
             .iter()
-            .map(|order| table.columns()[order.index].column_desc.name.clone())
+            .map(|o| table.columns()[o.column_index].column_desc.name.clone())
             .join(", ");
 
         let mut builder = f.debug_struct("StreamMaterialize");
@@ -250,6 +254,18 @@ impl fmt::Display for StreamMaterialize {
             pk_conflict_behavior = "ignore conflict";
         }
         builder.field("pk_conflict", &pk_conflict_behavior);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let watermark_column_names = watermark_columns
+                .ones()
+                .map(|i| table.columns()[i].name_with_hidden())
+                .join(", ");
+            builder.field(
+                "watermark_columns",
+                &format_args!("[{}]", watermark_column_names),
+            );
+        };
 
         builder.finish()
     }
@@ -292,7 +308,7 @@ impl StreamNode for StreamMaterialize {
                 .table()
                 .pk()
                 .iter()
-                .map(FieldOrder::to_protobuf)
+                .map(ColumnOrder::to_protobuf)
                 .collect(),
             table: Some(self.table().to_internal_table_prost()),
             handle_pk_conflict_behavior,

@@ -224,7 +224,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("source_recv_first_barrier")
+            .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -285,7 +285,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         let source_chunk_reader = self
             .build_stream_source_reader(&source_desc, recover_state)
-            .stack_trace("source_build_reader")
+            .instrument_await("source_build_reader")
             .await?;
 
         // Merge the chunks from source and the barriers into a single stream. We prioritize
@@ -434,7 +434,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let mut barrier_receiver = self.barrier_receiver.take().unwrap();
         let barrier = barrier_receiver
             .recv()
-            .stack_trace("source_recv_first_barrier")
+            .instrument_await("source_recv_first_barrier")
             .await
             .ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -496,7 +496,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
@@ -663,7 +663,7 @@ mod tests {
             Box::new(executor),
             mem_state_store.clone(),
             TableId::from(0x2333),
-            vec![OrderPair::new(0, OrderType::Ascending)],
+            vec![ColumnOrder::new(0, OrderType::ascending())],
             column_ids,
             2,
             Arc::new(AtomicU64::new(0)),

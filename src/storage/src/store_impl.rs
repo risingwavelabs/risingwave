@@ -23,7 +23,7 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
-use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
@@ -223,7 +223,7 @@ macro_rules! dispatch_state_store {
 pub mod verify {
     use std::fmt::Debug;
     use std::future::Future;
-    use std::ops::{Bound, Deref};
+    use std::ops::Deref;
 
     use bytes::Bytes;
     use futures::{pin_mut, TryStreamExt};
@@ -272,14 +272,12 @@ pub mod verify {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, epoch, read_options.clone()).await;
+                let actual = self
+                    .actual
+                    .get(key.clone(), epoch, read_options.clone())
+                    .await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, epoch, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -290,7 +288,7 @@ pub mod verify {
 
         fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> Self::IterFuture<'_> {
@@ -384,15 +382,15 @@ pub mod verify {
         // be consistent across different state store backends.
         fn may_exist(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> Self::MayExistFuture<'_> {
             self.actual.may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, read_options.clone()).await;
+                let actual = self.actual.get(key.clone(), read_options.clone()).await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -401,11 +399,7 @@ pub mod verify {
             }
         }
 
-        fn iter(
-            &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-            read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
+        fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
             async move {
                 let actual = self
                     .actual
@@ -605,17 +599,9 @@ impl StateStoreImpl {
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-
-                let backup_store = parse_meta_snapshot_storage(
-                    &opts.backup_storage_url,
-                    &opts.backup_storage_directory,
-                )
-                .await?;
-                let backup_reader = BackupReader::new(backup_store);
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
-                    backup_reader,
                     hummock_meta_client.clone(),
                     notification_client,
                     state_store_metrics.clone(),
@@ -651,6 +637,7 @@ pub trait HummockTrait {
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
 
@@ -669,6 +656,10 @@ impl HummockTrait for HummockStorage {
 
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.get_memory_limiter()
+    }
+
+    fn backup_reader(&self) -> BackupReaderRef {
+        self.backup_reader()
     }
 
     fn as_hummock(&self) -> Option<&HummockStorage> {
@@ -701,7 +692,7 @@ impl AsHummockTrait for SledStateStore {
 #[cfg(debug_assertions)]
 pub mod boxed_state_store {
     use std::future::Future;
-    use std::ops::{Bound, Deref, DerefMut};
+    use std::ops::{Deref, DerefMut};
 
     use bytes::Bytes;
     use futures::stream::BoxStream;
@@ -719,16 +710,16 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream>;
@@ -736,9 +727,9 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -747,7 +738,7 @@ pub mod boxed_state_store {
 
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<BoxStateStoreReadIterStream> {
@@ -761,19 +752,15 @@ pub mod boxed_state_store {
     pub trait DynamicDispatchedLocalStateStore: StaticSendSync {
         async fn may_exist(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>>;
 
@@ -801,23 +788,19 @@ pub mod boxed_state_store {
     impl<S: LocalStateStore> DynamicDispatchedLocalStateStore for S {
         async fn may_exist(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<bool> {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
         async fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> StorageResult<BoxLocalStateStoreIterStream<'_>> {
             Ok(self.iter(key_range, read_options).await?.boxed())
@@ -870,21 +853,17 @@ pub mod boxed_state_store {
 
         fn may_exist(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             read_options: ReadOptions,
         ) -> Self::MayExistFuture<'_> {
             self.deref().may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)
         }
 
-        fn iter(
-            &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-            read_options: ReadOptions,
-        ) -> Self::IterFuture<'_> {
+        fn iter(&self, key_range: IterKeyRange, read_options: ReadOptions) -> Self::IterFuture<'_> {
             self.deref().iter(key_range, read_options)
         }
 
@@ -973,18 +952,13 @@ pub mod boxed_state_store {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, epoch, read_options)
         }
 
         fn iter(
             &self,
-            key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+            key_range: IterKeyRange,
             epoch: u64,
             read_options: ReadOptions,
         ) -> Self::IterFuture<'_> {

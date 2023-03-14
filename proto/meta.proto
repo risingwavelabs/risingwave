@@ -205,6 +205,7 @@ enum SubscribeType {
   FRONTEND = 1;
   HUMMOCK = 2;
   COMPACTOR = 3;
+  COMPUTE = 4;
 }
 
 // Below for notification service.
@@ -233,9 +234,10 @@ message MetaSnapshot {
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
+  hummock.WriteLimits hummock_write_limits = 16;
 
   SnapshotVersion version = 13;
-  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -265,6 +267,8 @@ message SubscribeResponse {
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
+    SystemParams system_params = 19;
+    hummock.WriteLimits hummock_write_limits = 20;
   }
 }
 
@@ -327,8 +331,9 @@ service MetaMemberService {
 
 // The schema for persisted system parameters.
 // Note on backward compatibility:
-// - Do not remove deprecated fields.
-// - To rename, change the type or semantic of a field, introduce a new field postfixed by the version.
+// - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+// - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
+// - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
 message SystemParams {
   optional uint32 barrier_interval_ms = 1;
   optional uint64 checkpoint_frequency = 2;

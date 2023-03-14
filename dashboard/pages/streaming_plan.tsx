@@ -40,6 +40,7 @@ import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
 import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import useFetch from "./api/fetch"
 import { getFragments, getStreamingJobs } from "./api/streaming"
 
 interface DispatcherNode {
@@ -124,32 +125,6 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
 }
 
 const SIDEBAR_WIDTH = 200
-
-function useFetch<T>(fetchFn: () => Promise<T>) {
-  const [response, setResponse] = useState<T>()
-  const toast = useToast()
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetchFn()
-        setResponse(res)
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
-      }
-    }
-    fetchData()
-  }, [toast, fetchFn])
-
-  return { response }
-}
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)

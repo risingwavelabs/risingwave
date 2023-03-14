@@ -32,6 +32,7 @@ use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -232,7 +233,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter().await?;
+        let rhs_stream = self.right_table.iter(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -387,8 +388,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                         // TODO: prefetching for append-only case.
                         for vnode in self.left_table.vnodes().iter_vnodes() {
-                            let row_stream =
-                                self.left_table.iter_with_pk_range(&range, vnode).await?;
+                            let row_stream = self
+                                .left_table
+                                .iter_with_pk_range(
+                                    &range,
+                                    vnode,
+                                    PrefetchOptions::new_for_exhaust_iter(),
+                                )
+                                .await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {
                                 let row = res?;
@@ -494,7 +501,7 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
@@ -502,7 +509,7 @@ mod tests {
             mem_state,
             TableId::new(1),
             vec![column_descs],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;

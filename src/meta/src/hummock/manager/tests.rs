@@ -14,34 +14,38 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, HummockVersionExt,
+    get_compaction_group_ids, get_compaction_group_sst_ids, HummockVersionExt,
 };
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
-// use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
+    CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+    HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{
-    HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange, SstableInfo,
+    CompactTask, HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, KeyRange,
+    SstableInfo,
 };
 
 use crate::hummock::compaction::{default_level_selector, ManualCompactionOption};
 use crate::hummock::error::Error;
 use crate::hummock::test_utils::*;
-use crate::hummock::{start_compaction_scheduler, CompactionScheduler, HummockManagerRef};
+use crate::hummock::{
+    start_compaction_scheduler, CompactionScheduler, HummockManager, HummockManagerRef,
+};
 use crate::manager::WorkerId;
 use crate::model::MetadataModel;
-use crate::storage::MemStore;
+use crate::storage::{MemStore, MetaStore};
 
 fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
@@ -1286,4 +1290,538 @@ async fn test_version_stats() {
     assert_eq!(compact_table3_stats.total_key_count, 0);
     assert_eq!(compact_table3_stats.total_value_size, 0);
     assert_eq!(compact_table3_stats.total_key_size, 0);
+}
+
+#[tokio::test]
+async fn test_split_compaction_group_on_commit() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 3)])
+        .await
+        .unwrap();
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 10,
+            key_range: None,
+            table_ids: vec![100, 101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(current_version.levels.len(), 2);
+    assert_eq!(get_compaction_group_sst_ids(&current_version, 2), vec![10]);
+    assert_eq!(get_compaction_group_sst_ids(&current_version, 3), vec![10]);
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(2)
+            .member_table_ids,
+        vec![100]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(3)
+            .member_table_ids,
+        vec![101]
+    );
+    let branched_ssts = hummock_manager
+        .versioning
+        .read(&["", "", ""])
+        .await
+        .branched_ssts
+        .clone();
+    assert_eq!(branched_ssts.len(), 1);
+    assert_eq!(branched_ssts.values().next().unwrap().len(), 2);
+    assert_eq!(
+        branched_ssts
+            .values()
+            .next()
+            .unwrap()
+            .get(&2)
+            .cloned()
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        branched_ssts
+            .values()
+            .next()
+            .unwrap()
+            .get(&3)
+            .cloned()
+            .unwrap(),
+        1
+    );
+}
+
+async fn get_branched_ssts<S: MetaStore>(
+    hummock_manager: &HummockManager<S>,
+) -> BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>> {
+    hummock_manager
+        .versioning
+        .read(&["", "", ""])
+        .await
+        .branched_ssts
+        .clone()
+}
+
+#[tokio::test]
+async fn test_split_compaction_group_on_demand_basic() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let original_groups = hummock_manager
+        .get_current_version()
+        .await
+        .levels
+        .keys()
+        .cloned()
+        .sorted()
+        .collect_vec();
+    assert_eq!(original_groups, vec![2, 3]);
+
+    let err = hummock_manager
+        .split_compaction_group(100, &[0])
+        .await
+        .unwrap_err();
+    assert_eq!("compaction group error: invalid group 100", err.to_string());
+
+    hummock_manager
+        .split_compaction_group(2, &[])
+        .await
+        .unwrap();
+
+    let err = hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap_err();
+    assert_eq!(
+        "compaction group error: table 100 doesn't in group 2",
+        err.to_string()
+    );
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 10,
+            key_range: None,
+            table_ids: vec![100],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    let sst_2 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 11,
+            key_range: None,
+            table_ids: vec![100, 101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .commit_epoch(
+            30,
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
+        )
+        .await
+        .unwrap();
+
+    let err = hummock_manager
+        .split_compaction_group(2, &[100, 101])
+        .await
+        .unwrap_err();
+    assert_eq!(
+        "compaction group error: invalid split attempt for group 2: all member tables are moved",
+        err.to_string()
+    );
+
+    // Now group 2 has member tables [100,101,102], so split [100, 101] can succeed even though
+    // there is no data of 102.
+    hummock_manager
+        .register_table_ids(&[(102, 2)])
+        .await
+        .unwrap();
+
+    hummock_manager
+        .split_compaction_group(2, &[100, 101])
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(current_version.levels.len(), 3);
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert!(new_group_id > StaticCompactionGroupId::End as u64);
+    assert!(
+        get_compaction_group_sst_ids(&current_version, 2).is_empty(),
+        "SST 10, 11 has been moved to new_group completely."
+    );
+    assert_eq!(
+        get_compaction_group_sst_ids(&current_version, new_group_id),
+        vec![10, 11]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(2)
+            .member_table_ids,
+        vec![102]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .member_table_ids,
+        vec![100, 101]
+    );
+    let branched_ssts = get_branched_ssts(&hummock_manager).await;
+    assert_eq!(branched_ssts.len(), 2);
+    for sst_id in [10, 11] {
+        assert_eq!(branched_ssts.get(&sst_id).unwrap().len(), 1);
+        assert_eq!(
+            branched_ssts
+                .get(&sst_id)
+                .unwrap()
+                .get(&new_group_id)
+                .cloned()
+                .unwrap(),
+            1,
+            "trivial adjust should aoso increase divide version"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_split_compaction_group_on_demand_non_trivial() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 10,
+            key_range: None,
+            table_ids: vec![100, 101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .commit_epoch(30, vec![sst_1], HashMap::from([(10, context_id)]))
+        .await
+        .unwrap();
+
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+
+    let current_version = hummock_manager.get_current_version().await;
+    assert_eq!(current_version.levels.len(), 3);
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert!(new_group_id > StaticCompactionGroupId::End as u64);
+    assert_eq!(get_compaction_group_sst_ids(&current_version, 2), vec![10]);
+    assert_eq!(
+        get_compaction_group_sst_ids(&current_version, new_group_id),
+        vec![10]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(2)
+            .member_table_ids,
+        vec![101]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .member_table_ids,
+        vec![100]
+    );
+    let branched_ssts = get_branched_ssts(&hummock_manager).await;
+    assert_eq!(branched_ssts.len(), 1);
+    assert_eq!(branched_ssts.get(&10).unwrap().len(), 2);
+    assert_eq!(branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap(), 1,);
+    assert_eq!(
+        branched_ssts
+            .get(&10)
+            .unwrap()
+            .get(&new_group_id)
+            .cloned()
+            .unwrap(),
+        1,
+    );
+}
+
+async fn get_manual_compact_task<S: MetaStore>(
+    hummock_manager: &HummockManager<S>,
+    context_id: HummockContextId,
+) -> CompactTask {
+    hummock_manager
+        .compactor_manager
+        .add_compactor(context_id, 1);
+    let compaction_task = hummock_manager
+        .manual_get_compact_task(
+            2,
+            ManualCompactionOption {
+                level: 0,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    hummock_manager
+        .assign_compaction_task(&compaction_task, context_id)
+        .await
+        .unwrap();
+    compaction_task
+}
+
+#[tokio::test]
+async fn test_split_compaction_group_on_demand_bottom_levels() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 10,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(1, 1, 1),
+                right: iterator_test_key_of_epoch(1, 1, 1),
+                right_exclusive: false,
+            }),
+            table_ids: vec![100, 101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .commit_epoch(30, vec![sst_1.clone()], HashMap::from([(10, context_id)]))
+        .await
+        .unwrap();
+    // Construct data via manual compaction
+    let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
+    let base_level: usize = 6;
+    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 1);
+    assert_eq!(compaction_task.target_level, base_level as u32);
+    compaction_task.sorted_output_ssts = vec![
+        SstableInfo {
+            id: sst_1.sst_info.id + 1,
+            table_ids: vec![100, 101],
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(1, 1, 1),
+                right: iterator_test_key_of_epoch(1, 1, 1),
+                right_exclusive: false,
+            }),
+            ..Default::default()
+        },
+        SstableInfo {
+            id: sst_1.sst_info.id + 2,
+            table_ids: vec![100],
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(1, 2, 2),
+                right: iterator_test_key_of_epoch(1, 2, 2),
+                right_exclusive: false,
+            }),
+            ..Default::default()
+        },
+    ];
+    compaction_task.task_status = TaskStatus::Success.into();
+    assert!(hummock_manager
+        .report_compact_task(context_id, &mut compaction_task, None)
+        .await
+        .unwrap());
+    let current_version = hummock_manager.get_current_version().await;
+    assert!(current_version
+        .get_compaction_group_levels(2)
+        .l0
+        .as_ref()
+        .unwrap()
+        .sub_levels
+        .is_empty());
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1]
+            .table_infos
+            .len(),
+        2
+    );
+
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+    let current_version = hummock_manager.get_current_version().await;
+    let new_group_id = current_version.levels.keys().max().cloned().unwrap();
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1]
+            .table_infos
+            .len(),
+        1
+    );
+    assert_eq!(
+        current_version.get_compaction_group_levels(2).levels[base_level - 1].table_infos[0]
+            .table_ids,
+        vec![101]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .len(),
+        2
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos[0]
+            .table_ids,
+        vec![100]
+    );
+    assert_eq!(
+        current_version
+            .get_compaction_group_levels(new_group_id)
+            .levels[base_level - 1]
+            .table_infos[1]
+            .table_ids,
+        vec![100]
+    );
+}
+
+#[tokio::test]
+async fn test_compaction_task_expiration_due_to_split_group() {
+    let (_env, hummock_manager, _, worker_node) = setup_compute_env(80).await;
+    let context_id = worker_node.id;
+
+    hummock_manager
+        .register_table_ids(&[(100, 2)])
+        .await
+        .unwrap();
+    hummock_manager
+        .register_table_ids(&[(101, 2)])
+        .await
+        .unwrap();
+    let sst_1 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 10,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(1, 1, 1),
+                right: iterator_test_key_of_epoch(1, 1, 1),
+                right_exclusive: false,
+            }),
+            table_ids: vec![100, 101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    let sst_2 = ExtendedSstableInfo {
+        compaction_group_id: 2,
+        sst_info: SstableInfo {
+            id: 11,
+            key_range: Some(KeyRange {
+                left: iterator_test_key_of_epoch(1, 1, 1),
+                right: iterator_test_key_of_epoch(1, 1, 1),
+                right_exclusive: false,
+            }),
+            table_ids: vec![101],
+            divide_version: 0,
+            min_epoch: 20,
+            max_epoch: 20,
+            ..Default::default()
+        },
+        table_stats: Default::default(),
+    };
+    hummock_manager
+        .commit_epoch(
+            30,
+            vec![sst_1, sst_2],
+            HashMap::from([(10, context_id), (11, context_id)]),
+        )
+        .await
+        .unwrap();
+
+    let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
+    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
+    hummock_manager
+        .split_compaction_group(2, &[100])
+        .await
+        .unwrap();
+
+    let version_1 = hummock_manager.get_current_version().await;
+    compaction_task.task_status = TaskStatus::Success.into();
+    assert!(hummock_manager
+        .report_compact_task(context_id, &mut compaction_task, None)
+        .await
+        .unwrap());
+    let version_2 = hummock_manager.get_current_version().await;
+    assert_eq!(
+        version_1, version_2,
+        "version should not change because compaction task has been cancelled"
+    );
+
+    let mut compaction_task = get_manual_compact_task(&hummock_manager, context_id).await;
+    assert_eq!(compaction_task.input_ssts[0].table_infos.len(), 2);
+    compaction_task.task_status = TaskStatus::Success.into();
+    assert!(hummock_manager
+        .report_compact_task(context_id, &mut compaction_task, None)
+        .await
+        .unwrap());
+    let version_3 = hummock_manager.get_current_version().await;
+    assert_ne!(
+        version_2, version_3,
+        "version should change because compaction task has succeeded"
+    );
 }

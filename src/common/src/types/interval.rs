@@ -19,7 +19,6 @@ use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::ops::{Add, Neg, Sub};
 
-use anyhow::anyhow;
 use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
@@ -34,7 +33,7 @@ use crate::error::{ErrorCode, Result, RwError};
 /// Every interval can be represented by a `IntervalUnit`.
 /// Note that the difference between Interval and Instant.
 /// For example, `5 yrs 1 month 25 days 23:22:57` is a interval (Can be interpreted by Interval Unit
-/// with month = 61, days = 25, seconds = (57 + 23 * 3600 + 22 * 60) * 1000),
+/// with months = 61, days = 25, usecs = (57 + 23 * 3600 + 22 * 60) * 1000000),
 /// `1970-01-01 04:05:06` is a Instant or Timestamp
 /// One month may contain 28/31 days. One day may contain 23/25 hours.
 /// This internals is learned from PG:
@@ -43,22 +42,27 @@ use crate::error::{ErrorCode, Result, RwError};
 pub struct IntervalUnit {
     months: i32,
     days: i32,
-    ms: i64,
+    usecs: i64,
 }
 
-const DAY_MS: i64 = 86400000;
-const MONTH_MS: i64 = 30 * DAY_MS;
+const USECS_PER_SEC: i64 = 1_000_000;
+const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl IntervalUnit {
     /// Smallest interval value.
     pub const MIN: Self = Self {
         months: i32::MIN,
         days: i32::MIN,
-        ms: i64::MIN,
+        usecs: i64::MIN,
     };
 
-    pub fn new(months: i32, days: i32, ms: i64) -> Self {
-        IntervalUnit { months, days, ms }
+    pub fn from_month_day_usec(months: i32, days: i32, usecs: i64) -> Self {
+        IntervalUnit {
+            months,
+            days,
+            usecs,
+        }
     }
 
     pub fn get_days(&self) -> i32 {
@@ -69,56 +73,24 @@ impl IntervalUnit {
         self.months
     }
 
-    pub fn get_years(&self) -> i32 {
-        self.months / 12
+    pub fn get_usecs(&self) -> i64 {
+        self.usecs
     }
 
-    pub fn get_ms(&self) -> i64 {
-        self.ms
+    pub fn get_usecs_of_day(&self) -> u64 {
+        self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    pub fn get_ms_of_day(&self) -> u64 {
-        self.ms.rem_euclid(DAY_MS) as u64
-    }
-
-    pub fn from_protobuf_bytes(bytes: &[u8], ty: IntervalType) -> ArrayResult<Self> {
-        // TODO: remove IntervalType later.
-        match ty {
-            // the unit is months
-            Year | YearToMonth | Month => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i32: {:?}", e))?;
-                let mouths = i32::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_month(mouths))
-            }
-            // the unit is ms
-            Day | DayToHour | DayToMinute | DayToSecond | Hour | HourToMinute | HourToSecond
-            | Minute | MinuteToSecond | Second => {
-                let bytes = bytes
-                    .try_into()
-                    .map_err(|e| anyhow!("Failed to deserialize i64: {:?}", e))?;
-                let ms = i64::from_be_bytes(bytes);
-                Ok(IntervalUnit::from_millis(ms))
-            }
-            Unspecified => {
-                // Invalid means the interval is from the new frontend.
-                // TODO: make this default path later.
-                let mut cursor = Cursor::new(bytes);
-                read_interval_unit(&mut cursor)
-            }
-        }
-    }
-
-    /// Justify interval, convert 1 month to 30 days and 86400 ms to 1 day.
-    /// If day is positive, complement the ms negative value.
+    /// Justify interval, convert 1 month to 30 days and 86400 s to 1 day.
+    /// If day is positive, complement the seconds negative value.
     /// These rules only use in interval comparison.
     pub fn justify_interval(&mut self) {
-        let total_ms = self.total_ms();
+        #[expect(deprecated)]
+        let total_usecs = self.as_usecs_i64();
         *self = Self {
             months: 0,
-            days: (total_ms / DAY_MS) as i32,
-            ms: total_ms % DAY_MS,
+            days: (total_usecs / USECS_PER_DAY) as i32,
+            usecs: total_usecs % USECS_PER_DAY,
         }
     }
 
@@ -128,75 +100,24 @@ impl IntervalUnit {
         interval
     }
 
-    #[must_use]
-    pub fn from_total_ms(ms: i64) -> Self {
-        let mut remaining_ms = ms;
-        let months = remaining_ms / MONTH_MS;
-        remaining_ms -= months * MONTH_MS;
-        let days = remaining_ms / DAY_MS;
-        remaining_ms -= days * DAY_MS;
+    #[deprecated]
+    fn from_total_usecs(usecs: i64) -> Self {
+        let mut remaining_usecs = usecs;
+        let months = remaining_usecs / USECS_PER_MONTH;
+        remaining_usecs -= months * USECS_PER_MONTH;
+        let days = remaining_usecs / USECS_PER_DAY;
+        remaining_usecs -= days * USECS_PER_DAY;
         IntervalUnit {
             months: (months as i32),
             days: (days as i32),
-            ms: remaining_ms,
+            usecs: remaining_usecs,
         }
-    }
-
-    pub fn total_ms(&self) -> i64 {
-        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
-    }
-
-    #[must_use]
-    pub fn from_ymd(year: i32, month: i32, days: i32) -> Self {
-        let months = year * 12 + month;
-        let days = days;
-        let ms = 0;
-        IntervalUnit { months, days, ms }
-    }
-
-    #[must_use]
-    pub fn from_month(months: i32) -> Self {
-        IntervalUnit {
-            months,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_days(days: i32) -> Self {
-        Self {
-            days,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_millis(ms: i64) -> Self {
-        Self {
-            ms,
-            ..Default::default()
-        }
-    }
-
-    #[must_use]
-    pub fn from_minutes(minutes: i64) -> Self {
-        Self {
-            ms: 1000 * 60 * minutes,
-            ..Default::default()
-        }
-    }
-
-    pub fn to_protobuf_owned(self) -> Vec<u8> {
-        let buf = BytesMut::with_capacity(16);
-        let mut writer = buf.writer();
-        self.to_protobuf(&mut writer).unwrap();
-        writer.into_inner().to_vec()
     }
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
-        output.write_i64::<BigEndian>(self.ms)?;
+        output.write_i64::<BigEndian>(self.usecs)?;
         Ok(16)
     }
 
@@ -208,9 +129,13 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let months = self.months.checked_mul(rhs)?;
         let days = self.days.checked_mul(rhs)?;
-        let ms = self.ms.checked_mul(rhs as i64)?;
+        let usecs = self.usecs.checked_mul(rhs as i64)?;
 
-        Some(IntervalUnit { months, days, ms })
+        Some(IntervalUnit {
+            months,
+            days,
+            usecs,
+        })
     }
 
     /// Divides [`IntervalUnit`] by an integer/float with zero check.
@@ -225,12 +150,17 @@ impl IntervalUnit {
             return None;
         }
 
-        let ms = self.as_ms_i64();
-        Some(IntervalUnit::from_total_ms((ms as f64 / rhs).round() as i64))
+        #[expect(deprecated)]
+        let usecs = self.as_usecs_i64();
+        #[expect(deprecated)]
+        Some(IntervalUnit::from_total_usecs(
+            (usecs as f64 / rhs).round() as i64
+        ))
     }
 
-    fn as_ms_i64(&self) -> i64 {
-        self.months as i64 * MONTH_MS + self.days as i64 * DAY_MS + self.ms
+    #[deprecated]
+    fn as_usecs_i64(&self) -> i64 {
+        self.months as i64 * USECS_PER_MONTH + self.days as i64 * USECS_PER_DAY + self.usecs
     }
 
     /// times [`IntervalUnit`] with an integer/float.
@@ -241,8 +171,12 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
 
-        let ms = self.as_ms_i64();
-        Some(IntervalUnit::from_total_ms((ms as f64 * rhs).round() as i64))
+        #[expect(deprecated)]
+        let usecs = self.as_usecs_i64();
+        #[expect(deprecated)]
+        Some(IntervalUnit::from_total_usecs(
+            (usecs as f64 * rhs).round() as i64
+        ))
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
@@ -272,14 +206,14 @@ impl IntervalUnit {
 
         check_unit(self.months as i64, rhs.months as i64)?;
         check_unit(self.days as i64, rhs.days as i64)?;
-        check_unit(self.ms, rhs.ms)?;
+        check_unit(self.usecs, rhs.usecs)?;
 
         res
     }
 
     /// Checks if [`IntervalUnit`] is positive.
     pub fn is_positive(&self) -> bool {
-        self > &Self::new(0, 0, 0)
+        self > &Self::from_month_day_usec(0, 0, 0)
     }
 
     /// Truncate the interval to the precision of milliseconds.
@@ -294,13 +228,10 @@ impl IntervalUnit {
     /// );
     /// ```
     pub const fn truncate_millis(self) -> Self {
-        // for now it's just an identity function.
-        // it will take effect once microseconds precision is supported.
-        // https://github.com/risingwavelabs/risingwave/issues/4514
         IntervalUnit {
             months: self.months,
             days: self.days,
-            ms: self.ms,
+            usecs: self.usecs / 1000 * 1000,
         }
     }
 
@@ -319,7 +250,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months,
             days: self.days,
-            ms: self.ms / 1000 * 1000,
+            usecs: self.usecs / USECS_PER_SEC * USECS_PER_SEC,
         }
     }
 
@@ -338,7 +269,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months,
             days: self.days,
-            ms: self.ms / 1000 / 60 * 1000 * 60,
+            usecs: self.usecs / USECS_PER_SEC / 60 * USECS_PER_SEC * 60,
         }
     }
 
@@ -357,7 +288,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months,
             days: self.days,
-            ms: self.ms / 1000 / 60 / 60 * 1000 * 60 * 60,
+            usecs: self.usecs / USECS_PER_SEC / 60 / 60 * USECS_PER_SEC * 60 * 60,
         }
     }
 
@@ -373,7 +304,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months,
             days: self.days,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -389,7 +320,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -405,7 +336,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months / 3 * 3,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -421,7 +352,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months / 12 * 12,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -437,7 +368,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months / 12 / 10 * 12 * 10,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -453,7 +384,7 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months / 12 / 100 * 12 * 100,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 
@@ -469,19 +400,105 @@ impl IntervalUnit {
         IntervalUnit {
             months: self.months / 12 / 1000 * 12 * 1000,
             days: 0,
-            ms: 0,
+            usecs: 0,
         }
     }
 }
 
+/// A separate mod so that `use types::*` or `use interval::*` does not `use IntervalUnitTestExt` by
+/// accident.
+pub mod test_utils {
+    use super::*;
+
+    /// These constructors may panic when value out of bound. Only use in tests with known input.
+    pub trait IntervalUnitTestExt {
+        fn from_ymd(year: i32, month: i32, days: i32) -> Self;
+        fn from_month(months: i32) -> Self;
+        fn from_days(days: i32) -> Self;
+        fn from_millis(ms: i64) -> Self;
+        fn from_minutes(minutes: i64) -> Self;
+    }
+
+    impl IntervalUnitTestExt for IntervalUnit {
+        #[must_use]
+        fn from_ymd(year: i32, month: i32, days: i32) -> Self {
+            let months = year * 12 + month;
+            let days = days;
+            let usecs = 0;
+            IntervalUnit {
+                months,
+                days,
+                usecs,
+            }
+        }
+
+        #[must_use]
+        fn from_month(months: i32) -> Self {
+            IntervalUnit {
+                months,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_days(days: i32) -> Self {
+            Self {
+                days,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_millis(ms: i64) -> Self {
+            Self {
+                usecs: ms * 1000,
+                ..Default::default()
+            }
+        }
+
+        #[must_use]
+        fn from_minutes(minutes: i64) -> Self {
+            Self {
+                usecs: USECS_PER_SEC * 60 * minutes,
+                ..Default::default()
+            }
+        }
+    }
+}
+
+/// Wrapper so that `Debug for IntervalUnitDisplay` would use the concise format of `Display for
+/// IntervalUnit`.
+#[derive(Clone, Copy)]
+pub struct IntervalUnitDisplay<'a> {
+    pub core: &'a IntervalUnit,
+}
+
+impl std::fmt::Display for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        (self as &dyn std::fmt::Debug).fmt(f)
+    }
+}
+
+impl std::fmt::Debug for IntervalUnitDisplay<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.core)
+    }
+}
+
+/// Loss of information during the process due to `justify`. Only intended for memcomparable
+/// encoding.
 impl Serialize for IntervalUnit {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        let IntervalUnit { months, days, ms } = self.justified();
+        let IntervalUnit {
+            months,
+            days,
+            usecs,
+        } = self.justified();
         // serialize the `IntervalUnit` as a tuple
-        (months, days, ms).serialize(serializer)
+        (months, days, usecs).serialize(serializer)
     }
 }
 
@@ -490,18 +507,23 @@ impl<'de> Deserialize<'de> for IntervalUnit {
     where
         D: serde::Deserializer<'de>,
     {
-        let (months, days, ms) = <(i32, i32, i64)>::deserialize(deserializer)?;
-        Ok(Self { months, days, ms })
+        let (months, days, usecs) = <(i32, i32, i64)>::deserialize(deserializer)?;
+        Ok(Self {
+            months,
+            days,
+            usecs,
+        })
     }
 }
 
+/// Duplicated logic only used by `HopWindow`. See #8452.
 #[expect(clippy::from_over_into)]
 impl Into<IntervalUnitProto> for IntervalUnit {
     fn into(self) -> IntervalUnitProto {
         IntervalUnitProto {
             months: self.months,
             days: self.days,
-            ms: self.ms,
+            usecs: self.usecs,
         }
     }
 }
@@ -511,19 +533,19 @@ impl From<&'_ IntervalUnitProto> for IntervalUnit {
         Self {
             months: p.months,
             days: p.days,
-            ms: p.ms,
+            usecs: p.usecs,
         }
     }
 }
 
 impl From<NaiveTimeWrapper> for IntervalUnit {
     fn from(time: NaiveTimeWrapper) -> Self {
-        let mut ms: i64 = (time.0.num_seconds_from_midnight() * 1000) as i64;
-        ms += (time.0.nanosecond() / 1_000_000) as i64;
+        let mut usecs: i64 = (time.0.num_seconds_from_midnight() as i64) * USECS_PER_SEC;
+        usecs += (time.0.nanosecond() / 1000) as i64;
         Self {
             months: 0,
             days: 0,
-            ms,
+            usecs,
         }
     }
 }
@@ -534,8 +556,12 @@ impl Add for IntervalUnit {
     fn add(self, rhs: Self) -> Self {
         let months = self.months + rhs.months;
         let days = self.days + rhs.days;
-        let ms = self.ms + rhs.ms;
-        IntervalUnit { months, days, ms }
+        let usecs = self.usecs + rhs.usecs;
+        IntervalUnit {
+            months,
+            days,
+            usecs,
+        }
     }
 }
 
@@ -546,7 +572,7 @@ impl PartialOrd for IntervalUnit {
         } else {
             let diff = *self - *other;
             let days = diff.months as i64 * 30 + diff.days as i64;
-            Some((days * DAY_MS + diff.ms).cmp(&0))
+            Some((days * USECS_PER_DAY + diff.usecs).cmp(&0))
         }
     }
 }
@@ -555,7 +581,7 @@ impl Hash for IntervalUnit {
     fn hash<H: Hasher>(&self, state: &mut H) {
         let interval = self.justified();
         interval.months.hash(state);
-        interval.ms.hash(state);
+        interval.usecs.hash(state);
         interval.days.hash(state);
     }
 }
@@ -564,7 +590,7 @@ impl PartialEq for IntervalUnit {
     fn eq(&self, other: &Self) -> bool {
         let interval = self.justified();
         let other = other.justified();
-        interval.days == other.days && interval.ms == other.ms
+        interval.days == other.days && interval.usecs == other.usecs
     }
 }
 
@@ -580,8 +606,12 @@ impl CheckedNeg for IntervalUnit {
     fn checked_neg(&self) -> Option<Self> {
         let months = self.months.checked_neg()?;
         let days = self.days.checked_neg()?;
-        let ms = self.ms.checked_neg()?;
-        Some(IntervalUnit { months, days, ms })
+        let usecs = self.usecs.checked_neg()?;
+        Some(IntervalUnit {
+            months,
+            days,
+            usecs,
+        })
     }
 }
 
@@ -589,8 +619,12 @@ impl CheckedAdd for IntervalUnit {
     fn checked_add(&self, other: &Self) -> Option<Self> {
         let months = self.months.checked_add(other.months)?;
         let days = self.days.checked_add(other.days)?;
-        let ms = self.ms.checked_add(other.ms)?;
-        Some(IntervalUnit { months, days, ms })
+        let usecs = self.usecs.checked_add(other.usecs)?;
+        Some(IntervalUnit {
+            months,
+            days,
+            usecs,
+        })
     }
 }
 
@@ -600,8 +634,12 @@ impl Sub for IntervalUnit {
     fn sub(self, rhs: Self) -> Self {
         let months = self.months - rhs.months;
         let days = self.days - rhs.days;
-        let ms = self.ms - rhs.ms;
-        IntervalUnit { months, days, ms }
+        let usecs = self.usecs - rhs.usecs;
+        IntervalUnit {
+            months,
+            days,
+            usecs,
+        }
     }
 }
 
@@ -609,25 +647,31 @@ impl CheckedSub for IntervalUnit {
     fn checked_sub(&self, other: &Self) -> Option<Self> {
         let months = self.months.checked_sub(other.months)?;
         let days = self.days.checked_sub(other.days)?;
-        let ms = self.ms.checked_sub(other.ms)?;
-        Some(IntervalUnit { months, days, ms })
+        let usecs = self.usecs.checked_sub(other.usecs)?;
+        Some(IntervalUnit {
+            months,
+            days,
+            usecs,
+        })
     }
 }
 
 impl Zero for IntervalUnit {
     fn zero() -> Self {
-        Self::new(0, 0, 0)
+        Self::from_month_day_usec(0, 0, 0)
     }
 
     fn is_zero(&self) -> bool {
-        self.months == 0 && self.days == 0 && self.ms == 0
+        self.months == 0 && self.days == 0 && self.usecs == 0
     }
 }
 
 impl IsNegative for IntervalUnit {
     fn is_negative(&self) -> bool {
         let i = self.justified();
-        i.months < 0 || (i.months == 0 && i.days < 0) || (i.months == 0 && i.days == 0 && i.ms < 0)
+        i.months < 0
+            || (i.months == 0 && i.days < 0)
+            || (i.months == 0 && i.days == 0 && i.usecs < 0)
     }
 }
 
@@ -638,7 +682,7 @@ impl Neg for IntervalUnit {
         Self {
             months: -self.months,
             days: -self.days,
-            ms: -self.ms,
+            usecs: -self.usecs,
         }
     }
 }
@@ -685,21 +729,22 @@ impl Display for IntervalUnit {
         } else if days != 0 {
             write(format_args!("{days} days"))?;
         }
-        if self.ms != 0 || self.months == 0 && self.days == 0 {
-            let ms = self.ms.abs();
+        if self.usecs != 0 || self.months == 0 && self.days == 0 {
+            let usecs = self.usecs.abs();
+            let ms = usecs / 1000;
             let hours = ms / 1000 / 3600;
             let minutes = (ms / 1000 / 60) % 60;
             let seconds = ms % 60000 / 1000;
-            let secs_fract = ms % 1000;
+            let secs_fract = usecs % USECS_PER_SEC;
 
-            if self.ms < 0 {
+            if self.usecs < 0 {
                 write(format_args!("-{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
             } else {
                 write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
             }
             if secs_fract != 0 {
-                let mut buf = [0u8; 4];
-                write!(buf.as_mut_slice(), ".{:03}", secs_fract).unwrap();
+                let mut buf = [0u8; 7];
+                write!(buf.as_mut_slice(), ".{:06}", secs_fract).unwrap();
                 write!(
                     f,
                     "{}",
@@ -720,7 +765,7 @@ impl ToSql for IntervalUnit {
         out: &mut BytesMut,
     ) -> std::result::Result<IsNull, Box<dyn Error + 'static + Send + Sync>> {
         // refer: https://github.com/postgres/postgres/blob/517bf2d91/src/backend/utils/adt/timestamp.c#L1008
-        out.put_i64(self.ms * 1000);
+        out.put_i64(self.usecs);
         out.put_i32(self.days);
         out.put_i32(self.months);
         Ok(IsNull::No)
@@ -736,12 +781,10 @@ impl<'a> FromSql<'a> for IntervalUnit {
         _: &Type,
         mut raw: &'a [u8],
     ) -> std::result::Result<IntervalUnit, Box<dyn Error + Sync + Send>> {
-        let micros = raw.read_i64::<NetworkEndian>()?;
+        let usecs = raw.read_i64::<NetworkEndian>()?;
         let days = raw.read_i32::<NetworkEndian>()?;
         let months = raw.read_i32::<NetworkEndian>()?;
-        // TODO: https://github.com/risingwavelabs/risingwave/issues/4514
-        // Only support ms now.
-        Ok(IntervalUnit::new(months, days, micros / 1000))
+        Ok(IntervalUnit::from_month_day_usec(months, days, usecs))
     }
 
     fn accepts(ty: &Type) -> bool {
@@ -943,21 +986,21 @@ impl IntervalUnit {
         (|| match leading_field {
             Year => {
                 let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month(months as i32))
+                Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
             }
-            Month => Some(IntervalUnit::from_month(num as i32)),
-            Day => Some(IntervalUnit::from_days(num as i32)),
+            Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
+            Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
             Hour => {
-                let ms = num.checked_mul(3600 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
+                Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
             }
             Minute => {
-                let ms = num.checked_mul(60 * 1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                let usecs = num.checked_mul(60 * USECS_PER_SEC)?;
+                Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
             }
             Second => {
-                let ms = num.checked_mul(1000)?;
-                Some(IntervalUnit::from_millis(ms))
+                let usecs = num.checked_mul(USECS_PER_SEC)?;
+                Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
             }
         })()
         .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)).into())
@@ -973,28 +1016,28 @@ impl IntervalUnit {
             return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", &s)).into());
         }
         let mut token_iter = tokens.into_iter();
-        let mut result = IntervalUnit::new(0, 0, 0);
+        let mut result = IntervalUnit::from_month_day_usec(0, 0, 0);
         while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = result + (|| match interval_unit {
                         Year => {
                             let months = num.checked_mul(12)?;
-                            Some(IntervalUnit::from_month(months as i32))
+                            Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
                         }
-                        Month => Some(IntervalUnit::from_month(num as i32)),
-                        Day => Some(IntervalUnit::from_days(num as i32)),
+                        Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
+                        Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
                         Hour => {
-                            let ms = num.checked_mul(3600 * 1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
+                            Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                         Minute => {
-                            let ms = num.checked_mul(60 * 1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            let usecs = num.checked_mul(60 * USECS_PER_SEC)?;
+                            Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                         Second => {
-                            let ms = num.checked_mul(1000)?;
-                            Some(IntervalUnit::from_millis(ms))
+                            let usecs = num.checked_mul(USECS_PER_SEC)?;
+                            Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                     })()
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
@@ -1002,11 +1045,9 @@ impl IntervalUnit {
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = result + match interval_unit {
                         Second => {
-                            // Currently our precision is millisecond, we should consider to refactor it to microseconds later (#4514).
                             // If unsatisfied precision is passed as input, we should not return None (Error).
-                            // TODO: IntervalUnit only support millisecond precision so the part smaller than millisecond will be truncated.
-                            let ms = (second.into_inner() * 1000_f64).round() as i64;
-                            Some(IntervalUnit::from_millis(ms))
+                            let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
+                            Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                         _ => None,
                     }
@@ -1039,6 +1080,8 @@ impl FromStr for IntervalUnit {
 
 #[cfg(test)]
 mod tests {
+    use interval::test_utils::IntervalUnitTestExt;
+
     use super::*;
     use crate::types::ordered_float::OrderedFloat;
 
@@ -1119,23 +1162,27 @@ mod tests {
     #[test]
     fn test_to_string() {
         assert_eq!(
-            IntervalUnit::new(-14, 3, 11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
-                .to_string(),
-            "-1 years -2 mons 3 days 11:45:14.233"
+            IntervalUnit::from_month_day_usec(
+                -14,
+                3,
+                (11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233
+            )
+            .to_string(),
+            "-1 years -2 mons 3 days 11:45:14.000233"
         );
         assert_eq!(
-            IntervalUnit::new(-14, 3, 0).to_string(),
+            IntervalUnit::from_month_day_usec(-14, 3, 0).to_string(),
             "-1 years -2 mons 3 days"
         );
         assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
         assert_eq!(
-            IntervalUnit::new(
+            IntervalUnit::from_month_day_usec(
                 -14,
                 3,
-                -(11 * 3600 * 1000 + 45 * 60 * 1000 + 14 * 1000 + 233)
+                -((11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233)
             )
             .to_string(),
-            "-1 years -2 mons 3 days -11:45:14.233"
+            "-1 years -2 mons 3 days -11:45:14.000233"
         );
     }
 
@@ -1155,8 +1202,8 @@ mod tests {
         ];
 
         for (lhs, rhs, expected) in cases {
-            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
-            let rhs = IntervalUnit::new(rhs.0, rhs.1, rhs.2 as i64);
+            let lhs = IntervalUnit::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
+            let rhs = IntervalUnit::from_month_day_usec(rhs.0, rhs.1, rhs.2 as i64);
             let result = std::panic::catch_unwind(|| {
                 let actual = lhs.exact_div(&rhs);
                 assert_eq!(actual, expected);
@@ -1172,21 +1219,21 @@ mod tests {
     fn test_div_float() {
         let cases_int = [
             ((10, 8, 6), 2, Some((5, 4, 3))),
-            ((1, 2, 33), 3, Some((0, 10, 57600011))),
+            ((1, 2, 33), 3, Some((0, 10, 57600000011i64))),
             ((1, 0, 11), 10, Some((0, 3, 1))),
             ((5, 6, 7), 0, None),
         ];
 
         let cases_float = [
             ((10, 8, 6), 2.0f32, Some((5, 4, 3))),
-            ((1, 2, 33), 3.0f32, Some((0, 10, 57600011))),
+            ((1, 2, 33), 3.0f32, Some((0, 10, 57600000011i64))),
             ((10, 15, 100), 2.5f32, Some((4, 6, 40))),
             ((5, 6, 7), 0.0f32, None),
         ];
 
         for (lhs, rhs, expected) in cases_int {
-            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
+            let lhs = IntervalUnit::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::from_month_day_usec(x.0, x.1, x.2));
 
             let actual = lhs.div_float(rhs as i16);
             assert_eq!(actual, expected);
@@ -1199,8 +1246,8 @@ mod tests {
         }
 
         for (lhs, rhs, expected) in cases_float {
-            let lhs = IntervalUnit::new(lhs.0, lhs.1, lhs.2 as i64);
-            let expected = expected.map(|x| IntervalUnit::new(x.0, x.1, x.2 as i64));
+            let lhs = IntervalUnit::from_month_day_usec(lhs.0, lhs.1, lhs.2 as i64);
+            let expected = expected.map(|x| IntervalUnit::from_month_day_usec(x.0, x.1, x.2));
 
             let actual = lhs.div_float(OrderedFloat::<f32>(rhs));
             assert_eq!(actual, expected);
@@ -1213,7 +1260,7 @@ mod tests {
     #[test]
     fn test_serialize_deserialize() {
         let mut serializer = memcomparable::Serializer::new(vec![]);
-        let a = IntervalUnit::new(123, 456, 789);
+        let a = IntervalUnit::from_month_day_usec(123, 456, 789);
         a.serialize(&mut serializer).unwrap();
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
@@ -1225,22 +1272,26 @@ mod tests {
         let cases = [
             ((1, 2, 3), (4, 5, 6), Ordering::Less),
             ((0, 31, 0), (1, 0, 0), Ordering::Greater),
-            ((1, 0, 0), (0, 0, MONTH_MS + 1), Ordering::Less),
-            ((0, 1, 0), (0, 0, DAY_MS + 1), Ordering::Less),
-            ((2, 3, 4), (1, 2, 4 + DAY_MS + MONTH_MS), Ordering::Equal),
+            ((1, 0, 0), (0, 0, USECS_PER_MONTH + 1), Ordering::Less),
+            ((0, 1, 0), (0, 0, USECS_PER_DAY + 1), Ordering::Less),
+            (
+                (2, 3, 4),
+                (1, 2, 4 + USECS_PER_DAY + USECS_PER_MONTH),
+                Ordering::Equal,
+            ),
         ];
 
-        for ((lhs_months, lhs_days, lhs_ms), (rhs_months, rhs_days, rhs_ms), order) in cases {
+        for ((lhs_months, lhs_days, lhs_usecs), (rhs_months, rhs_days, rhs_usecs), order) in cases {
             let lhs = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
-                IntervalUnit::new(lhs_months, lhs_days, lhs_ms)
+                IntervalUnit::from_month_day_usec(lhs_months, lhs_days, lhs_usecs)
                     .serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()
             };
             let rhs = {
                 let mut serializer = memcomparable::Serializer::new(vec![]);
-                IntervalUnit::new(rhs_months, rhs_days, rhs_ms)
+                IntervalUnit::from_month_day_usec(rhs_months, rhs_days, rhs_usecs)
                     .serialize(&mut serializer)
                     .unwrap();
                 serializer.into_inner()

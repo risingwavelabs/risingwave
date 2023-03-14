@@ -246,12 +246,8 @@ impl CompactionPicker for ManualCompactionPicker {
                     return true;
                 }
 
-                // to collect internal_table_id from sst_info
-                let table_id_in_sst: Vec<u32> =
-                    sst_info.get_table_ids().iter().cloned().collect_vec();
-
                 // to filter sst_file by table_id
-                for table_id in &table_id_in_sst {
+                for table_id in &sst_info.table_ids {
                     if self.option.internal_table_id.contains(table_id) {
                         return true;
                     }
@@ -576,6 +572,7 @@ pub mod tests {
         for iter in [l0.sub_levels.iter_mut(), levels.iter_mut()] {
             for (idx, l) in iter.enumerate() {
                 for t in &mut l.table_infos {
+                    t.table_ids.clear();
                     if idx == 0 {
                         t.table_ids.push(((t.id % 2) + 1) as _);
                     } else {

@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -630,7 +630,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         while let Some(msg) = aligned_stream
             .next()
-            .stack_trace("hash_join_barrier_align")
+            .instrument_await("hash_join_barrier_align")
             .await
         {
             self.metrics
@@ -1101,7 +1101,7 @@ mod tests {
         let (state_l, degree_state_l) = create_in_memory_state_table(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             0,
             join_key_indices.len(),
@@ -1111,7 +1111,7 @@ mod tests {
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             2,
             join_key_indices.len(),
@@ -1171,9 +1171,9 @@ mod tests {
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 0],
             0,
@@ -1185,9 +1185,9 @@ mod tests {
             mem_state,
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 1],
             0,

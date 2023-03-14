@@ -27,7 +27,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::encoding_for_comparison::encode_chunk;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::top_n::{HeapElem, TopNHeap};
@@ -41,7 +41,7 @@ use crate::task::BatchTaskContext;
 /// For each group, use a N-heap to store the smallest N rows.
 pub struct GroupTopNExecutor<K: HashKey> {
     child: BoxedExecutor,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
     offset: usize,
     limit: usize,
     group_key: Vec<usize>,
@@ -54,7 +54,7 @@ pub struct GroupTopNExecutor<K: HashKey> {
 
 pub struct GroupTopNExecutorBuilder {
     child: BoxedExecutor,
-    order_pairs: Vec<OrderPair>,
+    column_orders: Vec<ColumnOrder>,
     offset: usize,
     limit: usize,
     group_key: Vec<usize>,
@@ -70,7 +70,7 @@ impl HashKeyDispatcher for GroupTopNExecutorBuilder {
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         Box::new(GroupTopNExecutor::<K>::new(
             self.child,
-            self.order_pairs,
+            self.column_orders,
             self.offset,
             self.limit,
             self.with_ties,
@@ -98,10 +98,10 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
             NodeBody::GroupTopN
         )?;
 
-        let order_pairs = top_n_node
+        let column_orders = top_n_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let group_key = top_n_node
@@ -117,7 +117,7 @@ impl BoxedExecutorBuilder for GroupTopNExecutorBuilder {
 
         let builder = Self {
             child,
-            order_pairs,
+            column_orders,
             offset: top_n_node.get_offset() as usize,
             limit: top_n_node.get_limit() as usize,
             group_key,
@@ -135,7 +135,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         child: BoxedExecutor,
-        order_pairs: Vec<OrderPair>,
+        column_orders: Vec<ColumnOrder>,
         offset: usize,
         limit: usize,
         with_ties: bool,
@@ -146,7 +146,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
         let schema = child.schema().clone();
         Self {
             child,
-            order_pairs,
+            column_orders,
             offset,
             limit,
             with_ties,
@@ -186,7 +186,7 @@ impl<K: HashKey> GroupTopNExecutor<K> {
             let chunk = Arc::new(chunk?.compact());
             let keys = K::build(self.group_key.as_slice(), &chunk)?;
 
-            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.order_pairs)
+            for (row_id, (encoded_row, key)) in encode_chunk(&chunk, &self.column_orders)
                 .into_iter()
                 .zip_eq_fast(keys.into_iter())
                 .enumerate()
@@ -256,19 +256,19 @@ mod tests {
              5 2 2
              ",
         ));
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
         ];
         let top_n_executor = (GroupTopNExecutorBuilder {
             child: Box::new(mock_executor),
-            order_pairs,
+            column_orders,
             offset: 1,
             limit: 3,
             with_ties: false,
@@ -295,7 +295,7 @@ mod tests {
                     i i i
                     4 2 1
                     3 3 1
-                    2 4 1 
+                    2 4 1
                     4 3 2
                     3 4 2
                     2 5 2

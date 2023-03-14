@@ -39,6 +39,7 @@ pub struct Scan {
     pub predicate: Condition,
     /// Help RowSeqScan executor use a better chunk size
     pub chunk_size: Option<u32>,
+    pub for_system_time_as_of_now: bool,
 }
 
 impl Scan {

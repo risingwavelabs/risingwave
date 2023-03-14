@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
 use crate::expr::OrderByExpr as BoundOrderByExpr;
-use crate::optimizer::property::Direction;
 use crate::Binder;
 
 impl Binder {
@@ -34,23 +34,20 @@ impl Binder {
             nulls_first,
         }: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        let direction = match asc {
-            None | Some(true) => Direction::Asc,
-            Some(false) => Direction::Desc,
+        // TODO(rc): support `NULLS FIRST | LAST`
+        if nulls_first.is_some() {
+            return Err(ErrorCode::NotImplemented(
+                "NULLS FIRST or NULLS LAST".to_string(),
+                4743.into(),
+            )
+            .into());
+        }
+        let order_type = match asc {
+            None => OrderType::default(),
+            Some(true) => OrderType::ascending(),
+            Some(false) => OrderType::descending(),
         };
-
-        let nulls_first = nulls_first.unwrap_or_else(|| match direction {
-            Direction::Asc => false,
-            Direction::Desc => true,
-            Direction::Any => unreachable!(),
-        });
-
         let expr = self.bind_expr(expr)?;
-
-        Ok(BoundOrderByExpr {
-            expr,
-            direction,
-            nulls_first,
-        })
+        Ok(BoundOrderByExpr { expr, order_type })
     }
 }

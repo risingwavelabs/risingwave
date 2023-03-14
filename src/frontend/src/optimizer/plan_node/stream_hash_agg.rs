@@ -15,6 +15,8 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
 use super::generic::PlanAggCall;
@@ -27,14 +29,23 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamHashAgg {
     pub base: PlanBase,
-    /// an optional column index which is the vnode of each row computed by the input's consistent
-    /// hash distribution
-    vnode_col_idx: Option<usize>,
     logical: LogicalAgg,
+
+    /// An optional column index which is the vnode of each row computed by the input's consistent
+    /// hash distribution.
+    vnode_col_idx: Option<usize>,
+
+    /// The index of `count(*)` in `agg_calls`.
+    row_count_idx: usize,
 }
 
 impl StreamHashAgg {
-    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(logical: LogicalAgg, vnode_col_idx: Option<usize>, row_count_idx: usize) -> Self {
+        assert_eq!(
+            logical.agg_calls()[row_count_idx],
+            PlanAggCall::count_star()
+        );
+
         let ctx = logical.base.ctx.clone();
         let pk_indices = logical.base.logical_pk.to_vec();
         let schema = logical.schema().clone();
@@ -67,8 +78,9 @@ impl StreamHashAgg {
         );
         StreamHashAgg {
             base,
-            vnode_col_idx,
             logical,
+            vnode_col_idx,
+            row_count_idx,
         }
     }
 
@@ -87,11 +99,26 @@ impl StreamHashAgg {
 
 impl fmt::Display for StreamHashAgg {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.input().append_only() {
-            self.logical.fmt_with_name(f, "StreamAppendOnlyHashAgg")
+        let mut builder = if self.input().append_only() {
+            f.debug_struct("StreamAppendOnlyHashAgg")
         } else {
-            self.logical.fmt_with_name(f, "StreamHashAgg")
-        }
+            f.debug_struct("StreamHashAgg")
+        };
+        self.logical.fmt_fields_with_builder(&mut builder);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
+
+        builder.finish()
     }
 }
 
@@ -101,7 +128,11 @@ impl PlanTreeNodeUnary for StreamHashAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input), self.vnode_col_idx)
+        Self::new(
+            self.logical.clone_with_input(input),
+            self.vnode_col_idx,
+            self.row_count_idx,
+        )
     }
 }
 impl_plan_tree_node_for_unary! { StreamHashAgg }
@@ -142,6 +173,7 @@ impl StreamNode for StreamHashAgg {
                     )
                 })
                 .collect(),
+            row_count_index: self.row_count_idx as u32,
         })
     }
 }
@@ -159,6 +191,7 @@ impl ExprRewritable for StreamHashAgg {
                 .unwrap()
                 .clone(),
             self.vnode_col_idx,
+            self.row_count_idx,
         )
         .into()
     }

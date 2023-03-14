@@ -15,9 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{
-    ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
-};
+use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};
@@ -104,8 +102,8 @@ impl ColumnDesc {
     }
 
     /// Convert to proto
-    pub fn to_protobuf(&self) -> ProstColumnDesc {
-        ProstColumnDesc {
+    pub fn to_protobuf(&self) -> PbColumnDesc {
+        PbColumnDesc {
             column_type: Some(self.data_type.to_protobuf()),
             column_id: self.column_id.get_id(),
             name: self.name.clone(),
@@ -199,8 +197,8 @@ impl ColumnDesc {
     }
 }
 
-impl From<ProstColumnDesc> for ColumnDesc {
-    fn from(prost: ProstColumnDesc) -> Self {
+impl From<PbColumnDesc> for ColumnDesc {
+    fn from(prost: PbColumnDesc) -> Self {
         let field_descs: Vec<ColumnDesc> = prost
             .field_descs
             .into_iter()
@@ -216,13 +214,13 @@ impl From<ProstColumnDesc> for ColumnDesc {
     }
 }
 
-impl From<&ProstColumnDesc> for ColumnDesc {
-    fn from(prost: &ProstColumnDesc) -> Self {
+impl From<&PbColumnDesc> for ColumnDesc {
+    fn from(prost: &PbColumnDesc) -> Self {
         prost.clone().into()
     }
 }
 
-impl From<&ColumnDesc> for ProstColumnDesc {
+impl From<&ColumnDesc> for PbColumnDesc {
     fn from(c: &ColumnDesc) -> Self {
         Self {
             column_type: c.data_type.to_protobuf().into(),
@@ -262,8 +260,8 @@ impl ColumnCatalog {
     }
 
     /// Convert column catalog to proto
-    pub fn to_protobuf(&self) -> ProstColumnCatalog {
-        ProstColumnCatalog {
+    pub fn to_protobuf(&self) -> PbColumnCatalog {
+        PbColumnCatalog {
             column_desc: Some(self.column_desc.to_protobuf()),
             is_hidden: self.is_hidden,
         }
@@ -278,8 +276,8 @@ impl ColumnCatalog {
     }
 }
 
-impl From<ProstColumnCatalog> for ColumnCatalog {
-    fn from(prost: ProstColumnCatalog) -> Self {
+impl From<PbColumnCatalog> for ColumnCatalog {
+    fn from(prost: PbColumnCatalog) -> Self {
         Self {
             column_desc: prost.column_desc.unwrap().into(),
             is_hidden: prost.is_hidden,
@@ -329,22 +327,22 @@ pub fn is_column_ids_dedup(columns: &[ColumnCatalog]) -> bool {
 
 #[cfg(test)]
 pub mod tests {
-    use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
+    use risingwave_pb::plan_common::PbColumnDesc;
 
     use crate::catalog::ColumnDesc;
     use crate::test_prelude::*;
     use crate::types::DataType;
 
-    pub fn build_prost_desc() -> ProstColumnDesc {
+    pub fn build_prost_desc() -> PbColumnDesc {
         let city = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.address", 2),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.city.zipcode", 3),
         ];
         let country = vec![
-            ProstColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
-            ProstColumnDesc::new_struct("country.city", 4, ".test.City", city),
+            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "country.address", 1),
+            PbColumnDesc::new_struct("country.city", 4, ".test.City", city),
         ];
-        ProstColumnDesc::new_struct("country", 5, ".test.Country", country)
+        PbColumnDesc::new_struct("country", 5, ".test.Country", country)
     }
 
     pub fn build_desc() -> ColumnDesc {
