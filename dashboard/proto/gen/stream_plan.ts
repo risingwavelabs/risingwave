@@ -693,8 +693,16 @@ export interface ChainNode {
   tableId: number;
   /** The schema of input stream, which will be used to build a MergeNode */
   upstreamFields: Field[];
-  /** Which columns from upstream are used in this Chain node. */
+  /**
+   * The columns from the upstream table to output.
+   * TODO: rename this field.
+   */
   upstreamColumnIndices: number[];
+  /**
+   * The columns from the upstream table that'll be internally required by this chain node.
+   * TODO: This is currently only used by backfill table scan. We should also apply it to the upstream dispatcher (#4529).
+   */
+  upstreamColumnIds: number[];
   /**
    * Generally, the barrier needs to be rearranged during the MV creation process, so that data can
    * be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
@@ -3111,6 +3119,7 @@ function createBaseChainNode(): ChainNode {
     tableId: 0,
     upstreamFields: [],
     upstreamColumnIndices: [],
+    upstreamColumnIds: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
     isSingleton: false,
     tableDesc: undefined,
@@ -3126,6 +3135,9 @@ export const ChainNode = {
         : [],
       upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
+        : [],
+      upstreamColumnIds: Array.isArray(object?.upstreamColumnIds)
+        ? object.upstreamColumnIds.map((e: any) => Number(e))
         : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
@@ -3146,6 +3158,11 @@ export const ChainNode = {
     } else {
       obj.upstreamColumnIndices = [];
     }
+    if (message.upstreamColumnIds) {
+      obj.upstreamColumnIds = message.upstreamColumnIds.map((e) => Math.round(e));
+    } else {
+      obj.upstreamColumnIds = [];
+    }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableDesc !== undefined &&
@@ -3158,6 +3175,7 @@ export const ChainNode = {
     message.tableId = object.tableId ?? 0;
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
+    message.upstreamColumnIds = object.upstreamColumnIds?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
     message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
