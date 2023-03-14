@@ -20,12 +20,15 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::{HashCode, VirtualNode};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_id::extract_vnode_id_from_row_id;
 
 use crate::error::StorageResult;
+
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
@@ -120,12 +123,19 @@ pub trait TableIter: Send {
 
 /// Get vnode value with `indices` on the given `row`.
 pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
-    let vnode = if indices.is_empty() {
-        DEFAULT_VNODE
-    } else {
-        let vnode = (&row).project(indices).hash(Crc32FastBuilder).to_vnode();
+    let vnode = if !indices.is_empty() {
+        let project = (&row).project(indices);
+
+        let vnode = if let Ok(d) = project.iter().exactly_one() && let Some(ScalarRefImpl::Serial(s)) = d.as_ref() {
+            HashCode::from(extract_vnode_id_from_row_id(s.as_row_id()) as u64).to_vnode()
+        } else {
+            project.hash(Crc32FastBuilder).to_vnode()
+        };
+
         check_vnode_is_set(vnode, vnodes);
         vnode
+    } else {
+        DEFAULT_VNODE
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
