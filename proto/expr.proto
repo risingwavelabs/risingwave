@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package expr;
 
+import "common.proto";
 import "data.proto";
-import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -119,6 +119,7 @@ message ExprNode {
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
     FORMAT_TYPE = 534;
+    ARRAY_DISTINCT = 535;
 
     // Jsonb functions
 
@@ -141,7 +142,7 @@ message ExprNode {
   Type expr_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
-    InputRefExpr input_ref = 4;
+    uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
@@ -161,8 +162,10 @@ message TableFunction {
   data.DataType return_type = 3;
 }
 
-message InputRefExpr {
-  int32 column_idx = 1;
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
+  uint32 index = 1;
+  data.DataType type = 2;
 }
 
 // The items which can occur in the select list of `ProjectSet` operator.
@@ -221,21 +224,11 @@ message AggCall {
     STDDEV_POP = 13;
     STDDEV_SAMP = 14;
   }
-  message Arg {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-  }
   Type type = 1;
-  repeated Arg args = 2;
+  repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  message OrderByField {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-    plan_common.OrderType direction = 3;
-    bool nulls_first = 4;
-  }
-  repeated OrderByField order_by_fields = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
 }
 
@@ -244,5 +237,6 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string path = 5;
+  string link = 5;
+  string identifier = 6;
 }

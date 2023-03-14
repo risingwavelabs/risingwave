@@ -65,7 +65,11 @@ impl ComputeNodeService {
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string());
+            .arg(&config.total_memory_bytes.to_string())
+            .arg("--memory-control-policy")
+            .arg(&config.memory_control_policy)
+            .arg("--streaming-memory-proportion")
+            .arg(&config.streaming_memory_proportion.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -162,7 +166,7 @@ impl Task for ComputeNodeService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 

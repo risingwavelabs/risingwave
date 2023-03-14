@@ -25,6 +25,7 @@ use rand::prelude::Distribution;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 
+use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
     Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
@@ -77,8 +78,8 @@ impl RandValue for IntervalUnit {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let months = rand.gen_range(0..100);
         let days = rand.gen_range(0..200);
-        let ms = rand.gen_range(0..100_000);
-        IntervalUnit::new(months, days, ms)
+        let usecs = rand.gen_range(0..100_000);
+        IntervalUnit::from_month_day_usec(months, days, usecs)
     }
 }
 
@@ -114,6 +115,13 @@ impl RandValue for NaiveDateTimeWrapper {
 impl RandValue for bool {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         rand.gen::<bool>()
+    }
+}
+
+impl RandValue for Serial {
+    fn rand_value<R: Rng>(rand: &mut R) -> Self {
+        // TODO(peng), serial should be in format of RowId
+        i64::rand_value(rand).into()
     }
 }
 
@@ -177,6 +185,7 @@ where
 mod tests {
     use super::*;
     use crate::array::interval_array::IntervalArray;
+    use crate::array::serial_array::SerialArray;
     use crate::array::*;
     use crate::for_all_variants;
 

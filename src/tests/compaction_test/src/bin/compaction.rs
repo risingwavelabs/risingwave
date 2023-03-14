@@ -16,7 +16,7 @@
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() {
-    use clap::StructOpt;
+    use clap::Parser;
 
     let opts = risingwave_compaction_test::CompactionTestOpts::parse();
 

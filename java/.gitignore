@@ -1,0 +1,5 @@
+# Java
+target/
+test_db/
+*.log
+*.class

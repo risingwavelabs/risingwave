@@ -26,6 +26,8 @@ use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::WithOptions;
 
+const RESERVED_ID_NUM: u16 = 10000;
+
 pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
     /// Store plan node id
@@ -66,7 +68,7 @@ impl OptimizerContext {
         ));
         Self {
             session_ctx: handler_args.session,
-            next_plan_node_id: RefCell::new(0),
+            next_plan_node_id: RefCell::new(RESERVED_ID_NUM.into()),
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
             explain_options,
@@ -75,7 +77,7 @@ impl OptimizerContext {
             next_correlated_id: RefCell::new(0),
             with_options: handler_args.with_options,
             session_timezone,
-            next_expr_display_id: RefCell::new(0),
+            next_expr_display_id: RefCell::new(RESERVED_ID_NUM.into()),
         }
     }
 
@@ -102,6 +104,14 @@ impl OptimizerContext {
     pub fn next_plan_node_id(&self) -> PlanNodeId {
         *self.next_plan_node_id.borrow_mut() += 1;
         PlanNodeId(*self.next_plan_node_id.borrow())
+    }
+
+    pub fn get_plan_node_id(&self) -> i32 {
+        *self.next_plan_node_id.borrow()
+    }
+
+    pub fn set_plan_node_id(&self, next_plan_node_id: i32) {
+        *self.next_plan_node_id.borrow_mut() = next_plan_node_id;
     }
 
     pub fn next_expr_display_id(&self) -> usize {

@@ -53,10 +53,7 @@ fn mapping_chunk(chunk: StreamChunk, upstream_indices: &[usize]) -> StreamChunk 
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    upstream_indices
-        .iter()
-        .position(|&idx| idx == watermark.col_idx)
-        .map(|idx| watermark.with_idx(idx))
+    watermark.transform_with_indices(upstream_indices)
 }
 
 impl ChainExecutor {

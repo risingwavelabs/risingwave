@@ -18,7 +18,9 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{
+    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
+};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -31,7 +33,7 @@ use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
 mod alter_system;
-mod alter_table;
+mod alter_table_column;
 pub mod alter_user;
 mod create_database;
 pub mod create_function;
@@ -190,13 +192,14 @@ pub async fn handle(
             columns,
             constraints,
             query,
-
             with_options: _, // It is put in OptimizerContext
             // Not supported things
             or_replace,
             temporary,
             if_not_exists,
             source_schema,
+            source_watermarks,
+            append_only,
         } => {
             if or_replace {
                 return Err(ErrorCode::NotImplemented(
@@ -219,6 +222,7 @@ pub async fn handle(
                     if_not_exists,
                     query,
                     columns,
+                    append_only,
                 )
                 .await;
             }
@@ -229,6 +233,8 @@ pub async fn handle(
                 constraints,
                 if_not_exists,
                 source_schema,
+                source_watermarks,
+                append_only,
             )
             .await
         }
@@ -374,8 +380,10 @@ pub async fn handle(
         }
         Statement::AlterTable {
             name,
-            operation: AlterTableOperation::AddColumn { column_def },
-        } => alter_table::handle_add_column(handler_args, name, column_def).await,
+            operation:
+                operation @ (AlterTableOperation::AddColumn { .. }
+                | AlterTableOperation::DropColumn { .. }),
+        } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
@@ -402,6 +410,10 @@ pub async fn handle(
         )),
         Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
             ROLLBACK,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
+            SET_TRANSACTION,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => Err(

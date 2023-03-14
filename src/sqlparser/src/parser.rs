@@ -563,6 +563,7 @@ impl Parser {
             }
             Token::Number(_)
             | Token::SingleQuotedString(_)
+            | Token::DollarQuotedString(_)
             | Token::NationalStringLiteral(_)
             | Token::HexStringLiteral(_)
             | Token::CstyleEscapesString(_) => {
@@ -1474,7 +1475,24 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        parser_err!(format!("Expected {}, found: {}", expected, found))
+        let start_off = self.index.saturating_sub(10);
+        let end_off = self.index.min(self.tokens.len());
+        let near_tokens = &self.tokens[start_off..end_off];
+        struct TokensDisplay<'a>(&'a [Token]);
+        impl<'a> fmt::Display for TokensDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for token in self.0 {
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
+            }
+        }
+        parser_err!(format!(
+            "Expected {}, found: {}\nNear \"{}\"",
+            expected,
+            found,
+            TokensDisplay(near_tokens),
+        ))
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -1847,9 +1865,26 @@ impl Parser {
             } else if self.parse_keyword(Keyword::RETURN) {
                 ensure_not_set(&body.return_, "RETURN")?;
                 body.return_ = Some(self.parse_expr()?);
+            } else if self.parse_keyword(Keyword::USING) {
+                ensure_not_set(&body.using, "USING")?;
+                body.using = Some(self.parse_create_function_using()?);
             } else {
                 return Ok(body);
             }
+        }
+    }
+
+    fn parse_create_function_using(&mut self) -> Result<CreateFunctionUsing, ParserError> {
+        let keyword = self.expect_one_of_keywords(&[Keyword::LINK])?;
+
+        let uri = self.parse_literal_string()?;
+
+        match keyword {
+            Keyword::LINK => Ok(CreateFunctionUsing::Link(uri)),
+            _ => self.expected(
+                "LINK, got {:?}",
+                Token::make_keyword(format!("{keyword:?}").as_str()),
+            ),
         }
     }
 
@@ -1950,8 +1985,21 @@ impl Parser {
     ) -> Result<Statement, ParserError> {
         let if_not_exists = self.parse_keywords(&[Keyword::IF, Keyword::NOT, Keyword::EXISTS]);
         let table_name = self.parse_object_name()?;
-        // parse optional column list (schema)
-        let (columns, constraints) = self.parse_columns()?;
+        // parse optional column list (schema) and watermarks on source.
+        let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
+
+        let append_only = if self.parse_keyword(Keyword::APPEND) {
+            self.expect_keyword(Keyword::ONLY)?;
+            if cfg!(debug_assertions) {
+                true
+            } else {
+                return Err(ParserError::ParserError(
+                    "APPEND ONLY is only allowed in debug model".to_string(),
+                ));
+            }
+        } else {
+            false
+        };
 
         // PostgreSQL supports `WITH ( options )`, before `AS`
         let with_options = self.parse_with_properties()?;
@@ -1999,6 +2047,11 @@ impl Parser {
 
         // Parse optional `AS ( query )`
         let query = if self.parse_keyword(Keyword::AS) {
+            if !source_watermarks.is_empty() {
+                return Err(ParserError::ParserError(
+                    "Watermarks can't be defined on table created by CREATE TABLE AS".to_string(),
+                ));
+            }
             Some(Box::new(self.parse_query()?))
         } else {
             None
@@ -2013,23 +2066,13 @@ impl Parser {
             or_replace,
             if_not_exists,
             source_schema,
+            source_watermarks,
+            append_only,
             query,
         })
     }
 
-    pub fn parse_columns(&mut self) -> Result<(Vec<ColumnDef>, Vec<TableConstraint>), ParserError> {
-        let (column_refs, table_constraints, _) = self.parse_columns_inner(true)?;
-        Ok((column_refs, table_constraints))
-    }
-
     pub fn parse_columns_with_watermark(&mut self) -> Result<ColumnsDefTuple, ParserError> {
-        self.parse_columns_inner(true)
-    }
-
-    fn parse_columns_inner(
-        &mut self,
-        with_watermark: bool,
-    ) -> Result<ColumnsDefTuple, ParserError> {
         let mut columns = vec![];
         let mut constraints = vec![];
         let mut watermarks = vec![];
@@ -2040,7 +2083,7 @@ impl Parser {
         loop {
             if let Some(constraint) = self.parse_optional_table_constraint()? {
                 constraints.push(constraint);
-            } else if with_watermark && let Some(watermark) = self.parse_optional_watermark()? {
+            } else if let Some(watermark) = self.parse_optional_watermark()? {
                 watermarks.push(watermark);
                 if watermarks.len() > 1 {
                     // TODO(yuhao): allow multiple watermark on source.
@@ -2472,6 +2515,7 @@ impl Parser {
             },
             Token::Number(ref n) => Ok(Value::Number(n.clone())),
             Token::SingleQuotedString(ref s) => Ok(Value::SingleQuotedString(s.to_string())),
+            Token::DollarQuotedString(ref s) => Ok(Value::DollarQuotedString(s.clone())),
             Token::CstyleEscapesString(ref s) => Ok(Value::CstyleEscapesString(s.to_string())),
             Token::NationalStringLiteral(ref s) => Ok(Value::NationalStringLiteral(s.to_string())),
             Token::HexStringLiteral(ref s) => Ok(Value::HexStringLiteral(s.to_string())),
@@ -2515,20 +2559,16 @@ impl Parser {
     }
 
     pub fn parse_function_definition(&mut self) -> Result<FunctionDefinition, ParserError> {
-        Ok(FunctionDefinition::SingleQuotedDef(
-            self.parse_literal_string()?,
-        ))
-        // TODO: support dollar quoted string
-        // let peek_token = self.peek_token();
-        // match peek_token {
-        //     Token::DollarQuotedString(value) if dialect_of!(self is PostgreSqlDialect) => {
-        //         self.next_token();
-        //         Ok(FunctionDefinition::DoubleDollarDef(value.value))
-        //     }
-        //     _ => Ok(FunctionDefinition::SingleQuotedDef(
-        //         self.parse_literal_string()?,
-        //     )),
-        // }
+        let peek_token = self.peek_token();
+        match peek_token {
+            Token::DollarQuotedString(value) => {
+                self.next_token();
+                Ok(FunctionDefinition::DoubleDollarDef(value.value))
+            }
+            _ => Ok(FunctionDefinition::SingleQuotedDef(
+                self.parse_literal_string()?,
+            )),
+        }
     }
 
     /// Parse a literal string
@@ -2698,19 +2738,6 @@ impl Parser {
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
                 Ok(Some(w.to_ident()?))
             }
-            // MSSQL supports single-quoted strings as aliases for columns
-            // We accept them as table aliases too, although MSSQL does not.
-            //
-            // Note, that this conflicts with an obscure rule from the SQL
-            // standard, which we don't implement:
-            // https://crate.io/docs/sql-99/en/latest/chapters/07.html#character-string-literal-s
-            //    "[Obscure Rule] SQL allows you to break a long <character
-            //    string literal> up into two or more smaller <character string
-            //    literal>s, split by a <separator> that includes a newline
-            //    character. When it sees such a <literal>, your DBMS will
-            //    ignore the <separator> and treat the multiple strings as
-            //    a single <literal>."
-            Token::SingleQuotedString(s) => Ok(Some(Ident::with_quote_unchecked('\'', s))),
             not_an_ident => {
                 if after_as {
                     return self.expected("an identifier after AS", not_an_ident);
@@ -2735,6 +2762,22 @@ impl Parser {
                 Ok(Some(TableAlias { name, columns }))
             }
             None => Ok(None),
+        }
+    }
+
+    pub fn parse_for_system_time_as_of_now(&mut self) -> Result<bool, ParserError> {
+        let after_for = self.parse_keyword(Keyword::FOR);
+        if after_for {
+            self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
+            let ident = self.parse_identifier()?;
+            if ident.real_value() != "now" {
+                return parser_err!(format!("Expected now, found: {}", ident.real_value()));
+            }
+            self.expect_token(&Token::LParen)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
@@ -3517,8 +3560,13 @@ impl Parser {
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::TableFunction { name, alias, args })
             } else {
+                let for_system_time_as_of_now = self.parse_for_system_time_as_of_now()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table { name, alias })
+                Ok(TableFactor::Table {
+                    name,
+                    alias,
+                    for_system_time_as_of_now,
+                })
             }
         }
     }

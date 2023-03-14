@@ -66,6 +66,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
                 name: alias.as_str().into(),
                 columns: vec![],
             }),
+            for_system_time_as_of_now: false,
         };
         table.name = alias; // Rename the table.
         let columns = table.get_qualified_columns();

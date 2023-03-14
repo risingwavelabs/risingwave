@@ -38,6 +38,8 @@ pub struct Source {
     pub row_id_index: Option<usize>,
     /// Whether the "SourceNode" should generate the row id column for append only source
     pub gen_row_id: bool,
+    /// True if it is a source created when creating table with a source.
+    pub for_table: bool,
 }
 
 impl GenericPlanNode for Source {
@@ -87,7 +89,7 @@ impl Source {
 
         let ordered_col_idx = builder.add_column(&key);
         builder.add_column(&value);
-        builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+        builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
         builder.build(vec![])
     }

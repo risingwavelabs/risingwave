@@ -768,12 +768,23 @@ def section_compaction(outer_panels):
                     "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
                     [
                         panels.target(
-                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('state_store_sstable_avg_key_size_count')}[$__rate_interval]))",
+                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_count')}[$__rate_interval]))",
                             "avg_key_size - {{job}} @ {{instance}}",
                         ),
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_value_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_avg_value_size_count')}[$__rate_interval]))",
                             "avg_value_size - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+
+                 panels.timeseries_count(
+                    "Hummock Sstable Stat",
+                    "Avg count gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
+                    [
+                        panels.target(
+                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
+                            "avg_epoch_count - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -2569,6 +2580,16 @@ def section_memory_manager(outer_panels):
                     [
                         panels.target(
                             f"{metric('stream_total_mem_usage')}",
+                            "",
+                        ),
+                    ],
+                ),
+                panels.timeseries_memory(
+                    "The memory allocated by batch",
+                    "",
+                    [
+                        panels.target(
+                            f"{metric('batch_total_mem_usage')}",
                             "",
                         ),
                     ],

@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use itertools::Itertools;
+use maplit::{convert_args, hashmap};
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{
     columns_extend, is_column_ids_dedup, ColumnCatalog, ColumnDesc, TableId, ROW_ID_COLUMN_ID,
@@ -25,10 +27,14 @@ use risingwave_common::types::DataType;
 use risingwave_connector::parser::{
     AvroParserConfig, DebeziumAvroParserConfig, ProtobufParserConfig,
 };
-use risingwave_connector::source::KAFKA_CONNECTOR;
-use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, WatermarkDesc,
+use risingwave_connector::source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR};
+use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
+use risingwave_connector::source::filesystem::S3_CONNECTOR;
+use risingwave_connector::source::{
+    GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
+    PULSAR_CONNECTOR,
 };
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
@@ -164,40 +170,29 @@ async fn extract_protobuf_table_schema(
 }
 
 #[inline(always)]
-pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+fn get_connector(with_properties: &HashMap<String, String>) -> String {
     with_properties
         .get(UPSTREAM_SOURCE_KEY)
         .unwrap_or(&"".to_string())
         .to_lowercase()
-        .eq(KAFKA_CONNECTOR)
+}
+
+#[inline(always)]
+pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool {
+    get_connector(with_properties).eq(KAFKA_CONNECTOR)
 }
 
 pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
     columns: &mut Vec<ColumnCatalog>,
-    with_properties: &HashMap<String, String>,
+    with_properties: &mut HashMap<String, String>,
     row_id_index: &mut Option<usize>,
     pk_column_ids: &mut Vec<ColumnId>,
     is_materialized: bool,
 ) -> Result<StreamSourceInfo> {
+    validate_compatibility(&source_schema, with_properties)?;
+
     let is_kafka = is_kafka_source(with_properties);
-    if !is_kafka
-        && matches!(
-            &source_schema,
-            SourceSchema::Protobuf(ProtobufSchema {
-                use_schema_registry: true,
-                ..
-            }) | SourceSchema::Avro(AvroSchema {
-                use_schema_registry: true,
-                ..
-            }) | SourceSchema::DebeziumAvro(_)
-        )
-    {
-        return Err(RwError::from(ProtocolError(format!(
-            "The {} must be kafka when schema registry is used",
-            UPSTREAM_SOURCE_KEY
-        ))));
-    }
 
     let source_info = match &source_schema {
         SourceSchema::Protobuf(protobuf_schema) => {
@@ -218,11 +213,7 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_protobuf_table_schema(
-                    protobuf_schema,
-                    with_properties.clone().into_iter().collect(),
-                )
-                .await?,
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
 
             StreamSourceInfo {
@@ -470,7 +461,7 @@ fn check_and_add_timestamp_column(
     }
 }
 
-fn bind_source_watermark(
+pub(super) fn bind_source_watermark(
     session: &SessionImpl,
     name: String,
     source_watermarks: Vec<SourceWatermark>,
@@ -496,6 +487,92 @@ fn bind_source_watermark(
     Ok(watermark_descs)
 }
 
+static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, Vec<RowFormatType>>> = LazyLock::new(
+    || {
+        convert_args!(hashmap!(
+                KAFKA_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson, RowFormatType::DebeziumAvro, RowFormatType::UpsertJson, RowFormatType::UpsertAvro],
+                PULSAR_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
+                KINESIS_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
+                GOOGLE_PUBSUB_CONNECTOR => vec![RowFormatType::Json, RowFormatType::Protobuf, RowFormatType::DebeziumJson, RowFormatType::Avro, RowFormatType::Maxwell, RowFormatType::CanalJson],
+                NEXMARK_CONNECTOR => vec![RowFormatType::Native],
+                DATAGEN_CONNECTOR => vec![RowFormatType::Native, RowFormatType::Json],
+                S3_CONNECTOR => vec![RowFormatType::Csv, RowFormatType::Json],
+                MYSQL_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+                POSTGRES_CDC_CONNECTOR => vec![RowFormatType::DebeziumJson],
+        ))
+    },
+);
+
+fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
+    match source_schema {
+        SourceSchema::Avro(_) => RowFormatType::Avro,
+        SourceSchema::Protobuf(_) => RowFormatType::Protobuf,
+        SourceSchema::Json => RowFormatType::Json,
+        SourceSchema::DebeziumJson => RowFormatType::DebeziumJson,
+        SourceSchema::DebeziumAvro(_) => RowFormatType::DebeziumAvro,
+        SourceSchema::UpsertJson => RowFormatType::UpsertJson,
+        SourceSchema::UpsertAvro(_) => RowFormatType::UpsertAvro,
+        SourceSchema::Maxwell => RowFormatType::Maxwell,
+        SourceSchema::CanalJson => RowFormatType::CanalJson,
+        SourceSchema::Csv(_) => RowFormatType::Csv,
+        SourceSchema::Native => RowFormatType::Native,
+    }
+}
+
+fn validate_compatibility(
+    source_schema: &SourceSchema,
+    props: &mut HashMap<String, String>,
+) -> Result<()> {
+    let connector = get_connector(props);
+    let row_format = source_shema_to_row_format(source_schema);
+
+    let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
+        .get(&connector)
+        .ok_or_else(|| {
+            RwError::from(ProtocolError(format!(
+                "connector {} is not supported",
+                connector
+            )))
+        })?;
+    if connector != KAFKA_CONNECTOR
+        && matches!(
+            &source_schema,
+            SourceSchema::Protobuf(ProtobufSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::Avro(AvroSchema {
+                use_schema_registry: true,
+                ..
+            }) | SourceSchema::DebeziumAvro(_)
+        )
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
+    }
+    if !compatible_formats.contains(&row_format) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {} does not support row format {:?}",
+            connector, row_format
+        ))));
+    }
+
+    if connector == POSTGRES_CDC_CONNECTOR {
+        if !props.contains_key("slot.name") {
+            // Build a random slot name with UUID
+            // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+            let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
+            props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+        }
+        if !props.contains_key("schema.name") {
+            // Default schema name is "public"
+            props.insert("schema.name".into(), "public".into());
+        }
+    }
+    Ok(())
+}
+
 pub async fn handle_create_source(
     handler_args: HandlerArgs,
     stmt: CreateSourceStatement,
@@ -508,7 +585,7 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let with_properties = handler_args
+    let mut with_properties = handler_args
         .with_options
         .inner()
         .clone()
@@ -538,7 +615,7 @@ pub async fn handle_create_source(
     let source_info = resolve_source_schema(
         stmt.source_schema,
         &mut columns,
-        &with_properties,
+        &mut with_properties,
         &mut row_id_index,
         &mut pk_column_ids,
         false,
@@ -552,7 +629,7 @@ pub async fn handle_create_source(
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
-    let row_id_index = row_id_index.map(|index| ProstColumnIndex { index: index as _ });
+    let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
@@ -594,7 +671,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kinesis')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}'"#,
             proto_file.path().to_str().unwrap()
         );

@@ -112,7 +112,7 @@ pub trait HummockVersionUpdateExt {
         parent_group_id: CompactionGroupId,
         group_id: CompactionGroupId,
         member_table_ids: &HashSet<StateTableId>,
-    ) -> Vec<(HummockSstableId, u64, u32)>;
+    ) -> Vec<SstSplitInfo>;
     fn apply_version_delta(&mut self, version_delta: &HummockVersionDelta) -> Vec<SstSplitInfo>;
 
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
@@ -183,10 +183,12 @@ impl HummockVersionExt for HummockVersion {
 
 pub type SstSplitInfo = (
     HummockSstableId,
-    // divide version
+    // Divide version. Counts the number of split of this SST.
     u64,
-    // level idx
+    // Level idx of the SSt.
     u32,
+    // The SST is moved to the new group completely. It should be removed from parent group.
+    bool,
 );
 
 impl HummockVersionUpdateExt for HummockVersion {
@@ -206,6 +208,10 @@ impl HummockVersionUpdateExt for HummockVersion {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
+        let remove_sst_stat_from_level = |level: &mut Level, sst: &SstableInfo| {
+            level.total_file_size -= sst.file_size;
+            level.uncompressed_file_size -= sst.uncompressed_file_size;
+        };
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
                 let mut insert_table_infos = vec![];
@@ -215,8 +221,17 @@ impl HummockVersionUpdateExt for HummockVersion {
                         .iter()
                         .any(|table_id| member_table_ids.contains(table_id))
                     {
+                        let is_trivial = sst_info
+                            .get_table_ids()
+                            .iter()
+                            .all(|table_id| member_table_ids.contains(table_id));
                         sst_info.divide_version += 1;
-                        split_id_vers.push((sst_info.get_id(), sst_info.get_divide_version(), 0));
+                        split_id_vers.push((
+                            sst_info.get_id(),
+                            sst_info.get_divide_version(),
+                            0,
+                            is_trivial,
+                        ));
                         let mut branch_table_info = sst_info.clone();
                         branch_table_info.table_ids = sst_info
                             .table_ids
@@ -224,6 +239,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                             .collect_vec();
                         insert_table_infos.push(branch_table_info);
                     }
+                }
+                // Remove SST from sub level may result in empty sub level. It will be purged
+                // whenever another compaction task is finished.
+                let removed = sub_level
+                    .table_infos
+                    .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                    .collect_vec();
+                for removed_sst in removed {
+                    remove_sst_stat_from_level(sub_level, &removed_sst);
                 }
                 add_new_sub_level(
                     cur_levels.l0.as_mut().unwrap(),
@@ -241,11 +265,18 @@ impl HummockVersionUpdateExt for HummockVersion {
                     .iter()
                     .any(|table_id| member_table_ids.contains(table_id))
                 {
-                    sst_info.divide_version += 1;
+                    let is_trivial = sst_info
+                        .get_table_ids()
+                        .iter()
+                        .all(|table_id| member_table_ids.contains(table_id));
+                    if !is_trivial {
+                        sst_info.divide_version += 1;
+                    }
                     split_id_vers.push((
                         sst_info.get_id(),
                         sst_info.get_divide_version(),
                         level_idx,
+                        is_trivial,
                     ));
                     let mut branch_table_info = sst_info.clone();
                     branch_table_info.table_ids = sst_info
@@ -257,6 +288,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                         branch_table_info.uncompressed_file_size;
                     cur_levels.levels[z].table_infos.push(branch_table_info);
                 }
+            }
+            let removed = level
+                .table_infos
+                .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                .collect_vec();
+            for removed_sst in removed {
+                remove_sst_stat_from_level(level, &removed_sst);
             }
         }
         split_id_vers

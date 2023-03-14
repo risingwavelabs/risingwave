@@ -307,29 +307,27 @@ fn parse_create_table_if_not_exists() {
 
 #[test]
 fn parse_bad_if_not_exists() {
-    let res = parse_sql_statements("CREATE TABLE NOT EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: uk_cities".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF NOT uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: NOT".to_string()),
-        res.unwrap_err()
-    );
+    for (sql, err_msg) in [
+        (
+            "CREATE TABLE NOT EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF uk_cities ()",
+            "Expected end of statement, found: uk_cities",
+        ),
+        (
+            "CREATE TABLE IF NOT uk_cities ()",
+            "Expected end of statement, found: NOT",
+        ),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -438,27 +436,14 @@ fn parse_set() {
 
     one_statement_parses_to("SET a TO b", "SET a = b");
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
-
-    assert_eq!(
-        parse_sql_statements("SET"),
-        Err(ParserError::ParserError(
-            "Expected identifier, found: EOF".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a b"),
-        Err(ParserError::ParserError(
-            "Expected equals sign or TO, found: b".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a ="),
-        Err(ParserError::ParserError(
-            "Expected variable value, found: EOF".to_string()
-        )),
-    );
+    for (sql, err_msg) in [
+        ("SET", "Expected identifier, found: EOF"),
+        ("SET a b", "Expected equals sign or TO, found: b"),
+        ("SET a =", "Expected variable value, found: EOF"),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -1042,12 +1027,9 @@ fn parse_array() {
     );
 
     let sql = "SELECT [[1, 2], [3, 4]]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "Expected an expression:, found: [".to_string()
-        )),
-    );
+    let res = parse_sql_statements(sql);
+    let err_msg = "Expected an expression:, found: [";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
 #[test]
@@ -1098,4 +1080,100 @@ fn parse_param_symbol() {
     if let SetExpr::Values(values) = query.body {
         assert_eq!(values.0[0][0], Expr::Parameter { index: 1 });
     }
+}
+
+#[test]
+fn parse_dollar_quoted_string() {
+    let sql = "SELECT $$hello$$, $tag_name$world$tag_name$, $$Foo$Bar$$, $$Foo$Bar$$col_name, $$$$, $tag_name$$tag_name$";
+
+    let stmt = parse_sql_statements(sql).unwrap();
+
+    let projection = match stmt.get(0).unwrap() {
+        Statement::Query(query) => match &query.body {
+            SetExpr::Select(select) => &select.projection,
+            _ => unreachable!(),
+        },
+        _ => unreachable!(),
+    };
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "hello".into()
+        })),
+        expr_from_projection(&projection[0])
+    );
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: Some("tag_name".into()),
+            value: "world".into()
+        })),
+        expr_from_projection(&projection[1])
+    );
+
+    assert_eq!(
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "Foo$Bar".into()
+        })),
+        expr_from_projection(&projection[2])
+    );
+
+    assert_eq!(
+        projection[3],
+        SelectItem::ExprWithAlias {
+            expr: Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+                tag: None,
+                value: "Foo$Bar".into(),
+            })),
+            alias: Ident::new_unchecked("col_name"),
+        }
+    );
+
+    assert_eq!(
+        expr_from_projection(&projection[4]),
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: None,
+            value: "".into()
+        })),
+    );
+
+    assert_eq!(
+        expr_from_projection(&projection[5]),
+        &Expr::Value(Value::DollarQuotedString(DollarQuotedString {
+            tag: Some("tag_name".into()),
+            value: "".into()
+        })),
+    );
+}
+
+#[test]
+fn parse_incorrect_dollar_quoted_string() {
+    let sql = "SELECT $x$hello$$";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT $hello$$";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT $$$";
+    assert!(parse_sql_statements(sql).is_err());
+}
+
+#[test]
+fn parse_incorrect_single_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t 't1'";
+    assert!(parse_sql_statements(sql).is_err());
+
+    let sql = "SELECT x 'x1‘ FROM t";
+    assert!(parse_sql_statements(sql).is_err());
+}
+
+#[test]
+fn parse_double_quoted_string_as_alias() {
+    let sql = "SELECT x FROM t \"t1\"";
+    assert!(parse_sql_statements(sql).is_ok());
+
+    let sql = "SELECT x \"x1\" FROM t";
+    assert!(parse_sql_statements(sql).is_ok());
 }

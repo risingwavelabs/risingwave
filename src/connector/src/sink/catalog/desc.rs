@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
 use risingwave_pb::stream_plan::SinkDesc as ProstSinkDesc;
 
@@ -38,7 +38,7 @@ pub struct SinkDesc {
 
     /// Primiary keys of the sink (connector). Now the sink does not care about a field's
     /// order (ASC/DESC).
-    pub pk: Vec<OrderPair>,
+    pub pk: Vec<ColumnOrder>,
 
     /// Primary key indices of the corresponding sink operator's output.
     pub stream_key: Vec<usize>,

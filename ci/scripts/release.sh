@@ -3,7 +3,7 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-connector_node_version=$(cat ci/connector-node-version)
+REPO_ROOT=${PWD}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -32,7 +32,8 @@ unzip -q awscliv2.zip && ./aws/install && mv /usr/local/bin/aws /bin/aws
 
 echo "--- Build risingwave release binary"
 cargo build -p risingwave_cmd_all --features "static-link static-log-level" --profile release
-cd target/release && chmod +x risingwave
+cargo build --bin risectl --features "static-link static-log-level" --profile release
+cd target/release && chmod +x risingwave risectl
 
 echo "--- Upload nightly binary to s3"
 if [ "${BUILDKITE_SOURCE}" == "schedule" ]; then
@@ -53,14 +54,17 @@ if [[ -n "${BUILDKITE_TAG+x}" ]]; then
   echo "--- Release create"
   gh release create "${BUILDKITE_TAG}" --notes "release ${BUILDKITE_TAG}" -d -p
 
-  echo "--- Release upload asset"
+  echo "--- Release upload risingwave asset"
   tar -czvf risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risingwave
   gh release upload "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
 
+  echo "--- Release upload risectl asset"
+  tar -czvf risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz risectl
+  gh release upload "${BUILDKITE_TAG}" risectl-"${BUILDKITE_TAG}"-x86_64-unknown-linux.tar.gz
+
   echo "--- Release build and upload risingwave connector node jar asset"
-  git clone https://"$GITHUB_TOKEN"@github.com/risingwavelabs/risingwave-connector-node.git
-  cd risingwave-connector-node && git checkout ${connector_node_version} && mvn -B package -Dmaven.test.skip=true
-  cd assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
+  cd ${REPO_ROOT}/java && mvn -B package -Dmaven.test.skip=true
+  cd connector-node/assembly/target && mv risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   gh release upload "${BUILDKITE_TAG}" risingwave-connector-"${BUILDKITE_TAG}".tar.gz
 fi
 

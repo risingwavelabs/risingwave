@@ -109,6 +109,9 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Start a RisingWave cluster for testing.
+    ///
+    /// This function should be called exactly once in a test.
     pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
@@ -117,7 +120,12 @@ impl Cluster {
         // setup DNS and load balance
         let net = madsim::net::NetSim::current();
         net.add_dns_record("etcd", "192.168.10.1".parse().unwrap());
-        net.add_dns_record("meta", "192.168.1.1".parse().unwrap());
+        for i in 1..=conf.meta_nodes {
+            net.add_dns_record(
+                &format!("meta-{i}"),
+                format!("192.168.1.{i}").parse().unwrap(),
+            );
+        }
 
         net.add_dns_record("frontend", "192.168.2.0".parse().unwrap());
         net.global_ipvs().add_service(
@@ -179,7 +187,11 @@ impl Cluster {
         // wait for the service to be ready
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-        std::env::set_var("RW_META_ADDR", "https://meta:5690/");
+        let mut meta_addrs = vec![];
+        for i in 1..=conf.meta_nodes {
+            meta_addrs.push(format!("http://meta-{i}:5690"));
+        }
+        std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
         // meta node
         for i in 1..=conf.meta_nodes {
@@ -190,7 +202,7 @@ impl Cluster {
                 "--listen-addr",
                 "0.0.0.0:5690",
                 "--advertise-addr",
-                &format!("192.168.1.{i}:5690"),
+                &format!("meta-{i}:5690"),
                 "--backend",
                 "etcd",
                 "--etcd-endpoints",
@@ -217,8 +229,6 @@ impl Cluster {
                 "0.0.0.0:4566",
                 "--advertise-addr",
                 &format!("192.168.2.{i}:4566"),
-                "--meta-addr",
-                "meta:5690",
             ]);
             handle
                 .create_node()
@@ -238,8 +248,6 @@ impl Cluster {
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
-                "--meta-address",
-                "meta:5690",
                 "--state-store",
                 "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--parallelism",
@@ -264,8 +272,6 @@ impl Cluster {
                 "0.0.0.0:6660",
                 "--advertise-addr",
                 &format!("192.168.4.{i}:6660"),
-                "--meta-address",
-                "meta:5690",
                 "--state-store",
                 "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
@@ -511,6 +517,7 @@ impl Cluster {
     }
 }
 
+/// Options for killing nodes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KillOpts {
     pub kill_rate: f32,
@@ -518,4 +525,15 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+}
+
+impl KillOpts {
+    /// Killing all kind of nodes.
+    pub const ALL: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+    };
 }

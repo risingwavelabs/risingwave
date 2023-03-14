@@ -2,19 +2,13 @@ syntax = "proto3";
 
 package catalog;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
-
-// The rust prost library always treats uint64 as required and message as
-// optional. In order to allow `row_id_index` as an optional field, we wrap
-// uint64 inside this message.
-message ColumnIndex {
-  uint64 index = 1;
-}
 
 // A mapping of column indices.
 message ColIndexMapping {
@@ -49,7 +43,7 @@ message Source {
   string name = 4;
   // The column index of row ID. If the primary key is specified by the user,
   // this will be `None`.
-  ColumnIndex row_id_index = 5;
+  optional uint32 row_id_index = 5;
   // Columns of the source.
   repeated plan_common.ColumnCatalog columns = 6;
   // Column id of the primary key specified by the user. If the user does not
@@ -79,7 +73,7 @@ message Sink {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder pk = 6;
+  repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 7;
   repeated int32 distribution_key = 8;
   // pk_indices of the corresponding materialize operator's output.
@@ -109,11 +103,12 @@ message Function {
   uint32 schema_id = 2;
   uint32 database_id = 3;
   string name = 4;
+  uint32 owner = 9;
   repeated data.DataType arg_types = 5;
   data.DataType return_type = 6;
   string language = 7;
-  string path = 8;
-  uint32 owner = 9;
+  string link = 8;
+  string identifier = 10;
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
@@ -125,6 +120,7 @@ message Table {
     INDEX = 3;
     INTERNAL = 4;
   }
+
   message TableVersion {
     // The version number, which will be 0 by default and be increased by 1 for
     // each schema change in the frontend.
@@ -139,7 +135,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder pk = 6;
+  repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;
@@ -154,21 +150,28 @@ message Table {
   uint32 fragment_id = 17;
   // an optional column index which is the vnode of each row computed by the
   // table's consistent hash distribution
-  ColumnIndex vnode_col_index = 18;
+  optional uint32 vnode_col_index = 18;
   // An optional column index of row id. If the primary key is specified by users,
   // this will be `None`.
-  ColumnIndex row_id_index = 19;
+  optional uint32 row_id_index = 19;
   // The column indices which are stored in the state store's value with
   // row-encoding. Currently is not supported yet and expected to be
   // `[0..columns.len()]`.
   repeated int32 value_indices = 20;
   string definition = 21;
-  bool handle_pk_conflict = 22;
+  HandleConflictBehavior handle_pk_conflict_behavior = 22;
   uint32 read_prefix_len_hint = 23;
   repeated int32 watermark_indices = 24;
+  repeated int32 dist_key_in_pk = 25;
   // Per-table catalog version, used by schema change. `None` for internal tables and tests.
   // Not to be confused with the global catalog version for notification service.
   TableVersion version = 100;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message View {

@@ -25,14 +25,13 @@ use risingwave_pb::batch_plan::{
     PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
 };
 use risingwave_pb::common::BatchQueryEpoch;
-use risingwave_pb::task_service::GetDataResponse;
+use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::Sender;
 use tonic::Status;
 
 use crate::executor::BatchManagerMetrics;
 use crate::rpc::service::exchange::GrpcExchangeWriter;
-use crate::rpc::service::task_service::TaskInfoResponseResult;
 use crate::task::{
     BatchTaskExecution, ComputeNodeContext, StateReporter, TaskId, TaskOutput, TaskOutputId,
 };
@@ -109,7 +108,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.clone().async_execute(state_reporter).await?;
+        task.async_execute(Some(state_reporter)).await?;
         ret
     }
 
@@ -148,12 +147,12 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId) {
+    pub fn abort_task(&self, sid: &ProstTaskId, msg: String) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                task.abort_task();
+                task.abort_task(msg);
                 self.metrics.task_num.dec()
             }
             None => {
@@ -200,7 +199,7 @@ impl BatchManager {
     pub fn get_task_receiver(
         &self,
         task_id: &TaskId,
-    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponseResult> {
+    ) -> tokio::sync::mpsc::Receiver<TaskInfoResponse> {
         self.tasks.lock().get(task_id).unwrap().state_receiver()
     }
 
@@ -214,7 +213,7 @@ impl BatchManager {
 
     /// Kill batch queries with larges memory consumption per task. Required to maintain task level
     /// memory usage in the struct. Will be called by global memory manager.
-    pub fn kill_queries(&self) {
+    pub fn kill_queries(&self, reason: String) {
         let mut max_mem_task_id = None;
         let mut max_mem = usize::MIN;
         let guard = self.tasks.lock();
@@ -235,7 +234,7 @@ impl BatchManager {
             let t = guard.get(&id).unwrap();
             // FIXME: `Abort` will not report error but truncated results to user. We should
             // consider throw error.
-            t.abort_task();
+            t.abort_task(reason);
         }
     }
 
@@ -390,7 +389,7 @@ mod tests {
             )
             .await
             .unwrap();
-        manager.abort_task(&task_id);
+        manager.abort_task(&task_id, "".to_string());
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
     }
