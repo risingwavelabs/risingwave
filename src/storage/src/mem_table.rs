@@ -22,7 +22,7 @@ use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::{TableId, TableOption};
-use risingwave_common::row::RowDeserializer;
+use risingwave_common::util::value_encoding::ValueRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use thiserror::Error;
 
@@ -204,7 +204,7 @@ impl KeyOp {
     /// # Panics
     ///
     /// The function will panic if it failed to decode the bytes with provided data types.
-    pub fn debug_fmt(&self, row_deserializer: &RowDeserializer) -> String {
+    pub fn debug_fmt(&self, row_deserializer: &impl ValueRowSerde) -> String {
         match self {
             Self::Insert(after) => {
                 let after = row_deserializer.deserialize(after.as_ref());
@@ -353,9 +353,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
         async { Ok(true) }
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
-            match self.mem_table.buffer.get(key) {
+            match self.mem_table.buffer.get(&key) {
                 None => self.inner.get(key, self.epoch(), read_options).await,
                 Some(op) => match op {
                     KeyOp::Insert(value) | KeyOp::Update((_, value)) => Ok(Some(value.clone())),
@@ -408,8 +408,8 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     KeyOp::Insert(value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_insert_sanity_check(
-                                &key,
-                                &value,
+                                key.clone(),
+                                value.clone(),
                                 &self.inner,
                                 self.epoch(),
                                 self.table_id,
@@ -422,8 +422,8 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     KeyOp::Delete(old_value) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_delete_sanity_check(
-                                &key,
-                                &old_value,
+                                key.clone(),
+                                old_value,
                                 &self.inner,
                                 self.epoch(),
                                 self.table_id,
@@ -436,9 +436,9 @@ impl<S: StateStoreWrite + StateStoreRead> LocalStateStore for MemtableLocalState
                     KeyOp::Update((old_value, new_value)) => {
                         if ENABLE_SANITY_CHECK && self.is_consistent_op {
                             do_update_sanity_check(
-                                &key,
-                                &old_value,
-                                &new_value,
+                                key.clone(),
+                                old_value,
+                                new_value.clone(),
                                 &self.inner,
                                 self.epoch(),
                                 self.table_id,

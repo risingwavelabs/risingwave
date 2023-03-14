@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static io.grpc.Status.*;
@@ -10,8 +24,6 @@ import io.delta.standalone.Operation;
 import io.delta.standalone.OptimisticTransaction;
 import io.delta.standalone.actions.AddFile;
 import io.delta.standalone.exceptions.DeltaConcurrentModificationException;
-import io.delta.standalone.types.*;
-import io.delta.standalone.util.ParquetSchemaConverter;
 import java.io.IOException;
 import java.util.*;
 import org.apache.avro.Schema;
@@ -20,11 +32,9 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.Path;
 import org.apache.parquet.avro.AvroParquetWriter;
-import org.apache.parquet.avro.AvroSchemaConverter;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.util.HadoopOutputFile;
-import org.apache.parquet.schema.MessageType;
 
 public class DeltaLakeSink extends SinkBase {
     private static final CompressionCodecName codecName = CompressionCodecName.SNAPPY;
@@ -41,10 +51,7 @@ public class DeltaLakeSink extends SinkBase {
         super(tableSchema);
         this.conf = conf;
         this.log = log;
-
-        StructType schema = log.snapshot().getMetadata().getSchema();
-        MessageType parquetSchema = ParquetSchemaConverter.deltaToParquet(schema);
-        this.sinkSchema = new AvroSchemaConverter().convert(parquetSchema);
+        this.sinkSchema = DeltaLakeSinkUtil.convertSchema(log, tableSchema);
     }
 
     @Override

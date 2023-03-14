@@ -109,6 +109,9 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Start a RisingWave cluster for testing.
+    ///
+    /// This function should be called exactly once in a test.
     pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
@@ -186,7 +189,7 @@ impl Cluster {
 
         let mut meta_addrs = vec![];
         for i in 1..=conf.meta_nodes {
-            meta_addrs.push(format!("https://meta-{i}:5690/"));
+            meta_addrs.push(format!("http://meta-{i}:5690"));
         }
         std::env::set_var("RW_META_ADDR", meta_addrs.join(","));
 
@@ -199,7 +202,7 @@ impl Cluster {
                 "--listen-addr",
                 "0.0.0.0:5690",
                 "--advertise-addr",
-                &format!("192.168.1.{i}:5690"),
+                &format!("meta-{i}:5690"),
                 "--backend",
                 "etcd",
                 "--etcd-endpoints",
@@ -514,6 +517,7 @@ impl Cluster {
     }
 }
 
+/// Options for killing nodes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KillOpts {
     pub kill_rate: f32,
@@ -521,4 +525,15 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+}
+
+impl KillOpts {
+    /// Killing all kind of nodes.
+    pub const ALL: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+    };
 }

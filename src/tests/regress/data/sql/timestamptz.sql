@@ -92,6 +92,9 @@ INSERT INTO TIMESTAMPTZ_TBL VALUES ('97/02/10 17:32:01 UTC');
 reset datestyle;
 INSERT INTO TIMESTAMPTZ_TBL VALUES ('1997.041 17:32:01 UTC');
 
+set datestyle to iso;
+set intervalstyle to postgres;
+
 -- timestamps at different timezones
 INSERT INTO TIMESTAMPTZ_TBL VALUES ('19970210 173201 America/New_York');
 SELECT '19970210 173201' AT TIME ZONE 'America/New_York';
@@ -354,6 +357,7 @@ SET timezone = '04:15';
 SELECT to_char(now(), 'OF') as "OF", to_char(now(), 'TZH:TZM') as "TZH:TZM";
 RESET timezone;
 
+DROP TABLE TIMESTAMPTZ_TBL;
 CREATE TABLE TIMESTAMPTZ_TST (a int , b timestamptz);
 
 -- Test year field value with len > 4
@@ -545,3 +549,6 @@ insert into tmptz values ('2017-01-18 00:00+00');
 explain (costs off)
 select * from tmptz where f1 at time zone 'utc' = '2017-01-18 00:00';
 select * from tmptz where f1 at time zone 'utc' = '2017-01-18 00:00';
+
+reset intervalstyle;
+reset datestyle;

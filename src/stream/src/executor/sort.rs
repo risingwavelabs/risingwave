@@ -25,6 +25,7 @@ use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
@@ -268,6 +269,7 @@ impl<S: StateStore> SortExecutor<S> {
                         Bound::<row::Empty>::Unbounded,
                     ),
                     owned_vnode,
+                    PrefetchOptions::new_for_exhaust_iter(),
                 )
                 .await?;
             let value_iter = Box::pin(value_iter);
@@ -502,7 +504,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let pk_indices = create_pk_indices();
         StateTable::new_without_distribution(
             memory_state_store,

@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static io.grpc.Status.*;
@@ -22,6 +36,23 @@ public class DeltaLakeSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
+        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
+        validate(tableSchema, tableProperties);
+
+        String location = tableProperties.get(LOCATION_PROP);
+        String locationType = tableProperties.get(LOCATION_TYPE_PROP);
+
+        Configuration hadoopConf = new Configuration();
+        location = getConfig(location, locationType, hadoopConf);
+
+        DeltaLog log = DeltaLog.forTable(hadoopConf, location);
+        StructType schema = log.snapshot().getMetadata().getSchema();
+        DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
+        return new DeltaLakeSink(tableSchema, hadoopConf, log);
+    }
+
+    @Override
+    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(LOCATION_PROP)
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
             throw INVALID_ARGUMENT
@@ -35,6 +66,15 @@ public class DeltaLakeSinkFactory implements SinkFactory {
         String locationType = tableProperties.get(LOCATION_TYPE_PROP);
 
         Configuration hadoopConf = new Configuration();
+        location = getConfig(location, locationType, hadoopConf);
+
+        DeltaLog log = DeltaLog.forTable(hadoopConf, location);
+        StructType schema = log.snapshot().getMetadata().getSchema();
+        DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
+        DeltaLakeSinkUtil.convertSchema(log, tableSchema);
+    }
+
+    private String getConfig(String location, String locationType, Configuration hadoopConf) {
         switch (locationType) {
             case "local":
                 location = "file://" + Paths.get(location).toAbsolutePath();
@@ -54,10 +94,6 @@ public class DeltaLakeSinkFactory implements SinkFactory {
                         .withDescription("unsupported deltalake sink type: " + locationType)
                         .asRuntimeException();
         }
-
-        DeltaLog log = DeltaLog.forTable(hadoopConf, location);
-        StructType schema = log.snapshot().getMetadata().getSchema();
-        DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
-        return new DeltaLakeSink(tableSchema, hadoopConf, log);
+        return location;
     }
 }

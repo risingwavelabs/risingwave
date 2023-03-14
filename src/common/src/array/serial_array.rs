@@ -17,10 +17,20 @@ use std::hash::Hash;
 use postgres_types::{ToSql as _, Type};
 use serde::{Serialize, Serializer};
 
-use crate::types::{Scalar, ScalarRef};
+use crate::array::{PrimitiveArray, PrimitiveArrayBuilder};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd)]
+// Serial is an alias for i64
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
 pub struct Serial(i64);
+
+pub type SerialArray = PrimitiveArray<Serial>;
+pub type SerialArrayBuilder = PrimitiveArrayBuilder<Serial>;
+
+impl From<i64> for Serial {
+    fn from(value: i64) -> Self {
+        Self(value)
+    }
+}
 
 impl Serial {
     #[inline]
@@ -60,27 +70,5 @@ impl crate::types::to_binary::ToBinary for Serial {
         let mut output = bytes::BytesMut::new();
         self.0.to_sql(&Type::ANY, &mut output).unwrap();
         Ok(Some(output.freeze()))
-    }
-}
-
-/// Implement `Scalar` for `Serial`.
-impl Scalar for Serial {
-    type ScalarRefType<'a> = Serial;
-
-    fn as_scalar_ref(&self) -> Self::ScalarRefType<'_> {
-        Serial(self.0)
-    }
-}
-
-/// Implement `ScalarRef` for `Serial`.
-impl<'a> ScalarRef<'a> for Serial {
-    type ScalarType = Serial;
-
-    fn to_owned_scalar(&self) -> Serial {
-        *self
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.0.hash(state)
     }
 }

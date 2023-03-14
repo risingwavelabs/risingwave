@@ -21,6 +21,7 @@ use clap::Subcommand;
 use futures::future::try_join_all;
 use futures::{pin_mut, Future, StreamExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::store::PrefetchOptions;
 use size::Size;
 use tokio::task::JoinHandle;
 
@@ -93,7 +94,9 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                         tb
                     };
                     loop {
-                        let stream = state_table.iter().await?;
+                        let stream = state_table
+                            .iter(PrefetchOptions::new_for_exhaust_iter())
+                            .await?;
                         pin_mut!(stream);
                         iter_cnt.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         while let Some(item) = stream.next().await {

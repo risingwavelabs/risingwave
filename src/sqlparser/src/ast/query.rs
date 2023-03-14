@@ -339,6 +339,7 @@ pub enum TableFactor {
     Table {
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     },
     Derived {
         lateral: bool,
@@ -363,8 +364,15 @@ pub enum TableFactor {
 impl fmt::Display for TableFactor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            TableFactor::Table { name, alias } => {
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_now,
+            } => {
                 write!(f, "{}", name)?;
+                if *for_system_time_as_of_now {
+                    write!(f, " FOR SYSTEM_TIME AS OF NOW()")?;
+                }
                 if let Some(alias) = alias {
                     write!(f, " AS {}", alias)?;
                 }

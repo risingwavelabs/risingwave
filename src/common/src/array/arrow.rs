@@ -348,14 +348,15 @@ impl FromIntoArrow for IntervalUnit {
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        IntervalUnit::new(months, days, ns / 1_000_000)
+        IntervalUnit::from_month_day_usec(months, days, ns / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
         arrow_array::types::IntervalMonthDayNanoType::make_value(
             self.get_months(),
             self.get_days(),
-            self.get_ms() * 1_000_000,
+            // TODO: this may overflow and we need `try_into`
+            self.get_usecs() * 1000,
         )
     }
 }
@@ -444,6 +445,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
             ArrayImpl::Jsonb(_) => todo!("list of jsonb"),
+            ArrayImpl::Serial(_) => todo!("list of serial"),
             ArrayImpl::Struct(_) => todo!("list of struct"),
             ArrayImpl::List(_) => todo!("list of list"),
             ArrayImpl::Bytea(a) => build(
@@ -512,6 +514,7 @@ impl From<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::interval::test_utils::IntervalUnitTestExt;
     use crate::{array, empty_array};
 
     #[test]

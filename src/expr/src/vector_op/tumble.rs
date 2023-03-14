@@ -55,7 +55,7 @@ fn tm_diff_bin(diff_usecs: i64, window: IntervalUnit) -> Result<i64> {
             reason: "unimplemented: tumble_start only support days or milliseconds".to_string(),
         });
     }
-    let window_usecs = window.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + window.get_ms() * 1000;
+    let window_usecs = window.get_days() as i64 * 24 * 60 * 60 * 1_000_000 + window.get_usecs();
 
     if window_usecs <= 0 {
         return Err(ExprError::InvalidParam {
@@ -78,7 +78,7 @@ mod tests {
     #[test]
     fn test_tumble_start_date_time() {
         let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
-        let interval = IntervalUnit::new(0, 0, 30 * 60 * 1000);
+        let interval = IntervalUnit::from_month_day_usec(0, 0, 30 * 60 * 1_000_000);
         let w = tumble_start_date_time(dt, interval).unwrap().0;
         assert_eq!(w.year(), 2022);
         assert_eq!(w.month(), 2);
