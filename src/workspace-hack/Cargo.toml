@@ -21,13 +21,11 @@ publish = false
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
-async-std = { version = "1", features = ["unstable"] }
 auto_enums = { version = "0.7", features = ["futures"] }
 aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
 aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
-bit-vec = { version = "0.6" }
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
@@ -37,8 +35,6 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-curl = { version = "0.4", features = ["http2", "static-curl"] }
-curl-sys = { version = "0.4", features = ["http2", "static-curl"] }
 digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
@@ -55,9 +51,8 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-isahc = { version = "1" }
+isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
-lalrpop-util = { version = "0.19", features = ["lexer"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
@@ -116,14 +111,12 @@ zstd-sys = { version = "2", default-features = false, features = ["legacy", "std
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
-async-std = { version = "1", features = ["unstable"] }
 auto_enums = { version = "0.7", features = ["futures"] }
 auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "std"] }
 aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
 aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
 base64 = { version = "0.21" }
-bit-vec = { version = "0.6" }
 bytes = { version = "1", features = ["serde"] }
 cc = { version = "1", default-features = false, features = ["parallel"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -134,8 +127,6 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-curl = { version = "0.4", features = ["http2", "static-curl"] }
-curl-sys = { version = "0.4", features = ["http2", "static-curl"] }
 digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
@@ -152,9 +143,8 @@ hashbrown-594e8ee84c453af0 = { package = "hashbrown", version = "0.13" }
 hashbrown-5ef9efb8ec2df382 = { package = "hashbrown", version = "0.12", features = ["nightly", "raw"] }
 hdrhistogram = { version = "7" }
 hyper = { version = "0.14", features = ["full"] }
-isahc = { version = "1" }
+isahc = { version = "1", default-features = false, features = ["text-decoding"] }
 itertools = { version = "0.10" }
-lalrpop-util = { version = "0.19", features = ["lexer"] }
 lexical-core = { version = "0.8", features = ["format"] }
 lexical-parse-float = { version = "0.8", default-features = false, features = ["format", "std"] }
 lexical-parse-integer = { version = "0.8", default-features = false, features = ["format", "std"] }
