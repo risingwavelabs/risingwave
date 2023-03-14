@@ -81,7 +81,6 @@ mach = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.4"
-httpmock = "0.6.7"
 more-asserts = "0.3"
 rand = "0.8"
 tempfile = "3"

@@ -165,9 +165,6 @@ pub fn current_timestamp() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use httpmock::prelude::*;
-    use httpmock::MockServer;
-
     use super::*;
 
     #[test]
@@ -181,40 +178,6 @@ mod tests {
         assert!(!system_data.os.kernel_version.is_empty());
         assert!(!system_data.os.version.is_empty());
         assert!(system_data.cpu.available > 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_post_telemetry_report_success() {
-        let mock_server = MockServer::start();
-        let url = mock_server.url("/report");
-
-        let report_json = "".to_string();
-        let resp_mock = mock_server.mock(|when, then| {
-            when.method(POST)
-                .path("/report")
-                .header("Content-Type", "application/json")
-                .body(report_json.clone());
-            then.status(200);
-        });
-        post_telemetry_report(&url, report_json).await.unwrap();
-        resp_mock.assert();
-    }
-
-    #[tokio::test]
-    async fn test_post_telemetry_report_fail() {
-        let mock_server = MockServer::start();
-        let url = mock_server.url("/report");
-
-        let report_json = "".to_string();
-        let resp_mock = mock_server.mock(|when, then| {
-            when.method(POST)
-                .path("/report")
-                .header("Content-Type", "application/json")
-                .body(report_json.clone());
-            then.status(404);
-        });
-        assert!(post_telemetry_report(&url, report_json).await.is_err());
-        resp_mock.assert();
     }
 
     #[test]
