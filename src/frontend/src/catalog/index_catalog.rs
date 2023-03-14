@@ -122,12 +122,14 @@ impl IndexCatalog {
         self.index_table.columns.len() == self.primary_table.columns.len()
     }
 
-    /// a mapping maps column index of secondary index to column index of primary table
+    /// A mapping maps the column index of the secondary index to the column index of the primary
+    /// table.
     pub fn secondary_to_primary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.secondary_to_primary_mapping
     }
 
-    /// a mapping maps column index of primary table to column index of secondary index
+    /// A mapping maps the column index of the primary table to the column index of the secondary
+    /// index.
     pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.primary_to_secondary_mapping
     }
