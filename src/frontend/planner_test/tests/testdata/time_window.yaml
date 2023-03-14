@@ -210,9 +210,3 @@
   batch_plan: |
     BatchProject { exprs: [*VALUES*_0.column_0, TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) as $expr1, (TumbleStart(*VALUES*_0.column_0, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
     └─BatchValues { rows: [['2020-01-01 12:00:00':Timestamp]] }
-- sql: |
-    create table t1 (id int, created_at date);
-    select id, created_at from hop(t1, created_at, interval '1' day, interval '3' day, interval '3' day);
-  logical_plan: ""
-  batch_plan: ""
-  stream_plan: ""
