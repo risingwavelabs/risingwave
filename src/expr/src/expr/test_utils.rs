@@ -100,6 +100,19 @@ pub fn make_i64_literal(data: i64) -> ExprNode {
     }
 }
 
+pub fn make_f32_literal(data: f32) -> ExprNode {
+    ExprNode {
+        expr_type: Type::ConstantValue as i32,
+        return_type: Some(ProstDataType {
+            type_name: TypeName::Float as i32,
+            ..Default::default()
+        }),
+        rex_node: Some(RexNode::Constant(ProstDatum {
+            body: serialize_datum(Some(ScalarImpl::Float32(data.into())).as_ref()),
+        })),
+    }
+}
+
 pub fn make_interval_literal(data: IntervalUnit) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,

@@ -155,47 +155,24 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
     use risingwave_pb::expr::expr_node::Type;
-    use risingwave_pb::expr::FunctionCall;
 
     use super::*;
-    use crate::expr::{InputRefExpression, LiteralExpression};
+    use crate::expr::test_utils::{
+        make_bool_literal, make_expression, make_f32_literal, make_i32_literal, make_input_ref,
+    };
 
     #[test]
     fn test_case_expr() {
-        let call = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Boolean as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: None,
-                },
-            ],
-        };
-        let p = ExprNode {
-            expr_type: Type::Case as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int32 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(call)),
-        };
+        let p = make_expression(
+            Type::Case,
+            TypeName::Int32,
+            vec![make_bool_literal(false), make_i32_literal(1)],
+        );
         assert!(CaseExpression::try_from(&p).is_ok());
     }
 
-    fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
+    fn test_eval_row(expr: BoxedExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
             let row = OwnedRow::new(vec![Some(row_input.to_scalar_value())]);
             let datum = expr.eval_row(&row).unwrap();
@@ -206,27 +183,24 @@ mod tests {
 
     #[test]
     fn test_eval_searched_case() {
-        let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause {
-            when: new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        }];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+        // when x <= 2 then 3.1 else 4.1
+        let p = make_expression(
+            Type::Case,
+            TypeName::Float,
+            vec![
+                // when
+                make_expression(
+                    Type::LessThanOrEqual,
+                    TypeName::Boolean,
+                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(2)],
+                ),
+                // then
+                make_f32_literal(3.1),
+                // else
+                make_f32_literal(4.1),
+            ],
+        );
+        let searched_case_expr = build_from_prost(&p).unwrap();
         let input = DataChunk::from_pretty(
             "i
              1
@@ -245,22 +219,22 @@ mod tests {
 
     #[test]
     fn test_eval_without_else() {
-        let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause {
-            when: new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        }];
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+        let p = make_expression(
+            Type::Case,
+            TypeName::Float,
+            vec![
+                // when
+                make_expression(
+                    Type::LessThanOrEqual,
+                    TypeName::Boolean,
+                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(3)],
+                ),
+                // then
+                make_f32_literal(3.1),
+            ],
+        );
+        let searched_case_expr = build_from_prost(&p).unwrap();
         let input = DataChunk::from_pretty(
             "i
              3
@@ -277,27 +251,24 @@ mod tests {
 
     #[test]
     fn test_eval_row_searched_case() {
-        let ret_type = DataType::Float32;
-        // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause {
-            when: new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        }];
-        // else 4.1
-        let els = Box::new(LiteralExpression::new(
-            DataType::Float32,
-            Some(4.1f32.into()),
-        ));
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, Some(els));
+        // when x <= 2 then 3.1 else 4.1
+        let p = make_expression(
+            Type::Case,
+            TypeName::Float,
+            vec![
+                // when
+                make_expression(
+                    Type::LessThanOrEqual,
+                    TypeName::Boolean,
+                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(2)],
+                ),
+                // then
+                make_f32_literal(3.1),
+                // else
+                make_f32_literal(4.1),
+            ],
+        );
+        let searched_case_expr = build_from_prost(&p).unwrap();
 
         let row_inputs = vec![1, 2, 3, 4, 5];
         let expected = vec![
@@ -313,22 +284,22 @@ mod tests {
 
     #[test]
     fn test_eval_row_without_else() {
-        let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause {
-            when: new_binary_expr(
-                Type::LessThanOrEqual,
-                DataType::Boolean,
-                Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
-            )
-            .unwrap(),
-            then: Box::new(LiteralExpression::new(
-                DataType::Float32,
-                Some(3.1f32.into()),
-            )),
-        }];
-        let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
+        let p = make_expression(
+            Type::Case,
+            TypeName::Float,
+            vec![
+                // when
+                make_expression(
+                    Type::LessThanOrEqual,
+                    TypeName::Boolean,
+                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(3)],
+                ),
+                // then
+                make_f32_literal(3.1),
+            ],
+        );
+        let searched_case_expr = build_from_prost(&p).unwrap();
 
         let row_inputs = vec![2, 3, 4, 5];
         let expected = vec![Some(3.1f32), Some(3.1f32), None, None];
