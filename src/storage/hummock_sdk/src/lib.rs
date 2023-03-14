@@ -43,6 +43,7 @@ pub mod prost_key_range;
 pub mod table_stats;
 
 pub type HummockSstableObjectId = u64;
+pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
 pub type HummockContextId = u32;

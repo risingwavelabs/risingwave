@@ -34,8 +34,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
-    HummockEpoch, HummockSstableObjectId, HummockVersionId, SstObjectIdRange, FIRST_VERSION_ID,
-    INVALID_VERSION_ID,
+    HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -1047,7 +1047,7 @@ where
         compact_task: &CompactTask,
         branched_ssts: &BTreeMap<
             HummockSstableObjectId,
-            BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>,
+            BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
         >,
     ) -> bool {
         for input_level in compact_task.get_input_ssts() {
@@ -2051,11 +2051,11 @@ fn drop_sst(
     branched_ssts: &mut BTreeMapTransaction<
         '_,
         HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>,
+        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
     >,
     group_id: CompactionGroupId,
     object_id: HummockSstableObjectId,
-    sst_id: HummockSstableObjectId,
+    sst_id: HummockSstableId,
 ) -> bool {
     match branched_ssts.get_mut(object_id) {
         Some(mut entry) => {
@@ -2082,7 +2082,7 @@ fn gen_version_delta<'a>(
     branched_ssts: &mut BTreeMapTransaction<
         'a,
         HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>,
+        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
     >,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
