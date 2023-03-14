@@ -391,6 +391,8 @@ message ChainNode {
   repeated plan_common.Field upstream_fields = 2;
   // Which columns from upstream are used in this Chain node.
   repeated uint32 upstream_column_indices = 3;
+  // TODO
+  repeated int32 upstream_column_ids = 8;
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
