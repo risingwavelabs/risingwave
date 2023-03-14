@@ -217,9 +217,10 @@ pub async fn compute_node_serve(
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
+        let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {
             backup_reader
-                .watch_config_change(system_params_manager.watch_params())
+                .watch_config_change(system_params_mgr.watch_params())
                 .await;
         });
     }
