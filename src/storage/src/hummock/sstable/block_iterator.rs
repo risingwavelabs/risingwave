@@ -26,7 +26,7 @@ use crate::hummock::BlockHolder;
 /// [`BlockIterator`] is used to read kv pairs in a block.
 pub struct BlockIterator {
     /// Block that iterates on.
-    pub block: BlockHolder,
+    block: BlockHolder,
     /// Current restart point index.
     restart_point_index: usize,
     /// Current offset.
@@ -99,26 +99,34 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        if key.user_key.table_id.table_id() == self.block.table_id() {
-            let mut full_key_encoded_without_table_id: BytesMut = Default::default();
-            key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
+        match key.user_key.table_id.table_id().cmp(&self.block.table_id()) {
+            Ordering::Less => self.seek_to_last(),
+            Ordering::Equal => {
+                let mut full_key_encoded_without_table_id: BytesMut = Default::default();
+                key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
 
-            self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+                self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
 
-            self.next_until_key(&full_key_encoded_without_table_id[..]);
+                self.next_until_key(&full_key_encoded_without_table_id[..]);
+            }
+            Ordering::Greater => self.invalidate(),
         }
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        if key.user_key.table_id.table_id() == self.block.table_id() {
-            let mut full_key_encoded_without_table_id: BytesMut = Default::default();
-            key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
-            self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
-            self.next_until_key(&full_key_encoded_without_table_id[..]);
-            if !self.is_valid() {
-                self.seek_to_last();
+        match key.user_key.table_id.table_id().cmp(&self.block.table_id()) {
+            Ordering::Less => self.invalidate(),
+            Ordering::Equal => {
+                let mut full_key_encoded_without_table_id: BytesMut = Default::default();
+                key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
+                self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+                self.next_until_key(&full_key_encoded_without_table_id[..]);
+                if !self.is_valid() {
+                    self.seek_to_last();
+                }
+                self.prev_until_key(&full_key_encoded_without_table_id[..]);
             }
-            self.prev_until_key(&full_key_encoded_without_table_id[..]);
+            Ordering::Greater => self.seek_to_last(),
         }
     }
 }
