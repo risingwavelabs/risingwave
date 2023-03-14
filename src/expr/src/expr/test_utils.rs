@@ -119,16 +119,14 @@ pub fn make_hop_window_expression(
     let get_hop_window_start = || -> Result<BoxedExpression> {
         let time_col_ref = InputRefExpression::new(time_col_data_type, time_col_idx).boxed();
 
-        let window_size_expr =
-            LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_size)))
-                .boxed();
         let window_slide_expr =
             LiteralExpression::new(DataType::Interval, Some(ScalarImpl::Interval(window_slide)))
                 .boxed();
 
         // The first window_start of hop window should be:
-        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`) + offset %
-        // window_size. Let's pre calculate (`window_size` - `window_slide`).
+        // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`) + `offset` %
+        // `window_size`. Let's pre calculate (`window_size` - `window_slide`) and `offset` %
+        // `window_size`.
         let window_size_sub_slide =
             window_size
                 .checked_sub(&window_slide)
@@ -144,29 +142,16 @@ pub fn make_hop_window_expression(
             Some(ScalarImpl::Interval(window_size_sub_slide)),
         )
         .boxed();
-        // add offset - tumble_start(offset , window_size)
-
-        let hop_start = new_binary_expr(
-            expr_node::Type::TumbleStart,
-            output_type.clone(),
-            new_binary_expr(
-                expr_node::Type::Subtract,
-                output_type.clone(),
-                time_col_ref,
-                window_size_sub_slide_expr,
-            )?,
-            window_slide_expr,
-        )?;
 
         let offset_modules_window_size = {
             const DAY_MS: i64 = 86400000;
             const MONTH_MS: i64 = 30 * DAY_MS;
             let mut remaining_ms = (window_offset.get_months() as i64 * MONTH_MS
                 + window_offset.get_days() as i64 * DAY_MS
-                + window_offset.get_ms() * 1000)
+                + window_offset.get_ms())
                 % (window_size.get_months() as i64 * MONTH_MS
                     + window_size.get_days() as i64 * DAY_MS
-                    + window_size.get_ms() * 1000);
+                    + window_size.get_ms());
             let months = remaining_ms / MONTH_MS;
             remaining_ms -= months * MONTH_MS;
             let days = remaining_ms / DAY_MS;
@@ -179,6 +164,18 @@ pub fn make_hop_window_expression(
             Some(ScalarImpl::Interval(offset_modules_window_size)),
         )
         .boxed();
+
+        let hop_start = new_binary_expr(
+            expr_node::Type::TumbleStart,
+            output_type.clone(),
+            new_binary_expr(
+                expr_node::Type::Subtract,
+                output_type.clone(),
+                time_col_ref,
+                window_size_sub_slide_expr,
+            )?,
+            window_slide_expr,
+        )?;
 
         let hop_start_with_offset = new_binary_expr(
             Type::Add,

@@ -14,7 +14,7 @@
 
 use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
 
-use crate::{ExprError, Result};
+use crate::Result;
 
 #[inline(always)]
 pub fn tumble_start_date(
