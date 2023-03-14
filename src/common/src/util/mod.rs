@@ -32,19 +32,18 @@ pub mod iter_util;
 pub mod ordered;
 pub mod prost;
 pub mod resource_util;
+pub mod row_id;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;
 pub mod stream_cancel;
 pub mod value_encoding;
 pub mod worker_util;
-pub mod row_id;
 
 pub use future_utils::select_all;
 
 #[macro_use]
 pub mod match_util;
-
 
 pub fn downcast_ref<S, T>(source: &S) -> Result<&T>
 where
