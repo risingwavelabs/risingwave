@@ -19,7 +19,7 @@ use std::time::Duration;
 
 use futures::{stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
@@ -41,7 +41,7 @@ pub struct VacuumManager<S: MetaStore> {
     /// Use the CompactorManager to dispatch VacuumTask.
     compactor_manager: CompactorManagerRef,
     /// SST object ids which have been dispatched to vacuum nodes but are not replied yet.
-    pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableId>>,
+    pending_object_ids: parking_lot::RwLock<HashSet<HummockSstableObjectId>>,
 }
 
 impl<S> VacuumManager<S>
@@ -86,7 +86,7 @@ where
     /// Schedules deletion of SST objects from object store
     ///
     /// Returns SST objects scheduled in worker node.
-    pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableId>> {
+    pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableObjectId>> {
         // Select SST objects to delete.
         let objects_to_delete = {
             // 1. Retry the pending SST objects first.
@@ -166,9 +166,9 @@ where
 
     async fn filter_out_pinned_ssts(
         &self,
-        objects_to_delete: &mut Vec<HummockSstableId>,
+        objects_to_delete: &mut Vec<HummockSstableObjectId>,
     ) -> MetaResult<()> {
-        let reject: HashSet<HummockSstableId> =
+        let reject: HashSet<HummockSstableObjectId> =
             self.backup_manager.list_pinned_ssts().into_iter().collect();
         // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
         // These SSTs will be GCed during full GC when they are no longer pinned.
@@ -241,7 +241,7 @@ where
 
     /// Given candidate SSTs to GC, filter out false positive.
     /// Returns number of SSTs to GC.
-    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableId>) -> Result<usize> {
+    pub async fn complete_full_gc(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<usize> {
         if object_ids.is_empty() {
             tracing::info!("SST full scan returns no SSTs.");
             return Ok(0);
@@ -279,11 +279,11 @@ where
 pub async fn collect_global_gc_watermark<S>(
     cluster_manager: ClusterManagerRef<S>,
     spin_interval: Duration,
-) -> Result<HummockSstableId>
+) -> Result<HummockSstableObjectId>
 where
     S: MetaStore,
 {
-    let mut global_watermark = HummockSstableId::MAX;
+    let mut global_watermark = HummockSstableObjectId::MAX;
     let workers = vec![
         cluster_manager
             .list_worker_node(WorkerType::ComputeNode, None)
@@ -336,7 +336,7 @@ where
         // None means either the worker has gone or the worker has not set a watermark.
         global_watermark = cmp::min(
             global_watermark,
-            worker_watermark.unwrap_or(HummockSstableId::MAX),
+            worker_watermark.unwrap_or(HummockSstableObjectId::MAX),
         );
     }
     Ok(global_watermark)
@@ -348,7 +348,7 @@ mod tests {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::HummockSstableId;
+    use risingwave_hummock_sdk::HummockSstableObjectId;
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::VacuumTask;
 
@@ -502,7 +502,7 @@ mod tests {
                 cluster_manager
                     .heartbeat(
                         context_id,
-                        vec![Info::HummockGcWatermark(HummockSstableId::MAX)],
+                        vec![Info::HummockGcWatermark(HummockSstableObjectId::MAX)],
                     )
                     .await
                     .unwrap();

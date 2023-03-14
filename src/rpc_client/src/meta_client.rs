@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
@@ -935,7 +935,7 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
         let req = ReportFullScanTaskRequest { object_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())

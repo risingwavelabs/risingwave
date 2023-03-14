@@ -25,7 +25,7 @@ use prometheus::HistogramTimer;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableId};
+use risingwave_hummock_sdk::{ExtendedSstableInfo, HummockSstableObjectId};
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::ddl_service::DdlProgress;
@@ -1011,10 +1011,10 @@ pub type BarrierManagerRef<S> = Arc<GlobalBarrierManager<S>>;
 fn collect_synced_ssts(
     resps: &mut [BarrierCompleteResponse],
 ) -> (
-    HashMap<HummockSstableId, WorkerId>,
+    HashMap<HummockSstableObjectId, WorkerId>,
     Vec<ExtendedSstableInfo>,
 ) {
-    let mut sst_to_worker: HashMap<HummockSstableId, WorkerId> = HashMap::new();
+    let mut sst_to_worker: HashMap<HummockSstableObjectId, WorkerId> = HashMap::new();
     let mut synced_ssts: Vec<ExtendedSstableInfo> = vec![];
     for resp in resps.iter_mut() {
         let mut t: Vec<ExtendedSstableInfo> = resp

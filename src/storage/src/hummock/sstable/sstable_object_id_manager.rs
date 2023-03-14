@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstObjectIdRange};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, SstObjectIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
@@ -50,8 +50,8 @@ impl SstableObjectIdManager {
         Self {
             wait_queue: Default::default(),
             available_sst_object_ids: Mutex::new(SstObjectIdRange::new(
-                HummockSstableId::MIN,
-                HummockSstableId::MIN,
+                HummockSstableObjectId::MIN,
+                HummockSstableObjectId::MIN,
             )),
             remote_fetch_number,
             hummock_meta_client,
@@ -61,7 +61,7 @@ impl SstableObjectIdManager {
 
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    pub async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableId> {
+    pub async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableObjectId> {
         self.map_next_sst_object_id(|available_sst_object_ids| {
             available_sst_object_ids.get_next_sst_object_id()
         })
@@ -70,9 +70,12 @@ impl SstableObjectIdManager {
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_sst_object_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockSstableId>
+    async fn map_next_sst_object_id<F>(
+        self: &Arc<Self>,
+        f: F,
+    ) -> HummockResult<HummockSstableObjectId>
     where
-        F: Fn(&mut SstObjectIdRange) -> Option<HummockSstableId>,
+        F: Fn(&mut SstObjectIdRange) -> Option<HummockSstableObjectId>,
     {
         loop {
             // 1. Try to get
@@ -170,13 +173,13 @@ impl SstableObjectIdManager {
 
     /// Returns GC watermark. It equals
     /// - min(effective watermarks), if number of effective watermarks > 0.
-    /// - `HummockSstableId::MAX`, if no effective watermark.
-    pub fn global_watermark_object_id(&self) -> HummockSstableId {
+    /// - `HummockSstableObjectId::MAX`, if no effective watermark.
+    pub fn global_watermark_object_id(&self) -> HummockSstableObjectId {
         self.object_id_tracker
             .tracking_object_ids()
             .into_iter()
             .min()
-            .unwrap_or(HummockSstableId::MAX)
+            .unwrap_or(HummockSstableObjectId::MAX)
     }
 
     fn notify_waiters(&self, success: bool) {
@@ -220,7 +223,7 @@ impl SstObjectIdTracker {
 
     /// Adds a tracker to track `object_id`. If a tracker with `tracker_id` already exists, it will
     /// track the smallest `object_id` ever given.
-    fn add_tracker(&self, tracker_id: TrackerId, object_id: HummockSstableId) {
+    fn add_tracker(&self, tracker_id: TrackerId, object_id: HummockSstableObjectId) {
         self.inner.write().add_tracker(tracker_id, object_id);
     }
 
@@ -233,13 +236,13 @@ impl SstObjectIdTracker {
         TrackerId::Auto(self.auto_id.fetch_add(1, Ordering::Relaxed) + 1)
     }
 
-    fn tracking_object_ids(&self) -> Vec<HummockSstableId> {
+    fn tracking_object_ids(&self) -> Vec<HummockSstableObjectId> {
         self.inner.read().tracking_object_ids()
     }
 }
 
 struct SstObjectIdTrackerInner {
-    tracking_object_ids: HashMap<TrackerId, HummockSstableId>,
+    tracking_object_ids: HashMap<TrackerId, HummockSstableObjectId>,
 }
 
 impl SstObjectIdTrackerInner {
@@ -249,7 +252,7 @@ impl SstObjectIdTrackerInner {
         }
     }
 
-    fn add_tracker(&mut self, tracker_id: TrackerId, object_id: HummockSstableId) {
+    fn add_tracker(&mut self, tracker_id: TrackerId, object_id: HummockSstableObjectId) {
         match self.tracking_object_ids.entry(tracker_id) {
             Entry::Occupied(mut o) => {
                 *o.get_mut() = cmp::min(*o.get_mut(), object_id);
@@ -272,7 +275,7 @@ impl SstObjectIdTrackerInner {
         }
     }
 
-    fn tracking_object_ids(&self) -> Vec<HummockSstableId> {
+    fn tracking_object_ids(&self) -> Vec<HummockSstableObjectId> {
         self.tracking_object_ids.values().cloned().collect_vec()
     }
 }

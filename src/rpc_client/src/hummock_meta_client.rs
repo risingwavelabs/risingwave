@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
+    HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
 };
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion, VacuumTask,
@@ -64,6 +64,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableId>) -> Result<()>;
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()>;
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 }

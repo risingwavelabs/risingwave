@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectMetadata;
 use risingwave_pb::hummock::{FullScanTask, VacuumTask};
 use risingwave_rpc_client::HummockMetaClient;
@@ -111,7 +111,7 @@ impl Vacuum {
         full_scan_task: FullScanTask,
         object_metadata: Vec<ObjectMetadata>,
         sstable_store: SstableStoreRef,
-    ) -> Vec<HummockSstableId> {
+    ) -> Vec<HummockSstableObjectId> {
         let timestamp_watermark = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

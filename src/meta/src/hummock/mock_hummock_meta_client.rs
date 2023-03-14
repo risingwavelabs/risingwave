@@ -23,7 +23,7 @@ use futures::StreamExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
+    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
     SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -255,7 +255,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, _object_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&self, _object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
         unimplemented!()
     }
 

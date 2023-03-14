@@ -71,7 +71,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
     let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         sstable_object_id_manager_clone
-            .get_new_sst_id()
+            .get_new_sst_object_id()
             .await
             .unwrap();
     });
@@ -88,7 +88,7 @@ async fn test_syncpoints_sstable_object_id_manager() {
         let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
-                .get_new_sst_id()
+                .get_new_sst_object_id()
                 .await
                 .unwrap();
         });
@@ -136,7 +136,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
         sstable_object_id_manager_clone
-            .get_new_sst_id()
+            .get_new_sst_object_id()
             .await
             .unwrap_err();
         fail::remove("get_new_sst_ids_err");
@@ -151,7 +151,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
         let sstable_object_id_manager_clone = sstable_object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
             sstable_object_id_manager_clone
-                .get_new_sst_id()
+                .get_new_sst_object_id()
                 .await
                 .unwrap();
         });

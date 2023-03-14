@@ -19,7 +19,7 @@ use std::ops::DerefMut;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId, INVALID_VERSION_ID};
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID};
 
 use crate::hummock::error::Result;
 use crate::hummock::manager::{commit_multi_var, read_lock, write_lock};
@@ -34,7 +34,7 @@ where
 {
     /// Gets SST objects that is safe to be deleted from object store.
     #[named]
-    pub async fn get_objects_to_delete(&self) -> Vec<HummockSstableId> {
+    pub async fn get_objects_to_delete(&self) -> Vec<HummockSstableObjectId> {
         read_lock!(self, versioning)
             .await
             .objects_to_delete
@@ -47,7 +47,7 @@ where
     ///
     /// Possibly extends deltas_to_delete.
     #[named]
-    pub async fn ack_deleted_objects(&self, object_ids: &[HummockSstableId]) -> Result<()> {
+    pub async fn ack_deleted_objects(&self, object_ids: &[HummockSstableObjectId]) -> Result<()> {
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
         for object_id in object_ids {
@@ -98,9 +98,9 @@ where
     #[named]
     pub async fn extend_objects_to_delete_from_scan(
         &self,
-        object_ids: &[HummockSstableId],
+        object_ids: &[HummockSstableObjectId],
     ) -> usize {
-        let tracked_object_ids: HashSet<HummockSstableId> = {
+        let tracked_object_ids: HashSet<HummockSstableObjectId> = {
             let versioning_guard = read_lock!(self, versioning).await;
             let mut tracked_object_ids =
                 HashSet::from_iter(versioning_guard.current_version.get_object_ids());

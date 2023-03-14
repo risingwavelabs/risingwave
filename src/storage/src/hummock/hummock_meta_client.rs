@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstObjectIdRange};
+use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion, VacuumTask,
 };
@@ -152,7 +152,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
         self.meta_client.report_full_scan_task(object_ids).await
     }
 

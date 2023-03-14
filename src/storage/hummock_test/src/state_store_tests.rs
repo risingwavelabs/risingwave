@@ -20,7 +20,9 @@ use bytes::Bytes;
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
+};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -1297,7 +1299,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         hummock_storage
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 
     let mut local_hummock_storage = hummock_storage
@@ -1319,7 +1321,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         hummock_storage
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 
     let epoch2 = initial_epoch + 2;
@@ -1333,7 +1335,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         hummock_storage
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
     let min_object_id = |sync_result: &SyncResult| {
         sync_result
@@ -1388,6 +1390,6 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
         hummock_storage
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 }

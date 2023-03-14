@@ -19,7 +19,7 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta::hummock::test_utils::{
     setup_compute_env, update_filter_key_extractor_for_table_ids,
 };
@@ -461,7 +461,7 @@ async fn test_clear_shared_buffer() {
         local_version_manager
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 }
 
@@ -484,7 +484,7 @@ async fn test_sst_gc_watermark() {
         local_version_manager
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 
     for i in 0..2 {
@@ -498,7 +498,7 @@ async fn test_sst_gc_watermark() {
         local_version_manager
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 
     for epoch in &epochs {
@@ -541,6 +541,6 @@ async fn test_sst_gc_watermark() {
         local_version_manager
             .sstable_object_id_manager()
             .global_watermark_object_id(),
-        HummockSstableId::MAX
+        HummockSstableObjectId::MAX
     );
 }

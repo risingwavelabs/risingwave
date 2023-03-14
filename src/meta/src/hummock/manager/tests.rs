@@ -26,7 +26,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+    CompactionGroupId, ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
     HummockVersionId, LocalSstableInfo, FIRST_VERSION_ID,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
@@ -61,7 +61,7 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
     group_id: CompactionGroupId,
-) -> Vec<HummockSstableId> {
+) -> Vec<HummockSstableObjectId> {
     get_compaction_group_ssts(version, group_id)
         .into_iter()
         .map(|(object_id, _)| object_id)
@@ -1387,7 +1387,7 @@ async fn test_split_compaction_group_on_commit() {
 
 async fn get_branched_ssts<S: MetaStore>(
     hummock_manager: &HummockManager<S>,
-) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>> {
+) -> BTreeMap<HummockSstableObjectId, BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>> {
     hummock_manager
         .versioning
         .read(&["", "", ""])

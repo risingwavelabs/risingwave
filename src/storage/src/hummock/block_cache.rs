@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use futures::Future;
 use risingwave_common::cache::{CacheableEntry, LookupResponse, LruCache, LruCacheEventListener};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use tokio::sync::oneshot::Receiver;
 use tokio::task::JoinHandle;
 
@@ -28,7 +28,7 @@ use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
-type CachedBlockEntry = CacheableEntry<(HummockSstableId, u64), Box<Block>>;
+type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
 
 enum BlockEntry {
     Cache(CachedBlockEntry),
@@ -66,7 +66,9 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_tiered_cache(entry: TieredCacheEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+    pub fn from_tiered_cache(
+        entry: TieredCacheEntry<(HummockSstableObjectId, u64), Box<Block>>,
+    ) -> Self {
         match entry {
             TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
             TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
@@ -86,11 +88,11 @@ unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
 type BlockCacheEventListener =
-    Arc<dyn LruCacheEventListener<K = (HummockSstableId, u64), T = Box<Block>>>;
+    Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
+    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>>>,
 }
 
 pub enum BlockResponse {
@@ -150,7 +152,7 @@ impl BlockCache {
         }
     }
 
-    pub fn get(&self, object_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
+    pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
             .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
             .map(BlockHolder::from_cached_block)
@@ -158,7 +160,7 @@ impl BlockCache {
 
     pub fn insert(
         &self,
-        object_id: HummockSstableId,
+        object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
     ) -> BlockHolder {
@@ -172,7 +174,7 @@ impl BlockCache {
 
     pub fn get_or_insert_with<F, Fut>(
         &self,
-        object_id: HummockSstableId,
+        object_id: HummockSstableObjectId,
         block_idx: u64,
         mut fetch_block: F,
     ) -> BlockResponse
@@ -203,7 +205,7 @@ impl BlockCache {
         }
     }
 
-    fn hash(object_id: HummockSstableId, block_idx: u64) -> u64 {
+    fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
         let mut hasher = DefaultHasher::default();
         object_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);

@@ -63,7 +63,10 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await;
         let timer = Instant::now();
-        let table_id = self.sstable_object_id_manager.get_new_sst_id().await?;
+        let table_id = self
+            .sstable_object_id_manager
+            .get_new_sst_object_id()
+            .await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {

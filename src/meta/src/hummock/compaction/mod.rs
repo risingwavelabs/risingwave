@@ -29,7 +29,7 @@ use picker::{
     LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
 };
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableObjectId,
 };
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
@@ -223,7 +223,7 @@ impl CompactStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub sst_ids: Vec<HummockSstableId>,
+    pub sst_ids: Vec<HummockSstableObjectId>,
     /// Filters out SSTs to pick.
     pub key_range: KeyRange,
     /// Filters out SSTs to pick. Has no effect if empty.

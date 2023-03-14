@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
@@ -147,7 +147,7 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
@@ -251,7 +251,7 @@ pub fn update_filter_key_extractor_for_tables(
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 pub fn iterator_test_key_of_epoch(
-    table: HummockSstableId,
+    table: HummockSstableObjectId,
     idx: usize,
     ts: HummockEpoch,
 ) -> Vec<u8> {
@@ -264,7 +264,7 @@ pub fn iterator_test_key_of_epoch(
     )
 }
 
-pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId> {
+pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {
     sstables
         .iter()
         .map(|table| table.get_object_id())
@@ -272,7 +272,9 @@ pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId> 
         .collect_vec()
 }
 
-pub fn get_sorted_committed_object_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
+pub fn get_sorted_committed_object_ids(
+    hummock_version: &HummockVersion,
+) -> Vec<HummockSstableObjectId> {
     let levels = match hummock_version
         .levels
         .get(&StaticCompactionGroupId::StateDefault.into())
@@ -343,7 +345,7 @@ pub async fn setup_compute_env(
 pub async fn get_sst_ids<S>(
     hummock_manager: &HummockManager<S>,
     number: u32,
-) -> Vec<HummockSstableId>
+) -> Vec<HummockSstableObjectId>
 where
     S: MetaStore,
 {

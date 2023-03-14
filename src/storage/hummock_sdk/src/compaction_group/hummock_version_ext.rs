@@ -27,7 +27,7 @@ use risingwave_pb::hummock::{
 use super::StateTableId;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::prost_key_range::KeyRangeExt;
-use crate::{can_concat, CompactionGroupId, HummockSstableId};
+use crate::{can_concat, CompactionGroupId, HummockSstableObjectId};
 
 pub struct GroupDeltasSummary {
     pub delete_sst_levels: Vec<u32>,
@@ -119,7 +119,7 @@ pub trait HummockVersionUpdateExt {
     fn build_compaction_group_info(&self) -> HashMap<TableId, CompactionGroupId>;
     fn build_branched_sst_info(
         &self,
-    ) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>>;
+    ) -> BTreeMap<HummockSstableObjectId, BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>>;
 }
 
 impl HummockVersionExt for HummockVersion {
@@ -190,13 +190,13 @@ impl HummockVersionExt for HummockVersion {
 
 pub type SstSplitInfo = (
     // Object id.
-    HummockSstableId,
+    HummockSstableObjectId,
     // SST id.
-    HummockSstableId,
+    HummockSstableObjectId,
     // Old SST id in parent group.
-    HummockSstableId,
+    HummockSstableObjectId,
     // New SST id in parent group.
-    Option<HummockSstableId>,
+    Option<HummockSstableObjectId>,
 );
 
 impl HummockVersionUpdateExt for HummockVersion {
@@ -416,7 +416,8 @@ impl HummockVersionUpdateExt for HummockVersion {
 
     fn build_branched_sst_info(
         &self,
-    ) -> BTreeMap<HummockSstableId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>> {
+    ) -> BTreeMap<HummockSstableObjectId, BTreeMap<CompactionGroupId, Vec<HummockSstableObjectId>>>
+    {
         let mut ret: BTreeMap<_, BTreeMap<_, Vec<_>>> = BTreeMap::new();
         for compaction_group_id in self.get_levels().keys() {
             self.level_iter(*compaction_group_id, |level| {
@@ -592,7 +593,7 @@ pub fn get_member_table_ids(version: &HummockVersion) -> HashSet<StateTableId> {
 pub fn get_compaction_group_ssts(
     version: &HummockVersion,
     group_id: CompactionGroupId,
-) -> Vec<(HummockSstableId, HummockSstableId)> {
+) -> Vec<(HummockSstableObjectId, HummockSstableObjectId)> {
     let group_levels = version.get_compaction_group_levels(group_id);
     group_levels
         .l0
@@ -681,7 +682,7 @@ pub fn build_version_delta_after_version(version: &HummockVersion) -> HummockVer
 /// Return `true` if some sst is deleted, and `false` is the deletion is trivial
 fn level_delete_ssts(
     operand: &mut Level,
-    delete_sst_ids_superset: &HashSet<HummockSstableId>,
+    delete_sst_ids_superset: &HashSet<HummockSstableObjectId>,
 ) -> bool {
     let original_len = operand.table_infos.len();
     operand

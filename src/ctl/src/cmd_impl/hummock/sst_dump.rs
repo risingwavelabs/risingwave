@@ -26,7 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
@@ -112,7 +112,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 
 pub async fn sst_dump_via_sstable_store(
     sstable_store: &SstableStore,
-    object_id: HummockSstableId,
+    object_id: HummockSstableObjectId,
     meta_offset: u64,
     file_size: u64,
     table_data: &TableData,

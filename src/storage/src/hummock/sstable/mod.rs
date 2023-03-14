@@ -41,7 +41,7 @@ pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
@@ -125,7 +125,7 @@ impl DeleteRangeTombstone {
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
-    pub id: HummockSstableId,
+    pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     pub filter_reader: XorFilterReader,
 }
@@ -140,7 +140,7 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
         Self {

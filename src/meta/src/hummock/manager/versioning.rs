@@ -20,7 +20,7 @@ use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -71,7 +71,7 @@ pub struct Versioning {
     /// These SST objects should be deleted from object store.
     /// Mapping from a SST object to the version that has marked it stale. See
     /// `ack_deleted_objects`.
-    pub objects_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
+    pub objects_to_delete: BTreeMap<HummockSstableObjectId, HummockVersionId>,
     /// These deltas should be deleted from meta store.
     /// A delta can be deleted if
     /// - Its version id <= checkpoint version id. Currently we only make checkpoint for version id
@@ -82,8 +82,8 @@ pub struct Versioning {
     /// SST which is referenced more than once
     pub branched_ssts: BTreeMap<
         // SST object id
-        HummockSstableId,
-        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
+        HummockSstableObjectId,
+        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableObjectId>>,
     >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
