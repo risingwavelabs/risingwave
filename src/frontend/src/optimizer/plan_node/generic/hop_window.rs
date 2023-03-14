@@ -186,6 +186,8 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
             Literal::new(Some((*window_size).into()), DataType::Interval).into();
         let window_slide_expr: ExprImpl =
             Literal::new(Some((*window_slide).into()), DataType::Interval).into();
+        let window_offset_expr: ExprImpl =
+            Literal::new(Some((*window_offset).into()), DataType::Interval).into();
 
         let window_size_sub_slide = FunctionCall::new(
             ExprType::Subtract,
@@ -204,35 +206,9 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
 
         let hop_start: ExprImpl = FunctionCall::new(
             ExprType::TumbleStart,
-            vec![time_col_shifted, window_slide_expr],
+            vec![time_col_shifted, window_slide_expr, window_offset_expr],
         )?
         .into();
-
-        // FIXME: Interval modules Interval
-        let offset_modules_window_size = {
-            const DAY_MS: i64 = 86400000;
-            const MONTH_MS: i64 = 30 * DAY_MS;
-            let mut remaining_ms = (window_offset.get_months() as i64 * MONTH_MS
-                + window_offset.get_days() as i64 * DAY_MS
-                + window_offset.get_ms())
-                % (window_size.get_months() as i64 * MONTH_MS
-                    + window_size.get_days() as i64 * DAY_MS
-                    + window_size.get_ms());
-            let months = remaining_ms / MONTH_MS;
-            remaining_ms -= months * MONTH_MS;
-            let days = remaining_ms / DAY_MS;
-            remaining_ms -= days * DAY_MS;
-            IntervalUnit::new(months as i32, days as i32, remaining_ms)
-        };
-
-        let offset_modules_window_size: ExprImpl = Literal::new(
-            Some((offset_modules_window_size).into()),
-            DataType::Interval,
-        )
-        .into();
-
-        let hop_start_with_offset: ExprImpl =
-            FunctionCall::new(ExprType::Add, vec![hop_start, offset_modules_window_size])?.into();
 
         let mut window_start_exprs = Vec::with_capacity(units);
         let mut window_end_exprs = Vec::with_capacity(units);
@@ -252,7 +228,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                     Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
                 let window_start_expr = FunctionCall::new(
                     ExprType::Add,
-                    vec![hop_start_with_offset.clone(), window_start_offset_expr],
+                    vec![hop_start.clone(), window_start_offset_expr],
                 )?
                 .into();
                 window_start_exprs.push(window_start_expr);
@@ -273,7 +249,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
                     Literal::new(Some(window_end_offset.into()), DataType::Interval).into();
                 let window_end_expr = FunctionCall::new(
                     ExprType::Add,
-                    vec![hop_start_with_offset.clone(), window_end_offset_expr],
+                    vec![hop_start.clone(), window_end_offset_expr],
                 )?
                 .into();
                 window_end_exprs.push(window_end_expr);

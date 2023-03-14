@@ -277,6 +277,7 @@ mod tests {
             let mut stream = executor.execute();
             stream.next().await.unwrap().unwrap()
         }
+
         let window_size = 30;
         for offset in 0..window_size {
             for coefficient in -5..0 {
@@ -306,14 +307,8 @@ mod tests {
                 );
             }
         }
-        for offset in 1..window_size {
-            assert_ne!(
-                test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
-                test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
-            );
-        }
-        for offset in -window_size + 1..0 {
-            assert_ne!(
+        for offset in -window_size..window_size {
+            assert_eq!(
                 test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
                 test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
             );
@@ -325,7 +320,7 @@ mod tests {
                 &"I I TS        TS        TS
                 1 1 ^10:00:00 ^09:44:00 ^10:14:00
                 2 3 ^10:05:00 ^09:44:00 ^10:14:00
-                3 2 ^10:14:00 ^09:44:00 ^10:14:00
+                3 2 ^10:14:00 ^09:59:00 ^10:29:00
                 4 1 ^10:22:00 ^09:59:00 ^10:29:00
                 5 3 ^10:33:00 ^10:14:00 ^10:44:00
                 6 2 ^10:42:00 ^10:14:00 ^10:44:00
@@ -338,14 +333,14 @@ mod tests {
             test_window_offset_helper(IntervalUnit::from_minutes(29)).await,
             DataChunk::from_pretty(
                 &"I I TS        TS        TS
-                1 1 ^10:00:00 ^10:14:00 ^10:44:00
-                2 3 ^10:05:00 ^10:14:00 ^10:44:00
-                3 2 ^10:14:00 ^10:14:00 ^10:44:00
-                4 1 ^10:22:00 ^10:29:00 ^10:59:00
-                5 3 ^10:33:00 ^10:44:00 ^11:14:00
-                6 2 ^10:42:00 ^10:44:00 ^11:14:00
-                7 1 ^10:51:00 ^10:59:00 ^11:29:00
-                8 3 ^11:02:00 ^11:14:00 ^11:44:00"
+                1 1 ^10:00:00 ^09:44:00 ^10:14:00
+                2 3 ^10:05:00 ^09:44:00 ^10:14:00
+                3 2 ^10:14:00 ^09:59:00 ^10:29:00
+                4 1 ^10:22:00 ^09:59:00 ^10:29:00
+                5 3 ^10:33:00 ^10:14:00 ^10:44:00
+                6 2 ^10:42:00 ^10:14:00 ^10:44:00
+                7 1 ^10:51:00 ^10:29:00 ^10:59:00
+                8 3 ^11:02:00 ^10:44:00 ^11:14:00"
                     .replace('^', "2022-2-2T"),
             )
         );
