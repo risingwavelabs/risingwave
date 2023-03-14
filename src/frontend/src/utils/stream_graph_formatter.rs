@@ -81,7 +81,7 @@ impl StreamGraphFormatter {
         let tb = TableCatalog::from(tb.clone());
         writeln!(
             f,
-            " Table {} {{ columns: [{}], primary key: {:?}, value indices: {:?}, distribution key: {:?}{} }}",
+            " Table {} {{ columns: [{}], primary key: {:?}, value indices: {:?}, distribution key: {:?}, read_pk_prefix_len_hint: {:?}{} }}",
             tb.id,
             tb.columns
                 .iter()
@@ -96,6 +96,7 @@ impl StreamGraphFormatter {
             tb.pk,
             tb.value_indices,
             tb.distribution_key,
+            tb.read_prefix_len_hint,
             if let Some(vnode_col_idx) = tb.vnode_col_index {
                 format!(", vnode column idx: {}", vnode_col_idx)
             } else {
@@ -139,23 +140,26 @@ impl StreamGraphFormatter {
             }
             _ => node.identity.clone(),
         };
+
         writeln!(f, "{}{}", " ".repeat(level * 2), one_line_explain)?;
-        let explain_table_oneline =
-            match node.get_node_body().unwrap() {
-                stream_node::NodeBody::Source(node) => node.source_inner.as_ref().map(|source| {
-                    format!(
-                        "source state table: {}",
-                        self.add_table(source.get_state_table().unwrap())
-                    )
-                }),
-                stream_node::NodeBody::Materialize(node) => Some(format!(
-                    "materialized table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::GlobalSimpleAgg(node) => Some(format!(
-                    "result table: {}, state tables: [{}]",
-                    self.add_table(node.get_result_table().unwrap()),
-                    node.agg_call_states
+        let explain_table_oneline = match node.get_node_body().unwrap() {
+            stream_node::NodeBody::Source(node) => node.source_inner.as_ref().map(|source| {
+                format!(
+                    "source state table: {}",
+                    self.add_table(source.get_state_table().unwrap())
+                )
+            }),
+            stream_node::NodeBody::Materialize(node) => Some(format!(
+                "materialized table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::GlobalSimpleAgg(inner) => {
+                let in_fields = &node.get_input()[0].fields;
+                Some(format!(
+                    "result table: {}, state tables: [{}], distinct_tables: [{}]",
+                    self.add_table(inner.get_result_table().unwrap()),
+                    inner
+                        .agg_call_states
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
@@ -164,12 +168,25 @@ impl StreamGraphFormatter {
                                 MaterializedInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),
                         })
-                        .join(", ")
-                )),
-                stream_node::NodeBody::HashAgg(node) => Some(format!(
-                    "result table: {}, state tables: [{}]",
-                    self.add_table(node.get_result_table().unwrap()),
-                    node.agg_call_states
+                        .join(", "),
+                    inner
+                        .get_distinct_dedup_tables()
+                        .iter()
+                        .map(|(i, table)| format!(
+                            "(distinct key: {}, table_id: {})",
+                            in_fields[*i as usize].name,
+                            self.add_table(table)
+                        ))
+                        .join(", "),
+                ))
+            }
+            stream_node::NodeBody::HashAgg(inner) => {
+                let in_fields = &node.get_input()[0].fields;
+                Some(format!(
+                    "result table: {}, state tables: [{}], distinct_tables: [{}]",
+                    self.add_table(inner.get_result_table().unwrap()),
+                    inner
+                        .agg_call_states
                         .iter()
                         .filter_map(|state| match state.get_inner().unwrap() {
                             agg_call_state::Inner::ResultValueState(_) => None,
@@ -178,52 +195,62 @@ impl StreamGraphFormatter {
                                 MaterializedInputState { table, .. },
                             ) => Some(self.add_table(table.as_ref().unwrap())),
                         })
-                        .join(", ")
-                )),
-                stream_node::NodeBody::HashJoin(node) => Some(format!(
-                    "left table: {}, right table {},{}{}",
-                    self.add_table(node.get_left_table().unwrap()),
-                    self.add_table(node.get_right_table().unwrap()),
-                    match &node.left_degree_table {
-                        Some(tb) => format!(" left degree table: {},", self.add_table(tb)),
-                        None => "".to_string(),
-                    },
-                    match &node.right_degree_table {
-                        Some(tb) => format!(" right degree table: {},", self.add_table(tb)),
-                        None => "".to_string(),
-                    },
-                )),
-                stream_node::NodeBody::TopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::Arrange(node) => Some(format!(
-                    "arrange table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::DynamicFilter(node) => Some(format!(
-                    "left table: {}, right table {}",
-                    self.add_table(node.get_left_table().unwrap()),
-                    self.add_table(node.get_right_table().unwrap()),
-                )),
-                stream_node::NodeBody::GroupTopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::AppendOnlyGroupTopN(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_table().unwrap())
-                )),
-                stream_node::NodeBody::Now(node) => Some(format!(
-                    "state table: {}",
-                    self.add_table(node.get_state_table().unwrap())
-                )),
-                _ => None,
-            };
+                        .join(", "),
+                    inner
+                        .get_distinct_dedup_tables()
+                        .iter()
+                        .map(|(i, table)| format!(
+                            "(distinct key: {}, table_id: {})",
+                            in_fields[*i as usize].name,
+                            self.add_table(table)
+                        ))
+                        .join(", "),
+                ))
+            }
+            stream_node::NodeBody::HashJoin(node) => Some(format!(
+                "left table: {}, right table {},{}{}",
+                self.add_table(node.get_left_table().unwrap()),
+                self.add_table(node.get_right_table().unwrap()),
+                match &node.left_degree_table {
+                    Some(tb) => format!(" left degree table: {},", self.add_table(tb)),
+                    None => "".to_string(),
+                },
+                match &node.right_degree_table {
+                    Some(tb) => format!(" right degree table: {},", self.add_table(tb)),
+                    None => "".to_string(),
+                },
+            )),
+            stream_node::NodeBody::TopN(node) => Some(format!(
+                "state table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::AppendOnlyTopN(node) => Some(format!(
+                "state table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::Arrange(node) => Some(format!(
+                "arrange table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::DynamicFilter(node) => Some(format!(
+                "left table: {}, right table {}",
+                self.add_table(node.get_left_table().unwrap()),
+                self.add_table(node.get_right_table().unwrap()),
+            )),
+            stream_node::NodeBody::GroupTopN(node) => Some(format!(
+                "state table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::AppendOnlyGroupTopN(node) => Some(format!(
+                "state table: {}",
+                self.add_table(node.get_table().unwrap())
+            )),
+            stream_node::NodeBody::Now(node) => Some(format!(
+                "state table: {}",
+                self.add_table(node.get_state_table().unwrap())
+            )),
+            _ => None,
+        };
         if let Some(explain_table_oneline) = explain_table_oneline {
             writeln!(f, "{}{}", " ".repeat(level * 2 + 4), explain_table_oneline)?;
         }

@@ -53,7 +53,7 @@
           Upstream
           BatchPlanNode
 
-     Table 4294967294 { columns: [auction, bidder, price, date_time, bid._row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4] }
+     Table 4294967294 { columns: [auction, bidder, price, date_time, bid._row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q1
   before:
   - create_tables
@@ -81,7 +81,7 @@
             Upstream
             BatchPlanNode
 
-     Table 4294967294 { columns: [auction, bidder, price, date_time, bid._row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4] }
+     Table 4294967294 { columns: [auction, bidder, price, date_time, bid._row_id], primary key: [$4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [4], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q2
   before:
   - create_tables
@@ -103,7 +103,7 @@
             Upstream
             BatchPlanNode
 
-     Table 4294967294 { columns: [auction, price, bid._row_id], primary key: [$2 ASC], value indices: [0, 1, 2], distribution key: [2] }
+     Table 4294967294 { columns: [auction, price, bid._row_id], primary key: [$2 ASC], value indices: [0, 1, 2], distribution key: [2], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q3
   before:
   - create_tables
@@ -153,11 +153,11 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_seller], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1] }
-     Table 1 { columns: [auction_seller, auction_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [person_id, person_name, person_city, person_state], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 3 { columns: [person_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [name, city, state, id, auction.seller, person.id], primary key: [$3 ASC, $5 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4] }
+     Table 0 { columns: [auction_id, auction_seller], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [1], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_seller, auction_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [person_id, person_name, person_city, person_state], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [person_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [name, city, state, id, auction.seller, person.id], primary key: [$3 ASC, $5 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [4], read_pk_prefix_len_hint: 3 }
 - id: nexmark_q4
   before:
   - create_tables
@@ -203,13 +203,13 @@
           materialized table: 4294967294
         StreamProject { exprs: [auction.category, (sum(max(bid.price)) / count(max(bid.price))) as $expr1] }
           StreamHashAgg { group_key: [auction.category], aggs: [sum(max(bid.price)), count(max(bid.price)), count] }
-              result table: 0, state tables: []
+              result table: 0, state tables: [], distinct_tables: []
             StreamExchange Hash([1]) from 1
 
     Fragment 1
       StreamProject { exprs: [auction.id, auction.category, max(bid.price)] }
         StreamHashAgg { group_key: [auction.id, auction.category], aggs: [max(bid.price), count] }
-            result table: 2, state tables: [1]
+            result table: 2, state tables: [1], distinct_tables: []
           StreamProject { exprs: [auction.id, auction.category, bid.price, bid._row_id] }
             StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
               StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
@@ -227,14 +227,14 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_category, sum(max(bid_price)), count(max(bid_price)), count], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0] }
-     Table 1 { columns: [auction_id, auction_category, bid_price, bid__row_id], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC], value indices: [0, 2, 3], distribution key: [0] }
-     Table 2 { columns: [auction_id, auction_category, max(bid_price), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction_id, auction_date_time, auction_expires, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 5 { columns: [bid_auction, bid_price, bid_date_time, bid__row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [category, avg], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 0 { columns: [auction_category, sum(max(bid_price)), count(max(bid_price)), count], primary key: [$0 ASC], value indices: [1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_id, auction_category, bid_price, bid__row_id], primary key: [$0 ASC, $1 ASC, $2 DESC, $3 ASC], value indices: [0, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 2 }
+     Table 2 { columns: [auction_id, auction_category, max(bid_price), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0], read_pk_prefix_len_hint: 2 }
+     Table 3 { columns: [auction_id, auction_date_time, auction_expires, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 5 { columns: [bid_auction, bid_price, bid_date_time, bid__row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [category, avg], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q5
   before:
   - create_tables
@@ -319,7 +319,7 @@
               StreamExchange Hash([2]) from 1
               StreamProject { exprs: [max(count), window_start] }
                 StreamHashAgg { group_key: [window_start], aggs: [max(count), count] }
-                    result table: 6, state tables: [5]
+                    result table: 6, state tables: [5], distinct_tables: []
                   StreamExchange Hash([1]) from 4
 
     Fragment 1
@@ -328,7 +328,7 @@
 
     Fragment 2
       StreamAppendOnlyHashAgg { group_key: [bid.auction, window_start], aggs: [count] }
-          result table: 4, state tables: []
+          result table: 4, state tables: [], distinct_tables: []
         StreamExchange Hash([0, 1]) from 3
 
     Fragment 3
@@ -342,14 +342,14 @@
       StreamProject { exprs: [bid.auction, window_start, count] }
         StreamExchange Hash([0, 1]) from 2
 
-     Table 0 { columns: [bid_auction, count, window_start], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [2] }
-     Table 1 { columns: [window_start, bid_auction, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [max(count), window_start], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1] }
-     Table 3 { columns: [window_start, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4 { columns: [bid_auction, window_start, count], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0, 1] }
-     Table 5 { columns: [window_start, count, bid_auction], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 6 { columns: [window_start, max(count), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 4294967294 { columns: [auction, num, window_start, window_start#1], primary key: [$0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [2] }
+     Table 0 { columns: [bid_auction, count, window_start], primary key: [$2 ASC, $0 ASC], value indices: [0, 1, 2], distribution key: [2], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [window_start, bid_auction, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [max(count), window_start], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [window_start, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [bid_auction, window_start, count], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0, 1], read_pk_prefix_len_hint: 2 }
+     Table 5 { columns: [window_start, count, bid_auction], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 6 { columns: [window_start, max(count), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction, num, window_start, window_start#1], primary key: [$0 ASC, $2 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [2], read_pk_prefix_len_hint: 3 }
 - id: nexmark_q6
   before:
   - create_tables
@@ -434,7 +434,7 @@
     Fragment 2
       StreamProject { exprs: [max(bid.price), $expr1, ($expr1 - '00:00:10':Interval) as $expr2] }
         StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [max(bid.price), count] }
-            result table: 4, state tables: []
+            result table: 4, state tables: [], distinct_tables: []
           StreamExchange Hash([0]) from 3
 
     Fragment 3
@@ -443,12 +443,12 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2] }
-     Table 1 { columns: [bid_price, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [max(bid_price), $expr1, $expr2], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 3 { columns: [max(bid_price), $expr1, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4 { columns: [$expr1, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 4294967294 { columns: [auction, price, bidder, date_time, bid._row_id, $expr1], primary key: [$4 ASC, $5 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [1] }
+     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_date_time, bid__row_id], primary key: [$2 ASC, $4 ASC], value indices: [0, 1, 2, 3, 4], distribution key: [2], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [bid_price, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [max(bid_price), $expr1, $expr2], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [max(bid_price), $expr1, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [$expr1, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction, price, bidder, date_time, bid._row_id, $expr1], primary key: [$4 ASC, $5 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [1], read_pk_prefix_len_hint: 3 }
 - id: nexmark_q8
   before:
   - create_tables
@@ -518,13 +518,13 @@
           StreamExchange Hash([0, 2, 3]) from 1
           StreamProject { exprs: [auction.seller, $expr3, $expr4] }
             StreamHashAgg { group_key: [auction.seller, $expr3, $expr4], aggs: [count] }
-                result table: 5, state tables: []
+                result table: 5, state tables: [], distinct_tables: []
               StreamExchange Hash([0, 1, 2]) from 2
 
     Fragment 1
       StreamProject { exprs: [person.id, person.name, $expr1, $expr2] }
         StreamHashAgg { group_key: [person.id, person.name, $expr1, $expr2], aggs: [count] }
-            result table: 4, state tables: []
+            result table: 4, state tables: [], distinct_tables: []
           StreamProject { exprs: [person.id, person.name, TumbleStart(person.date_time, '00:00:10':Interval) as $expr1, (TumbleStart(person.date_time, '00:00:10':Interval) + '00:00:10':Interval) as $expr2] }
             Chain { table: person, columns: [person.id, person.name, person.date_time], pk: [person.id], dist: UpstreamHashShard(person.id) }
               Upstream
@@ -536,13 +536,13 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [person_id, person_name, $expr1, $expr2], primary key: [$0 ASC, $2 ASC, $3 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 2, 3] }
-     Table 1 { columns: [person_id, $expr1, $expr2, person_name, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1, 2] }
-     Table 2 { columns: [auction_seller, $expr3, $expr4], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2] }
-     Table 3 { columns: [auction_seller, $expr3, $expr4, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
-     Table 4 { columns: [person_id, person_name, $expr1, $expr2, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0] }
-     Table 5 { columns: [auction_seller, $expr3, $expr4, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2] }
-     Table 4294967294 { columns: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0, 2, 3] }
+     Table 0 { columns: [person_id, person_name, $expr1, $expr2], primary key: [$0 ASC, $2 ASC, $3 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0, 2, 3], read_pk_prefix_len_hint: 3 }
+     Table 1 { columns: [person_id, $expr1, $expr2, person_name, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 2 { columns: [auction_seller, $expr3, $expr4], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 3 { columns: [auction_seller, $expr3, $expr4, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 4 { columns: [person_id, person_name, $expr1, $expr2, count], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0], read_pk_prefix_len_hint: 4 }
+     Table 5 { columns: [auction_seller, $expr3, $expr4, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 4294967294 { columns: [id, name, starttime, $expr2, auction.seller, $expr3, $expr4], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0, 2, 3], read_pk_prefix_len_hint: 7 }
 - id: nexmark_q9
   before:
   - create_tables
@@ -614,12 +614,12 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$0 ASC, $11 DESC, $14 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [0] }
-     Table 1 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
-     Table 2 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 3 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$0 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0] }
-     Table 4 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, bid._row_id], primary key: [$0 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0] }
+     Table 0 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category, bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$0 ASC, $11 DESC, $14 ASC, $16 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$0 ASC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time, bid._row_id], primary key: [$0 ASC, $13 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], distribution key: [0], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q10
   before:
   - create_tables
@@ -642,7 +642,7 @@
             Upstream
             BatchPlanNode
 
-     Table 4294967294 { columns: [auction, bidder, price, date_time, date, time, bid._row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6] }
+     Table 4294967294 { columns: [auction, bidder, price, date_time, date, time, bid._row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q11
   before:
   - create_tables
@@ -732,7 +732,7 @@
               Upstream
               BatchPlanNode
 
-     Table 4294967294 { columns: [auction, bidder, price, bidtimetype, date_time, extra, bid._row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6] }
+     Table 4294967294 { columns: [auction, bidder, price, bidtimetype, date_time, extra, bid._row_id], primary key: [$6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [6], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q15
   before:
   - create_tables
@@ -774,7 +774,7 @@
       StreamMaterialize { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [day], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamAppendOnlyHashAgg { group_key: [$expr1], aggs: [count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count(distinct bid.bidder), count(distinct bid.bidder) filter((bid.price < 10000:Int32)), count(distinct bid.bidder) filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count(distinct bid.bidder) filter((bid.price >= 1000000:Int32)), count(distinct bid.auction), count(distinct bid.auction) filter((bid.price < 10000:Int32)), count(distinct bid.auction) filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count(distinct bid.auction) filter((bid.price >= 1000000:Int32))] }
-            result table: 0, state tables: []
+            result table: 0, state tables: [], distinct_tables: [(distinct key: bid.bidder, table_id: 1), (distinct key: bid.auction, table_id: 2)]
           StreamExchange Hash([0]) from 1
 
     Fragment 1
@@ -783,8 +783,10 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [$expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32))], primary key: [$0 ASC], value indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0] }
-     Table 4294967294 { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0] }
+     Table 0 { columns: [$expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32))], primary key: [$0 ASC], value indices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [$expr1, bid_bidder, count_for_agg_call_4, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
+     Table 2 { columns: [$expr1, bid_auction, count_for_agg_call_8, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5], distribution key: [0], read_pk_prefix_len_hint: 0 }
+     Table 4294967294 { columns: [day, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], distribution key: [0], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q16
   before:
   - create_tables
@@ -828,7 +830,7 @@
       StreamMaterialize { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], pk_columns: [channel, day], pk_conflict: "no check" }
           materialized table: 4294967294
         StreamAppendOnlyHashAgg { group_key: [bid.channel, $expr1], aggs: [max($expr2), count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), count(distinct bid.bidder), count(distinct bid.bidder) filter((bid.price < 10000:Int32)), count(distinct bid.bidder) filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count(distinct bid.bidder) filter((bid.price >= 1000000:Int32)), count(distinct bid.auction), count(distinct bid.auction) filter((bid.price < 10000:Int32)), count(distinct bid.auction) filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count(distinct bid.auction) filter((bid.price >= 1000000:Int32))] }
-            result table: 0, state tables: []
+            result table: 0, state tables: [], distinct_tables: [(distinct key: bid.bidder, table_id: 1), (distinct key: bid.auction, table_id: 2)]
           StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
@@ -837,8 +839,10 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid_channel, $expr1, max($expr2), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1] }
-     Table 4294967294 { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1] }
+     Table 0 { columns: [bid_channel, $expr1, max($expr2), count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), count(distinct bid_bidder), count(distinct bid_bidder) filter((bid_price < 10000:Int32)), count(distinct bid_bidder) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_bidder) filter((bid_price >= 1000000:Int32)), count(distinct bid_auction), count(distinct bid_auction) filter((bid_price < 10000:Int32)), count(distinct bid_auction) filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count(distinct bid_auction) filter((bid_price >= 1000000:Int32))], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1], read_pk_prefix_len_hint: 2 }
+     Table 1 { columns: [bid_channel, $expr1, bid_bidder, count_for_agg_call_5, count_for_agg_call_6, count_for_agg_call_7, count_for_agg_call_8], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4, 5, 6], distribution key: [0, 1], read_pk_prefix_len_hint: 0 }
+     Table 2 { columns: [bid_channel, $expr1, bid_auction, count_for_agg_call_9, count_for_agg_call_10, count_for_agg_call_11, count_for_agg_call_12], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4, 5, 6], distribution key: [0, 1], read_pk_prefix_len_hint: 0 }
+     Table 4294967294 { columns: [channel, day, minute, total_bids, rank1_bids, rank2_bids, rank3_bids, total_bidders, rank1_bidders, rank2_bidders, rank3_bidders, total_auctions, rank1_auctions, rank2_auctions, rank3_auctions], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14], distribution key: [0, 1], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q17
   before:
   - create_tables
@@ -876,7 +880,7 @@
           materialized table: 4294967294
         StreamProject { exprs: [bid.auction, $expr1, count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), (sum(bid.price) / count(bid.price)) as $expr2, sum(bid.price)] }
           StreamAppendOnlyHashAgg { group_key: [bid.auction, $expr1], aggs: [count, count filter((bid.price < 10000:Int32)), count filter((bid.price >= 10000:Int32) AND (bid.price < 1000000:Int32)), count filter((bid.price >= 1000000:Int32)), min(bid.price), max(bid.price), sum(bid.price), count(bid.price)] }
-              result table: 0, state tables: []
+              result table: 0, state tables: [], distinct_tables: []
             StreamExchange Hash([0, 1]) from 1
 
     Fragment 1
@@ -885,8 +889,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid_auction, $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), min(bid_price), max(bid_price), sum(bid_price), count(bid_price)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
-     Table 4294967294 { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1] }
+     Table 0 { columns: [bid_auction, $expr1, count, count filter((bid_price < 10000:Int32)), count filter((bid_price >= 10000:Int32) AND (bid_price < 1000000:Int32)), count filter((bid_price >= 1000000:Int32)), min(bid_price), max(bid_price), sum(bid_price), count(bid_price)], primary key: [$0 ASC, $1 ASC], value indices: [2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1], read_pk_prefix_len_hint: 2 }
+     Table 4294967294 { columns: [auction, day, total_bids, rank1_bids, rank2_bids, rank3_bids, min_price, max_price, avg_price, sum_price], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], distribution key: [0, 1], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q18
   before:
   - create_tables
@@ -931,8 +935,8 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$1 ASC, $0 ASC, $5 DESC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1, 0] }
-     Table 4294967294 { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid_extra, bid__row_id], primary key: [$1 ASC, $0 ASC, $5 DESC, $7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [1, 0], read_pk_prefix_len_hint: 2 }
+     Table 4294967294 { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q19
   before:
   - create_tables
@@ -995,11 +999,11 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid__row_id], primary key: [$0 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0] }
-     Table 1 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 2 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0] }
-     Table 3 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id], primary key: [$14 ASC, $15 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [0] }
+     Table 0 { columns: [bid_auction, bid_bidder, bid_price, bid_channel, bid_url, bid_date_time, bid__row_id], primary key: [$0 ASC, $6 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [auction_id, auction_item_name, auction_description, auction_initial_bid, auction_reserve, auction_date_time, auction_expires, auction_seller, auction_category], primary key: [$0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction, bidder, price, channel, url, date_timeb, item_name, description, initial_bid, reserve, date_timea, expires, seller, category, bid._row_id, auction.id], primary key: [$14 ASC, $15 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], distribution key: [0], read_pk_prefix_len_hint: 3 }
 - id: nexmark_q21
   before:
   - create_tables
@@ -1045,7 +1049,7 @@
             Upstream
             BatchPlanNode
 
-     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7] }
+     Table 4294967294 { columns: [auction, bidder, price, channel, dir1, dir2, dir3, bid._row_id], primary key: [$7 ASC], value indices: [0, 1, 2, 3, 4, 5, 6, 7], distribution key: [7], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q101
   before:
   - create_tables
@@ -1092,7 +1096,7 @@
           StreamExchange Hash([0]) from 1
           StreamProject { exprs: [bid.auction, max(bid.price)] }
             StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [max(bid.price), count] }
-                result table: 4, state tables: []
+                result table: 4, state tables: [], distinct_tables: []
               StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -1105,12 +1109,12 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 2 { columns: [bid_auction, max(bid_price)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4 { columns: [bid_auction, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
+     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [bid_auction, max(bid_price)], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [bid_auction, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction_id, auction_item_name, current_highest_bid, bid.auction], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q102
   before:
   - create_tables
@@ -1169,7 +1173,7 @@
             left table: 0, right table 1
           StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
             StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction), count] }
-                result table: 2, state tables: []
+                result table: 2, state tables: [], distinct_tables: []
               StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
                   left table: 3, right table 5, left degree table: 4, right degree table: 6,
                 StreamExchange Hash([0]) from 1
@@ -1189,12 +1193,12 @@
     Fragment 3
       StreamProject { exprs: [(sum0(count) / count(bid.auction)) as $expr1] }
         StreamGlobalSimpleAgg { aggs: [sum0(count), count(bid.auction), count] }
-            result table: 7, state tables: []
+            result table: 7, state tables: [], distinct_tables: []
           StreamExchange Single from 4
 
     Fragment 4
       StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [count] }
-          result table: 8, state tables: []
+          result table: 8, state tables: [], distinct_tables: []
         StreamExchange Hash([0]) from 5
 
     Fragment 5
@@ -1202,16 +1206,16 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction)], primary key: [$2 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 1 { columns: [$expr1], primary key: [], value indices: [0], distribution key: [] }
-     Table 2 { columns: [auction_id, auction_item_name, count(bid_auction), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 7 { columns: [sum0(count), count(bid_auction), count], primary key: [], value indices: [0, 1, 2], distribution key: [] }
-     Table 8 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0] }
+     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction)], primary key: [$2 ASC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 0 }
+     Table 1 { columns: [$expr1], primary key: [], value indices: [0], distribution key: [], read_pk_prefix_len_hint: 0 }
+     Table 2 { columns: [auction_id, auction_item_name, count(bid_auction), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0], read_pk_prefix_len_hint: 2 }
+     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 7 { columns: [sum0(count), count(bid_auction), count], primary key: [], value indices: [0, 1, 2], distribution key: [], read_pk_prefix_len_hint: 0 }
+     Table 8 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q103
   before:
   - create_tables
@@ -1258,7 +1262,7 @@
           StreamProject { exprs: [bid.auction] }
             StreamFilter { predicate: (count >= 20:Int32) }
               StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [count] }
-                  result table: 4, state tables: []
+                  result table: 4, state tables: [], distinct_tables: []
                 StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -1271,12 +1275,12 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 2 { columns: [bid_auction], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
-     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [bid_auction], primary key: [$0 ASC], value indices: [0], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q104
   before:
   - create_tables
@@ -1323,7 +1327,7 @@
           StreamProject { exprs: [bid.auction] }
             StreamFilter { predicate: (count < 20:Int32) }
               StreamAppendOnlyHashAgg { group_key: [bid.auction], aggs: [count] }
-                  result table: 4, state tables: []
+                  result table: 4, state tables: [], distinct_tables: []
                 StreamExchange Hash([0]) from 2
 
     Fragment 1
@@ -1336,12 +1340,12 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 2 { columns: [bid_auction], primary key: [$0 ASC], value indices: [0], distribution key: [0] }
-     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
+     Table 0 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 2 { columns: [bid_auction], primary key: [$0 ASC], value indices: [0], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 3 { columns: [bid_auction, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [bid_auction, count], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
 - id: nexmark_q105
   before:
   - create_tables
@@ -1397,7 +1401,7 @@
         StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction), Vnode(auction.id) as $expr1] }
           StreamProject { exprs: [auction.id, auction.item_name, count(bid.auction)] }
             StreamHashAgg { group_key: [auction.id, auction.item_name], aggs: [count(bid.auction), count] }
-                result table: 2, state tables: []
+                result table: 2, state tables: [], distinct_tables: []
               StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
                   left table: 3, right table 5, left degree table: 4, right degree table: 6,
                 StreamExchange Hash([0]) from 2
@@ -1413,14 +1417,14 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction), $expr1], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [] }
-     Table 1 { columns: [auction_id, auction_item_name, count(bid_auction), $expr1], primary key: [$3 ASC, $2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0], vnode column idx: 3 }
-     Table 2 { columns: [auction_id, auction_item_name, count(bid_auction), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0] }
-     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [] }
+     Table 0 { columns: [auction_id, auction_item_name, count(bid_auction), $expr1], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [], read_pk_prefix_len_hint: 0 }
+     Table 1 { columns: [auction_id, auction_item_name, count(bid_auction), $expr1], primary key: [$3 ASC, $2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1, vnode column idx: 3 }
+     Table 2 { columns: [auction_id, auction_item_name, count(bid_auction), count], primary key: [$0 ASC, $1 ASC], value indices: [2, 3], distribution key: [0], read_pk_prefix_len_hint: 2 }
+     Table 3 { columns: [auction_id, auction_item_name], primary key: [$0 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 5 { columns: [bid_auction, bid__row_id], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 6 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [auction_id, auction_item_name, bid_count], primary key: [$2 DESC, $0 ASC, $1 ASC], value indices: [0, 1, 2], distribution key: [], read_pk_prefix_len_hint: 2 }
 - id: nexmark_q106
   before:
   - create_tables
@@ -1476,16 +1480,16 @@
           materialized table: 4294967294
         StreamProject { exprs: [min(min(max(bid.price)))] }
           StreamGlobalSimpleAgg { aggs: [min(min(max(bid.price))), count] }
-              result table: 1, state tables: [0]
+              result table: 1, state tables: [0], distinct_tables: []
             StreamExchange Single from 1
 
     Fragment 1
       StreamHashAgg { group_key: [$expr1], aggs: [min(max(bid.price)), count] }
-          result table: 3, state tables: [2]
+          result table: 3, state tables: [2], distinct_tables: []
         StreamProject { exprs: [auction.id, max(bid.price), Vnode(auction.id) as $expr1] }
           StreamProject { exprs: [auction.id, max(bid.price)] }
             StreamHashAgg { group_key: [auction.id], aggs: [max(bid.price), count] }
-                result table: 5, state tables: [4]
+                result table: 5, state tables: [4], distinct_tables: []
               StreamProject { exprs: [auction.id, bid.price, bid._row_id] }
                 StreamFilter { predicate: (bid.date_time >= auction.date_time) AND (bid.date_time <= auction.expires) }
                   StreamHashJoin { type: Inner, predicate: auction.id = bid.auction, output: all }
@@ -1503,14 +1507,14 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [min(max(bid_price)), $expr1], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [] }
-     Table 1 { columns: [min(min(max(bid_price))), count], primary key: [], value indices: [0, 1], distribution key: [] }
-     Table 2 { columns: [$expr1, max(bid_price), auction_id], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2], distribution key: [2], vnode column idx: 0 }
-     Table 3 { columns: [$expr1, min(max(bid_price)), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], vnode column idx: 0 }
-     Table 4 { columns: [auction_id, bid_price, bid__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 5 { columns: [auction_id, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0] }
-     Table 6 { columns: [auction_id, auction_date_time, auction_expires], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 7 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0] }
-     Table 8 { columns: [bid_auction, bid_price, bid_date_time, bid__row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0] }
-     Table 9 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [min_final], primary key: [], value indices: [0], distribution key: [] }
+     Table 0 { columns: [min(max(bid_price)), $expr1], primary key: [$0 ASC, $1 ASC], value indices: [0, 1], distribution key: [], read_pk_prefix_len_hint: 0 }
+     Table 1 { columns: [min(min(max(bid_price))), count], primary key: [], value indices: [0, 1], distribution key: [], read_pk_prefix_len_hint: 0 }
+     Table 2 { columns: [$expr1, max(bid_price), auction_id], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [1, 2], distribution key: [2], read_pk_prefix_len_hint: 1, vnode column idx: 0 }
+     Table 3 { columns: [$expr1, min(max(bid_price)), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [], read_pk_prefix_len_hint: 1, vnode column idx: 0 }
+     Table 4 { columns: [auction_id, bid_price, bid__row_id], primary key: [$0 ASC, $1 DESC, $2 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 5 { columns: [auction_id, max(bid_price), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 6 { columns: [auction_id, auction_date_time, auction_expires], primary key: [$0 ASC], value indices: [0, 1, 2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 7 { columns: [auction_id, _degree], primary key: [$0 ASC], value indices: [1], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 8 { columns: [bid_auction, bid_price, bid_date_time, bid__row_id], primary key: [$0 ASC, $3 ASC], value indices: [0, 1, 2, 3], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 9 { columns: [bid_auction, bid__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read_pk_prefix_len_hint: 1 }
+     Table 4294967294 { columns: [min_final], primary key: [], value indices: [0], distribution key: [], read_pk_prefix_len_hint: 0 }
