@@ -545,11 +545,55 @@ impl Serialize for IntervalUnit {
 
 impl IntervalCmpValue {
     fn as_justified(&self) -> Option<IntervalUnit> {
-        todo!()
+        let usecs = (self.0 % (USECS_PER_DAY as i128)) as i64;
+        let remaining_days = self.0 / (USECS_PER_DAY as i128);
+        let days = (remaining_days % 30) as i32;
+        let months = (remaining_days / 30).try_into().ok()?;
+        Some(IntervalUnit::from_month_day_usec(months, days, usecs))
     }
 
-    fn as_alternate(&self) -> IntervalUnit {
-        todo!()
+    fn as_alternate(&self) -> Option<IntervalUnit> {
+        match self.0.cmp(&0) {
+            Ordering::Equal => Some(IntervalUnit::from_month_day_usec(0, 0, 0)),
+            Ordering::Greater => {
+                let remaining_usecs = self.0;
+                let mut usecs = (remaining_usecs % (USECS_PER_DAY as i128)) as i64;
+                let mut remaining_days = remaining_usecs / (USECS_PER_DAY as i128);
+                let extra_days = ((i64::MAX - usecs) / USECS_PER_DAY)
+                    .min(remaining_days.try_into().unwrap_or(i64::MAX));
+                usecs += extra_days * USECS_PER_DAY;
+                remaining_days -= extra_days as i128;
+
+                let mut days = (remaining_days % 30) as i32;
+                let mut remaining_months = remaining_days / 30;
+                let extra_months =
+                    ((i32::MAX - days) / 30).min(remaining_months.try_into().unwrap_or(i32::MAX));
+                days += extra_months * 30;
+                remaining_months -= extra_months as i128;
+
+                let months = remaining_months.try_into().ok()?;
+                Some(IntervalUnit::from_month_day_usec(months, days, usecs))
+            }
+            Ordering::Less => {
+                let remaining_usecs = self.0;
+                let mut usecs = (remaining_usecs % (USECS_PER_DAY as i128)) as i64;
+                let mut remaining_days = remaining_usecs / (USECS_PER_DAY as i128);
+                let extra_days = ((i64::MIN - usecs) / USECS_PER_DAY)
+                    .max(remaining_days.try_into().unwrap_or(i64::MIN));
+                usecs += extra_days * USECS_PER_DAY;
+                remaining_days -= extra_days as i128;
+
+                let mut days = (remaining_days % 30) as i32;
+                let mut remaining_months = remaining_days / 30;
+                let extra_months =
+                    ((i32::MIN - days) / 30).max(remaining_months.try_into().unwrap_or(i32::MIN));
+                days += extra_months * 30;
+                remaining_months -= extra_months as i128;
+
+                let months = remaining_months.try_into().ok()?;
+                Some(IntervalUnit::from_month_day_usec(months, days, usecs))
+            }
+        }
     }
 }
 
@@ -562,8 +606,11 @@ impl<'de> Deserialize<'de> for IntervalUnit {
         let cmp_value = IntervalCmpValue(((hi as i128) << 64) | (lo as i128));
         let interval = cmp_value
             .as_justified()
-            .unwrap_or_else(|| cmp_value.as_alternate());
-        Ok(interval)
+            .or_else(|| cmp_value.as_alternate());
+        interval.ok_or_else(|| {
+            use serde::de::Error as _;
+            D::Error::custom("memcomparable deserialize interval overflow")
+        })
     }
 }
 
@@ -580,7 +627,8 @@ impl crate::hash::HashKeySerDe<'_> for IntervalUnit {
         let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
         cmp_value
             .as_justified()
-            .unwrap_or_else(|| cmp_value.as_alternate())
+            .or_else(|| cmp_value.as_alternate())
+            .expect("HashKey deserialize interval overflow")
     }
 }
 
