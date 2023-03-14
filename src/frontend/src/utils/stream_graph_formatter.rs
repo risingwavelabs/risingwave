@@ -252,26 +252,16 @@ impl StreamGraphFormatter {
                 Pretty::Array(
                     node.fields
                         .iter()
-                        .map(|f| Pretty::debug(f.get_name()))
+                        .map(|f| Pretty::display(f.get_name()))
                         .collect(),
                 ),
             ));
-            // writeln!(
-            //     f,
-            //     "{}Stream key: [{}], {}",
-            //     " ".repeat(level * 2 + 4),
-            //     node.stream_key
-            //         .iter()
-            //         .map(|i| node.fields[*i as usize].get_name())
-            //         .join(", "),
-            //     if node.append_only { "AppendOnly" } else { "" }
-            // )?;
             fields.push((
                 "stream key",
                 Pretty::Array(
                     node.stream_key
                         .iter()
-                        .map(|i| Pretty::debug(node.fields[*i as usize].get_name()))
+                        .map(|i| Pretty::display(node.fields[*i as usize].get_name()))
                         .collect(),
                 ),
             ));
