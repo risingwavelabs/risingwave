@@ -208,6 +208,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
         )?
         .into();
 
+        // FIXME: Interval modules Interval
         let offset_modules_window_size = {
             const DAY_MS: i64 = 86400000;
             const MONTH_MS: i64 = 30 * DAY_MS;
