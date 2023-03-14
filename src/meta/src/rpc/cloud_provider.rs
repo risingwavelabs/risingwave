@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use aws_config::retry::RetryConfig;
 use aws_sdk_ec2::model::{Filter, VpcEndpointType};
+use itertools::Itertools;
 use risingwave_pb::catalog::connection::PrivateLinkService;
 
 use crate::MetaResult;
@@ -102,6 +103,7 @@ impl AwsEc2Client {
             .subnets
             .unwrap_or_default()
             .into_iter()
+            .unique_by(|s| s.availability_zone().unwrap_or_default().to_string())
             .map(|s| s.subnet_id.unwrap_or_default())
             .collect();
         Ok(subnets)
