@@ -165,6 +165,12 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
+    static ref JOIN_REORDER_STREAM: OptimizationStage = OptimizationStage::new(
+        "Join Reorder Stream".to_string(),
+        vec![ReorderMultiJoinRuleStreaming::create()],
+        ApplyOrder::TopDown,
+    );
+
     static ref FILTER_WITH_NOW_TO_JOIN: OptimizationStage = OptimizationStage::new(
         "Push down filter with now into a left semijoin",
         vec![FilterWithNowToJoinRule::create()],
@@ -365,8 +371,8 @@ impl LogicalOptimizer {
         // their relevant joins.
         plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
 
-        // Reorder multijoin into left-deep join tree.
-        plan = plan.optimize_by_rules(&JOIN_REORDER);
+        // Reorder multijoin into join tree.
+        plan = plan.optimize_by_rules(&JOIN_REORDER_STREAM);
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
