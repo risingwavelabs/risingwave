@@ -280,6 +280,7 @@ impl SstableMeta {
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
+    /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
@@ -299,11 +300,11 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u64_le(self.meta_offset);
         buf.put_u32_le(self.range_tombstone_list.len() as u32);
         for tombstone in &self.range_tombstone_list {
             tombstone.encode(buf);
         }
+        buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -340,13 +341,13 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let meta_offset = buf.get_u64_le();
         let range_del_count = buf.get_u32_le() as usize;
         let mut range_tombstone_list = Vec::with_capacity(range_del_count);
         for _ in 0..range_del_count {
             let tombstone = DeleteRangeTombstone::decode(buf);
             range_tombstone_list.push(tombstone);
         }
+        let meta_offset = buf.get_u64_le();
 
         Ok(Self {
             block_metas,
