@@ -407,20 +407,10 @@ impl LogicalJoin {
             result_plan = Some(lookup_join);
         }
 
-        let required_col_idx = logical_scan.required_col_idx();
         let indexes = logical_scan.indexes();
         for index in indexes {
-            let p2s_mapping = index.primary_to_secondary_mapping();
-            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
-                // Covering index selection
-                let index_scan: PlanRef = logical_scan
-                    .to_index_scan(
-                        &index.name,
-                        index.index_table.table_desc().into(),
-                        p2s_mapping,
-                    )
-                    .into();
-
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                let index_scan: PlanRef = index_scan.into();
                 let that = self.clone_with_left_right(self.left(), index_scan.clone());
                 let new_logical_join = logical_join.clone_with_left_right(
                     logical_join.left(),
