@@ -69,7 +69,7 @@ impl StreamGraphFormatter {
         for edge in &graph.edges {
             self.edges.insert(edge.link_id, edge.clone());
         }
-        let mut pretties = Vec::with_capacity(graph.fragments.len() + self.tables.len());
+        let mut pretties = Vec::with_capacity(100);
         for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
             pretties.push(self.explain_fragment(fragment));
         }
@@ -81,15 +81,16 @@ impl StreamGraphFormatter {
 
     fn explain_table<'a>(&mut self, tb: &Table) -> Pretty<'a> {
         let tb = TableCatalog::from(tb.clone());
-        let columns = Pretty::list_of_strings(
-            &tb.columns
+        let columns = Pretty::Array(
+            tb.columns
                 .iter()
                 .map(|c| {
-                    if self.verbose {
-                        &format!("{}: {}", c.name(), c.data_type())
+                    let s = if self.verbose {
+                        format!("{}: {}", c.name(), c.data_type())
                     } else {
-                        c.name()
-                    }
+                        c.name().to_string()
+                    };
+                    Pretty::Text(s.into())
                 })
                 .collect::<Vec<_>>(),
         );
@@ -294,9 +295,8 @@ impl StreamGraphFormatter {
                 | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
                     table,
                     ..
-                }) => Some(&self.add_table(table.as_ref().unwrap())),
+                }) => Some(self.pretty_add_table(table.as_ref().unwrap())),
             })
-            .map(Pretty::debug)
             .collect();
         Pretty::Array(vec)
     }
