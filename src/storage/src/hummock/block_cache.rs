@@ -38,7 +38,7 @@ enum BlockEntry {
 
 pub struct BlockHolder {
     _handle: BlockEntry,
-    block: *const Block,
+    pub block: *const Block,
 }
 
 impl BlockHolder {
