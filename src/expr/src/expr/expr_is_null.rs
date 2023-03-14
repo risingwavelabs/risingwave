@@ -36,6 +36,18 @@ pub struct IsNotNullExpression {
     child: BoxedExpression,
 }
 
+impl IsNullExpression {
+    fn new(child: BoxedExpression) -> Self {
+        Self { child }
+    }
+}
+
+impl IsNotNullExpression {
+    fn new(child: BoxedExpression) -> Self {
+        Self { child }
+    }
+}
+
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean

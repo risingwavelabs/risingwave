@@ -12,78 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{I32Array, JsonbArrayBuilder, Utf8Array, Utf8ArrayBuilder};
-use risingwave_common::types::*;
-use risingwave_pb::expr::expr_node::Type;
-
-use super::Expression;
-use crate::expr::expr_jsonb_access::{
-    jsonb_array_element, jsonb_object_field, JsonbAccessExpression,
-};
-use crate::expr::BoxedExpression;
-use crate::{ExprError, Result};
-
-/// Create a new binary expression.
-pub fn new_binary_expr(
-    expr_type: Type,
-    _ret: DataType,
-    l: BoxedExpression,
-    r: BoxedExpression,
-) -> Result<BoxedExpression> {
-    let expr = match expr_type {
-        Type::JsonbAccessInner => match r.return_type() {
-            DataType::Varchar => {
-                JsonbAccessExpression::<Utf8Array, JsonbArrayBuilder, _>::new_expr(
-                    l,
-                    r,
-                    jsonb_object_field,
-                )
-                .boxed()
-            }
-            DataType::Int32 => JsonbAccessExpression::<I32Array, JsonbArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_array_element,
-            )
-            .boxed(),
-            t => return Err(ExprError::UnsupportedFunction(format!("jsonb -> {t}"))),
-        },
-        Type::JsonbAccessStr => match r.return_type() {
-            DataType::Varchar => JsonbAccessExpression::<Utf8Array, Utf8ArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_object_field,
-            )
-            .boxed(),
-            DataType::Int32 => JsonbAccessExpression::<I32Array, Utf8ArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_array_element,
-            )
-            .boxed(),
-            t => return Err(ExprError::UnsupportedFunction(format!("jsonb ->> {t}"))),
-        },
-
-        tp => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}({:?}, {:?})",
-                tp,
-                l.return_type(),
-                r.return_type(),
-            )));
-        }
-    };
-    Ok(expr)
-}
-
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{
-        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, Scalar,
-    };
+    use risingwave_common::types::{Decimal, IntervalUnit, NaiveDateWrapper, Scalar};
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
 
@@ -114,17 +48,11 @@ mod tests {
         test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan);
         test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
         test_binary_interval::<NaiveDateTimeArray, _>(
-            |x, y| {
-                date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
-                    .unwrap()
-            },
+            |x, y| date_interval_add(x, y).unwrap(),
             Type::Add,
         );
         test_binary_interval::<NaiveDateTimeArray, _>(
-            |x, y| {
-                date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
-                    .unwrap()
-            },
+            |x, y| date_interval_sub(x, y).unwrap(),
             Type::Subtract,
         );
     }

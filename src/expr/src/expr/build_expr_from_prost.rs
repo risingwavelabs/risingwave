@@ -35,11 +35,9 @@ use super::expr_to_timestamp_const_tmpl::{
 };
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_jsonb_access::build_jsonb_expr;
 use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
-use crate::expr::{
-    build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
-    LiteralExpression,
-};
+use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ensure, ExprError, Result};
 
@@ -76,6 +74,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             // the implementation to improve performance.
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
+        E::JsonbAccessInner | E::JsonbAccessStr => build_jsonb_expr(prost),
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         E::Now => build_now_expr(prost),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
@@ -103,7 +102,7 @@ fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
-    let data_expr = expr_build_from_prost(&children[0])?;
+    let data_expr = build_from_prost(&children[0])?;
     let tmpl_node = &children[1];
     if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
         && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
@@ -118,7 +117,7 @@ fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
             child: data_expr,
         }.boxed())
     } else {
-        let tmpl_expr = expr_build_from_prost(&children[1])?;
+        let tmpl_expr = build_from_prost(&children[1])?;
         Ok(BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
             data_expr,
             tmpl_expr,
@@ -149,7 +148,7 @@ pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
-    let data_expr = expr_build_from_prost(&children[0])?;
+    let data_expr = build_from_prost(&children[0])?;
     let tmpl_node = &children[1];
     if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
         && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
@@ -164,7 +163,7 @@ pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
             child: data_expr,
         }.boxed())
     } else {
-        let tmpl_expr = expr_build_from_prost(&children[1])?;
+        let tmpl_expr = build_from_prost(&children[1])?;
         Ok(BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
             data_expr,
             tmpl_expr,
@@ -172,141 +171,5 @@ pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
             to_timestamp,
         )
         .boxed())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::vec;
-
-    use risingwave_common::array::{ArrayImpl, DataChunk, Utf8Array};
-    use risingwave_common::types::Scalar;
-    use risingwave_common::util::value_encoding::serialize_datum;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall};
-
-    use super::*;
-
-    #[test]
-    fn test_array_access_expr() {
-        let values = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Varchar as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum(Some("foo".into()).as_ref()),
-                    })),
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Varchar as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum(Some("bar".into()).as_ref()),
-                    })),
-                },
-            ],
-        };
-        let array_index = FunctionCall {
-            children: vec![
-                ExprNode {
-                    expr_type: Type::Array as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::List as i32,
-                        field_type: vec![ProstDataType {
-                            type_name: TypeName::Varchar as i32,
-                            ..Default::default()
-                        }],
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::FuncCall(values)),
-                },
-                ExprNode {
-                    expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
-                        type_name: TypeName::Int32 as i32,
-                        ..Default::default()
-                    }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
-                        body: serialize_datum(Some(1_i32.to_scalar_value()).as_ref()),
-                    })),
-                },
-            ],
-        };
-        let access = ExprNode {
-            expr_type: Type::ArrayAccess as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Varchar as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(array_index)),
-        };
-        let expr = build_nullable_binary_expr_prost(&access);
-        assert!(expr.is_ok());
-
-        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
-        assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_iter(["foo"])));
-    }
-
-    #[test]
-    fn test_build_extract_expr() {
-        let left = ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Varchar as i32,
-                precision: 11,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
-                body: serialize_datum(Some("DAY".into()).as_ref()),
-            })),
-        };
-        let right_date = ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Date as i32,
-                ..Default::default()
-            }),
-            rex_node: None,
-        };
-        let right_time = ExprNode {
-            expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Timestamp as i32,
-                ..Default::default()
-            }),
-            rex_node: None,
-        };
-
-        let expr = ExprNode {
-            expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left.clone(), right_date],
-            })),
-        };
-        assert!(build_binary_expr_prost(&expr).is_ok());
-        let expr = ExprNode {
-            expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
-                type_name: TypeName::Int64 as i32,
-                ..Default::default()
-            }),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![left, right_time],
-            })),
-        };
-        assert!(build_binary_expr_prost(&expr).is_ok());
     }
 }

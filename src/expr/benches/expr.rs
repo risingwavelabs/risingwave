@@ -206,7 +206,7 @@ fn bench_expr(c: &mut Criterion) {
     let sigs = sigs.sorted_by_cached_key(|sig| sig.to_string_no_return());
     for sig in sigs {
         if sig
-            .inputs_type
+            .args
             .iter()
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
@@ -216,19 +216,19 @@ fn bench_expr(c: &mut Criterion) {
         }
 
         let mut prost = make_expression(
-            sig.func,
-            &sig.inputs_type
+            sig.ty,
+            &sig.args
                 .iter()
                 .map(|t| DataType::from(*t).prost_type_name())
                 .collect_vec(),
-            &sig.inputs_type
+            &sig.args
                 .iter()
                 .enumerate()
-                .map(|(idx, t)| match (sig.func, idx) {
+                .map(|(idx, t)| match (sig.ty, idx) {
                     (ExprType::AtTimeZone, 1) => TIMEZONE,
                     (ExprType::DateTrunc, 0) => TIME_FIELD,
                     (ExprType::DateTrunc, 2) => TIMEZONE,
-                    (ExprType::Extract, 0) => match sig.inputs_type[1] {
+                    (ExprType::Extract, 0) => match sig.args[1] {
                         DataTypeName::Date => EXTRACT_FIELD_DATE,
                         DataTypeName::Time => EXTRACT_FIELD_TIME,
                         DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
@@ -239,7 +239,7 @@ fn bench_expr(c: &mut Criterion) {
                 })
                 .collect_vec(),
         );
-        if sig.func == ExprType::ToChar {
+        if sig.ty == ExprType::ToChar {
             let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
             f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
         }
@@ -313,29 +313,6 @@ fn bench_expr(c: &mut Criterion) {
             bencher.iter(|| expr.eval(&input).unwrap())
         });
     }
-
-    // ~360ns
-    // This should be the optimization goal for our add expression.
-    c.bench_function("TBD/add(int32,int32)", |bencher| {
-        bencher.iter(|| {
-            let a = input.column_at(2).array_ref().as_int32();
-            let b = input.column_at(2).array_ref().as_int32();
-            assert_eq!(a.len(), b.len());
-            let mut c = (a.raw_iter())
-                .zip(b.raw_iter())
-                .map(|(a, b)| a + b)
-                .collect::<I32Array>();
-            let mut overflow = false;
-            for ((a, b), c) in a.raw_iter().zip(b.raw_iter()).zip(c.raw_iter()) {
-                overflow |= (c ^ a) & (c ^ b) < 0;
-            }
-            if overflow {
-                return Err(ExprError::NumericOverflow);
-            }
-            c.set_bitmap(a.null_bitmap() & b.null_bitmap());
-            Ok(c)
-        })
-    });
 }
 
 /// Evaluate on raw Rust array.
@@ -442,4 +419,27 @@ fn bench_raw(c: &mut Criterion) {
             })
         },
     );
+
+    // ~360ns
+    // This should be the optimization goal for our add expression.
+    c.bench_function("TBD/add(int32,int32)", |bencher| {
+        bencher.iter(|| {
+            let a = (0..CHUNK_SIZE as i32).collect::<I32Array>();
+            let b = (0..CHUNK_SIZE as i32).collect::<I32Array>();
+            assert_eq!(a.len(), b.len());
+            let mut c = (a.raw_iter())
+                .zip(b.raw_iter())
+                .map(|(a, b)| a + b)
+                .collect::<I32Array>();
+            let mut overflow = false;
+            for ((a, b), c) in a.raw_iter().zip(b.raw_iter()).zip(c.raw_iter()) {
+                overflow |= (c ^ a) & (c ^ b) < 0;
+            }
+            if overflow {
+                return Err(ExprError::NumericOverflow);
+            }
+            c.set_bitmap(a.null_bitmap() & b.null_bitmap());
+            Ok(c)
+        })
+    });
 }

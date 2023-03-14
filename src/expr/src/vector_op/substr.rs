@@ -58,12 +58,12 @@ mod tests {
         let s = "cxscgccdd";
 
         let cases = [
-            (s.to_owned(), Some(4), None, "cgccdd"),
-            (s.to_owned(), None, Some(3), "cxs"),
-            (s.to_owned(), Some(4), Some(-2), "[unused result]"),
-            (s.to_owned(), Some(4), Some(2), "cg"),
-            (s.to_owned(), Some(-1), Some(-5), "[unused result]"),
-            (s.to_owned(), Some(-1), Some(5), "cxs"),
+            (s, Some(4), None, "cgccdd"),
+            (s, None, Some(3), "cxs"),
+            (s, Some(4), Some(-2), "[unused result]"),
+            (s, Some(4), Some(2), "cg"),
+            (s, Some(-1), Some(-5), "[unused result]"),
+            (s, Some(-1), Some(5), "cxs"),
         ];
 
         for (s, off, len, expected) in cases {

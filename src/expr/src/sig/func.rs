@@ -15,9 +15,11 @@
 //! Function signatures.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::ops::Deref;
 use std::sync::LazyLock;
 
+use itertools::Itertools;
 use risingwave_common::types::DataTypeName;
 use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::expr::ExprNode;
@@ -38,7 +40,7 @@ pub fn func_sigs() -> impl Iterator<Item = &'static FunctionDescriptor> {
     FUNC_SIG_MAP.0.values().flatten()
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FunctionDescriptor>>);
 
 impl Deref for FuncSigMap {
@@ -71,6 +73,18 @@ pub struct FunctionDescriptor {
     pub args: &'static [DataTypeName],
     pub ret: DataTypeName,
     pub build_from_prost: fn(prost: &ExprNode) -> Result<BoxedExpression>,
+}
+
+impl fmt::Debug for FunctionDescriptor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{:?}({}) -> {:?}",
+            self.ty,
+            self.args.iter().map(|t| format!("{t:?}")).join(", "),
+            self.ret
+        )
+    }
 }
 
 impl FunctionDescriptor {

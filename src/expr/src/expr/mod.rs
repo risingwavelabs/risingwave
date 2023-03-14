@@ -35,7 +35,6 @@
 mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_to_string;
-mod expr_binary_bytes;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
@@ -48,10 +47,8 @@ mod expr_is_null;
 mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
-mod expr_quaternary_bytes;
 pub mod expr_regexp;
 mod expr_some_all;
-mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
 mod expr_udf;
@@ -73,7 +70,6 @@ use risingwave_common::types::{DataType, Datum};
 
 pub use self::agg::AggKind;
 pub use self::build_expr_from_prost::build_from_prost;
-pub use self::expr_binary_nonnull::new_binary_expr;
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 use super::Result;

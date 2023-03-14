@@ -160,7 +160,6 @@ mod tests {
     use risingwave_pb::expr::FunctionCall;
 
     use super::*;
-    use crate::expr::expr_binary_nonnull::new_binary_expr;
     use crate::expr::{InputRefExpression, LiteralExpression};
 
     #[test]
@@ -209,19 +208,19 @@ mod tests {
     fn test_eval_searched_case() {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
+        let when_clauses = vec![WhenClause {
+            when: new_binary_expr(
                 Type::LessThanOrEqual,
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
             )
             .unwrap(),
-            Box::new(LiteralExpression::new(
+            then: Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
             )),
-        )];
+        }];
         // else 4.1
         let els = Box::new(LiteralExpression::new(
             DataType::Float32,
@@ -248,19 +247,19 @@ mod tests {
     fn test_eval_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
+        let when_clauses = vec![WhenClause {
+            when: new_binary_expr(
                 Type::LessThanOrEqual,
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
             )
             .unwrap(),
-            Box::new(LiteralExpression::new(
+            then: Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
             )),
-        )];
+        }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
         let input = DataChunk::from_pretty(
             "i
@@ -280,19 +279,19 @@ mod tests {
     fn test_eval_row_searched_case() {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
+        let when_clauses = vec![WhenClause {
+            when: new_binary_expr(
                 Type::LessThanOrEqual,
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(2f32.into()))),
             )
             .unwrap(),
-            Box::new(LiteralExpression::new(
+            then: Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
             )),
-        )];
+        }];
         // else 4.1
         let els = Box::new(LiteralExpression::new(
             DataType::Float32,
@@ -316,19 +315,19 @@ mod tests {
     fn test_eval_row_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
-        let when_clauses = vec![WhenClause::new(
-            new_binary_expr(
+        let when_clauses = vec![WhenClause {
+            when: new_binary_expr(
                 Type::LessThanOrEqual,
                 DataType::Boolean,
                 Box::new(InputRefExpression::new(DataType::Int32, 0)),
                 Box::new(LiteralExpression::new(DataType::Float32, Some(3f32.into()))),
             )
             .unwrap(),
-            Box::new(LiteralExpression::new(
+            then: Box::new(LiteralExpression::new(
                 DataType::Float32,
                 Some(3.1f32.into()),
             )),
-        )];
+        }];
         let searched_case_expr = CaseExpression::new(ret_type, when_clauses, None);
 
         let row_inputs = vec![2, 3, 4, 5];
