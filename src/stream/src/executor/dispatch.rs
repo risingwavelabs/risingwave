@@ -446,14 +446,20 @@ pub trait Dispatcher: Debug + 'static {
 #[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<BoxedOutput>,
+    output_indices: Vec<usize>,
     cur: usize,
     dispatcher_id: DispatcherId,
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<BoxedOutput>, dispatcher_id: DispatcherId) -> Self {
+    pub fn new(
+        outputs: Vec<BoxedOutput>,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             outputs,
+            output_indices,
             cur: 0,
             dispatcher_id,
         }
@@ -465,6 +471,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
+            let chunk = chunk.reorder_columns(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -484,9 +491,11 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -569,9 +578,11 @@ impl Dispatcher for HashDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -751,8 +762,11 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            for output in self.outputs.values_mut() {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in self.outputs.values_mut() {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -851,7 +865,10 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            output.send(Message::Watermark(watermark)).await
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                output.send(Message::Watermark(watermark)).await?;
+            }
+            Ok(())
         }
     }
 

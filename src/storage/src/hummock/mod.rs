@@ -80,9 +80,7 @@ use self::event_handler::ReadVersionMappingType;
 use self::iterator::HummockIterator;
 pub use self::sstable_store::*;
 use super::monitor::HummockStateStoreMetrics;
-#[cfg(any(test, feature = "test"))]
-use crate::hummock::backup_reader::BackupReader;
-use crate::hummock::backup_reader::BackupReaderRef;
+use crate::hummock::backup_reader::{BackupReader, BackupReaderRef};
 use crate::hummock::compactor::CompactorContext;
 use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::{HummockEvent, HummockEventHandler};
@@ -146,7 +144,6 @@ impl HummockStorage {
     pub async fn new(
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
-        backup_reader: BackupReaderRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         notification_client: impl NotificationClient,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -157,7 +154,12 @@ impl HummockStorage {
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
-
+        let backup_reader = BackupReader::new(
+            &options.backup_storage_url,
+            &options.backup_storage_directory,
+        )
+        .await
+        .map_err(HummockError::read_backup_error)?;
         let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
         let write_limiter = Arc::new(WriteLimiter::default());
         let (event_tx, mut event_rx) = unbounded_channel();
@@ -272,6 +274,10 @@ impl HummockStorage {
     pub fn get_pinned_version(&self) -> PinnedVersion {
         self.pinned_version.load().deref().deref().clone()
     }
+
+    pub fn backup_reader(&self) -> BackupReaderRef {
+        self.backup_reader.clone()
+    }
 }
 
 #[cfg(any(test, feature = "test"))]
@@ -327,7 +333,6 @@ impl HummockStorage {
         Self::new(
             options,
             sstable_store,
-            BackupReader::unused(),
             hummock_meta_client,
             notification_client,
             Arc::new(HummockStateStoreMetrics::unused()),

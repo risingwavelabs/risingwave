@@ -16,8 +16,8 @@ use std::collections::HashSet;
 
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
-    LogicalNow, LogicalProject, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues,
-    PlanTreeNodeBinary, PlanTreeNodeUnary,
+    LogicalNow, LogicalProject, LogicalProjectSet, LogicalScan, LogicalTopN, LogicalUnion,
+    LogicalValues, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 use crate::optimizer::PlanTreeNode;
@@ -77,8 +77,12 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
         plan.column_subsets().len() == 1 && self.visit(plan.input())
     }
 
-    fn visit_logical_project_set(&mut self, plan: &LogicalProjectSet) -> bool {
-        plan.select_list().len() == 1 && self.visit(plan.input())
+    fn visit_logical_project_set(&mut self, _plan: &LogicalProjectSet) -> bool {
+        false
+    }
+
+    fn visit_logical_scan(&mut self, _plan: &LogicalScan) -> bool {
+        false
     }
 
     fn visit_logical_hop_window(&mut self, _plan: &LogicalHopWindow) -> bool {
