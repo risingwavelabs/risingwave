@@ -107,6 +107,11 @@ pub trait HummockVersionExt {
 }
 
 pub trait HummockVersionUpdateExt {
+    fn count_new_ssts_in_group_split(
+        &mut self,
+        parent_group_id: CompactionGroupId,
+        member_table_ids: &HashSet<StateTableId>,
+    ) -> u64;
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
@@ -200,6 +205,43 @@ pub type SstSplitInfo = (
 );
 
 impl HummockVersionUpdateExt for HummockVersion {
+    fn count_new_ssts_in_group_split(
+        &mut self,
+        parent_group_id: CompactionGroupId,
+        member_table_ids: &HashSet<StateTableId>,
+    ) -> u64 {
+        self.levels
+            .get(&parent_group_id)
+            .map_or(0, |parent_levels| {
+                parent_levels
+                    .l0
+                    .iter()
+                    .flat_map(|l0| l0.get_sub_levels())
+                    .chain(parent_levels.get_levels().iter())
+                    .flat_map(|level| level.get_table_infos())
+                    .map(|sst_info| {
+                        // `flag` is a bitmap
+                        let mut flag = 0;
+                        // `sst_info.table_ids` will never be empty.
+                        for table_id in sst_info.get_table_ids() {
+                            flag |= if member_table_ids.contains(table_id) {
+                                2
+                            } else {
+                                1
+                            };
+                            if flag == 3 {
+                                break;
+                            }
+                        }
+                        // We need to replace the SST id of the divided part in parent group with a
+                        // new SST id when it's not a trivial adjust. View function
+                        // `init_with_parent_group` for details.
+                        flag - 1
+                    })
+                    .sum()
+            })
+    }
+
     fn init_with_parent_group(
         &mut self,
         parent_group_id: CompactionGroupId,
