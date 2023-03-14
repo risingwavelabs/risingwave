@@ -81,23 +81,40 @@ impl IntervalUnit {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    /// Justify interval, convert 1 month to 30 days and 86400 s to 1 day.
-    /// If day is positive, complement the seconds negative value.
-    /// These rules only use in interval comparison.
-    pub fn justify_interval(&mut self) {
-        #[expect(deprecated)]
-        let total_usecs = self.as_usecs_i64();
-        *self = Self {
-            months: 0,
-            days: (total_usecs / USECS_PER_DAY) as i32,
-            usecs: total_usecs % USECS_PER_DAY,
+    /// Justify interval, convert 24 hours to 1 day and 30 days to 1 month.
+    /// Also makes signs of all fields to be the same.
+    ///
+    /// <https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L2740>
+    pub fn justify_interval(&self) -> Option<Self> {
+        let mut v = *self;
+        if v.days > 0 && v.usecs > 0 || v.days < 0 && v.usecs < 0 {
+            v.months = v.months.checked_add(v.days / 30)?;
+            v.days %= 30;
         }
-    }
 
-    pub fn justified(&self) -> Self {
-        let mut interval = *self;
-        interval.justify_interval();
-        interval
+        v.days += (v.usecs / USECS_PER_DAY) as i32;
+        v.usecs %= USECS_PER_DAY;
+
+        v.months = v.months.checked_add(v.days / 30)?;
+        v.days %= 30;
+
+        if v.months > 0 && (v.days < 0 || v.days == 0 && v.usecs < 0) {
+            v.days += 30;
+            v.months -= 1;
+        } else if v.months < 0 && (v.days > 0 || v.days == 0 && v.usecs > 0) {
+            v.days -= 30;
+            v.months += 1;
+        }
+
+        if v.days > 0 && v.usecs < 0 {
+            v.usecs += USECS_PER_DAY;
+            v.days -= 1;
+        } else if v.days < 0 && v.usecs > 0 {
+            v.usecs -= USECS_PER_DAY;
+            v.days += 1;
+        }
+
+        Some(v)
     }
 
     #[deprecated]
@@ -747,10 +764,7 @@ impl Zero for IntervalUnit {
 
 impl IsNegative for IntervalUnit {
     fn is_negative(&self) -> bool {
-        let i = self.justified();
-        i.months < 0
-            || (i.months == 0 && i.days < 0)
-            || (i.months == 0 && i.days == 0 && i.usecs < 0)
+        self < &Self::from_month_day_usec(0, 0, 0)
     }
 }
 
