@@ -84,7 +84,7 @@ impl RowIdGenExecutor {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().await.into())),
-                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap().into())),
+                _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
             }
         }
 

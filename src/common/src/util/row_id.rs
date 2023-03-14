@@ -40,8 +40,9 @@ pub struct RowIdGenerator {
 
 pub type RowId = i64;
 
+#[inline]
 pub fn extract_vnode_id_from_row_id(id: RowId) -> u32 {
-    ((id >> VNODE_ID_SHIFT_BITS) & (SEQUENCE_UPPER_BOUND - 1)) as u32
+    ((id >> VNODE_ID_SHIFT_BITS) & (SEQUENCE_UPPER_BOUND as i64 - 1)) as u32
 }
 
 impl RowIdGenerator {

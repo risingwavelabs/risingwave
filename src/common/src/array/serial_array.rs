@@ -18,6 +18,7 @@ use postgres_types::{ToSql as _, Type};
 use serde::{Serialize, Serializer};
 
 use crate::array::{PrimitiveArray, PrimitiveArrayBuilder};
+use crate::util::row_id::RowId;
 
 // Serial is an alias for i64
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Ord, PartialOrd, Default, Hash)]
@@ -38,8 +39,9 @@ impl Serial {
         self.0
     }
 
-    pub fn vnode_id(&self) -> u32 {
-        ((self.0 >> 12) & 0x3FF) as u32
+    #[inline]
+    pub fn as_row_id(self) -> RowId {
+        self.0 as RowId
     }
 }
 
