@@ -89,21 +89,10 @@ impl LogicalScan {
             predicate,
             chunk_size: None,
             for_system_time_as_of_now,
-        };
-
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        let functional_dependency = match &pk_indices {
-            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
-            None => FunctionalDependencySet::new(schema.len()),
-        };
-        let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        };
+
+        let base = PlanBase::new_logical_with_core(&core);
 
         Self { base, core }
     }

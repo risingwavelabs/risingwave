@@ -60,14 +60,7 @@ impl LogicalShare {
         let core = generic::Share {
             input: RefCell::new(input),
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }
     }
 

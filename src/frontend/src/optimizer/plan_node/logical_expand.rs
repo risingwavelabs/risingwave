@@ -53,29 +53,7 @@ impl LogicalExpand {
             column_subsets,
             input,
         };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        // TODO(Wenzhuo): change fd according to expand's new definition.
-        let flag_index = schema.len() - 1; // assume that `flag` is the last column
-        let functional_dependency = {
-            let input_fd = core
-                .input
-                .functional_dependency()
-                .clone()
-                .into_dependencies();
-            let mut current_fd = FunctionalDependencySet::new(schema.len());
-            for mut fd in input_fd {
-                fd.grow(schema.len());
-                fd.set_from(flag_index, true);
-                current_fd.add_functional_dependency(fd);
-            }
-            current_fd
-        };
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalExpand { base, core }
     }

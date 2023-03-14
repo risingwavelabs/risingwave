@@ -50,16 +50,7 @@ impl LogicalUnion {
             inputs,
             source_col,
         };
-        let ctx = core.ctx();
-        let pk_indices = core.logical_pk();
-        let schema = core.schema();
-        let functional_dependency = FunctionalDependencySet::new(schema.len());
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalUnion { base, core }
     }
 

@@ -19,7 +19,8 @@ use risingwave_pb::plan_common::JoinType;
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -140,6 +141,62 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.left.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let left_fd_set = self.left.functional_dependency().clone();
+        let right_fd_set = self.right.functional_dependency().clone();
+
+        let full_out_col_num = self.internal_column_num();
+
+        let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
+            ColIndexMapping::with_shift_offset(left_len, 0)
+                .composite(&ColIndexMapping::identity(full_out_col_num))
+                .rewrite_functional_dependency_set(left_fd_set)
+        };
+        let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
+            ColIndexMapping::with_shift_offset(right_len, left_len.try_into().unwrap())
+                .rewrite_functional_dependency_set(right_fd_set)
+        };
+        let fd_set: FunctionalDependencySet = match self.join_type {
+            JoinType::Inner => {
+                let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
+                for i in &self.on.conjunctions {
+                    if let Some((col, _)) = i.as_eq_const() {
+                        fd_set.add_constant_columns(&[col.index()])
+                    } else if let Some((left, right)) = i.as_eq_cond() {
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[left.index()],
+                            &[right.index()],
+                        );
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[right.index()],
+                            &[left.index()],
+                        );
+                    }
+                }
+                get_new_left_fd_set(left_fd_set)
+                    .into_dependencies()
+                    .into_iter()
+                    .chain(
+                        get_new_right_fd_set(right_fd_set)
+                            .into_dependencies()
+                            .into_iter(),
+                    )
+                    .for_each(|fd| fd_set.add_functional_dependency(fd));
+                fd_set
+            }
+            JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
+            JoinType::FullOuter => FunctionalDependencySet::new(full_out_col_num),
+            JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
+            JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
+            JoinType::Unspecified => unreachable!(),
+        };
+        ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num)
+            .rewrite_functional_dependency_set(fd_set)
     }
 }
 

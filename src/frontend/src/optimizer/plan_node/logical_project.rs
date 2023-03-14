@@ -50,18 +50,7 @@ impl LogicalProject {
     }
 
     pub fn with_core(core: generic::Project<PlanRef>) -> Self {
-        let ctx = core.input.ctx();
-
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalProject { base, core }
     }
 
@@ -91,20 +80,6 @@ impl LogicalProject {
     /// Creates a `LogicalProject` which select some columns from the input.
     pub fn with_out_col_idx(input: PlanRef, out_fields: impl Iterator<Item = usize>) -> Self {
         Self::with_core(generic::Project::with_out_col_idx(input, out_fields))
-    }
-
-    fn derive_fd(
-        core: &Project<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        let mut fd_set = FunctionalDependencySet::new(core.exprs.len());
-        for fd in input_fd_set.as_dependencies() {
-            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
-                fd_set.add_functional_dependency(fd);
-            }
-        }
-        fd_set
     }
 
     pub fn exprs(&self) -> &Vec<ExprImpl> {

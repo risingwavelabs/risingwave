@@ -52,24 +52,6 @@ impl LogicalHopWindow {
         // if output_indices is not specified, use default output_indices
         let output_indices =
             output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
-        let output_type = DataType::window_of(&time_col.data_type).unwrap();
-        let original_schema: Schema = input
-            .schema()
-            .clone()
-            .into_fields()
-            .into_iter()
-            .chain([
-                Field::with_name(output_type.clone(), "window_start"),
-                Field::with_name(output_type, "window_end"),
-            ])
-            .collect();
-        let window_start_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len());
-        let window_end_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len() + 1);
-
         let core = generic::HopWindow {
             input,
             time_col,
@@ -81,20 +63,6 @@ impl LogicalHopWindow {
         let schema = core.schema();
         let pk_indices = core.logical_pk();
         let ctx = core.ctx();
-        let functional_dependency = {
-            let mut fd_set =
-                ColIndexMapping::identity_or_none(core.input.schema().len(), original_schema.len())
-                    .composite(&ColIndexMapping::with_remaining_columns(
-                        &core.output_indices,
-                        original_schema.len(),
-                    ))
-                    .rewrite_functional_dependency_set(core.input.functional_dependency().clone());
-            if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
-                fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
-                fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
-            }
-            fd_set
-        };
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
@@ -107,9 +75,9 @@ impl LogicalHopWindow {
 
         let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
+            core.schema(),
+            core.logical_pk().unwrap_or_default(),
+            core.functional_dependency(),
         );
 
         LogicalHopWindow { base, core }

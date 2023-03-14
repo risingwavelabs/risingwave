@@ -48,26 +48,8 @@ impl LogicalFilter {
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
         }
-        let mut functional_dependency = input.functional_dependency().clone();
-        for i in &predicate.conjunctions {
-            if let Some((col, _)) = i.as_eq_const() {
-                functional_dependency.add_constant_columns(&[col.index()])
-            } else if let Some((left, right)) = i.as_eq_cond() {
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[left.index()], &[right.index()]);
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
-            }
-        }
         let core = generic::Filter { predicate, input };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalFilter { base, core }
     }
 

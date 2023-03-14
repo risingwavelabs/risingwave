@@ -879,27 +879,12 @@ impl ExprRewriter for LogicalAggBuilder {
 
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
-        let ctx = input.ctx();
         let core = generic::Agg {
             agg_calls,
             group_key,
             input,
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(
-            schema.len(),
-            core.input.schema().len(),
-            core.input.functional_dependency(),
-            &core.group_key,
-        );
-
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 
@@ -912,26 +897,6 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
-    }
-
-    fn derive_fd(
-        column_cnt: usize,
-        input_len: usize,
-        input_fd_set: &FunctionalDependencySet,
-        group_key: &[usize],
-    ) -> FunctionalDependencySet {
-        let mut fd_set =
-            FunctionalDependencySet::with_key(column_cnt, &(0..group_key.len()).collect_vec());
-        // take group keys from input_columns, then grow the target size to column_cnt
-        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
-            &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
-        );
-        for fd in input_fd_set.as_dependencies() {
-            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
-                fd_set.add_functional_dependency(fd);
-            }
-        }
-        fd_set
     }
 
     /// `create` will analyze select exprs, group exprs and having, and construct a plan like

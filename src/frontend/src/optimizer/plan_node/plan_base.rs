@@ -17,6 +17,7 @@ use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 
+use super::generic::GenericPlanNode;
 use super::*;
 use crate::for_all_plan_nodes;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -63,6 +64,10 @@ impl generic::GenericPlanRef for PlanBase {
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        &self.functional_dependency
+    }
 }
 
 impl stream::StreamPlanRef for PlanBase {
@@ -95,6 +100,15 @@ impl PlanBase {
             functional_dependency,
             watermark_columns,
         }
+    }
+
+    pub fn new_logical_with_core(node: &impl GenericPlanNode) -> Self {
+        Self::new_logical(
+            node.ctx(),
+            node.schema(),
+            node.logical_pk().unwrap_or_default(),
+            node.functional_dependency(),
+        )
     }
 
     pub fn new_stream(

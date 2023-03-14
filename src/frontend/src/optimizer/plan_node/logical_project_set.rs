@@ -50,13 +50,7 @@ impl LogicalProjectSet {
         );
 
         let core = generic::ProjectSet { select_list, input };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalProjectSet { base, core }
     }
@@ -172,14 +166,6 @@ impl LogicalProjectSet {
                 LogicalProject::new(inner, select_list).into()
             }
         }
-    }
-
-    fn derive_fd(
-        core: &generic::ProjectSet<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
     pub fn select_list(&self) -> &Vec<ExprImpl> {
