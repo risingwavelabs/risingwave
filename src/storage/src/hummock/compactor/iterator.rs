@@ -97,11 +97,6 @@ impl SstableStreamIterator {
             }
         }
 
-        if self.block_iter.is_none() {
-            // End of stream.
-            self.remaining_blocks = 0;
-        }
-
         Ok(())
     }
 
