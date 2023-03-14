@@ -533,13 +533,23 @@ impl Serialize for IntervalUnit {
     where
         S: serde::Serializer,
     {
-        let IntervalUnit {
-            months,
-            days,
-            usecs,
-        } = self.justified();
-        // serialize the `IntervalUnit` as a tuple
-        (months, days, usecs).serialize(serializer)
+        let cmp_value = IntervalCmpValue::from(*self);
+        // split i128 as (i64, u64), which is equivalent
+        (
+            (cmp_value.0 >> 64) as i64,
+            cmp_value.0 as u64, // truncate to get the lower part
+        )
+            .serialize(serializer)
+    }
+}
+
+impl IntervalCmpValue {
+    fn as_justified(&self) -> Option<IntervalUnit> {
+        todo!()
+    }
+
+    fn as_alternate(&self) -> IntervalUnit {
+        todo!()
     }
 }
 
@@ -548,12 +558,29 @@ impl<'de> Deserialize<'de> for IntervalUnit {
     where
         D: serde::Deserializer<'de>,
     {
-        let (months, days, usecs) = <(i32, i32, i64)>::deserialize(deserializer)?;
-        Ok(Self {
-            months,
-            days,
-            usecs,
-        })
+        let (hi, lo) = <(i64, u64)>::deserialize(deserializer)?;
+        let cmp_value = IntervalCmpValue(((hi as i128) << 64) | (lo as i128));
+        let interval = cmp_value
+            .as_justified()
+            .unwrap_or_else(|| cmp_value.as_alternate());
+        Ok(interval)
+    }
+}
+
+impl crate::hash::HashKeySerDe<'_> for IntervalUnit {
+    type S = [u8; 16];
+
+    fn serialize(self) -> Self::S {
+        let cmp_value = IntervalCmpValue::from(self);
+        cmp_value.0.to_ne_bytes()
+    }
+
+    fn deserialize<R: std::io::Read>(source: &mut R) -> Self {
+        let value = Self::read_fixed_size_bytes::<R, 16>(source);
+        let cmp_value = IntervalCmpValue(i128::from_ne_bytes(value));
+        cmp_value
+            .as_justified()
+            .unwrap_or_else(|| cmp_value.as_alternate())
     }
 }
 
