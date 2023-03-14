@@ -24,6 +24,7 @@ import io.grpc.StatusException;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
+import java.sql.Array;
 import java.sql.DriverManager;
 import java.util.*;
 import org.slf4j.Logger;
@@ -261,6 +262,113 @@ public class SourceRequestHandler {
                                                 "incompatible data type of column %s",
                                                 srcCol.getName()));
                             }
+                        }
+                    }
+                    // check whether user is superuser or replication role
+                    try (var stmt =
+                                 conn.prepareStatement(sqlStmts.getProperty("postgres.role.check"))) {
+                        stmt.setString(1, props.get(ConnectorConfig.USER));
+                        var res = stmt.executeQuery();
+                        while (res.next()) {
+                            if (!res.getBoolean(1)) {
+                                throw new StatusException(
+                                        Status.INTERNAL.withDescription(
+                                                "Postgres user must be superuser or replication role to start walsender."));
+                            }
+                        }
+                    }
+                    // check whether user has select privilege on table for initial snapshot
+                    try (var stmt =
+                                 conn.prepareStatement(sqlStmts.getProperty("postgres.table_privilege.check"))) {
+                        stmt.setString(1, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(2, props.get(ConnectorConfig.USER));
+                        var res = stmt.executeQuery();
+                        while (res.next()) {
+                            if (!res.getBoolean(1)) {
+                                throw new StatusException(
+                                        Status.INTERNAL.withDescription(
+                                                "Postgres user must have select privilege on table " +  props.get(ConnectorConfig.TABLE_NAME)));
+                            }
+                        }
+                    }
+                    // check whether publication exists
+                    boolean publicationExists = false;
+                    try (var stmt =
+                                 conn.prepareStatement(sqlStmts.getProperty("postgres.publication_att"))) {
+                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
+                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        var res = stmt.executeQuery();
+                        while (res.next()) {
+                            String[] columnsPub = (String[]) res.getArray("attnames").getArray();
+                            var sourceSchema = validate.getTableSchema();
+                            for (int i = 0; i < sourceSchema.getColumnsCount(); i++) {
+                                String columnName = sourceSchema.getColumns(i).getName();
+                                if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
+                                    break;
+                                }
+                                if (i == sourceSchema.getColumnsCount() - 1) {
+                                    publicationExists = true;
+                                }
+                            }
+                            if (publicationExists) {
+                                LOG.error("PUBLICATION FOUND!");
+                                break;
+                            }
+                        }
+                    }
+                    // if publication does not exist, check permission to create publication
+                    if (!publicationExists) {
+                        // check create privilege on database
+                        try (var stmt =
+                                     conn.prepareStatement(sqlStmts.getProperty("postgres.database_privilege.check"))) {
+                            stmt.setString(1, props.get(ConnectorConfig.USER));
+                            stmt.setString(2, props.get(ConnectorConfig.DB_NAME));
+                            stmt.setString(3, props.get(ConnectorConfig.USER));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                if (!res.getBoolean(1)) {
+                                    throw new StatusException(
+                                            Status.INTERNAL.withDescription(
+                                                    "Postgres user must have create privilege on database" + props.get(ConnectorConfig.DB_NAME)));
+                                }
+                            }
+                        }
+                        // check ownership on table
+                        boolean isTableOwner = false;
+                        String owner = null;
+                        // check if user is owner
+                        try (var stmt =
+                                     conn.prepareStatement(sqlStmts.getProperty("postgres.table_owner"))) {
+                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                owner = res.getString("tableowner");
+                                if (owner == props.get(ConnectorConfig.USER)) {
+                                    isTableOwner = true;
+                                    break;
+                                }
+                            }
+                        }
+                        // if user is not owner, check if user belongs to owner group
+                        if (!isTableOwner && !owner.isEmpty()) {
+                            try (var stmt =
+                                         conn.prepareStatement(sqlStmts.getProperty("postgres.users_of_group"))) {
+                                stmt.setString(1, owner);
+                                var res = stmt.executeQuery();
+                                while (res.next()) {
+                                    String[] users = (String[]) res.getArray("members").getArray();
+                                    if (Arrays.stream(users).anyMatch(props.get(ConnectorConfig.USER)::equals)) {
+                                        isTableOwner = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!isTableOwner) {
+                            throw new StatusException(
+                                    Status.INTERNAL.withDescription(
+                                            "Postgres user must be owner of table " + props.get(ConnectorConfig.TABLE_NAME)));
                         }
                     }
                     break;
