@@ -56,7 +56,7 @@ sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "par
 echo "--- Kill cluster"
 cargo make ci-kill
 
-echo "--- e2e, cci-3cn-3fe-opendal-fs-backend, streaming"
+echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
 cargo make ci-start ci-3cn-3fe-opendal-fs-backend
 sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-${profile}"
 
