@@ -13,10 +13,13 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 use risingwave_common::session_config::SearchPath;
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
@@ -90,10 +93,94 @@ pub struct Binder {
 
     /// `ShareId`s identifying shared views.
     shared_views: HashMap<ViewId, ShareId>,
+
+    param_types: ParameterTypes,
+}
+
+/// `ParameterTypes` is used to record the types of the parameters during binding. It works
+/// following the rules:
+/// 1. At the beginning, it contains the user specified parameters type.
+/// 2. When the binder encounters a parameter, it will record it as unknown(call `record_new_param`)
+/// if it didn't exist in `ParameterTypes`.
+/// 3. When the binder encounters a cast on parameter, if it's a unknown type, the cast function
+/// will record the target type as infer type for that parameter(call `record_infer_type`). If the
+/// parameter has been inferred, the cast function will act as a normal cast.
+/// 4. After bind finished:
+///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
+/// occur in the query. `export` will return error if there is a kind of
+/// parameter. This rule is compatible with PostgreSQL    
+///     (b) parameter is None means that it's a unknown type. The user didn't specify it
+/// and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
+/// compatible with PostgreSQL.
+///     (c) parameter is Some means that it's a known type.
+#[derive(Clone, Debug)]
+pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
+
+impl ParameterTypes {
+    pub fn new(specified_param_types: Vec<DataType>) -> Self {
+        let map = specified_param_types
+            .into_iter()
+            .enumerate()
+            .map(|(index, data_type)| ((index + 1) as u64, Some(data_type)))
+            .collect::<HashMap<u64, Option<DataType>>>();
+        Self(Arc::new(RwLock::new(map)))
+    }
+
+    pub fn has_infer(&self, index: u64) -> bool {
+        self.0.read().unwrap().get(&index).unwrap().is_some()
+    }
+
+    pub fn read_type(&self, index: u64) -> Option<DataType> {
+        self.0.read().unwrap().get(&index).unwrap().clone()
+    }
+
+    pub fn record_new_param(&mut self, index: u64) {
+        self.0.write().unwrap().entry(index).or_insert(None);
+    }
+
+    pub fn record_infer_type(&mut self, index: u64, data_type: DataType) {
+        assert!(
+            !self.has_infer(index),
+            "The parameter has been inferred, should not be inferred again."
+        );
+        self.0
+            .write()
+            .unwrap()
+            .get_mut(&index)
+            .unwrap()
+            .replace(data_type);
+    }
+
+    pub fn export(&self) -> Result<Vec<DataType>> {
+        let types = self
+            .0
+            .read()
+            .unwrap()
+            .clone()
+            .into_iter()
+            .sorted_by_key(|(index, _)| *index)
+            .collect::<Vec<_>>();
+
+        // Check if all the parameters have been inferred.
+        for ((index, _), expect_index) in types.iter().zip_eq_debug(1_u64..=types.len() as u64) {
+            if *index != expect_index {
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "Cannot infer the type of the parameter {}.",
+                    expect_index
+                ))
+                .into());
+            }
+        }
+
+        Ok(types
+            .into_iter()
+            .map(|(_, data_type)| data_type.unwrap_or(DataType::Varchar))
+            .collect::<Vec<_>>())
+    }
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
+    fn new_inner(session: &SessionImpl, in_create_mv: bool, param_types: Vec<DataType>) -> Binder {
         let now_ms = session
             .env()
             .hummock_snapshot_manager()
@@ -114,20 +201,25 @@ impl Binder {
             search_path: session.config().get_search_path(),
             in_create_mv,
             shared_views: HashMap::new(),
+            param_types: ParameterTypes::new(param_types),
         }
     }
 
     pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, false)
+        Self::new_inner(session, false, vec![])
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, true)
+        Self::new_inner(session, true, vec![])
     }
 
     /// Bind a [`Statement`].
     pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
         self.bind_statement(stmt)
+    }
+
+    pub fn export_param_types(&self) -> Result<Vec<DataType>> {
+        self.param_types.export()
     }
 
     fn push_context(&mut self) {

@@ -8,8 +8,10 @@ statement ok
 CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3 from mv6 WITH (
     connector = 'iceberg',
     sink.mode='append-only',
-    location.type='minio',
-    warehouse.path='minio://hummockadmin:hummockadmin@127.0.0.1:9301/iceberg',
+    warehouse.path = 's3://iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
     database.name='demo_db',
     table.name='demo_table'
 );

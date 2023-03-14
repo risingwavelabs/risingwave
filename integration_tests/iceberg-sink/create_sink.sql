@@ -3,8 +3,10 @@ FROM
     bhv_mv WITH (
     connector = 'iceberg',
     sink.mode='upsert',
-    location.type='minio',
-    warehouse.path='minio://hummockadmin:hummockadmin@minio-0:9301/hummock001/iceberg-data',
+    warehouse.path = 's3://hummock001/iceberg-data',
+    s3.endpoint = 'http://minio-0:9301',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
     database.name='demo_db',
     table.name='demo_table'
 );
