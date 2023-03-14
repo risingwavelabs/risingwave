@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package expr;
 
+import "common.proto";
 import "data.proto";
-import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -93,6 +93,8 @@ message ExprNode {
     BIT_LENGTH = 230;
     OVERLAY = 231;
     REGEXP_MATCH = 232;
+    POW = 233;
+    EXP = 234;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -111,12 +113,24 @@ message ExprNode {
     ARRAY = 521;
     ARRAY_ACCESS = 522;
     ROW = 523;
+    ARRAY_TO_STRING = 524;
     // Array functions
     ARRAY_CAT = 531;
     ARRAY_APPEND = 532;
     ARRAY_PREPEND = 533;
+    FORMAT_TYPE = 534;
+    ARRAY_DISTINCT = 535;
 
-    // Non-pure functions below (> 600)
+    // Jsonb functions
+
+    // jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb
+    JSONB_ACCESS_INNER = 600;
+    // jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text
+    JSONB_ACCESS_STR = 601;
+    JSONB_TYPEOF = 602;
+    JSONB_ARRAY_LENGTH = 603;
+
+    // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
     VNODE = 1101;
@@ -128,7 +142,7 @@ message ExprNode {
   Type expr_type = 1;
   data.DataType return_type = 3;
   oneof rex_node {
-    InputRefExpr input_ref = 4;
+    uint32 input_ref = 4;
     data.Datum constant = 5;
     FunctionCall func_call = 6;
     UserDefinedFunction udf = 7;
@@ -148,8 +162,10 @@ message TableFunction {
   data.DataType return_type = 3;
 }
 
-message InputRefExpr {
-  int32 column_idx = 1;
+// Reference to an upstream column, containing its index and data type.
+message InputRef {
+  uint32 index = 1;
+  data.DataType type = 2;
 }
 
 // The items which can occur in the select list of `ProjectSet` operator.
@@ -203,22 +219,16 @@ message AggCall {
     ARRAY_AGG = 8;
     FIRST_VALUE = 9;
     SUM0 = 10;
-  }
-  message Arg {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
+    VAR_POP = 11;
+    VAR_SAMP = 12;
+    STDDEV_POP = 13;
+    STDDEV_SAMP = 14;
   }
   Type type = 1;
-  repeated Arg args = 2;
+  repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  message OrderByField {
-    InputRefExpr input = 1;
-    data.DataType type = 2;
-    plan_common.OrderType direction = 3;
-    bool nulls_first = 4;
-  }
-  repeated OrderByField order_by_fields = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
 }
 
@@ -227,5 +237,6 @@ message UserDefinedFunction {
   string name = 2;
   repeated data.DataType arg_types = 3;
   string language = 4;
-  string path = 5;
+  string link = 5;
+  string identifier = 6;
 }

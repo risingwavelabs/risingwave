@@ -83,6 +83,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Int16(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int32(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Int64(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Serial(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Float32(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Float64(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Utf8(v) => v.to_binary_with_type(ty),
@@ -93,6 +94,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::NaiveDateTime(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::NaiveTime(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Struct(_) => todo!(),
             ScalarRefImpl::List(_) => todo!(),
         }

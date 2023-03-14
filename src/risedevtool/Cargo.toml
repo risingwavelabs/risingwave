@@ -7,11 +7,16 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
-bytes = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 console = "0.15"
 dialoguer = "0.10"
 enum-iterator = "1"
@@ -37,6 +42,5 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
-toml = "0.5.9"
 workspace-hack = { path = "../workspace-hack" }
 yaml-rust = "0.4"

@@ -18,7 +18,6 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::UpdateNode;
 
-use super::generic::GenericPlanRef;
 use super::{
     ExprRewritable, LogicalUpdate, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
     ToDistributedBatch,
@@ -28,7 +27,7 @@ use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUpdate` implements [`LogicalUpdate`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUpdate {
     pub base: PlanBase,
     logical: LogicalUpdate,
@@ -79,17 +78,13 @@ impl ToBatchProst for BatchUpdate {
             .logical
             .exprs()
             .iter()
-            .map(|x| {
-                self.base
-                    .ctx()
-                    .expr_with_session_timezone(x.clone())
-                    .to_expr_proto()
-            })
+            .map(|x| x.to_expr_proto())
             .collect();
 
         NodeBody::Update(UpdateNode {
             exprs,
             table_id: self.logical.table_id().table_id(),
+            table_version_id: self.logical.table_version_id(),
             returning: self.logical.has_returning(),
         })
     }

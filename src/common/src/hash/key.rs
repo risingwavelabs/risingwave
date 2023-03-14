@@ -29,11 +29,11 @@ use std::io::{Cursor, Read};
 
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 
+use crate::array::serial_array::Serial;
 use crate::array::{
-    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, ListRef,
-    StructRef,
+    Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
+    ListRef, StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
 use crate::hash::VirtualNode;
@@ -43,6 +43,7 @@ use crate::types::{
     OrderedF32, OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::iter_util::ZipEqFast;
 use crate::util::value_encoding::{deserialize_datum, serialize_datum_into};
 
 /// A wrapper for u64 hash result.
@@ -364,14 +365,14 @@ impl HashKeySerDe<'_> for IntervalUnit {
         let mut ret = [0; 16];
         ret[0..4].copy_from_slice(&self.get_months().to_ne_bytes());
         ret[4..8].copy_from_slice(&self.get_days().to_ne_bytes());
-        ret[8..16].copy_from_slice(&self.get_ms().to_ne_bytes());
+        ret[8..16].copy_from_slice(&self.get_usecs().to_ne_bytes());
 
         ret
     }
 
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        IntervalUnit::new(
+        IntervalUnit::from_month_day_usec(
             i32::from_ne_bytes(value[0..4].try_into().unwrap()),
             i32::from_ne_bytes(value[4..8].try_into().unwrap()),
             i64::from_ne_bytes(value[8..16].try_into().unwrap()),
@@ -460,6 +461,32 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
         NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
+    type S = Vec<u8>;
+
+    /// This should never be called
+    fn serialize(self) -> Self::S {
+        todo!()
+    }
+
+    /// This should never be called
+    fn deserialize<R: Read>(_source: &mut R) -> Self {
+        todo!()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for Serial {
+    type S = <i64 as HashKeySerDe<'a>>::S;
+
+    fn serialize(self) -> Self::S {
+        self.into_inner().serialize()
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        i64::deserialize(source).into()
     }
 }
 
@@ -618,7 +645,7 @@ where
     A::RefItem<'a>: HashKeySerDe<'a>,
     S: HashKeySerializer,
 {
-    for (item, serializer) in array.iter().zip_eq(serializers.iter_mut()) {
+    for (item, serializer) in array.iter().zip_eq_fast(serializers.iter_mut()) {
         serializer.append(item);
     }
 }
@@ -719,7 +746,7 @@ impl HashKey for SerializedKey {
         for (datum_result, array_builder) in data_types
             .iter()
             .map(|ty| deserialize_datum(&mut key_buffer, ty))
-            .zip_eq(array_builders.iter_mut())
+            .zip_eq_fast(array_builders.iter_mut())
         {
             array_builder.append_datum(&datum_result.map_err(ArrayError::internal)?);
         }
@@ -735,6 +762,8 @@ impl HashKey for SerializedKey {
 mod tests {
     use std::collections::HashMap;
     use std::str::FromStr;
+
+    use itertools::Itertools;
 
     use super::*;
     use crate::array;

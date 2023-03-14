@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::config::StorageConfig;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManagerRef;
 use risingwave_rpc_client::HummockMetaClient;
@@ -24,12 +23,13 @@ use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
 use crate::monitor::CompactorMetrics;
+use crate::opts::StorageOpts;
 
 /// A `CompactorContext` describes the context of a compactor.
 #[derive(Clone)]
 pub struct CompactorContext {
-    /// Storage configurations.
-    pub storage_config: Arc<StorageConfig>,
+    /// Storage options.
+    pub storage_opts: Arc<StorageOpts>,
 
     /// The meta client.
     pub hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -58,7 +58,7 @@ pub struct CompactorContext {
 
 impl CompactorContext {
     pub fn new_local_compact_context(
-        storage_config: Arc<StorageConfig>,
+        storage_opts: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
@@ -66,18 +66,18 @@ impl CompactorContext {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         compactor_runtime_config: CompactorRuntimeConfig,
     ) -> Self {
-        let compaction_executor =
-            if storage_config.share_buffer_compaction_worker_threads_number == 0 {
-                Arc::new(CompactionExecutor::new(None))
-            } else {
-                Arc::new(CompactionExecutor::new(Some(
-                    storage_config.share_buffer_compaction_worker_threads_number as usize,
-                )))
-            };
+        let compaction_executor = if storage_opts.share_buffer_compaction_worker_threads_number == 0
+        {
+            Arc::new(CompactionExecutor::new(None))
+        } else {
+            Arc::new(CompactionExecutor::new(Some(
+                storage_opts.share_buffer_compaction_worker_threads_number as usize,
+            )))
+        };
         // not limit memory for local compact
         let memory_limiter = MemoryLimiter::unlimit();
         Self {
-            storage_config,
+            storage_opts,
             hummock_meta_client,
             sstable_store,
             compactor_metrics,

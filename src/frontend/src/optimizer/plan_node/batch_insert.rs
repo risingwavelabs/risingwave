@@ -17,7 +17,6 @@ use std::fmt;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
-use risingwave_pb::catalog::ColumnIndex;
 
 use super::{
     ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
@@ -26,7 +25,7 @@ use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchInsert` implements [`LogicalInsert`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchInsert {
     pub base: PlanBase,
     logical: LogicalInsert,
@@ -82,11 +81,9 @@ impl ToBatchProst for BatchInsert {
             .collect();
         NodeBody::Insert(InsertNode {
             table_id: self.logical.table_id().table_id(),
+            table_version_id: self.logical.table_version_id(),
             column_indices,
-            row_id_index: self
-                .logical
-                .row_id_index()
-                .map(|index| ColumnIndex { index: index as _ }),
+            row_id_index: self.logical.row_id_index().map(|index| index as _),
             returning: self.logical.has_returning(),
         })
     }

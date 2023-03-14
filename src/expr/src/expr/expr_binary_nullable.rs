@@ -31,6 +31,7 @@ use crate::vector_op::cmp::{
     str_is_not_distinct_from,
 };
 use crate::vector_op::conjunction::{and, or};
+use crate::vector_op::format_type::format_type;
 use crate::{for_all_cmp_variants, ExprError, Result};
 
 macro_rules! gen_is_distinct_from_impl {
@@ -164,6 +165,7 @@ pub fn new_nullable_binary_expr(
         Type::Or => Box::new(BinaryShortCircuitExpression::new(l, r, expr_type)),
         Type::IsDistinctFrom => new_distinct_from_expr(l, r, ret)?,
         Type::IsNotDistinctFrom => new_not_distinct_from_expr(l, r, ret)?,
+        Type::FormatType => new_format_type_expr(l, r, ret),
         tp => {
             return Err(ExprError::UnsupportedFunction(format!(
                 "{:?}({:?}, {:?})",
@@ -209,6 +211,7 @@ fn build_array_access_expr(
         DataType::Timestamp => array_access_expression!(NaiveDateTimeArray),
         DataType::Timestamptz => array_access_expression!(PrimitiveArray::<i64>),
         DataType::Interval => array_access_expression!(IntervalArray),
+        DataType::Jsonb => array_access_expression!(JsonbArray),
         DataType::Struct { .. } => array_access_expression!(StructArray),
         DataType::List { .. } => array_access_expression!(ListArray),
     }
@@ -280,6 +283,21 @@ pub fn new_not_distinct_from_expr(
         }
     };
     Ok(expr)
+}
+
+pub fn new_format_type_expr(
+    expr_ia1: BoxedExpression,
+    expr_ia2: BoxedExpression,
+    return_type: DataType,
+) -> BoxedExpression {
+    Box::new(
+        BinaryNullableExpression::<I32Array, I32Array, Utf8Array, _>::new(
+            expr_ia1,
+            expr_ia2,
+            return_type,
+            format_type,
+        ),
+    )
 }
 
 #[cfg(test)]
@@ -442,6 +460,34 @@ mod tests {
             ]);
             let res = vec_executor.eval_row(&row).unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
+            assert_eq!(res, expected);
+        }
+    }
+
+    #[test]
+    fn test_format_type() {
+        let l = vec![Some(16), Some(21), Some(9527), None];
+        let r = vec![Some(0), None, Some(0), Some(0)];
+        let target: Vec<Option<String>> = vec![
+            Some("boolean".into()),
+            Some("smallint".into()),
+            Some("???".into()),
+            None,
+        ];
+        let expr = make_expression(
+            Type::FormatType,
+            &[TypeName::Int32, TypeName::Int32],
+            &[0, 1],
+        );
+        let vec_executor = build_from_prost(&expr).unwrap();
+
+        for i in 0..l.len() {
+            let row = OwnedRow::new(vec![
+                l[i].map(|x| x.to_scalar_value()),
+                r[i].map(|x| x.to_scalar_value()),
+            ]);
+            let res = vec_executor.eval_row(&row).unwrap();
+            let expected = target[i].as_ref().map(|x| x.into());
             assert_eq!(res, expected);
         }
     }

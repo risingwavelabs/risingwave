@@ -16,12 +16,12 @@
 
 use std::marker::PhantomData;
 
-use itertools::Itertools;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{Datum, Scalar, ScalarRef};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::ExprError;
 
 use super::{StreamingAggImpl, StreamingAggInput, StreamingAggOutput};
@@ -276,7 +276,7 @@ where
     ) -> StreamExecutorResult<()> {
         match visibility {
             None => {
-                for (op, data) in ops.iter().zip_eq(data.iter()) {
+                for (op, data) in ops.iter().zip_eq_fast(data.iter()) {
                     match op {
                         Op::Insert | Op::UpdateInsert => {
                             self.result = S::accumulate(self.result.as_ref(), data)?
@@ -288,8 +288,10 @@ where
                 }
             }
             Some(visibility) => {
-                for ((visible, op), data) in
-                    visibility.iter().zip_eq(ops.iter()).zip_eq(data.iter())
+                for ((visible, op), data) in visibility
+                    .iter()
+                    .zip_eq_fast(ops.iter())
+                    .zip_eq_fast(data.iter())
                 {
                     if visible {
                         match op {

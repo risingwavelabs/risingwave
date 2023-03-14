@@ -43,12 +43,14 @@ impl BatchServiceImpl {
         BatchServiceImpl { mgr, env }
     }
 }
-pub(crate) type TaskInfoResponseResult = std::result::Result<TaskInfoResponse, Status>;
-pub(crate) type GetDataResponseResult = std::result::Result<GetDataResponse, Status>;
+
+pub type TaskInfoResponseResult = Result<TaskInfoResponse, Status>;
+pub type GetDataResponseResult = Result<GetDataResponse, Status>;
+
 #[async_trait::async_trait]
 impl TaskService for BatchServiceImpl {
     type CreateTaskStream = ReceiverStream<TaskInfoResponseResult>;
-    type ExecuteStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
+    type ExecuteStream = ReceiverStream<GetDataResponseResult>;
 
     #[cfg_attr(coverage, no_coverage)]
     async fn create_task(
@@ -98,8 +100,11 @@ impl TaskService for BatchServiceImpl {
         req: Request<AbortTaskRequest>,
     ) -> Result<Response<AbortTaskResponse>, Status> {
         let req = req.into_inner();
-        self.mgr
-            .abort_task(req.get_task_id().expect("no task id found"));
+        tracing::trace!("Aborting task: {:?}", req.get_task_id().unwrap());
+        self.mgr.abort_task(
+            req.get_task_id().expect("no task id found"),
+            "abort task request".to_string(),
+        );
         Ok(Response::new(AbortTaskResponse { status: None }))
     }
 
@@ -125,8 +130,7 @@ impl TaskService for BatchServiceImpl {
         let task = BatchTaskExecution::new(&task_id, plan, context, epoch, self.mgr.runtime())?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(LOCAL_EXECUTE_BUFFER_SIZE);
-        let state_reporter = StateReporter::new_with_local_sender(tx.clone());
-        if let Err(e) = task.clone().async_execute(state_reporter).await {
+        if let Err(e) = task.clone().async_execute(None).await {
             error!(
                 "failed to build executors and trigger execution of Task {:?}: {}",
                 task_id, e

@@ -23,7 +23,7 @@ use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, ToLocalB
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 
 /// `BatchUnion` implements [`super::LogicalUnion`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchUnion {
     pub base: PlanBase,
     logical: LogicalUnion,

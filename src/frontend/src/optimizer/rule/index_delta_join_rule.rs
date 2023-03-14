@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
-
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
@@ -44,9 +42,9 @@ impl Rule for IndexDeltaJoinRule {
             }
         }
 
-        let input_left_dyn = match_through_exchange(Rc::clone(&join.inputs()[0]))?;
+        let input_left_dyn = match_through_exchange(join.inputs()[0].clone())?;
         let input_left = input_left_dyn.as_stream_table_scan()?;
-        let input_right_dyn = match_through_exchange(Rc::clone(&join.inputs()[1]))?;
+        let input_right_dyn = match_through_exchange(join.inputs()[1].clone())?;
         let input_right = input_right_dyn.as_stream_table_scan()?;
         let left_indices = join.eq_join_predicate().left_eq_indexes();
         let right_indices = join.eq_join_predicate().right_eq_indexes();
@@ -83,7 +81,7 @@ impl Rule for IndexDeltaJoinRule {
                     .index_table
                     .pk
                     .iter()
-                    .map(|x| x.index)
+                    .map(|x| x.column_index)
                     .take(index.index_table.distribution_key.len())
                     .collect_vec();
 
@@ -109,7 +107,7 @@ impl Rule for IndexDeltaJoinRule {
                 && primary_table_distribution_key == join_indices {
                 // Check join key is prefix of primary table order key
                 let primary_table_order_key_prefix = primary_table.table_desc().pk.iter()
-                    .map(|x| x.column_idx)
+                    .map(|x| x.column_index)
                     .take(primary_table_distribution_key.len())
                     .collect_vec();
 

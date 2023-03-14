@@ -24,6 +24,7 @@ use crate::{
 };
 
 pub type MetaSnapshotStorageRef = Arc<dyn MetaSnapshotStorage>;
+pub type BoxedMetaSnapshotStorage = Box<dyn MetaSnapshotStorage>;
 
 #[async_trait::async_trait]
 pub trait MetaSnapshotStorage: 'static + Sync + Send {

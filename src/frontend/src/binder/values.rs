@@ -16,6 +16,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
@@ -67,11 +68,12 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
+    /// Returns true if null values were inserted
     pub(super) fn bind_values(
         &mut self,
         values: Values,
         expected_types: Option<Vec<DataType>>,
-    ) -> Result<BoundValues> {
+    ) -> Result<(BoundValues, bool)> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
@@ -82,8 +84,31 @@ impl Binder {
             .collect::<Result<Vec<Vec<_>>>>()?;
         self.context.clause = None;
 
+        // Adding Null values in case user did not specify all columns. E.g.
+        // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
+        let vec_len = bound[0].len();
+        let nulls_to_insert = if let Some(expected_types) = &expected_types && expected_types.len() > vec_len {
+            let nulls_to_insert = expected_types.len() - vec_len;
+            for row in &mut bound {
+                if vec_len != row.len() {
+                    return Err(ErrorCode::BindError(
+                        "VALUES lists must all be the same length".into(),
+                    )
+                    .into());
+                }
+                for i in 0..nulls_to_insert {
+                    let t = expected_types[vec_len + i].clone();
+                    row.push(ExprImpl::literal_null(t));
+                }
+            }
+            nulls_to_insert
+        } else {
+            0
+        };
+
+        // only check for this condition again if we did not insert any nulls
         let num_columns = bound[0].len();
-        if bound.iter().any(|row| row.len() != num_columns) {
+        if nulls_to_insert == 0 && bound.iter().any(|row| row.len() != num_columns) {
             return Err(
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
@@ -108,7 +133,7 @@ impl Binder {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..num_columns)
+                .zip_eq_fast(0..num_columns)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(values_id, col_id)))
                 .collect(),
         );
@@ -132,14 +157,14 @@ impl Binder {
             )
             .into());
         }
-        Ok(bound_values)
+        Ok((bound_values, nulls_to_insert > 0))
     }
 }
 
 #[cfg(test)]
 mod tests {
 
-    use itertools::zip_eq;
+    use risingwave_common::util::iter_util::zip_eq_fast;
     use risingwave_sqlparser::ast::{Expr, Value};
 
     use super::*;
@@ -161,14 +186,14 @@ mod tests {
         let schema = Schema::new(
             types
                 .into_iter()
-                .zip_eq(0..n_cols)
+                .zip_eq_fast(0..n_cols)
                 .map(|(ty, col_id)| Field::with_name(ty, values_column_name(0, col_id)))
                 .collect(),
         );
 
-        assert_eq!(res.schema, schema);
-        for vec in res.rows {
-            for (expr, ty) in zip_eq(vec, schema.data_types()) {
+        assert_eq!(res.0.schema, schema);
+        for vec in res.0.rows {
+            for (expr, ty) in zip_eq_fast(vec, schema.data_types()) {
                 assert_eq!(expr.return_type(), ty);
             }
         }

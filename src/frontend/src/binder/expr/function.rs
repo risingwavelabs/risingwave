@@ -327,9 +327,13 @@ impl Binder {
                         (1, raw_call(ExprType::Round)),
                     ]),
                 ),
+                ("pow", raw_call(ExprType::Pow)),
+                // "power" is the function name used in PG.
+                ("power", raw_call(ExprType::Pow)),
                 ("ceil", raw_call(ExprType::Ceil)),
                 ("floor", raw_call(ExprType::Floor)),
                 ("abs", raw_call(ExprType::Abs)),
+                ("exp", raw_call(ExprType::Exp)),
                 ("mod", raw_call(ExprType::Modulus)),
                 (
                     "to_timestamp",
@@ -368,7 +372,17 @@ impl Binder {
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
+                ("array_join", raw_call(ExprType::ArrayToString)),
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
+                ("array_to_string", raw_call(ExprType::ArrayToString)),
+                ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                // jsonb
+                ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
+                ("jsonb_object_field_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
+                ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
+                ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
                 // System information operations.
                 (
                     "pg_typeof",
@@ -480,11 +494,7 @@ impl Binder {
                         .into())
                     }
                 })),
-                ("format_type", guard_by_len(2, raw(|_binder, _inputs| {
-                        // TODO
-                        // return null as an workaround for now
-                        Ok(ExprImpl::literal_null(DataType::Varchar))
-                }))),
+                ("format_type", raw_call(ExprType::FormatType)),
                 ("pg_table_is_visible", raw_literal(ExprImpl::literal_bool(true))),
                 ("pg_encoding_to_char", raw_literal(ExprImpl::literal_varchar("UTF8".into()))),
                 ("has_database_privilege", raw_literal(ExprImpl::literal_bool(true))),

@@ -14,14 +14,14 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{ArrayBuilder, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
-use risingwave_source::row_id::RowIdGenerator;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
@@ -79,7 +79,7 @@ impl RowIdGenExecutor {
         let len = column.array_ref().len();
         let mut builder = I64ArrayBuilder::new(len);
 
-        for (datum, op) in column.array_ref().iter().zip_eq(ops) {
+        for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
                 Op::Insert => builder.append(Some(self.row_id_generator.next().await)),

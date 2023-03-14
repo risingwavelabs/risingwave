@@ -11,12 +11,16 @@ repository = { workspace = true }
 static-link = ["workspace-config/enable-static-link"]
 static-log-level = ["workspace-config/enable-static-log-level"]
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
+[package.metadata.cargo-udeps.ignore]
+ignored = ["workspace-hack", "workspace-config", "task_stats_alloc"]
+
 [dependencies]
 anyhow = "1"
-clap = { version = "3", features = ["derive"] }
-console = "0.15.2"
-log = { version = "0.4" }
-risedev = { path = "../risedevtool" }
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
 risingwave_common = { path = "../common" }
 risingwave_compactor = { path = "../storage/compactor" }
 risingwave_compute = { path = "../compute" }
@@ -24,10 +28,8 @@ risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
 risingwave_rt = { path = "../utils/runtime" }
-sync-point = { path = "../utils/sync-point" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
-tempfile = "3.3.0"
-tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
+tempfile = "3"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -40,6 +42,9 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tracing = { version = "0.1" }
 workspace-config = { path = "../utils/workspace-config", optional = true }
 workspace-hack = { path = "../workspace-hack" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version = "0.5", features = ["profiling", "stats"] }
 
 [[bin]]
 name = "risingwave"

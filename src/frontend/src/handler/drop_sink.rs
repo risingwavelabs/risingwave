@@ -56,7 +56,7 @@ pub async fn handle_drop_sink(
     };
 
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.drop_sink(sink_id).await?;
+    catalog_writer.drop_sink(sink_id.sink_id).await?;
 
     Ok(PgResponse::empty_result(StatementType::DROP_SINK))
 }
@@ -70,7 +70,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_drop_sink_handler() {
-        let sql_create_table = "create table t (v1 smallint);";
+        let sql_create_table = "create table t (v1 smallint primary key);";
         let sql_create_mv = "create materialized view mv as select v1 from t;";
         let sql_create_sink = "create sink snk from mv with( connector = 'mysql')";
         let sql_drop_sink = "drop sink snk;";

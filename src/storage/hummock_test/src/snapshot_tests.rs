@@ -18,29 +18,22 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures::TryStreamExt;
 use risingwave_hummock_sdk::HummockReadEpoch;
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
-use risingwave_storage::hummock::*;
-use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreWrite, WriteOptions};
-use risingwave_storage::StateStore;
-
-use crate::get_notification_client_for_test;
-use crate::test_utils::{
-    with_hummock_storage_v1, with_hummock_storage_v2, HummockStateStoreTestTrait,
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
+
+use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
         use std::ops::RangeBounds;
         let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
+        let bounds: (Bound<Bytes>, Bound<Bytes>) = (
+            range.start_bound().map(|x: &Bytes| x.clone()),
+            range.end_bound().map(|x: &Bytes| x.clone()),
         );
         let it = $storage
             .iter(
@@ -52,6 +45,7 @@ macro_rules! assert_count_range_scan {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                 },
             )
             .await
@@ -108,8 +102,13 @@ async fn test_snapshot_inner(
     enable_sync: bool,
     enable_commit: bool,
 ) {
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+
     let epoch1: u64 = 1;
-    hummock_storage
+    local.init(epoch1);
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_put("test")),
@@ -123,6 +122,8 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    let epoch2 = epoch1 + 1;
+    local.seal_current_epoch(epoch2);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch1)
@@ -142,8 +143,7 @@ async fn test_snapshot_inner(
     }
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    let epoch2 = epoch1 + 1;
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_delete()),
@@ -158,6 +158,8 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    let epoch3 = epoch2 + 1;
+    local.seal_current_epoch(epoch3);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch2)
@@ -178,8 +180,7 @@ async fn test_snapshot_inner(
     assert_count_range_scan!(hummock_storage, .., 3, epoch2);
     assert_count_range_scan!(hummock_storage, .., 2, epoch1);
 
-    let epoch3 = epoch2 + 1;
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("2"), StorageValue::new_delete()),
@@ -194,6 +195,7 @@ async fn test_snapshot_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch3)
@@ -223,8 +225,12 @@ async fn test_snapshot_range_scan_inner(
     enable_commit: bool,
 ) {
     let epoch: u64 = 1;
+    let mut local = hummock_storage
+        .new_local(NewLocalOptions::for_test(Default::default()))
+        .await;
+    local.init(epoch);
 
-    hummock_storage
+    local
         .ingest_batch(
             vec![
                 (Bytes::from("1"), StorageValue::new_put("test")),
@@ -240,6 +246,7 @@ async fn test_snapshot_range_scan_inner(
         )
         .await
         .unwrap();
+    local.seal_current_epoch(u64::MAX);
     if enable_sync {
         let ssts = hummock_storage
             .seal_and_sync_epoch(epoch)
@@ -271,134 +278,10 @@ async fn test_snapshot_range_scan_inner(
     assert_count_range_scan!(hummock_storage, .., 4, epoch);
 }
 
-#[ignore]
-async fn test_snapshot_backward_range_scan_inner(enable_sync: bool, enable_commit: bool) {
-    let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
-    let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
-        setup_compute_env(8080).await;
-    let mock_hummock_meta_client = Arc::new(MockHummockMetaClient::new(
-        hummock_manager_ref.clone(),
-        worker_node.id,
-    ));
-
-    // TODO: may also test for v2 when the unit test is enabled.
-    let hummock_storage = HummockStorageV1::new(
-        hummock_options,
-        sstable_store,
-        mock_hummock_meta_client.clone(),
-        get_notification_client_for_test(env, hummock_manager_ref, worker_node),
-        Arc::new(HummockStateStoreMetrics::unused()),
-        Arc::new(risingwave_tracing::RwTracingService::disabled()),
-        Arc::new(CompactorMetrics::unused()),
-    )
-    .await
-    .unwrap();
-
-    let epoch = 1;
-    hummock_storage
-        .ingest_batch(
-            vec![
-                (Bytes::from("1"), StorageValue::new_put("test")),
-                (Bytes::from("2"), StorageValue::new_put("test")),
-                (Bytes::from("3"), StorageValue::new_put("test")),
-                (Bytes::from("4"), StorageValue::new_put("test")),
-                (Bytes::from("5"), StorageValue::new_put("test")),
-                (Bytes::from("6"), StorageValue::new_put("test")),
-            ],
-            vec![],
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
-    if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
-        if enable_commit {
-            mock_hummock_meta_client
-                .commit_epoch(epoch, ssts)
-                .await
-                .unwrap();
-            hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch))
-                .await
-                .unwrap();
-        }
-    }
-    hummock_storage
-        .ingest_batch(
-            vec![
-                (Bytes::from("5"), StorageValue::new_put("test")),
-                (Bytes::from("6"), StorageValue::new_put("test")),
-                (Bytes::from("7"), StorageValue::new_put("test")),
-                (Bytes::from("8"), StorageValue::new_put("test")),
-            ],
-            vec![],
-            WriteOptions {
-                epoch: epoch + 1,
-                table_id: Default::default(),
-            },
-        )
-        .await
-        .unwrap();
-    if enable_sync {
-        let ssts = hummock_storage
-            .seal_and_sync_epoch(epoch + 1)
-            .await
-            .unwrap()
-            .uncommitted_ssts;
-        if enable_commit {
-            mock_hummock_meta_client
-                .commit_epoch(epoch + 1, ssts)
-                .await
-                .unwrap();
-            hummock_storage
-                .try_wait_epoch(HummockReadEpoch::Committed(epoch + 1))
-                .await
-                .unwrap();
-        }
-    }
-
-    #[allow(unused_macros)]
-    macro_rules! key {
-        ($idx:expr) => {
-            Bytes::from(stringify!($idx))
-        };
-    }
-
-    // TODO: re-enable it when backward range scan is supported again on hummock
-    // assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(2), 2, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(2), 1, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(1), 2, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, key!(3)..=key!(1), 3, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, key!(3)..key!(0), 3, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, .., 6, epoch);
-    // assert_count_backward_range_scan!(hummock_storage, .., 8, epoch + 1);
-    // assert_count_backward_range_scan!(hummock_storage, key!(7)..key!(2), 5, epoch + 1);
-}
-
-#[tokio::test]
-async fn test_snapshot_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_inner(storage, meta_client, false, false).await;
-}
-
 #[tokio::test]
 async fn test_snapshot_v2() {
     let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, false, false).await;
-}
-
-#[tokio::test]
-async fn test_snapshot_with_sync_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
@@ -408,21 +291,9 @@ async fn test_snapshot_with_sync_v2() {
 }
 
 #[tokio::test]
-async fn test_snapshot_with_commit_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_inner(storage, meta_client, true, true).await;
-}
-
-#[tokio::test]
 async fn test_snapshot_with_commit_v2() {
     let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, true).await;
-}
-
-#[tokio::test]
-async fn test_snapshot_range_scan_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
@@ -432,43 +303,13 @@ async fn test_snapshot_range_scan_v2() {
 }
 
 #[tokio::test]
-async fn test_snapshot_range_scan_with_sync_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
-}
-
-#[tokio::test]
 async fn test_snapshot_range_scan_with_sync_v2() {
     let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
-async fn test_snapshot_range_scan_with_commit_v1() {
-    let (storage, meta_client) = with_hummock_storage_v1().await;
-    test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
-}
-
-#[tokio::test]
 async fn test_snapshot_range_scan_with_commit_v2() {
     let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
-}
-
-#[ignore]
-#[tokio::test]
-async fn test_snapshot_backward_range_scan() {
-    test_snapshot_backward_range_scan_inner(false, false).await;
-}
-
-#[ignore]
-#[tokio::test]
-async fn test_snapshot_backward_range_scan_with_sync() {
-    test_snapshot_backward_range_scan_inner(true, false).await;
-}
-
-#[ignore]
-#[tokio::test]
-async fn test_snapshot_backward_range_scan_with_commit() {
-    test_snapshot_backward_range_scan_inner(true, true).await;
 }

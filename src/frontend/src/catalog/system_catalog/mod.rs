@@ -22,7 +22,7 @@ use std::sync::{Arc, LazyLock};
 use async_trait::async_trait;
 use paste::paste;
 use risingwave_common::catalog::{
-    ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
+    ColumnCatalog, ColumnDesc, SysCatalogReader, TableDesc, TableId, DEFAULT_SUPER_USER_ID,
     INFORMATION_SCHEMA_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_CATALOG_SCHEMA_NAME,
 };
 use risingwave_common::error::Result;
@@ -30,7 +30,6 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
 
 use crate::catalog::catalog_service::CatalogReader;
-use crate::catalog::column_catalog::ColumnCatalog;
 use crate::catalog::system_catalog::information_schema::*;
 use crate::catalog::system_catalog::pg_catalog::*;
 use crate::catalog::system_catalog::rw_catalog::*;
@@ -203,7 +202,9 @@ prepare_sys_catalog! {
     { PG_CATALOG, PG_TABLESPACE, vec![0], read_tablespace_info },
     { PG_CATALOG, PG_STAT_ACTIVITY, vec![0], read_stat_activity },
     { PG_CATALOG, PG_ENUM, vec![0], read_enum_info },
+    { PG_CATALOG, PG_CONVERSION, vec![0], read_conversion_info },
     { INFORMATION_SCHEMA, COLUMNS, vec![], read_columns_info },
     { INFORMATION_SCHEMA, TABLES, vec![], read_tables_info },
     { RW_CATALOG, RW_META_SNAPSHOT, vec![], read_meta_snapshot await },
+    { RW_CATALOG, RW_DDL_PROGRESS, vec![], read_ddl_progress await },
 }

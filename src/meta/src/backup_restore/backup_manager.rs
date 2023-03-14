@@ -15,13 +15,16 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use arc_swap::ArcSwap;
 use itertools::Itertools;
 use prometheus::Registry;
 use risingwave_backup::error::BackupError;
-use risingwave_backup::storage::MetaSnapshotStorageRef;
+use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::task::JoinHandle;
@@ -29,7 +32,7 @@ use tokio::task::JoinHandle;
 use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
 use crate::backup_restore::metrics::BackupManagerMetrics;
 use crate::hummock::{HummockManagerRef, HummockVersionSafePoint};
-use crate::manager::{IdCategory, MetaSrvEnv};
+use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::storage::MetaStore;
 use crate::MetaResult;
 
@@ -57,40 +60,118 @@ impl BackupJobHandle {
 }
 
 pub type BackupManagerRef<S> = Arc<BackupManager<S>>;
+/// (url, dir)
+type StoreConfig = (String, String);
 
 /// `BackupManager` manages lifecycle of all existent backups and the running backup job.
 pub struct BackupManager<S: MetaStore> {
     env: MetaSrvEnv<S>,
     hummock_manager: HummockManagerRef<S>,
-    backup_store: MetaSnapshotStorageRef,
+    backup_store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
     /// Tracks the running backup job. Concurrent jobs is not supported.
     running_backup_job: tokio::sync::Mutex<Option<BackupJobHandle>>,
     metrics: BackupManagerMetrics,
 }
 
 impl<S: MetaStore> BackupManager<S> {
-    pub fn new(
+    pub async fn new(
         env: MetaSrvEnv<S>,
         hummock_manager: HummockManagerRef<S>,
-        backup_store: MetaSnapshotStorageRef,
         registry: Registry,
+        store_url: &str,
+        store_dir: &str,
+    ) -> MetaResult<Arc<Self>> {
+        let store_config = (store_url.to_string(), store_dir.to_string());
+        let store = create_snapshot_store(&store_config).await?;
+        tracing::info!(
+            "backup manager initialized: url={}, dir={}",
+            store_config.0,
+            store_config.1
+        );
+        let instance = Arc::new(Self::with_store(
+            env.clone(),
+            hummock_manager,
+            registry,
+            (store, store_config),
+        ));
+        let (local_notification_tx, mut local_notification_rx) =
+            tokio::sync::mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx)
+            .await;
+        let this = instance.clone();
+        tokio::spawn(async move {
+            loop {
+                match local_notification_rx.recv().await {
+                    Some(notification) => {
+                        if let LocalNotification::SystemParamsChange(p) = notification {
+                            let new_config = (
+                                p.backup_storage_url().to_string(),
+                                p.backup_storage_directory().to_string(),
+                            );
+                            this.handle_new_config(new_config).await;
+                        }
+                    }
+                    None => {
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(instance)
+    }
+
+    async fn handle_new_config(&self, new_config: StoreConfig) {
+        if self.backup_store.load().1 == new_config {
+            return;
+        }
+        if let Err(e) = self.set_store(new_config.clone()).await {
+            // Retry is driven by periodic system params notification.
+            tracing::warn!(
+                "failed to apply new backup config: url={}, dir={}, {:#?}",
+                new_config.0,
+                new_config.1,
+                e
+            );
+        }
+    }
+
+    fn with_store(
+        env: MetaSrvEnv<S>,
+        hummock_manager: HummockManagerRef<S>,
+        registry: Registry,
+        backup_store: (BoxedMetaSnapshotStorage, StoreConfig),
     ) -> Self {
         Self {
             env,
             hummock_manager,
-            backup_store,
+            backup_store: ArcSwap::from_pointee(backup_store),
             running_backup_job: tokio::sync::Mutex::new(None),
             metrics: BackupManagerMetrics::new(registry),
         }
     }
 
+    pub async fn set_store(&self, config: StoreConfig) -> MetaResult<()> {
+        let new_store = create_snapshot_store(&config).await?;
+        tracing::info!(
+            "new backup config is applied: url={}, dir={}",
+            config.0,
+            config.1
+        );
+        self.backup_store.store(Arc::new((new_store, config)));
+        Ok(())
+    }
+
     #[cfg(test)]
     pub fn for_test(env: MetaSrvEnv<S>, hummock_manager: HummockManagerRef<S>) -> Self {
-        Self::new(
+        Self::with_store(
             env,
             hummock_manager,
-            Arc::new(risingwave_backup::storage::DummyMetaSnapshotStorage::default()),
             Registry::new(),
+            (
+                Box::<risingwave_backup::storage::DummyMetaSnapshotStorage>::default(),
+                StoreConfig::default(),
+            ),
         )
     }
 
@@ -104,6 +185,26 @@ impl<S: MetaStore> BackupManager<S> {
                 job.job_id
             ));
         }
+        // The reasons to limit number of meta snapshot are:
+        // 1. limit size of `MetaSnapshotManifest`, which is kept in memory by
+        // `ObjectStoreMetaSnapshotStorage`.
+        // 2. limit number of pinned SSTs returned by
+        // `list_pinned_ssts`, which subsequently is used by GC.
+        const MAX_META_SNAPSHOT_NUM: usize = 100;
+        let current_number = self
+            .backup_store
+            .load()
+            .0
+            .manifest()
+            .snapshot_metadata
+            .len();
+        if current_number > MAX_META_SNAPSHOT_NUM {
+            bail!(format!(
+                "too many existent meta snapshots, expect at most {}",
+                MAX_META_SNAPSHOT_NUM
+            ))
+        }
+
         let job_id = self
             .env
             .id_gen_manager()
@@ -134,6 +235,8 @@ impl<S: MetaStore> BackupManager<S> {
         }
         if self
             .backup_store
+            .load()
+            .0
             .manifest()
             .snapshot_metadata
             .iter()
@@ -160,7 +263,7 @@ impl<S: MetaStore> BackupManager<S> {
                     .notify_hummock_without_version(
                         Operation::Update,
                         Info::MetaBackupManifestId(MetaBackupManifestId {
-                            id: self.backup_store.manifest().manifest_id,
+                            id: self.backup_store.load().0.manifest().manifest_id,
                         }),
                     );
             }
@@ -188,13 +291,23 @@ impl<S: MetaStore> BackupManager<S> {
 
     /// Deletes existent backups from backup storage.
     pub async fn delete_backups(&self, ids: &[MetaSnapshotId]) -> MetaResult<()> {
-        self.backup_store.delete(ids).await?;
+        self.backup_store.load().0.delete(ids).await?;
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(
+                Operation::Update,
+                Info::MetaBackupManifestId(MetaBackupManifestId {
+                    id: self.backup_store.load().0.manifest().manifest_id,
+                }),
+            );
         Ok(())
     }
 
     /// List all `SSTables` required by backups.
     pub fn list_pinned_ssts(&self) -> Vec<HummockSstableId> {
         self.backup_store
+            .load()
+            .0
             .manifest()
             .snapshot_metadata
             .iter()
@@ -204,7 +317,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {
-        self.backup_store.manifest()
+        self.backup_store.load().0.manifest()
     }
 }
 
@@ -226,7 +339,12 @@ impl<S: MetaStore> BackupWorker<S> {
             // Reuse job id as snapshot id.
             snapshot_builder.build(job_id).await?;
             let snapshot = snapshot_builder.finish()?;
-            backup_manager_clone.backup_store.create(&snapshot).await?;
+            backup_manager_clone
+                .backup_store
+                .load()
+                .0
+                .create(&snapshot)
+                .await?;
             Ok(BackupJobResult::Succeeded)
         };
         tokio::spawn(async move {
@@ -236,4 +354,17 @@ impl<S: MetaStore> BackupWorker<S> {
                 .await;
         })
     }
+}
+
+async fn create_snapshot_store(config: &StoreConfig) -> MetaResult<BoxedMetaSnapshotStorage> {
+    let object_store = Arc::new(
+        parse_remote_object_store(
+            &config.0,
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Meta Backup",
+        )
+        .await,
+    );
+    let store = ObjectStoreMetaSnapshotStorage::new(&config.1, object_store).await?;
+    Ok(Box::new(store))
 }

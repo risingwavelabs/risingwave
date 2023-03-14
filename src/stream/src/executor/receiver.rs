@@ -115,7 +115,7 @@ impl Executor for ReceiverExecutor {
     fn execute(mut self: Box<Self>) -> BoxedMessageStream {
         let actor_id = self.actor_context.id;
         let actor_id_str = actor_id.to_string();
-        let upstream_fragment_id_str = self.upstream_fragment_id.to_string();
+        let mut upstream_fragment_id_str = self.upstream_fragment_id.to_string();
 
         let stream = #[try_stream]
         async move {
@@ -149,13 +149,23 @@ impl Executor for ReceiverExecutor {
                         if let Some(update) = barrier
                             .as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                         {
+                            let new_upstream_fragment_id = update
+                                .new_upstream_fragment_id
+                                .unwrap_or(self.upstream_fragment_id);
+                            let added_upstream_actor_id = update.added_upstream_actor_id.clone();
+                            let removed_upstream_actor_id: Vec<_> =
+                                if update.new_upstream_fragment_id.is_some() {
+                                    vec![self.input.actor_id()]
+                                } else {
+                                    update.removed_upstream_actor_id.clone()
+                                };
+
                             assert_eq!(
-                                update.removed_upstream_actor_id,
+                                removed_upstream_actor_id,
                                 vec![self.input.actor_id()],
                                 "the removed upstream actor should be the same as the current input"
                             );
-                            let upstream_actor_id = *update
-                                .added_upstream_actor_id
+                            let upstream_actor_id = *added_upstream_actor_id
                                 .iter()
                                 .exactly_one()
                                 .expect("receiver should have exactly one upstream");
@@ -167,7 +177,7 @@ impl Executor for ReceiverExecutor {
                                 self.actor_context.id,
                                 self.fragment_id,
                                 upstream_actor_id,
-                                self.upstream_fragment_id,
+                                new_upstream_fragment_id,
                             )
                             .context("failed to create upstream input")?;
 
@@ -178,6 +188,9 @@ impl Executor for ReceiverExecutor {
 
                             // Replace the input.
                             self.input = new_upstream;
+
+                            self.upstream_fragment_id = new_upstream_fragment_id;
+                            upstream_fragment_id_str = new_upstream_fragment_id.to_string();
                         }
                     }
                 };
@@ -218,7 +231,7 @@ mod tests {
 
     use super::*;
     use crate::executor::{ActorContext, Barrier, Executor, Mutation};
-    use crate::task::test_utils::{add_local_channels, helper_make_local_actor};
+    use crate::task::test_utils::helper_make_local_actor;
 
     #[tokio::test]
     async fn test_configuration_change() {
@@ -230,7 +243,7 @@ mod tests {
         let ctx = Arc::new(SharedContext::for_test());
         let metrics = Arc::new(StreamingMetrics::unused());
 
-        // 1. Register info and channels in context.
+        // 1. Register info in context.
         {
             let mut actor_infos = ctx.actor_infos.write();
 
@@ -238,7 +251,8 @@ mod tests {
                 actor_infos.insert(local_actor_id, helper_make_local_actor(local_actor_id));
             }
         }
-        add_local_channels(ctx.clone(), vec![(old, actor_id), (new, actor_id)]);
+        // old -> actor_id
+        // new -> actor_id
 
         let (upstream_fragment_id, fragment_id) = (10, 18);
 
@@ -308,6 +322,7 @@ mod tests {
             (actor_id, upstream_fragment_id) => MergeUpdate {
                 actor_id,
                 upstream_fragment_id,
+                new_upstream_fragment_id: None,
                 added_upstream_actor_id: vec![new],
                 removed_upstream_actor_id: vec![old],
             }

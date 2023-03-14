@@ -20,14 +20,14 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |
-    StreamMaterialize { columns: [max_v1, max_v2, t1.id(hidden), t2.id(hidden)], pk_columns: [t1.id, t2.id] }
+    StreamMaterialize { columns: [max_v1, max_v2, t1.id(hidden), t2.id(hidden)], pk_columns: [t1.id, t2.id], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t1.id = t2.id, output: [max(t1.v1), max(t2.v2), t1.id, t2.id] }
       ├─StreamProject { exprs: [max(t1.v1), t1.id] }
-      | └─StreamHashAgg { group_key: [t1.id], aggs: [count, max(t1.v1)] }
+      | └─StreamHashAgg { group_key: [t1.id], aggs: [max(t1.v1), count] }
       |   └─StreamExchange { dist: HashShard(t1.id) }
       |     └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamProject { exprs: [max(t2.v2), t2.id] }
-        └─StreamHashAgg { group_key: [t2.id], aggs: [count, max(t2.v2)] }
+        └─StreamHashAgg { group_key: [t2.id], aggs: [max(t2.v2), count] }
           └─StreamExchange { dist: HashShard(t2.id) }
             └─StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
@@ -50,16 +50,20 @@
     ON
         Tone.id = Ttwo.id;
   stream_plan: |
-    StreamMaterialize { columns: [max_v, min_v, t.id(hidden), t.id#1(hidden)], pk_columns: [t.id, t.id#1] }
+    StreamMaterialize { columns: [max_v, min_v, t.id(hidden), t.id#1(hidden)], pk_columns: [t.id, t.id#1], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [max(t.v), min(t.v), t.id, t.id] }
       ├─StreamProject { exprs: [max(t.v), t.id] }
-      | └─StreamHashAgg { group_key: [t.id], aggs: [count, max(t.v)] }
+      | └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }
       |   └─StreamExchange { dist: HashShard(t.id) }
-      |     └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+      |     └─StreamProject { exprs: [t.id, t.v, t._row_id] }
+      |       └─StreamShare { id = 1 }
+      |         └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamProject { exprs: [min(t.v), t.id] }
-        └─StreamHashAgg { group_key: [t.id], aggs: [count, min(t.v)] }
+        └─StreamHashAgg { group_key: [t.id], aggs: [min(t.v), count] }
           └─StreamExchange { dist: HashShard(t.id) }
-            └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamProject { exprs: [t.id, t.v, t._row_id] }
+              └─StreamShare { id = 1 }
+                └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
@@ -70,11 +74,11 @@
         v1,
         v2,
         v3;
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, v3], pk_columns: [v1, v2, v3] }
+    StreamMaterialize { columns: [v1, v2, v3], pk_columns: [v1, v2, v3], pk_conflict: "no check" }
     └─StreamProject { exprs: [t.v1, t.v2, t.v3] }
       └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
         └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
@@ -96,9 +100,9 @@
         mv
     where
         v3 = 'world' or v3 = 'hello';
-  optimized_logical_plan: |
+  optimized_logical_plan_for_batch: |
     LogicalScan { table: mv, output_columns: [mv.v1], required_columns: [mv.v1, mv.v3], predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
   stream_plan: |
-    StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], pk_columns: [v1, mv.v2, mv.v3] }
+    StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], pk_columns: [v1, mv.v2, mv.v3], pk_conflict: "no check" }
     └─StreamFilter { predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
       └─StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], pk: [mv.v1, mv.v2, mv.v3], dist: UpstreamHashShard(mv.v1, mv.v2, mv.v3) }

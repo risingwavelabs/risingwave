@@ -19,6 +19,7 @@ use std::sync::LazyLock;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::sig::agg::{agg_func_sigs, AggFuncSig as RwAggFuncSig};
 use risingwave_expr::sig::cast::{cast_sigs, CastContext, CastSig as RwCastSig};
@@ -42,11 +43,12 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Timestamptz => AstDataType::Timestamp(true),
         DataType::Time => AstDataType::Time(false),
         DataType::Interval => AstDataType::Interval,
+        DataType::Jsonb => AstDataType::Custom(vec!["JSONB".into()].into()),
         DataType::Struct(inner) => AstDataType::Struct(
             inner
                 .field_names
                 .iter()
-                .zip_eq(inner.fields.iter())
+                .zip_eq_fast(inner.fields.iter())
                 .map(|(name, typ)| StructField {
                     name: name.as_str().into(),
                     data_type: data_type_to_ast_data_type(typ),
@@ -154,6 +156,18 @@ impl TryFrom<&RwAggFuncSig> for AggFuncSig {
     }
 }
 
+/// Function ban list.
+/// These functions should be generated eventually, by adding expression constraints.
+/// If we naively generate arguments for these functions, it will affect sqlsmith
+/// effectiveness, e.g. cause it to crash.
+static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
+    [
+        ExprType::Repeat, // FIXME: https://github.com/risingwavelabs/risingwave/issues/8003
+    ]
+    .into_iter()
+    .collect()
+});
+
 /// Table which maps functions' return types to possible function signatures.
 // ENABLE: https://github.com/risingwavelabs/risingwave/issues/5826
 pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLock::new(|| {
@@ -163,6 +177,7 @@ pub(crate) static FUNC_TABLE: LazyLock<HashMap<DataType, Vec<FuncSig>>> = LazyLo
             func.inputs_type
                 .iter()
                 .all(|t| *t != DataTypeName::Timestamptz)
+                && !FUNC_BAN_LIST.contains(&func.func)
         })
         .filter_map(|func| func.try_into().ok())
         .for_each(|func: FuncSig| funcs.entry(func.ret_type.clone()).or_default().push(func));

@@ -21,11 +21,12 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
+use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
-use risingwave_expr::expr::expr_unary::new_unary_expr;
+use risingwave_expr::expr::test_utils::{make_expression, make_string_literal};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::cast::cast_sigs;
@@ -178,19 +179,19 @@ fn bench_expr(c: &mut Criterion) {
             .find(|r| r.return_type() == ty)
             .expect("expression not found")
     };
-    const TIMEZONE: i32 = 14;
-    const TIME_FIELD: i32 = 15;
-    const EXTRACT_FIELD_DATE: i32 = 16;
-    const EXTRACT_FIELD_TIME: i32 = 17;
-    const EXTRACT_FIELD_TIMESTAMP: i32 = 16;
-    const EXTRACT_FIELD_TIMESTAMPTZ: i32 = 18;
-    const BOOL_STRING: i32 = 19;
-    const NUMBER_STRING: i32 = 12;
-    const DATE_STRING: i32 = 20;
-    const TIME_STRING: i32 = 21;
-    const TIMESTAMP_STRING: i32 = 22;
-    const TIMESTAMPTZ_STRING: i32 = 23;
-    const INTERVAL_STRING: i32 = 24;
+    const TIMEZONE: usize = 14;
+    const TIME_FIELD: usize = 15;
+    const EXTRACT_FIELD_DATE: usize = 16;
+    const EXTRACT_FIELD_TIME: usize = 17;
+    const EXTRACT_FIELD_TIMESTAMP: usize = 16;
+    const EXTRACT_FIELD_TIMESTAMPTZ: usize = 18;
+    const BOOL_STRING: usize = 19;
+    const NUMBER_STRING: usize = 12;
+    const DATE_STRING: usize = 20;
+    const TIME_STRING: usize = 21;
+    const TIMESTAMP_STRING: usize = 22;
+    const TIMESTAMPTZ_STRING: usize = 23;
+    const INTERVAL_STRING: usize = 24;
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
@@ -234,7 +235,7 @@ fn bench_expr(c: &mut Criterion) {
                         DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
                         t => panic!("unexpected type: {t:?}"),
                     },
-                    _ => inputref_for_type((*t).into()).index() as i32,
+                    _ => inputref_for_type((*t).into()).index(),
                 })
                 .collect_vec(),
         );
@@ -297,7 +298,7 @@ fn bench_expr(c: &mut Criterion) {
                         continue;
                     }
                 };
-                InputRefExpression::new(DataType::Varchar, idx as usize).boxed()
+                InputRefExpression::new(DataType::Varchar, idx).boxed()
             } else {
                 inputref_for_type(sig.from_type.into()).clone().boxed()
             },
@@ -329,7 +330,7 @@ fn bench_expr(c: &mut Criterion) {
                 overflow |= (c ^ a) & (c ^ b) < 0;
             }
             if overflow {
-                return Err(ExprError::NumericOutOfRange);
+                return Err(ExprError::NumericOverflow);
             }
             c.set_bitmap(a.null_bitmap() & b.null_bitmap());
             Ok(c)

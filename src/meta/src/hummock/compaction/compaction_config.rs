@@ -26,6 +26,8 @@ const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * 1024 * 1024; // 32MB
 const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
 const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
+const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = u32::MAX as u64;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -44,8 +46,8 @@ impl CompactionConfigBuilder {
                 target_file_size_base: DEFAULT_TARGET_FILE_SIZE_BASE,
                 compaction_mode: CompactionMode::Range as i32,
                 // support compression setting per level
-                // L0 and L1 do not use compression algorithms
-                // L2 - L4 use Lz4, else use Zstd
+                // L0/L1 and L2 do not use compression algorithms
+                // L3 - L4 use Lz4, else use Zstd
                 compression_algorithm: vec![
                     "None".to_string(),
                     "None".to_string(),
@@ -59,6 +61,10 @@ impl CompactionConfigBuilder {
                     | CompactionFilterFlag::TTL)
                     .into(),
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
+                max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
+                split_by_state_table: false,
+                level0_stop_write_threshold_sub_level_number:
+                    DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER,
             },
         }
     }
@@ -68,8 +74,24 @@ impl CompactionConfigBuilder {
     }
 
     pub fn build(self) -> CompactionConfig {
+        if let Err(reason) = validate_compaction_config(&self.config) {
+            tracing::warn!("Bad compaction config: {}", reason);
+        }
         self.config
     }
+}
+
+/// Returns Ok if `config` is valid,
+/// or the reason why it's invalid.
+pub fn validate_compaction_config(config: &CompactionConfig) -> Result<(), String> {
+    let sub_level_number_threshold_min = 1;
+    if config.level0_stop_write_threshold_sub_level_number < sub_level_number_threshold_min {
+        return Err(format!(
+            "{} is too small for level0_stop_write_threshold_sub_level_number, expect >= {}",
+            config.level0_stop_write_threshold_sub_level_number, sub_level_number_threshold_min
+        ));
+    }
+    Ok(())
 }
 
 impl Default for CompactionConfigBuilder {
@@ -101,5 +123,8 @@ builder_field! {
     compaction_mode: i32,
     compression_algorithm: Vec<String>,
     compaction_filter_mask: u32,
+    target_file_size_base: u64,
     max_sub_compaction: u32,
+    max_space_reclaim_bytes: u64,
+    level0_stop_write_threshold_sub_level_number: u64,
 }

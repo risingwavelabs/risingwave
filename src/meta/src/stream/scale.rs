@@ -24,17 +24,15 @@ use num_traits::abs;
 use risingwave_common::bail;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::{ActorMapping, ParallelUnitId, VirtualNode};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::common::{worker_node, ActorInfo, ParallelUnit, WorkerNode, WorkerType};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::{self, ActorStatus, Fragment};
-use risingwave_pb::stream_plan::barrier::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    DispatcherType, FragmentTypeFlag, PauseMutation, ResumeMutation, StreamActor, StreamNode,
-};
+use risingwave_pb::stream_plan::{DispatcherType, FragmentTypeFlag, StreamActor, StreamNode};
 use risingwave_pb::stream_service::{
-    BroadcastActorInfoTableRequest, BuildActorsRequest, HangingChannel, UpdateActorsRequest,
+    BroadcastActorInfoTableRequest, BuildActorsRequest, UpdateActorsRequest,
 };
 use uuid::Uuid;
 
@@ -783,9 +781,6 @@ where
             }
         }
 
-        // Note: we must create hanging channels at first, creating hanging channels with upstream
-        // actors after scaling will cause the barrier to fail to push down.
-        let mut worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>> = HashMap::new();
         let mut new_created_actors = HashMap::new();
         for fragment_id in reschedules.keys() {
             let actors_to_create = fragment_actors_to_create
@@ -799,38 +794,10 @@ where
 
             for (actor_to_create, sample_actor) in actors_to_create
                 .iter()
-                .zip_eq(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
+                .zip_eq_debug(repeat(fragment.actors.first().unwrap()).take(actors_to_create.len()))
             {
                 let new_actor_id = actor_to_create.0;
-                let new_parallel_unit_id = actor_to_create.1;
                 let mut new_actor = sample_actor.clone();
-
-                let worker = ctx.parallel_unit_id_to_worker(new_parallel_unit_id)?;
-
-                // Because of the transferability of no shuffle, the upstream and downstream actors
-                // of no shuffle are always created at the same time, so the upstream and downstream
-                // scaling process of 1-1 no shuffle does not need to create a hanging channel,
-                // but for the downstream of no shuffle with multiple upstreams (e.g. dynamic filter
-                // actor), the hanging channel from the remaining upstreams to the new actor needs
-                // to be created
-                for upstream_actor_id in &new_actor.upstream_actor_id {
-                    let upstream_worker_id = ctx
-                        .actor_id_to_parallel_unit(upstream_actor_id)?
-                        .worker_node_id;
-                    worker_hanging_channels
-                        .entry(upstream_worker_id)
-                        .or_default()
-                        .push(HangingChannel {
-                            upstream: Some(ActorInfo {
-                                actor_id: *upstream_actor_id,
-                                host: None,
-                            }),
-                            downstream: Some(ActorInfo {
-                                actor_id: *new_actor_id,
-                                host: worker.host.clone(),
-                            }),
-                        });
-                }
 
                 // This should be assigned before the `modify_actor_upstream_and_downstream` call,
                 // because we need to use the new actor id to find the upstream and
@@ -934,8 +901,7 @@ where
         }
 
         self.create_actors_on_compute_node(
-            &ctx,
-            worker_hanging_channels,
+            &ctx.worker_nodes,
             actor_infos_to_broadcast,
             node_actors_to_create,
             broadcast_worker_ids,
@@ -1160,11 +1126,7 @@ where
         tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
-            .run_multiple_commands(vec![
-                Command::Plain(Some(Mutation::Pause(PauseMutation {}))),
-                Command::RescheduleFragment(reschedule_fragment),
-                Command::Plain(Some(Mutation::Resume(ResumeMutation {}))),
-            ])
+            .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
             .await?;
 
         Ok(())
@@ -1172,14 +1134,13 @@ where
 
     async fn create_actors_on_compute_node(
         &self,
-        ctx: &RescheduleContext,
-        worker_hanging_channels: HashMap<WorkerId, Vec<HangingChannel>>,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
         actor_infos_to_broadcast: BTreeMap<u32, ActorInfo>,
         node_actors_to_create: HashMap<WorkerId, Vec<StreamActor>>,
         broadcast_worker_ids: HashSet<u32>,
     ) -> MetaResult<()> {
         for worker_id in &broadcast_worker_ids {
-            let node = ctx.worker_nodes.get(worker_id).unwrap();
+            let node = worker_nodes.get(worker_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
 
             let actor_infos_to_broadcast = actor_infos_to_broadcast.values().cloned().collect();
@@ -1192,38 +1153,20 @@ where
                 .await?;
         }
 
-        let mut worker_hanging_channels = worker_hanging_channels;
-
         for (node_id, stream_actors) in &node_actors_to_create {
-            let node = ctx.worker_nodes.get(node_id).unwrap();
+            let node = worker_nodes.get(node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
             let request = UpdateActorsRequest {
                 request_id,
                 actors: stream_actors.clone(),
-                hanging_channels: worker_hanging_channels.remove(node_id).unwrap_or_default(),
             };
 
             client.to_owned().update_actors(request).await?;
         }
 
-        for (node_id, hanging_channels) in worker_hanging_channels {
-            let node = ctx.worker_nodes.get(&node_id).unwrap();
-            let client = self.env.stream_client_pool().get(node).await?;
-            let request_id = Uuid::new_v4().to_string();
-
-            client
-                .to_owned()
-                .update_actors(UpdateActorsRequest {
-                    request_id,
-                    actors: vec![],
-                    hanging_channels,
-                })
-                .await?;
-        }
-
         for (node_id, stream_actors) in node_actors_to_create {
-            let node = ctx.worker_nodes.get(&node_id).unwrap();
+            let node = worker_nodes.get(&node_id).unwrap();
             let client = self.env.stream_client_pool().get(node).await?;
             let request_id = Uuid::new_v4().to_string();
 

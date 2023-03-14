@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -81,7 +82,7 @@ impl ValuesExecutor {
                 let chunk_size = self.chunk_size.min(self.rows.len());
                 let mut array_builders = self.schema.create_array_builders(chunk_size);
                 for row in self.rows.by_ref().take(chunk_size) {
-                    for (expr, builder) in row.into_iter().zip_eq(&mut array_builders) {
+                    for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
                         let out = expr.eval(&one_row_chunk)?;
                         builder.append_array(&out);
                     }

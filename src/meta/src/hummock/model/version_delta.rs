@@ -16,11 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_pb::hummock::HummockVersionDelta;
 
+use crate::hummock::model::HUMMOCK_VERSION_DELTA_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for hummock version delta.
-/// `cf(hummock_version_delta)`: `HummockVersionId` -> `HummockVersionDelta`
-const HUMMOCK_VERSION_DELTA_CF_NAME: &str = "cf/hummock_version_delta";
 
 /// `HummockVersionDelta` tracks delta of `Sstables` in given version based on previous version.
 impl MetadataModel for HummockVersionDelta {

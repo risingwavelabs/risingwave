@@ -65,7 +65,11 @@ impl ComputeNodeService {
             .arg("--parallelism")
             .arg(&config.parallelism.to_string())
             .arg("--total-memory-bytes")
-            .arg(&config.total_memory_bytes.to_string());
+            .arg(&config.total_memory_bytes.to_string())
+            .arg("--memory-control-policy")
+            .arg(&config.memory_control_policy)
+            .arg("--streaming-memory-proportion")
+            .arg(&config.streaming_memory_proportion.to_string());
 
         let provide_jaeger = config.provide_jaeger.as_ref().unwrap();
         match provide_jaeger.len() {
@@ -82,25 +86,29 @@ impl ComputeNodeService {
         }
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
+        let provide_opendal = config.provide_opendal.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
 
         let is_shared_backend = match (
             config.enable_in_memory_kv_state_backend,
             provide_minio.as_slice(),
             provide_aws_s3.as_slice(),
+            provide_opendal.as_slice(),
         ) {
-            (true, [], []) => {
+            (true, [], [], []) => {
                 cmd.arg("--state-store").arg("in-memory");
                 false
             }
-            (true, _, _) => {
+            (true, _, _, _) => {
                 return Err(anyhow!(
                     "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
                 ));
             }
-            (false, provide_minio, provide_aws_s3) => add_storage_backend(
+            (_, provide_minio, provide_aws_s3, provide_opendal) => add_storage_backend(
                 &config.id,
+                provide_opendal,
                 provide_minio,
                 provide_aws_s3,
                 hummock_in_memory_strategy,
@@ -158,7 +166,7 @@ impl Task for ComputeNodeService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compute-node",
+                "prof:true,lg_prof_interval:40,lg_prof_sample:19,prof_prefix:compute-node",
             );
         }
 

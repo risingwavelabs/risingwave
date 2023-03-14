@@ -72,6 +72,18 @@ macro_rules! list {
 pub(crate) use list;
 
 #[macro_export]
+macro_rules! jsonb {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Jsonb,
+            risingwave_common::array::JsonbArray
+        }
+    };
+}
+
+pub(crate) use jsonb;
+
+#[macro_export]
 macro_rules! int16 {
     ($macro:ident) => {
         $macro! {

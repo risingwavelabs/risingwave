@@ -63,6 +63,9 @@ impl BoxedExecutorBuilder for LimitExecutor {
 impl LimitExecutor {
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn do_execute(self: Box<Self>) {
+        if self.limit == 0 {
+            return Ok(());
+        }
         // the number of rows have been skipped due to offset
         let mut skipped = 0;
         // the number of rows have been returned as execute result
@@ -150,6 +153,7 @@ mod tests {
     use risingwave_common::array::{Array, BoolArray, DataChunk, PrimitiveArray};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
+    use risingwave_common::util::iter_util::ZipEqDebug;
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -338,7 +342,7 @@ mod tests {
             result.cardinality()
         );
         MockLimitIter::new(row_num, limit, offset, visible)
-            .zip_eq(0..result.cardinality())
+            .zip_eq_debug(0..result.cardinality())
             .for_each(|(expect, chunk_idx)| {
                 assert_eq!(col1.array().as_bool().value_at(chunk_idx), Some(true));
                 assert_eq!(

@@ -201,6 +201,7 @@ mod tests {
 
     use super::*;
     use crate::array::NULL_VAL_FOR_HASH;
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_utf8_builder() {
@@ -350,10 +351,12 @@ mod tests {
         let hasher_builder = RandomXxHashBuilder64::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
-            v.iter().zip_eq(&mut states).for_each(|(x, state)| match x {
-                Some(inner) => inner.hash(state),
-                None => NULL_VAL_FOR_HASH.hash(state),
-            })
+            v.iter()
+                .zip_eq_fast(&mut states)
+                .for_each(|(x, state)| match x {
+                    Some(inner) => inner.hash(state),
+                    None => NULL_VAL_FOR_HASH.hash(state),
+                })
         });
         let hashes = hash_finish(&mut states[..]);
 

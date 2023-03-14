@@ -31,8 +31,11 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Prepare data"
 cp src/connector/src/test_data/simple-schema.avsc ./avro-simple-schema.avsc
@@ -60,9 +63,10 @@ export PGPASSWORD='postgres';
 createdb -h db -U postgres cdc_test
 psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 
-node_port=60061
+node_port=50051
 node_timeout=10
-java -jar ./connector-service.jar --port $node_port > .risingwave/log/connector-source.log 2>&1 &
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
 echo "waiting for connector node to start"
 start_time=$(date +%s)
 while :
@@ -104,13 +108,13 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc_insert.s
 # start cluster w/o clean-data
 cargo make dev ci-1cn-1fe-with-recovery
 echo "wait for recovery finish"
-sleep 10
+sleep 20
 echo "check mviews after cluster recovery"
 # check results
 sqllogictest -p 4566 -d dev './e2e_test/source/cdc/cdc.check_new_rows.slt'
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"

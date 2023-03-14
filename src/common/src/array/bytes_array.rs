@@ -15,7 +15,6 @@
 use std::iter;
 use std::mem::size_of;
 
-use itertools::Itertools;
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
@@ -23,6 +22,7 @@ use risingwave_pb::data::{Array as ProstArray, ArrayType};
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
 use crate::buffer::{Bitmap, BitmapBuilder};
+use crate::util::iter_util::ZipEqDebug;
 
 /// `BytesArray` is a collection of Rust `[u8]`s.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,7 +55,7 @@ impl Array for BytesArray {
             // of null_bitmap is n, chain iterator of null_bitmapƒ
             // with one single true here to push the end of offset
             // to offset_buffer
-            .zip_eq(self.null_bitmap().iter().chain(iter::once(true)))
+            .zip_eq_debug(self.null_bitmap().iter().chain(iter::once(true)))
             .fold(
                 Vec::<u8>::with_capacity(self.data.len() * size_of::<usize>()),
                 |mut buffer, (offset, not_null)| {

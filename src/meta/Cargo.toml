@@ -7,19 +7,21 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
 anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
-async-stream = "0.3"
 async-trait = "0.1"
-byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-clap = { version = "3", features = ["derive", "env"] }
-crc32fast = "1"
+clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"
-derivative = "2"
+easy-ext = "1"
 either = "1"
 enum-as-inner = "0.5"
 etcd-client = { version = "0.2", package = "madsim-etcd-client" }
@@ -34,7 +36,6 @@ mime_guess = "2"
 num-integer = "0.1"
 num-traits = "0.2"
 parking_lot = { version = "0.12", features = ["arc_lock"] }
-paste = "1"
 prometheus = "0.13"
 prometheus-http-query = "0.6"
 prost = "0.11"
@@ -51,10 +52,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 scopeguard = "1.1.0"
 serde = { version = "1", features = ["derive"] }
-serde_derive = "1"
 serde_json = "1"
-serial_test = "0.9"
-smallvec = "1"
 sync-point = { path = "../utils/sync-point" }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -67,13 +65,11 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-retry = "0.3"
 tokio-stream = { version = "0.1", features = ["net"] }
-toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tower = { version = "0.4", features = ["util", "load-shed"] }
 tracing = "0.1"
 url = "2"
 uuid = { version = "1", features = ["v4"] }
-xxhash-rust = { version = "0.8.5", features = ["xxh64"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 axum = "0.6"

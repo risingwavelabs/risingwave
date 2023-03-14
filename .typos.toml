@@ -7,6 +7,7 @@ ot = "ot"
 inout = "inout"
 numer = "numer"
 nd = "nd"
+steam = "stream"
 
 [files]
 extend-exclude = [
@@ -15,4 +16,7 @@ extend-exclude = [
     "**/*.svg",
     "scripts",
     "src/frontend/planner_test/tests/testdata",
+    "src/tests/sqlsmith/tests/freeze",
+    "**/go.mod",
+    "**/go.sum",
 ]

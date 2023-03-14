@@ -88,17 +88,14 @@ where
 
         // unregister compaction group for dirty table fragments.
         let _ = self.hummock_manager
-            .unregister_table_ids(
-                &to_drop_streaming_ids
-                    .iter()
-                    .map(|t| t.table_id)
-                    .collect_vec(),
+            .unregister_table_fragments_vec(
+                &to_drop_table_fragments
             )
             .await.inspect_err(|e|
             tracing::warn!(
-                "Failed to unregister compaction group for {:#?}.\nThey will be cleaned up on node restart.\n{:#?}",
-                to_drop_streaming_ids,
-                e)
+            "Failed to unregister compaction group for {:#?}. They will be cleaned up on node restart. {:#?}",
+            to_drop_table_fragments,
+            e)
         );
 
         // clean up source connector dirty changes.
@@ -168,6 +165,21 @@ where
                 true,
                 self.source_manager.clone(),
             ));
+
+            #[cfg(not(all(test, feature = "failpoints")))]
+            {
+                use risingwave_common::util::epoch::INVALID_EPOCH;
+
+                let mce = self
+                    .hummock_manager
+                    .get_current_version()
+                    .await
+                    .max_committed_epoch;
+
+                if mce != INVALID_EPOCH {
+                    command_ctx.wait_epoch_commit(mce).await?;
+                }
+            }
 
             let (barrier_complete_tx, mut barrier_complete_rx) =
                 tokio::sync::mpsc::unbounded_channel();
@@ -304,7 +316,6 @@ where
                 .update_actors(UpdateActorsRequest {
                     request_id,
                     actors: node_actors.get(node_id).cloned().unwrap_or_default(),
-                    ..Default::default()
                 })
                 .await?;
         }

@@ -110,6 +110,20 @@ message FlushResponse {
   hummock.HummockSnapshot snapshot = 2;
 }
 
+message CreatingJobInfo {
+  uint32 database_id = 1;
+  uint32 schema_id = 2;
+  string name = 3;
+}
+
+message CancelCreatingJobsRequest {
+  repeated CreatingJobInfo infos = 1;
+}
+
+message CancelCreatingJobsResponse {
+  common.Status status = 1;
+}
+
 message ListTableFragmentsRequest {
   repeated uint32 table_ids = 1;
 }
@@ -133,6 +147,7 @@ message ListTableFragmentsResponse {
 
 service StreamManagerService {
   rpc Flush(FlushRequest) returns (FlushResponse);
+  rpc CancelCreatingJobs(CancelCreatingJobsRequest) returns (CancelCreatingJobsResponse);
   rpc ListTableFragments(ListTableFragmentsRequest) returns (ListTableFragmentsResponse);
 }
 
@@ -145,6 +160,8 @@ message AddWorkerNodeRequest {
 }
 
 message AddWorkerNodeResponse {
+  reserved 3;
+  reserved "system_params";
   common.Status status = 1;
   common.WorkerNode node = 2;
 }
@@ -188,6 +205,7 @@ enum SubscribeType {
   FRONTEND = 1;
   HUMMOCK = 2;
   COMPACTOR = 3;
+  COMPUTE = 4;
 }
 
 // Below for notification service.
@@ -216,9 +234,10 @@ message MetaSnapshot {
   repeated common.WorkerNode nodes = 10;
   hummock.HummockSnapshot hummock_snapshot = 11;
   hummock.HummockVersion hummock_version = 12;
+  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
+  hummock.WriteLimits hummock_write_limits = 16;
 
   SnapshotVersion version = 13;
-  backup_service.MetaBackupManifestId meta_backup_manifest_id = 14;
 }
 
 message SubscribeResponse {
@@ -248,6 +267,8 @@ message SubscribeResponse {
     hummock.HummockVersionDeltas hummock_version_deltas = 15;
     MetaSnapshot snapshot = 16;
     backup_service.MetaBackupManifestId meta_backup_manifest_id = 17;
+    SystemParams system_params = 19;
+    hummock.WriteLimits hummock_write_limits = 20;
   }
 }
 
@@ -306,4 +327,40 @@ message MembersResponse {
 
 service MetaMemberService {
   rpc Members(MembersRequest) returns (MembersResponse);
+}
+
+// The schema for persisted system parameters.
+// Note on backward compatibility:
+// - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+// - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
+// - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
+message SystemParams {
+  optional uint32 barrier_interval_ms = 1;
+  optional uint64 checkpoint_frequency = 2;
+  optional uint32 sstable_size_mb = 3;
+  optional uint32 block_size_kb = 4;
+  optional double bloom_false_positive = 5;
+  optional string state_store = 6;
+  optional string data_directory = 7;
+  optional string backup_storage_url = 8;
+  optional string backup_storage_directory = 9;
+}
+
+message GetSystemParamsRequest {}
+
+message GetSystemParamsResponse {
+  SystemParams params = 1;
+}
+
+message SetSystemParamRequest {
+  string param = 1;
+  // None means set to default value.
+  optional string value = 2;
+}
+
+message SetSystemParamResponse {}
+
+service SystemParamsService {
+  rpc GetSystemParams(GetSystemParamsRequest) returns (GetSystemParamsResponse);
+  rpc SetSystemParam(SetSystemParamRequest) returns (SetSystemParamResponse);
 }

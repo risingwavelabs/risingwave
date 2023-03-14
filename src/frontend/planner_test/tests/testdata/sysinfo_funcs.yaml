@@ -2,40 +2,33 @@
 - sql: |
     select current_schema();
   batch_plan: |
-    BatchProject { exprs: ['public':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['public':Varchar]] }
 - sql: |
     select current_schema;
   batch_plan: |
-    BatchProject { exprs: ['public':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['public':Varchar]] }
 - sql: |
     select session_user;
   batch_plan: |
-    BatchProject { exprs: ['root':Varchar] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [['root':Varchar]] }
 - sql: |
     select current_schemas(true);
   batch_plan: |
-    BatchProject { exprs: [ARRAY[pg_catalog, public]:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ARRAY[pg_catalog, public]:List { datatype: Varchar }]] }
 - sql: |
     select current_schemas(false);
   batch_plan: |
-    BatchProject { exprs: [ARRAY[public]:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[ARRAY[public]:List { datatype: Varchar }]] }
 - sql: |
     select current_schemas(null);
   batch_plan: |
-    BatchProject { exprs: [null:List { datatype: Varchar }] }
-    └─BatchValues { rows: [[]] }
+    BatchValues { rows: [[null:List { datatype: Varchar }]] }
 - sql: |
     select current_schemas(true and false);
   binder_error: |-
     Feature is not yet implemented: Only boolean literals are supported in `current_schemas`.
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - sql: |
-    select current_timestamp;
-  batch_plan: |-
-    BatchProject { exprs: [Now] }
-    └─BatchValues { rows: [[]] }
+    select current_timestamp > now() - interval '10 minutes';
+  batch_plan: |
+    BatchValues { rows: [[true:Boolean]] }

@@ -22,19 +22,27 @@ use super::{
     ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
     ToDistributedBatch,
 };
+use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchHopWindow` implements [`super::LogicalHopWindow`] to evaluate specified expressions on
 /// input rows
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchHopWindow {
     pub base: PlanBase,
     logical: LogicalHopWindow,
+    window_start_exprs: Vec<ExprImpl>,
+    window_end_exprs: Vec<ExprImpl>,
 }
 
 impl BatchHopWindow {
-    pub fn new(logical: LogicalHopWindow) -> Self {
+    pub fn new(
+        logical: LogicalHopWindow,
+        window_start_exprs: Vec<ExprImpl>,
+        window_end_exprs: Vec<ExprImpl>,
+    ) -> Self {
         let ctx = logical.base.ctx.clone();
         let distribution = logical
             .i2o_col_mapping()
@@ -45,7 +53,12 @@ impl BatchHopWindow {
             distribution,
             logical.get_out_column_index_order(),
         );
-        BatchHopWindow { base, logical }
+        BatchHopWindow {
+            base,
+            logical,
+            window_start_exprs,
+            window_end_exprs,
+        }
     }
 }
 
@@ -61,7 +74,11 @@ impl PlanTreeNodeUnary for BatchHopWindow {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(self.logical.clone_with_input(input))
+        Self::new(
+            self.logical.clone_with_input(input),
+            self.window_start_exprs.clone(),
+            self.window_end_exprs.clone(),
+        )
     }
 }
 
@@ -89,7 +106,11 @@ impl ToDistributedBatch for BatchHopWindow {
             .input()
             .to_distributed_with_required(required_order, &input_required)?;
         let new_logical = self.logical.clone_with_input(new_input);
-        let batch_plan = BatchHopWindow::new(new_logical);
+        let batch_plan = BatchHopWindow::new(
+            new_logical,
+            self.window_start_exprs.clone(),
+            self.window_end_exprs.clone(),
+        );
         let batch_plan = required_order.enforce_if_not_satisfies(batch_plan.into())?;
         required_dist.enforce_if_not_satisfies(batch_plan, required_order)
     }
@@ -98,7 +119,7 @@ impl ToDistributedBatch for BatchHopWindow {
 impl ToBatchProst for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
-            time_col: Some(self.logical.core.time_col.to_proto()),
+            time_col: self.logical.core.time_col.index() as _,
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),
             output_indices: self
@@ -107,6 +128,18 @@ impl ToBatchProst for BatchHopWindow {
                 .output_indices
                 .iter()
                 .map(|&x| x as u32)
+                .collect(),
+            window_start_exprs: self
+                .window_start_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect(),
+            window_end_exprs: self
+                .window_end_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
                 .collect(),
         })
     }
@@ -119,4 +152,25 @@ impl ToLocalBatch for BatchHopWindow {
     }
 }
 
-impl ExprRewritable for BatchHopWindow {}
+impl ExprRewritable for BatchHopWindow {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical.clone(),
+            self.window_start_exprs
+                .clone()
+                .into_iter()
+                .map(|e| r.rewrite_expr(e))
+                .collect(),
+            self.window_end_exprs
+                .clone()
+                .into_iter()
+                .map(|e| r.rewrite_expr(e))
+                .collect(),
+        )
+        .into()
+    }
+}

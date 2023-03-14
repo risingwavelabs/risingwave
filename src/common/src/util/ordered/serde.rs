@@ -15,13 +15,13 @@
 use std::borrow::Cow;
 
 use bytes::BufMut;
-use itertools::Itertools;
 
 use crate::row::{OwnedRow, Row};
 use crate::types::{
     memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, ToDatumRef,
 };
-use crate::util::sort_util::OrderType;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::sort_util::{Direction, OrderType};
 
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
 #[derive(Clone)]
@@ -64,9 +64,9 @@ impl OrderedRowSerde {
         datum_refs: impl Iterator<Item = impl ToDatumRef>,
         mut append_to: impl BufMut,
     ) {
-        for (datum, order_type) in datum_refs.zip_eq(self.order_types.iter()) {
+        for (datum, order_type) in datum_refs.zip_eq_debug(self.order_types.iter()) {
             let mut serializer = memcomparable::Serializer::new(&mut append_to);
-            serializer.set_reverse(*order_type == OrderType::Descending);
+            serializer.set_reverse(order_type.direction() == Direction::Descending);
             memcmp_serialize_datum_into(datum, &mut serializer).unwrap();
         }
     }
@@ -74,8 +74,8 @@ impl OrderedRowSerde {
     pub fn deserialize(&self, data: &[u8]) -> memcomparable::Result<OwnedRow> {
         let mut values = Vec::with_capacity(self.schema.len());
         let mut deserializer = memcomparable::Deserializer::new(data);
-        for (data_type, order_type) in self.schema.iter().zip_eq(self.order_types.iter()) {
-            deserializer.set_reverse(*order_type == OrderType::Descending);
+        for (data_type, order_type) in self.schema.iter().zip_eq_fast(self.order_types.iter()) {
+            deserializer.set_reverse(order_type.direction() == Direction::Descending);
             let datum = memcmp_deserialize_datum_from(data_type, &mut deserializer)?;
             values.push(datum);
         }
@@ -102,7 +102,7 @@ impl OrderedRowSerde {
             let order_type = &self.order_types[index];
             let data = &key[len..];
             let mut deserializer = memcomparable::Deserializer::new(data);
-            deserializer.set_reverse(*order_type == OrderType::Descending);
+            deserializer.set_reverse(order_type.direction() == Direction::Descending);
 
             len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
         }
@@ -122,7 +122,7 @@ mod tests {
 
     #[test]
     fn test_ordered_row_serializer() {
-        let orders = vec![OrderType::Descending, OrderType::Ascending];
+        let orders = vec![OrderType::descending(), OrderType::ascending()];
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let serializer = OrderedRowSerde::new(data_types, orders);
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
@@ -148,7 +148,7 @@ mod tests {
         use crate::types::ScalarImpl::{self, *};
         {
             // basic
-            let order_types = vec![OrderType::Descending, OrderType::Ascending];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
             let schema = vec![DataType::Varchar, DataType::Int16];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -170,7 +170,7 @@ mod tests {
         {
             // decimal
 
-            let order_types = vec![OrderType::Descending, OrderType::Ascending];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_with_column_indices() {
-        let order_types = vec![OrderType::Descending, OrderType::Ascending];
+        let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
         let schema = vec![DataType::Varchar, DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
@@ -218,7 +218,7 @@ mod tests {
             let row_0_idx_0_len = serde.deserialize_prefix_len(&array[0], 1).unwrap();
 
             let schema = vec![DataType::Varchar];
-            let order_types = vec![OrderType::Descending];
+            let order_types = vec![OrderType::descending()];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
@@ -230,7 +230,7 @@ mod tests {
         {
             let row_0_idx_1_len = serde.deserialize_prefix_len(&array[0], 2).unwrap();
 
-            let order_types = vec![OrderType::Descending, OrderType::Ascending];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
             let schema = vec![DataType::Varchar, DataType::Int16];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
@@ -245,7 +245,7 @@ mod tests {
         use crate::types::interval::IntervalUnit;
         use crate::types::OrderedF64;
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let schema = vec![DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
 
@@ -414,7 +414,7 @@ mod tests {
                 {
                     {
                         // test varchar Descending
-                        let order_types = vec![OrderType::Descending];
+                        let order_types = vec![OrderType::descending()];
                         let schema = vec![DataType::Varchar];
                         let serde = OrderedRowSerde::new(schema, order_types);
                         let varchar = "abcdefghijklmnopq";

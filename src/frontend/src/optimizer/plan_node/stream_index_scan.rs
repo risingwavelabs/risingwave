@@ -14,13 +14,13 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamNode};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -29,7 +29,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request. Compared with `StreamTableScan`, it will reorder columns, and the chain node
 /// doesn't allow rearrange.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamIndexScan {
     pub base: PlanBase,
     logical: LogicalScan,
@@ -62,8 +62,7 @@ impl StreamIndexScan {
             logical.functional_dependency().clone(),
             distribution,
             false, // TODO: determine the `append-only` field of table scan
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,
@@ -177,7 +176,6 @@ impl StreamIndexScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: true,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
@@ -205,5 +203,23 @@ impl StreamIndexScan {
             identity: format!("{}", self),
             append_only: self.append_only(),
         }
+    }
+}
+
+impl ExprRewritable for StreamIndexScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.chain_type,
+        )
+        .into()
     }
 }

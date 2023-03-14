@@ -64,7 +64,7 @@ use crate::optimizer::PlanRef;
 use crate::scheduler::worker_node_manager::WorkerNodeManagerRef;
 
 /// the distribution property provided by a operator.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Distribution {
     /// There is only one partition. All records are placed on it.
     Single,
@@ -310,6 +310,13 @@ impl RequiredDist {
             Ok(self.enforce(plan, required_order))
         } else {
             Ok(plan)
+        }
+    }
+
+    pub fn no_shuffle(plan: PlanRef) -> PlanRef {
+        match plan.convention() {
+            Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
+            Convention::Logical | Convention::Batch => unreachable!(),
         }
     }
 

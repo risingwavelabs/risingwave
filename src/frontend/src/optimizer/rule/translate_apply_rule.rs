@@ -20,6 +20,7 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare,
     PlanTreeNodeBinary, PlanTreeNodeUnary,
@@ -47,7 +48,10 @@ use crate::utils::{ColIndexMapping, Condition};
 ///             /           \
 ///          Domain         RHS
 /// ```
-pub struct TranslateApplyRule {}
+pub struct TranslateApplyRule {
+    enable_share_plan: bool,
+}
+
 impl Rule for TranslateApplyRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
@@ -95,8 +99,13 @@ impl Rule for TranslateApplyRule {
             // the domain. Distinct + Project + The Left of Apply
 
             // Use Share
-            let logical_share = LogicalShare::new(left);
-            left = logical_share.into();
+            left = if self.enable_share_plan {
+                let logical_share = LogicalShare::new(left);
+                logical_share.into()
+            } else {
+                left
+            };
+
             let distinct = LogicalAgg::new(
                 vec![],
                 correlated_indices.clone().into_iter().collect_vec(),
@@ -130,8 +139,8 @@ impl Rule for TranslateApplyRule {
 }
 
 impl TranslateApplyRule {
-    pub fn create() -> BoxedRule {
-        Box::new(TranslateApplyRule {})
+    pub fn create(enable_share_plan: bool) -> BoxedRule {
+        Box::new(TranslateApplyRule { enable_share_plan })
     }
 
     /// Rewrite `LogicalApply`'s left according to `correlated_indices`.

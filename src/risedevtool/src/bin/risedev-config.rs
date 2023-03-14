@@ -18,7 +18,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
-use clap::{ArgEnum, Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
@@ -42,29 +42,31 @@ enum Commands {
     /// Enable one component
     Enable {
         /// Component to enable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Disable one component
     Disable {
         /// Component to disable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Use default configuration
     Default,
 }
 
-#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
+#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
+    Hdfs,
     PrometheusAndGrafana,
     Etcd,
     Kafka,
     Pubsub,
     Redis,
     ConnectorNode,
+    BuildConnectorNode,
     Tracing,
     RustComponents,
     Dashboard,
@@ -77,12 +79,14 @@ impl Components {
     pub fn title(&self) -> String {
         match self {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
             Self::Etcd => "[Component] Etcd",
             Self::Kafka => "[Component] Kafka",
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::ConnectorNode => "[Component] RisingWave Connector",
+            Self::BuildConnectorNode => "[Build] Build RisingWave Connector from source",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -96,6 +100,10 @@ impl Components {
     pub fn description(&self) -> String {
         match self {
             Self::Minio => {
+                "
+Required by Hummock state store."
+            }
+            Self::Hdfs => {
                 "
 Required by Hummock state store."
             }
@@ -162,6 +170,11 @@ Required if you want to sink data to redis.
 Required if you want to create CDC source from external Databases.
                 "
             }
+            Self::BuildConnectorNode => {
+                "
+Required if you want to build Connector Node from source locally.
+                "
+            }
         }
         .into()
     }
@@ -169,6 +182,7 @@ Required if you want to create CDC source from external Databases.
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
             "ENABLE_MINIO" => Some(Self::Minio),
+            "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
             "ENABLE_ETCD" => Some(Self::Etcd),
             "ENABLE_KAFKA" => Some(Self::Kafka),
@@ -181,6 +195,7 @@ Required if you want to create CDC source from external Databases.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
+            "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             _ => None,
         }
     }
@@ -188,6 +203,7 @@ Required if you want to create CDC source from external Databases.
     pub fn env(&self) -> String {
         match self {
             Self::Minio => "ENABLE_MINIO",
+            Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
             Self::Etcd => "ENABLE_ETCD",
             Self::Kafka => "ENABLE_KAFKA",
@@ -200,6 +216,7 @@ Required if you want to create CDC source from external Databases.
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
+            Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
         }
         .into()
     }

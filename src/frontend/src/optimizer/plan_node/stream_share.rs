@@ -20,13 +20,13 @@ use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, ExchangeNode, StreamNode as ProstStreamPlan,
 };
 
-use super::{PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
     pub base: PlanBase,
     logical: LogicalShare,
@@ -85,33 +85,39 @@ impl StreamNode for StreamShare {
 impl StreamShare {
     pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> ProstStreamPlan {
         let operator_id = self.base.id.0 as u32;
+        let output_indices = (0..self.schema().len() as u32).collect_vec();
+
         match state.get_share_stream_node(operator_id) {
             None => {
                 let dispatch_strategy = match &self.base.dist {
                     Distribution::HashShard(keys) | Distribution::UpstreamHashShard(keys, _) => {
                         DispatchStrategy {
                             r#type: DispatcherType::Hash as i32,
-                            column_indices: keys.iter().map(|x| *x as u32).collect_vec(),
+                            dist_key_indices: keys.iter().map(|x| *x as u32).collect_vec(),
+                            output_indices,
                         }
                     }
                     Distribution::Single => DispatchStrategy {
                         r#type: DispatcherType::Simple as i32,
-                        column_indices: vec![],
+                        dist_key_indices: vec![],
+                        output_indices,
                     },
                     Distribution::Broadcast => DispatchStrategy {
                         r#type: DispatcherType::Broadcast as i32,
-                        column_indices: vec![],
+                        dist_key_indices: vec![],
+                        output_indices,
                     },
                     Distribution::SomeShard => {
                         // FIXME: use another DispatcherType?
                         DispatchStrategy {
                             r#type: DispatcherType::Hash as i32,
-                            column_indices: self
+                            dist_key_indices: self
                                 .base
                                 .logical_pk
                                 .iter()
                                 .map(|x| *x as u32)
                                 .collect_vec(),
+                            output_indices,
                         }
                     }
                 };
@@ -143,3 +149,5 @@ impl StreamShare {
         }
     }
 }
+
+impl ExprRewritable for StreamShare {}

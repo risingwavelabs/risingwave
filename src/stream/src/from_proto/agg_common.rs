@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
 use risingwave_common::bail;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::{build_from_prost, AggKind};
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -34,37 +34,29 @@ pub fn build_agg_call_from_prost(
     let agg_kind = AggKind::try_from(agg_call_proto.get_type()?)?;
     let args = match &agg_call_proto.get_args()[..] {
         [] => AggArgs::None,
-        [arg] if agg_kind != AggKind::StringAgg => AggArgs::Unary(
-            DataType::from(arg.get_type()?),
-            arg.get_input()?.column_idx as usize,
-        ),
+        [arg] if agg_kind != AggKind::StringAgg => {
+            AggArgs::Unary(DataType::from(arg.get_type()?), arg.get_index() as usize)
+        }
         [agg_arg, extra_arg] if agg_kind == AggKind::StringAgg => AggArgs::Binary(
             [
                 DataType::from(agg_arg.get_type()?),
                 DataType::from(extra_arg.get_type()?),
             ],
-            [
-                agg_arg.get_input()?.column_idx as usize,
-                extra_arg.get_input()?.column_idx as usize,
-            ],
+            [agg_arg.get_index() as usize, extra_arg.get_index() as usize],
         ),
         _ => bail!("Too many/few arguments for {:?}", agg_kind),
     };
-    let mut order_pairs = vec![];
-    let mut order_col_types = vec![];
-    agg_call_proto
-        .get_order_by_fields()
+    let column_orders = agg_call_proto
+        .get_order_by()
         .iter()
-        .for_each(|field| {
-            let col_idx = field.get_input().unwrap().get_column_idx() as usize;
-            let col_type = DataType::from(field.get_type().unwrap());
-            let order_type =
-                OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
+        .map(|col_order| {
+            let col_idx = col_order.get_column_index() as usize;
+            let order_type = OrderType::from_protobuf(col_order.get_order_type().unwrap());
             // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
             // see also `risingwave_common::util::sort_util::compare_values`
-            order_pairs.push(OrderPair::new(col_idx, order_type));
-            order_col_types.push(col_type);
-        });
+            ColumnOrder::new(col_idx, order_type)
+        })
+        .collect();
     let filter = match agg_call_proto.filter {
         Some(ref prost_filter) => Some(Arc::from(build_from_prost(prost_filter)?)),
         None => None,
@@ -73,9 +65,10 @@ pub fn build_agg_call_from_prost(
         kind: agg_kind,
         args,
         return_type: DataType::from(agg_call_proto.get_return_type()?),
-        order_pairs,
+        column_orders,
         append_only,
         filter,
+        distinct: agg_call_proto.distinct,
     })
 }
 
@@ -130,4 +123,21 @@ pub async fn build_agg_state_storages_from_proto<S: StateStore>(
     }
 
     result
+}
+
+pub async fn build_distinct_dedup_table_from_proto<S: StateStore>(
+    dedup_tables: &HashMap<u32, risingwave_pb::catalog::Table>,
+    store: S,
+    vnodes: Option<Arc<Bitmap>>,
+) -> HashMap<usize, StateTable<S>> {
+    if dedup_tables.is_empty() {
+        return HashMap::new();
+    }
+    futures::future::join_all(dedup_tables.iter().map(|(distinct_col, table_pb)| async {
+        let table = StateTable::from_table_catalog(table_pb, store.clone(), vnodes.clone()).await;
+        (*distinct_col as usize, table)
+    }))
+    .await
+    .into_iter()
+    .collect()
 }

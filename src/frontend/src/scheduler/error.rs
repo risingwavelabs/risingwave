@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::session_config::QueryMode;
 use risingwave_rpc_client::error::RpcError;
 use thiserror::Error;
 use tonic::{Code, Status};
@@ -33,9 +34,15 @@ pub enum SchedulerError {
     #[error("{0}")]
     TaskExecutionError(String),
 
+    #[error("Task got killed because compute node running out of memory")]
+    TaskRunningOutOfMemory,
+
     /// Used when receive cancel request (ctrl-c) from user.
     #[error("Canceled by user")]
     QueryCancelError,
+
+    #[error("Reject query: the {0} query number reaches the limit: {1}")]
+    QueryReachLimit(QueryMode, u64),
 
     #[error(transparent)]
     Internal(#[from] anyhow::Error),

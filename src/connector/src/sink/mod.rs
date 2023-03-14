@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod catalog;
 pub mod console;
 pub mod kafka;
 pub mod redis;
@@ -30,11 +31,18 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
+use self::catalog::{SinkCatalog, SinkType};
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
+
+pub const SINK_FORMAT_OPTION: &str = "format";
+pub const SINK_FORMAT_APPEND_ONLY: &str = "append_only";
+pub const SINK_FORMAT_DEBEZIUM: &str = "debezium";
+pub const SINK_FORMAT_UPSERT: &str = "upsert";
+pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[async_trait]
 pub trait Sink {
@@ -104,8 +112,10 @@ impl SinkConfig {
 #[derive(Debug)]
 pub enum SinkImpl {
     Redis(Box<RedisSink>),
-    Kafka(Box<KafkaSink>),
-    Remote(Box<RemoteSink>),
+    Kafka(Box<KafkaSink<true>>),
+    UpsertKafka(Box<KafkaSink<false>>),
+    Remote(Box<RemoteSink<true>>),
+    UpsertRemote(Box<RemoteSink<false>>),
     Console(Box<ConsoleSink>),
     Blackhole,
 }
@@ -116,62 +126,115 @@ impl SinkImpl {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
+        sink_type: SinkType,
     ) -> Result<Self> {
         Ok(match cfg {
             SinkConfig::Redis(cfg) => SinkImpl::Redis(Box::new(RedisSink::new(cfg, schema)?)),
             SinkConfig::Kafka(cfg) => {
-                SinkImpl::Kafka(Box::new(KafkaSink::new(*cfg, schema).await?))
+                if sink_type.is_append_only() {
+                    // Append-only Kafka sink
+                    SinkImpl::Kafka(Box::new(
+                        KafkaSink::<true>::new(*cfg, schema, pk_indices).await?,
+                    ))
+                } else {
+                    // Upsert Kafka sink
+                    SinkImpl::UpsertKafka(Box::new(
+                        KafkaSink::<false>::new(*cfg, schema, pk_indices).await?,
+                    ))
+                }
             }
             SinkConfig::Console(cfg) => SinkImpl::Console(Box::new(ConsoleSink::new(cfg, schema)?)),
-            SinkConfig::Remote(cfg) => SinkImpl::Remote(Box::new(
-                RemoteSink::new(cfg, schema, pk_indices, connector_params).await?,
-            )),
+            SinkConfig::Remote(cfg) => {
+                if sink_type.is_append_only() {
+                    // Append-only remote sink
+                    SinkImpl::Remote(Box::new(
+                        RemoteSink::<true>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                } else {
+                    // Upsert remote sink
+                    SinkImpl::UpsertRemote(Box::new(
+                        RemoteSink::<false>::new(cfg, schema, pk_indices, connector_params).await?,
+                    ))
+                }
+            }
             SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }
+
+    pub async fn validate(
+        cfg: SinkConfig,
+        sink_catalog: SinkCatalog,
+        connector_rpc_endpoint: Option<String>,
+    ) -> Result<()> {
+        match cfg {
+            SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
+            SinkConfig::Kafka(cfg) => {
+                // We simply call `KafkaSink::new` here to validate a Kafka sink.
+                if sink_catalog.sink_type.is_append_only() {
+                    KafkaSink::<true>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
+                        .await
+                        .map(|_| ())
+                } else {
+                    KafkaSink::<false>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
+                        .await
+                        .map(|_| ())
+                }
+            }
+            SinkConfig::Remote(cfg) => {
+                if sink_catalog.sink_type.is_append_only() {
+                    RemoteSink::<true>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
+                } else {
+                    RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
+                }
+            }
+            SinkConfig::Console(_) => Ok(()),
+            SinkConfig::BlackHole => Ok(()),
+        }
+    }
 }
 
-#[async_trait]
-impl Sink for SinkImpl {
-    async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Kafka(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Remote(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Console(sink) => sink.write_batch(chunk).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+macro_rules! impl_sink {
+    ($($variant_name:ident),*) => {
+        #[async_trait]
+        impl Sink for SinkImpl {
+            async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.write_batch(chunk).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Kafka(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Remote(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Console(sink) => sink.begin_epoch(epoch).await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.begin_epoch(epoch).await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn commit(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.commit().await,
-            SinkImpl::Kafka(sink) => sink.commit().await,
-            SinkImpl::Remote(sink) => sink.commit().await,
-            SinkImpl::Console(sink) => sink.commit().await,
-            SinkImpl::Blackhole => Ok(()),
-        }
-    }
+            async fn commit(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.commit().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
 
-    async fn abort(&mut self) -> Result<()> {
-        match self {
-            SinkImpl::Redis(sink) => sink.abort().await,
-            SinkImpl::Kafka(sink) => sink.abort().await,
-            SinkImpl::Remote(sink) => sink.abort().await,
-            SinkImpl::Console(sink) => sink.abort().await,
-            SinkImpl::Blackhole => Ok(()),
+            async fn abort(&mut self) -> Result<()> {
+                match self {
+                    $( SinkImpl::$variant_name(inner) => inner.abort().await, )*
+                    SinkImpl::Blackhole => Ok(()),
+                }
+            }
         }
     }
+}
+
+impl_sink! {
+    Redis,
+    Kafka,
+    UpsertKafka,
+    Remote,
+    UpsertRemote,
+    Console
 }
 
 pub type Result<T> = std::result::Result<T, SinkError>;
@@ -190,7 +253,7 @@ pub enum SinkError {
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(format!("{:?}", value))
+        SinkError::Remote(format!("{}", value))
     }
 }
 

@@ -14,20 +14,22 @@
 
 use std::collections::HashMap;
 
-use risingwave_pb::plan_common::{ColumnOrder, StorageTableDesc};
+use fixedbitset::FixedBitSet;
+use risingwave_pb::common::PbColumnOrder;
+use risingwave_pb::plan_common::StorageTableDesc;
 
 use super::{ColumnDesc, ColumnId, TableId};
-use crate::util::sort_util::OrderPair;
+use crate::util::sort_util::ColumnOrder;
 
 /// Includes necessary information for compute node to access data of the table.
 ///
 /// It's a subset of `TableCatalog` in frontend. Refer to `TableCatalog` for more details.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
 pub struct TableDesc {
     /// Id of the table, to find in storage.
     pub table_id: TableId,
     /// The key used to sort in storage.
-    pub pk: Vec<OrderPair>,
+    pub pk: Vec<ColumnOrder>,
     /// All columns in the table, noticed it is NOT sorted by columnId in the vec.
     pub columns: Vec<ColumnDesc>,
     /// Distribution keys of this table, which corresponds to the corresponding column of the
@@ -46,22 +48,31 @@ pub struct TableDesc {
 
     /// The prefix len of pk, used in bloom filter.
     pub read_prefix_len_hint: usize,
+
+    /// the column indices which could receive watermarks.
+    pub watermark_columns: FixedBitSet,
+
+    /// Whether the table is versioned. If `true`, column-aware row encoding will be used
+    /// to be compatible with schema changes.
+    ///
+    /// See `version` field in `TableCatalog` for more details.
+    pub versioned: bool,
 }
 
 impl TableDesc {
-    pub fn arrange_key_orders_prost(&self) -> Vec<ColumnOrder> {
+    pub fn arrange_key_orders_protobuf(&self) -> Vec<PbColumnOrder> {
         // Set materialize key as arrange key + pk
         self.pk.iter().map(|x| x.to_protobuf()).collect()
     }
 
     pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_idx)).collect()
+        self.pk.iter().map(|col| (col.column_index)).collect()
     }
 
     pub fn order_column_ids(&self) -> Vec<ColumnId> {
         self.pk
             .iter()
-            .map(|col| self.columns[col.column_idx].column_id)
+            .map(|col| self.columns[col.column_index].column_id)
             .collect()
     }
 
@@ -74,6 +85,7 @@ impl TableDesc {
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,
+            versioned: self.versioned,
         }
     }
 

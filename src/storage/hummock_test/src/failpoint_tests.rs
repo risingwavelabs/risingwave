@@ -23,14 +23,16 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::{count_stream, default_config_for_test};
+use risingwave_storage::hummock::test_utils::{count_stream, default_opts_for_test};
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::{
+    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, StateStoreRead, WriteOptions,
+};
 use risingwave_storage::StateStore;
 
 use crate::get_notification_client_for_test;
-use crate::test_utils::HummockV2MixedStateStore;
+use crate::test_utils::TestIngestBatch;
 
 #[tokio::test]
 #[ignore]
@@ -39,7 +41,7 @@ async fn test_failpoints_state_store_read_upload() {
     let mem_upload_err = "mem_upload_err";
     let mem_read_err = "mem_read_err";
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         setup_compute_env(8080).await;
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -48,7 +50,7 @@ async fn test_failpoints_state_store_read_upload() {
     ));
 
     let hummock_storage = HummockStorage::for_test(
-        hummock_options.clone(),
+        hummock_options,
         sstable_store.clone(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),
@@ -56,7 +58,7 @@ async fn test_failpoints_state_store_read_upload() {
     .await
     .unwrap();
 
-    let hummock_storage = HummockV2MixedStateStore::new(hummock_storage, Default::default()).await;
+    let mut local = hummock_storage.new_local(NewLocalOptions::default()).await;
 
     let anchor = Bytes::from("aa");
     let mut batch1 = vec![
@@ -71,7 +73,8 @@ async fn test_failpoints_state_store_read_upload() {
     ];
     // Make sure the batch is sorted.
     batch2.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
-    hummock_storage
+    local.init(1);
+    local
         .ingest_batch(
             batch1,
             vec![],
@@ -83,6 +86,8 @@ async fn test_failpoints_state_store_read_upload() {
         .await
         .unwrap();
 
+    local.seal_current_epoch(3);
+
     // Get the value after flushing to remote.
     let anchor_prefix_hint = {
         let mut ret = Vec::with_capacity(TABLE_PREFIX_LEN + anchor.len());
@@ -92,7 +97,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             1,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -100,6 +105,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -107,7 +113,7 @@ async fn test_failpoints_state_store_read_upload() {
         .unwrap();
     assert_eq!(value, Bytes::from("111"));
     // // Write second batch.
-    hummock_storage
+    local
         .ingest_batch(
             batch2,
             vec![],
@@ -118,6 +124,8 @@ async fn test_failpoints_state_store_read_upload() {
         )
         .await
         .unwrap();
+
+    local.seal_current_epoch(u64::MAX);
 
     // sync epoch1 test the read_error
     let ssts = hummock_storage
@@ -143,7 +151,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let result = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -151,13 +159,14 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await;
     assert!(result.is_err());
     let result = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -165,6 +174,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await;
@@ -178,7 +188,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            b"ee".as_ref(),
+            Bytes::from("ee"),
             2,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -186,6 +196,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -218,7 +229,7 @@ async fn test_failpoints_state_store_read_upload() {
     };
     let value = hummock_storage
         .get(
-            &anchor,
+            anchor.clone(),
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -226,6 +237,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: Default::default(),
             },
         )
         .await
@@ -234,7 +246,7 @@ async fn test_failpoints_state_store_read_upload() {
     assert_eq!(value, Bytes::from("111"));
     let iters = hummock_storage
         .iter(
-            (Bound::Unbounded, Bound::Included(b"ee".to_vec())),
+            (Bound::Unbounded, Bound::Included(Bytes::from("ee"))),
             5,
             ReadOptions {
                 ignore_range_tombstone: false,
@@ -242,6 +254,7 @@ async fn test_failpoints_state_store_read_upload() {
                 table_id: Default::default(),
                 retention_seconds: None,
                 read_version_from_backup: false,
+                prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
             },
         )
         .await

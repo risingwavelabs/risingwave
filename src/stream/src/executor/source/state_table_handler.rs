@@ -28,9 +28,11 @@ use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
 use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
-use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, ColumnOrder};
+use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc};
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -83,7 +85,11 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         // all source executor has vnode id zero
         let iter = self
             .state_store
-            .iter_with_pk_range(&(start, end), VirtualNode::ZERO)
+            .iter_with_pk_range(
+                &(start, end),
+                VirtualNode::ZERO,
+                PrefetchOptions::new_for_exhaust_iter(),
+            )
             .await?;
 
         let mut set = HashSet::new();
@@ -212,15 +218,17 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
     ];
     ProstTable {
         id,
-        schema_id: SchemaId::placeholder() as u32,
-        database_id: DatabaseId::placeholder() as u32,
+        schema_id: SchemaId::placeholder().schema_id,
+        database_id: DatabaseId::placeholder().database_id,
         name: String::new(),
         columns,
         table_type: TableType::Internal as i32,
         value_indices: vec![0, 1],
-        pk: vec![ColumnOrder {
-            index: 0,
-            order_type: 1,
+        pk: vec![PbColumnOrder {
+            column_index: 0,
+            order_type: Some(PbOrderType {
+                direction: PbDirection::Ascending as _,
+            }),
         }],
         ..Default::default()
     }

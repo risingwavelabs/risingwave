@@ -29,6 +29,7 @@ use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{build_from_prost, BoxedExpression, Expression};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
@@ -1529,7 +1530,7 @@ impl DataChunkMutator {
     ) -> Self {
         let mut new_visibility = BitmapBuilder::zeroed(self.0.capacity());
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1549,7 +1550,8 @@ impl DataChunkMutator {
         build_row_ids: &mut Vec<RowId>,
         build_row_matched: &mut ChunkedData<bool>,
     ) {
-        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq(build_row_ids.iter()) {
+        for (output_row_non_null, &build_row_id) in filter.iter().zip_eq_fast(build_row_ids.iter())
+        {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
             }
@@ -1605,7 +1607,7 @@ impl DataChunkMutator {
         first_output_row_id.clear();
 
         for (output_row_id, (output_row_non_null, &build_row_id)) in
-            filter.iter().zip_eq(build_row_ids.iter()).enumerate()
+            filter.iter().zip_eq_fast(build_row_ids.iter()).enumerate()
         {
             if output_row_non_null {
                 build_row_matched[build_row_id] = true;
@@ -1778,15 +1780,14 @@ impl<K> HashJoinExecutor<K> {
 mod tests {
 
     use futures::StreamExt;
-    use itertools::Itertools;
     use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::error::Result;
     use risingwave_common::hash::Key32;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{BoxedExpression, InputRefExpression};
+    use risingwave_common::util::iter_util::ZipEqDebug;
+    use risingwave_expr::expr::{new_binary_expr, BoxedExpression, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::{
@@ -1847,7 +1848,7 @@ mod tests {
         }
 
         left.rows()
-            .zip_eq(right.rows())
+            .zip_eq_debug(right.rows())
             .all(|(row1, row2)| row1 == row2)
     }
 

@@ -48,7 +48,7 @@
 
 use std::cmp::min;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
@@ -56,6 +56,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
 };
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::{BoxedRule, Rule};
@@ -93,7 +94,9 @@ impl Rule for IndexSelectionRule {
         if indexes.is_empty() {
             return None;
         }
-
+        if logical_scan.for_system_time_as_of_now() {
+            return None;
+        }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
         let primary_cost = min(
             self.estimate_table_scan_cost(logical_scan, primary_table_row_size),
@@ -149,7 +152,7 @@ impl Rule for IndexSelectionRule {
 }
 
 struct IndexPredicateRewriter<'a> {
-    p2s_mapping: &'a HashMap<usize, usize>,
+    p2s_mapping: &'a BTreeMap<usize, usize>,
     offset: usize,
 }
 impl ExprRewriter for IndexPredicateRewriter<'_> {
@@ -190,6 +193,7 @@ impl IndexSelectionRule {
             index.index_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let primary_table_scan = LogicalScan::create(
@@ -198,18 +202,23 @@ impl IndexSelectionRule {
             index.primary_table.table_desc().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let conjunctions = index
             .primary_table_pk_ref_to_index_table()
             .iter()
-            .zip_eq(index.primary_table.pk.iter())
+            .zip_eq_fast(index.primary_table.pk.iter())
             .map(|(x, y)| {
                 Self::create_null_safe_equal_expr(
-                    x.index,
-                    index.index_table.columns[x.index].data_type().clone(),
-                    y.index + index.index_item.len(),
-                    index.primary_table.columns[y.index].data_type().clone(),
+                    x.column_index,
+                    index.index_table.columns[x.column_index]
+                        .data_type()
+                        .clone(),
+                    y.column_index + index.index_item.len(),
+                    index.primary_table.columns[y.column_index]
+                        .data_type()
+                        .clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -292,6 +301,7 @@ impl IndexSelectionRule {
             primary_table_desc.clone().into(),
             vec![],
             logical_scan.ctx(),
+            false,
         );
 
         let conjunctions = primary_table_desc
@@ -302,8 +312,8 @@ impl IndexSelectionRule {
                 Self::create_null_safe_equal_expr(
                     x,
                     schema.fields[x].data_type.clone(),
-                    y.column_idx + index_access_len,
-                    primary_table_desc.columns[y.column_idx].data_type.clone(),
+                    y.column_index + index_access_len,
+                    primary_table_desc.columns[y.column_index].data_type.clone(),
                 )
             })
             .chain(new_predicate.into_iter())
@@ -476,7 +486,7 @@ impl IndexSelectionRule {
                 match p2s_mapping.get(column_index.as_ref().unwrap()) {
                     None => continue, // not found, prune this index
                     Some(&idx) => {
-                        if index.index_table.pk()[0].index != idx {
+                        if index.index_table.pk()[0].column_index != idx {
                             // not match, prune this index
                             continue;
                         }
@@ -501,7 +511,7 @@ impl IndexSelectionRule {
         let primary_table_desc = logical_scan.table_desc();
         if let Some(idx) = column_index {
             assert_eq!(conjunctions.len(), 1);
-            if primary_table_desc.pk[0].column_idx != idx {
+            if primary_table_desc.pk[0].column_index != idx {
                 return result;
             }
         }
@@ -512,7 +522,7 @@ impl IndexSelectionRule {
             primary_table_desc
                 .pk
                 .iter()
-                .map(|x| x.column_idx)
+                .map(|x| x.column_index)
                 .collect_vec(),
             primary_table_desc.clone().into(),
             vec![],
@@ -520,6 +530,7 @@ impl IndexSelectionRule {
             Condition {
                 conjunctions: conjunctions.to_vec(),
             },
+            false,
         );
 
         result.push(primary_access.into());
@@ -560,12 +571,13 @@ impl IndexSelectionRule {
                 index
                     .primary_table_pk_ref_to_index_table()
                     .iter()
-                    .map(|x| x.index)
+                    .map(|x| x.column_index)
                     .collect_vec(),
                 index.index_table.table_desc().into(),
                 vec![],
                 ctx,
                 new_predicate,
+                false,
             )
             .into(),
         )
@@ -687,7 +699,7 @@ impl<'a> TableScanIoEstimator<'a> {
                     table_desc
                         .pk
                         .iter()
-                        .map(|x| &table_desc.columns[x.column_idx]),
+                        .map(|x| &table_desc.columns[x.column_index]),
                 )
                 .map(|x| TableScanIoEstimator::estimate_data_type_size(&x.data_type))
                 .sum::<usize>()
@@ -711,6 +723,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Interval => size_of::<IntervalUnit>(),
             DataType::Varchar => 20,
             DataType::Bytea => 20,
+            DataType::Jsonb => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
         }

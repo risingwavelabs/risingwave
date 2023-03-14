@@ -21,7 +21,10 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::DEFAULT_VNODE;
+use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
 use crate::common::table::test_utils::{gen_prost_table, gen_prost_table_with_value_indices};
@@ -37,7 +40,7 @@ async fn test_state_table_update_insert() {
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
     ];
-    let order_types = vec![OrderType::Ascending];
+    let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
     let table = gen_prost_table(
@@ -50,7 +53,7 @@ async fn test_state_table_update_insert() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -208,7 +211,7 @@ async fn test_state_table_iter_with_prefix() {
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -228,7 +231,7 @@ async fn test_state_table_iter_with_prefix() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -277,7 +280,10 @@ async fn test_state_table_iter_with_prefix() {
     ]));
 
     let pk_prefix = OwnedRow::new(vec![Some(1_i32.into())]);
-    let iter = state_table.iter_with_pk_prefix(&pk_prefix).await.unwrap();
+    let iter = state_table
+        .iter_with_pk_prefix(&pk_prefix, Default::default())
+        .await
+        .unwrap();
     pin_mut!(iter);
 
     // this row exists in both mem_table and shared_storage
@@ -333,7 +339,7 @@ async fn test_state_table_iter_with_pk_range() {
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -353,7 +359,7 @@ async fn test_state_table_iter_with_pk_range() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -406,7 +412,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::Included(OwnedRow::new(vec![Some(4_i32.into())])),
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -431,7 +437,7 @@ async fn test_state_table_iter_with_pk_range() {
         std::ops::Bound::<row::Empty>::Unbounded,
     );
     let iter = state_table
-        .iter_with_pk_range(&pk_range, DEFAULT_VNODE)
+        .iter_with_pk_range(&pk_range, DEFAULT_VNODE, Default::default())
         .await
         .unwrap();
     pin_mut!(iter);
@@ -474,7 +480,7 @@ async fn test_mem_table_assertion() {
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
     ];
-    let order_types = vec![OrderType::Ascending];
+    let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
     let table = gen_prost_table(
@@ -487,8 +493,7 @@ async fn test_mem_table_assertion() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
-            .await;
+        StateTable::from_table_catalog(&table, test_env.storage.clone(), None).await;
 
     let epoch = EpochPair::new_test_epoch(1);
     state_table.init_epoch(epoch);
@@ -510,7 +515,7 @@ async fn test_state_table_iter_with_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -530,7 +535,7 @@ async fn test_state_table_iter_with_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -571,7 +576,7 @@ async fn test_state_table_iter_with_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter().await.unwrap();
+        let iter = state_table.iter(Default::default()).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -626,7 +631,7 @@ async fn test_state_table_iter_with_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter().await.unwrap();
+    let iter = state_table.iter(Default::default()).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -671,7 +676,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
-    let order_types = vec![OrderType::Ascending, OrderType::Descending];
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -691,7 +696,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let mut epoch = EpochPair::new_test_epoch(1);
@@ -732,7 +737,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     ]));
 
     {
-        let iter = state_table.iter().await.unwrap();
+        let iter = state_table.iter(Default::default()).await.unwrap();
         pin_mut!(iter);
 
         let res = iter.next().await.unwrap().unwrap();
@@ -808,7 +813,7 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
         Some(888_i32.into()),
     ]));
 
-    let iter = state_table.iter().await.unwrap();
+    let iter = state_table.iter(Default::default()).await.unwrap();
     pin_mut!(iter);
 
     let res = iter.next().await.unwrap().unwrap();
@@ -913,7 +918,7 @@ async fn test_state_table_write_chunk() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::Ascending];
+    let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -926,7 +931,7 @@ async fn test_state_table_write_chunk() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
@@ -995,7 +1000,7 @@ async fn test_state_table_write_chunk() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1042,7 +1047,7 @@ async fn test_state_table_write_chunk_visibility() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::Ascending];
+    let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -1055,7 +1060,7 @@ async fn test_state_table_write_chunk_visibility() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
@@ -1112,7 +1117,7 @@ async fn test_state_table_write_chunk_visibility() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1168,7 +1173,7 @@ async fn test_state_table_write_chunk_value_indices() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::Ascending];
+    let order_types = vec![OrderType::ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table_with_value_indices(
@@ -1182,7 +1187,7 @@ async fn test_state_table_write_chunk_value_indices() {
 
     test_env.register_table(table.clone()).await;
     let mut state_table =
-        StateTable::from_table_catalog_no_sanity_check(&table, test_env.storage.clone(), None)
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
             .await;
 
     let epoch = EpochPair::new_test_epoch(1);
@@ -1224,7 +1229,7 @@ async fn test_state_table_write_chunk_value_indices() {
     state_table.write_chunk(chunk);
 
     let rows: Vec<_> = state_table
-        .iter()
+        .iter(PrefetchOptions::new_for_exhaust_iter())
         .await
         .unwrap()
         .collect::<Vec<_>>()
@@ -1246,4 +1251,204 @@ async fn test_state_table_write_chunk_value_indices() {
         rows[2].as_ref(),
         &OwnedRow::new(vec![Some(false.into()), Some(4888i64.into()),])
     );
+}
+
+async fn check_may_exist<S>(
+    state_table: &StateTable<S>,
+    existent_prefix: Vec<i32>,
+    non_existent_prefix: Vec<i32>,
+) where
+    S: StateStore,
+{
+    for prefix in existent_prefix {
+        let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
+        assert!(state_table.may_exist(&pk_prefix).await.unwrap());
+    }
+    for prefix in non_existent_prefix {
+        let pk_prefix = OwnedRow::new(vec![Some(prefix.into())]);
+        assert!(!state_table.may_exist(&pk_prefix).await.unwrap());
+    }
+}
+
+#[tokio::test]
+async fn test_state_table_may_exist() {
+    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    let test_env = prepare_hummock_test_env().await;
+
+    // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
+    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+
+    let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
+    let column_descs = vec![
+        ColumnDesc::unnamed(column_ids[0], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[1], DataType::Int32),
+        ColumnDesc::unnamed(column_ids[2], DataType::Int32),
+    ];
+    let pk_index = vec![0_usize, 1_usize];
+    let read_prefix_len_hint = 1;
+    let table = gen_prost_table(
+        TEST_TABLE_ID,
+        column_descs,
+        order_types,
+        pk_index,
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+    let mut state_table =
+        StateTable::from_table_catalog_inconsistent_op(&table, test_env.storage.clone(), None)
+            .await;
+
+    let mut epoch = EpochPair::new_test_epoch(1);
+    state_table.init_epoch(epoch);
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(11_i32.into()),
+        Some(111_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(22_i32.into()),
+        Some(222_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(4_i32.into()),
+        Some(44_i32.into()),
+        Some(444_i32.into()),
+    ]));
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(55_i32.into()),
+        Some(555_i32.into()),
+    ]));
+
+    // test may_exist with data only in memtable (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    let e1 = epoch.prev;
+
+    // test may_exist with data only in immutable memtable (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+
+    let e1_res = test_env.storage.seal_and_sync_epoch(e1).await.unwrap();
+
+    // test may_exist with data only in uncommitted ssts (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+
+    test_env
+        .meta_client
+        .commit_epoch(e1, e1_res.uncommitted_ssts)
+        .await
+        .unwrap();
+    test_env.storage.try_wait_epoch_for_test(e1).await;
+
+    // test may_exist with data only in committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4], vec![2, 3, 6, 12]).await;
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(33_i32.into()),
+        Some(333_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(55_i32.into()),
+        Some(5555_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(6_i32.into()),
+        Some(66_i32.into()),
+        Some(666_i32.into()),
+    ]));
+
+    // test may_exist with data in memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    let e2 = epoch.prev;
+
+    // test may_exist with data in immutable memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 4, 6], vec![2, 3, 12]).await;
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(44_i32.into()),
+        Some(444_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(3_i32.into()),
+        Some(1_i32.into()),
+        Some(111_i32.into()),
+    ]));
+
+    // test may_exist with data in memtable (e3), immutable memtable (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+
+    let e2_res = test_env.storage.seal_and_sync_epoch(e2).await.unwrap();
+
+    // test may_exist with data in memtable (e3), uncommitted ssts (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    let e3 = epoch.prev;
+
+    // test may_exist with data in immutable memtable (e3), uncommitted ssts (e2), committed
+    // ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![2, 12]).await;
+
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(55_i32.into()),
+        Some(555_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(2_i32.into()),
+        Some(1_i32.into()),
+        Some(111_i32.into()),
+    ]));
+
+    // test may_exist with data in memtable (e4), immutable memtable (e3), uncommitted ssts
+    // (e2), committed ssts (e1)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+
+    test_env
+        .meta_client
+        .commit_epoch(e2, e2_res.uncommitted_ssts)
+        .await
+        .unwrap();
+    test_env.storage.try_wait_epoch_for_test(e2).await;
+
+    epoch.inc();
+    state_table.commit(epoch).await.unwrap();
+    let e4 = epoch.prev;
+
+    let e3_res = test_env.storage.seal_and_sync_epoch(e3).await.unwrap();
+    let e4_res = test_env.storage.seal_and_sync_epoch(e4).await.unwrap();
+
+    // test may_exist with data in uncommitted ssts (e3, e4), committed ssts (e1, e2, e3, e4)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
+
+    test_env
+        .meta_client
+        .commit_epoch(e3, e3_res.uncommitted_ssts)
+        .await
+        .unwrap();
+    test_env.storage.try_wait_epoch_for_test(e3).await;
+
+    test_env
+        .meta_client
+        .commit_epoch(e4, e4_res.uncommitted_ssts)
+        .await
+        .unwrap();
+    test_env.storage.try_wait_epoch_for_test(e4).await;
+
+    // test may_exist with data in committed ssts (e1, e2, e3, e4)
+    check_may_exist(&state_table, vec![1, 3, 4, 6], vec![12]).await;
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
 use std::rc::Rc;
 
@@ -20,7 +20,7 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::{
@@ -36,13 +36,12 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::Asc;
-use crate::optimizer::property::{FieldOrder, FunctionalDependencySet, Order};
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::optimizer::rule::IndexSelectionRule;
-use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalScan` returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalScan {
     pub base: PlanBase,
     core: generic::Scan,
@@ -50,6 +49,7 @@ pub struct LogicalScan {
 
 impl LogicalScan {
     /// Create a `LogicalScan` node. Used internally by optimizer.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         table_name: String, // explain-only
         is_sys_table: bool,
@@ -58,6 +58,7 @@ impl LogicalScan {
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
         predicate: Condition, // refers to column indexes of the table
+        for_system_time_as_of_now: bool,
     ) -> Self {
         // here we have 3 concepts
         // 1. column_id: ColumnId, stored in catalog and a ID to access data from storage.
@@ -86,6 +87,8 @@ impl LogicalScan {
             table_desc,
             indexes,
             predicate,
+            chunk_size: None,
+            for_system_time_as_of_now,
         };
 
         let schema = core.schema();
@@ -112,6 +115,7 @@ impl LogicalScan {
         table_desc: Rc<TableDesc>,
         indexes: Vec<Rc<IndexCatalog>>,
         ctx: OptimizerContextRef,
+        for_system_time_as_of_now: bool,
     ) -> Self {
         Self::new(
             table_name,
@@ -121,6 +125,7 @@ impl LogicalScan {
             indexes,
             ctx,
             Condition::true_cond(),
+            for_system_time_as_of_now,
         )
     }
 
@@ -174,6 +179,10 @@ impl LogicalScan {
         self.core.is_sys_table
     }
 
+    pub fn for_system_time_as_of_now(&self) -> bool {
+        self.core.for_system_time_as_of_now
+    }
+
     /// Get a reference to the logical scan's table desc.
     pub fn table_desc(&self) -> &TableDesc {
         self.core.table_desc.as_ref()
@@ -224,12 +233,9 @@ impl LogicalScan {
                 .iter()
                 .map(|order| {
                     let idx = id_to_tb_idx
-                        .get(&self.table_desc().columns[order.column_idx].column_id)
+                        .get(&self.table_desc().columns[order.column_index].column_id)
                         .unwrap();
-                    match order.order_type {
-                        OrderType::Ascending => FieldOrder::ascending(*idx),
-                        OrderType::Descending => FieldOrder::descending(*idx),
-                    }
+                    ColumnOrder::new(*idx, order.order_type)
                 })
                 .collect(),
         );
@@ -256,11 +262,75 @@ impl LogicalScan {
             .collect()
     }
 
+    pub fn watermark_columns(&self) -> FixedBitSet {
+        let watermark_columns = &self.table_desc().watermark_columns;
+        self.i2o_col_mapping().rewrite_bitset(watermark_columns)
+    }
+
+    /// Return indexes can satisfy the required order.
+    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+        let output_col_map = self
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = output_col_map.len();
+        self.indexes()
+            .iter()
+            .filter(|idx| {
+                let s2p_mapping = idx.secondary_to_primary_mapping();
+                Order {
+                    column_orders: idx
+                        .index_table
+                        .pk()
+                        .iter()
+                        .map(|idx_item| {
+                            ColumnOrder::new(
+                                *output_col_map
+                                    .get(
+                                        s2p_mapping
+                                            .get(&idx_item.column_index)
+                                            .expect("should be in s2p mapping"),
+                                    )
+                                    .unwrap_or(&unmatched_idx),
+                                idx_item.order_type,
+                            )
+                        })
+                        .collect(),
+                }
+                .satisfies(required_order)
+            })
+            .collect()
+    }
+
+    /// If the index can cover the scan, transform it to the index scan.
+    pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if self
+            .required_col_idx()
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            let index_scan = self.to_index_scan(
+                &index.name,
+                index.index_table.table_desc().into(),
+                p2s_mapping,
+            );
+            Some(index_scan)
+        } else {
+            None
+        }
+    }
+
+    /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
+    /// scan.
     pub fn to_index_scan(
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &HashMap<usize, usize>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
     ) -> LogicalScan {
         let new_output_col_idx = self
             .output_col_idx()
@@ -269,7 +339,7 @@ impl LogicalScan {
             .collect_vec();
 
         struct Rewriter<'a> {
-            primary_to_secondary_mapping: &'a HashMap<usize, usize>,
+            primary_to_secondary_mapping: &'a BTreeMap<usize, usize>,
         }
         impl ExprRewriter for Rewriter<'_> {
             fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
@@ -297,7 +367,22 @@ impl LogicalScan {
             vec![],
             self.ctx(),
             new_predicate,
+            self.for_system_time_as_of_now(),
         )
+    }
+
+    /// used by optimizer (currently `top_n_on_index_rule`) to help reduce useless `chunk_size` at
+    /// executor
+    pub fn set_chunk_size(&mut self, chunk_size: u32) {
+        self.core.chunk_size = Some(chunk_size);
+    }
+
+    pub fn chunk_size(&self) -> Option<u32> {
+        self.core.chunk_size
+    }
+
+    pub fn primary_key(&self) -> Vec<ColumnOrder> {
+        self.core.table_desc.pk.clone()
     }
 
     /// a vec of `InputRef` corresponding to `output_col_idx`, which can represent a pulled project.
@@ -333,6 +418,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.ctx(),
             Condition::true_cond(),
+            self.for_system_time_as_of_now(),
         );
         let project_expr = if self.required_col_idx() != self.output_col_idx() {
             Some(self.output_idx_to_input_ref())
@@ -351,6 +437,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             predicate,
+            self.for_system_time_as_of_now(),
         )
     }
 
@@ -363,6 +450,7 @@ impl LogicalScan {
             self.indexes().to_vec(),
             self.base.ctx.clone(),
             self.predicate().clone(),
+            self.for_system_time_as_of_now(),
         )
     }
 
@@ -524,8 +612,12 @@ impl LogicalScan {
             let (scan, predicate, project_expr) = scan.predicate_pull_up();
 
             if predicate.always_false() {
-                return LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch();
+                let plan =
+                    LogicalValues::create(vec![], scan.schema().clone(), scan.ctx()).to_batch()?;
+                assert_eq!(plan.schema(), self.schema());
+                return required_order.enforce_if_not_satisfies(plan);
             }
+
             let mut plan: PlanRef = BatchSeqScan::new(scan, scan_ranges).into();
             if !predicate.always_true() {
                 plan = BatchFilter::new(LogicalFilter::new(plan, predicate)).into();
@@ -544,39 +636,18 @@ impl LogicalScan {
         &self,
         required_order: &Order,
     ) -> Option<Result<PlanRef>> {
-        if required_order.field_order.is_empty() {
+        if required_order.column_orders.is_empty() {
             return None;
         }
 
-        let index = self.indexes().iter().find(|idx| {
-            Order {
-                field_order: idx
-                    .index_item
-                    .iter()
-                    .map(|idx_item| FieldOrder {
-                        index: idx_item.index,
-                        direct: Asc,
-                    })
-                    .collect(),
+        let order_satisfied_index = self.indexes_satisfy_order(required_order);
+        for index in order_satisfied_index {
+            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                return Some(index_scan.to_batch());
             }
-            .satisfies(required_order)
-        })?;
-
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if self
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            let index_scan = self.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-            );
-            Some(index_scan.to_batch())
-        } else {
-            None
         }
+
+        None
     }
 }
 
@@ -586,17 +657,7 @@ impl ToBatch for LogicalScan {
     }
 
     fn to_batch_with_order_required(&self, required_order: &Order) -> Result<PlanRef> {
-        // rewrite the condition before converting to batch as we will handle the expressions in a
-        // special way
-        let new_predicate = Condition {
-            conjunctions: self
-                .predicate()
-                .conjunctions
-                .iter()
-                .map(|expr| self.base.ctx().expr_with_session_timezone(expr.clone()))
-                .collect(),
-        };
-        let new = self.clone_with_predicate(new_predicate);
+        let new = self.clone_with_predicate(self.predicate().clone());
 
         if !new.indexes().is_empty() {
             let index_selection_rule = IndexSelectionRule::create();
@@ -665,8 +726,8 @@ impl ToStream for LogicalScan {
                     .pk
                     .iter()
                     .filter_map(|c| {
-                        if !col_ids.contains(&self.table_desc().columns[c.column_idx].column_id) {
-                            Some(c.column_idx)
+                        if !col_ids.contains(&self.table_desc().columns[c.column_index].column_id) {
+                            Some(c.column_index)
                         } else {
                             None
                         }

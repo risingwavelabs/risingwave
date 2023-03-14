@@ -18,7 +18,6 @@ use std::future::Future;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::anyhow;
-use itertools::Itertools;
 use rdkafka::error::{KafkaError, KafkaResult};
 use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
@@ -29,11 +28,12 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use super::{Sink, SinkError};
+use super::{Sink, SinkError, SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_DEBEZIUM, SINK_FORMAT_UPSERT};
 use crate::common::KafkaCommon;
 use crate::sink::Result;
 use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
@@ -61,7 +61,7 @@ pub struct KafkaConfig {
     #[serde(flatten)]
     pub common: KafkaCommon,
 
-    pub format: String, // accept "append_only" or "debezium"
+    pub format: String, // accept "append_only", "debezium", or "upsert"
 
     pub identifier: String,
 
@@ -94,9 +94,12 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.format != "append_only" && config.format != "debezium" {
+        if config.format != SINK_FORMAT_APPEND_ONLY
+            && config.format != SINK_FORMAT_DEBEZIUM
+            && config.format != SINK_FORMAT_UPSERT
+        {
             return Err(SinkError::Config(anyhow!(
-                "format must be either append_only or debezium"
+                "format must be append_only, debezium, or upsert"
             )));
         }
         Ok(config)
@@ -110,22 +113,24 @@ enum KafkaSinkState {
     Running(u64),
 }
 
-pub struct KafkaSink {
+pub struct KafkaSink<const APPEND_ONLY: bool> {
     pub config: KafkaConfig,
     pub conductor: KafkaTransactionConductor,
     state: KafkaSinkState,
     schema: Schema,
+    pk_indices: Vec<usize>,
     in_transaction_epoch: Option<u64>,
 }
 
-impl KafkaSink {
-    pub async fn new(config: KafkaConfig, schema: Schema) -> Result<Self> {
+impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
+    pub async fn new(config: KafkaConfig, schema: Schema, pk_indices: Vec<usize>) -> Result<Self> {
         Ok(KafkaSink {
             config: config.clone(),
             conductor: KafkaTransactionConductor::new(config).await?,
             in_transaction_epoch: None,
             state: KafkaSinkState::Init,
             schema,
+            pk_indices,
         })
     }
 
@@ -181,15 +186,16 @@ impl KafkaSink {
         )
     }
 
-    async fn debezium_update(&self, chunk: StreamChunk, schema: &Schema, ts_ms: u64) -> Result<()> {
+    async fn debezium_update(&self, chunk: StreamChunk, ts_ms: u64) -> Result<()> {
         let mut update_cache: Option<Map<String, Value>> = None;
+        let schema = &self.schema;
         for (op, row) in chunk.rows() {
             let event_object = match op {
                 Op::Insert => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
                         "before": null,
-                        "after": record_to_json(row, schema.fields.clone())?,
+                        "after": record_to_json(row, &schema.fields)?,
                         "op": "c",
                         "ts_ms": ts_ms,
                     }
@@ -197,14 +203,14 @@ impl KafkaSink {
                 Op::Delete => Some(json!({
                     "schema": schema_to_json(schema),
                     "payload": {
-                        "before": record_to_json(row, schema.fields.clone())?,
+                        "before": record_to_json(row, &schema.fields)?,
                         "after": null,
                         "op": "d",
                         "ts_ms": ts_ms,
                     }
                 })),
                 Op::UpdateDelete => {
-                    update_cache = Some(record_to_json(row, schema.fields.clone())?);
+                    update_cache = Some(record_to_json(row, &schema.fields)?);
                     continue;
                 }
                 Op::UpdateInsert => {
@@ -213,14 +219,14 @@ impl KafkaSink {
                             "schema": schema_to_json(schema),
                             "payload": {
                                 "before": before,
-                                "after": record_to_json(row, schema.fields.clone())?,
+                                "after": record_to_json(row, &schema.fields)?,
                                 "op": "u",
                                 "ts_ms": ts_ms,
                             }
                         }))
                     } else {
                         warn!(
-                            "not found UpdateDelete in prev row, skipping, row_id {:?}",
+                            "not found UpdateDelete in prev row, skipping, row index {:?}",
                             row.index()
                         );
                         continue;
@@ -239,10 +245,46 @@ impl KafkaSink {
         Ok(())
     }
 
-    async fn append_only(&self, chunk: StreamChunk, schema: &Schema) -> Result<()> {
+    async fn upsert(&self, chunk: StreamChunk) -> Result<()> {
+        let mut update_cache: Option<Map<String, Value>> = None;
+        let schema = &self.schema;
+        for (op, row) in chunk.rows() {
+            let event_object = match op {
+                Op::Insert => Some(Value::Object(record_to_json(row, &schema.fields)?)),
+                Op::Delete => Some(Value::Null),
+                Op::UpdateDelete => {
+                    update_cache = Some(record_to_json(row, &schema.fields)?);
+                    continue;
+                }
+                Op::UpdateInsert => {
+                    if update_cache.take().is_some() {
+                        Some(Value::Object(record_to_json(row, &schema.fields)?))
+                    } else {
+                        warn!(
+                            "not found UpdateDelete in prev row, skipping, row index {:?}",
+                            row.index()
+                        );
+                        continue;
+                    }
+                }
+            };
+            if let Some(obj) = event_object {
+                let event_key = Value::Object(pk_to_json(row, &schema.fields, &self.pk_indices)?);
+                self.send(
+                    BaseRecord::to(self.config.common.topic.as_str())
+                        .key(event_key.to_string().as_bytes())
+                        .payload(obj.to_string().as_bytes()),
+                )
+                .await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn append_only(&self, chunk: StreamChunk) -> Result<()> {
         for (op, row) in chunk.rows() {
             if op == Op::Insert {
-                let record = Value::Object(record_to_json(row, schema.fields.clone())?).to_string();
+                let record = Value::Object(record_to_json(row, &self.schema.fields)?).to_string();
                 self.send(
                     BaseRecord::to(self.config.common.topic.as_str())
                         .key(self.gen_message_key().as_bytes())
@@ -256,31 +298,30 @@ impl KafkaSink {
 }
 
 #[async_trait::async_trait]
-impl Sink for KafkaSink {
+impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        // when sinking the snapshot, it is required to begin epoch 0 for transaction
-        // if let (KafkaSinkState::Running(epoch), in_txn_epoch) = (&self.state,
-        // &self.in_transaction_epoch.unwrap()) && in_txn_epoch <= epoch {     return Ok(())
-        // }
-
-        match self.config.format.as_str() {
-            "append_only" => self.append_only(chunk, &self.schema).await,
-            "debezium" => {
+        if APPEND_ONLY {
+            // Append-only
+            self.append_only(chunk).await
+        } else {
+            // Debezium
+            if self.config.format == SINK_FORMAT_DEBEZIUM {
                 self.debezium_update(
                     chunk,
-                    &self.schema,
                     SystemTime::now()
                         .duration_since(UNIX_EPOCH)
                         .unwrap()
                         .as_millis() as u64,
                 )
                 .await
+            } else {
+                // Upsert
+                self.upsert(chunk).await
             }
-            _ => unreachable!(),
         }
     }
 
-    //  Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
+    // Note that epoch 0 is reserved for initializing, so we should not use epoch 0 for
     // transaction.
     async fn begin_epoch(&mut self, epoch: u64) -> Result<()> {
         self.in_transaction_epoch = Some(epoch);
@@ -318,7 +359,7 @@ impl Sink for KafkaSink {
     }
 }
 
-impl Debug for KafkaSink {
+impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         unimplemented!();
     }
@@ -382,10 +423,10 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
         }
         (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
             let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq(
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
                 st.fields
                     .iter()
-                    .zip_eq(st.field_names.iter())
+                    .zip_eq_fast(st.field_names.iter())
                     .map(|(dt, name)| Field::with_name(dt.clone(), name)),
             ) {
                 let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
@@ -403,11 +444,27 @@ fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value
     Ok(value)
 }
 
-fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Value>> {
+fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, Value>> {
     let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq(row.iter()) {
+    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
         let key = field.name.clone();
         let value = datum_to_json_object(field, datum_ref)
+            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        mappings.insert(key, value);
+    }
+    Ok(mappings)
+}
+
+fn pk_to_json(
+    row: RowRef<'_>,
+    schema: &[Field],
+    pk_indices: &[usize],
+) -> Result<Map<String, Value>> {
+    let mut mappings = Map::with_capacity(schema.len());
+    for idx in pk_indices {
+        let field = &schema[*idx];
+        let key = field.name.clone();
+        let value = datum_to_json_object(field, row.datum_at(*idx))
             .map_err(|e| SinkError::JsonParse(e.to_string()))?;
         mappings.insert(key, value);
     }
@@ -417,7 +474,7 @@ fn record_to_json(row: RowRef<'_>, schema: Vec<Field>) -> Result<Map<String, Val
 pub fn chunk_to_json(chunk: StreamChunk, schema: &Schema) -> Result<Vec<String>> {
     let mut records: Vec<String> = Vec::with_capacity(chunk.capacity());
     for (_, row) in chunk.rows() {
-        let record = Value::Object(record_to_json(row, schema.fields.clone())?);
+        let record = Value::Object(record_to_json(row, &schema.fields)?);
         records.push(record.to_string());
     }
 
@@ -578,8 +635,11 @@ mod test {
                 type_name: "".into(),
             },
         ]);
+        let pk_indices = vec![];
         let kafka_config = KafkaConfig::from_hashmap(properties)?;
-        let mut sink = KafkaSink::new(kafka_config.clone(), schema).await.unwrap();
+        let mut sink = KafkaSink::<true>::new(kafka_config.clone(), schema, pk_indices)
+            .await
+            .unwrap();
 
         for i in 0..10 {
             let mut fail_flag = false;

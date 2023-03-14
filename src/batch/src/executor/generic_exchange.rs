@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
@@ -166,7 +167,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
         let mut stream = select_all(
             self.proto_sources
                 .into_iter()
-                .zip_eq(self.source_creators)
+                .zip_eq_fast(self.source_creators)
                 .map(|(prost_source, source_creator)| {
                     Self::data_chunk_stream(
                         prost_source,

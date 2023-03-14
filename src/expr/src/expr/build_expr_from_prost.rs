@@ -16,34 +16,113 @@ use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
-use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::expr_some_all::SomeAllExpression;
-use crate::expr::expr_binary_bytes::{
+use super::expr_array_concat::ArrayConcatExpression;
+use super::expr_binary_bytes::{
     new_ltrim_characters, new_repeat, new_rtrim_characters, new_substr_start, new_to_char,
     new_trim_characters,
 };
-use crate::expr::expr_binary_nonnull::{
+use super::expr_binary_nonnull::{
     new_binary_expr, new_date_trunc_expr, new_like_default, new_to_timestamp,
 };
-use crate::expr::expr_binary_nullable::new_nullable_binary_expr;
-use crate::expr::expr_quaternary_bytes::new_overlay_for_exp;
-use crate::expr::expr_ternary_bytes::{
+use super::expr_binary_nullable::new_nullable_binary_expr;
+use super::expr_case::CaseExpression;
+use super::expr_coalesce::CoalesceExpression;
+use super::expr_concat_ws::ConcatWsExpression;
+use super::expr_field::FieldExpression;
+use super::expr_in::InExpression;
+use super::expr_nested_construct::NestedConstructExpression;
+use super::expr_quaternary_bytes::new_overlay_for_exp;
+use super::expr_regexp::RegexpMatchExpression;
+use super::expr_some_all::SomeAllExpression;
+use super::expr_ternary_bytes::{
     new_overlay_exp, new_replace_expr, new_split_part_expr, new_substr_start_end,
     new_translate_expr,
 };
-use crate::expr::expr_to_char_const_tmpl::{ExprToCharConstTmpl, ExprToCharConstTmplContext};
-use crate::expr::expr_to_timestamp_const_tmpl::{
+use super::expr_to_char_const_tmpl::{ExprToCharConstTmpl, ExprToCharConstTmplContext};
+use super::expr_to_timestamp_const_tmpl::{
     ExprToTimestampConstTmpl, ExprToTimestampConstTmplContext,
 };
-use crate::expr::expr_unary::{
+use super::expr_udf::UdfExpression;
+use super::expr_unary::{
     new_length_default, new_ltrim_expr, new_rtrim_expr, new_trim_expr, new_unary_expr,
 };
+use super::expr_vnode::VnodeExpression;
+use crate::expr::expr_array_distinct::ArrayDistinctExpression;
+use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::{
-    build_from_prost as expr_build_from_prost, BoxedExpression, Expression, LiteralExpression,
+    build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
+    LiteralExpression,
 };
 use crate::vector_op::to_char::compile_pattern_to_chrono;
-use crate::{bail, ensure, Result};
+use crate::{bail, ensure, ExprError, Result};
+
+pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    use risingwave_pb::expr::expr_node::Type::*;
+
+    match prost.get_expr_type().unwrap() {
+        // Fixed number of arguments and based on `Unary/Binary/Ternary/...Expression`
+        Cast | Upper | Lower | Md5 | Not | IsTrue | IsNotTrue | IsFalse | IsNotFalse | IsNull
+        | IsNotNull | Neg | Ascii | Abs | Ceil | Floor | Round | Exp | BitwiseNot | CharLength
+        | BoolOut | OctetLength | BitLength | ToTimestamp | JsonbTypeof | JsonbArrayLength => {
+            build_unary_expr_prost(prost)
+        }
+        Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
+        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
+        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
+        | ConcatOp | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
+            build_binary_expr_prost(prost)
+        }
+        And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
+            build_nullable_binary_expr_prost(prost)
+        }
+        ToChar => build_to_char_expr(prost),
+        ToTimestamp1 => build_to_timestamp_expr(prost),
+        Length => build_length_expr(prost),
+        Replace => build_replace_expr(prost),
+        Like => build_like_expr(prost),
+        Repeat => build_repeat_expr(prost),
+        SplitPart => build_split_part_expr(prost),
+        Translate => build_translate_expr(prost),
+
+        // Variable number of arguments and based on `Unary/Binary/Ternary/...Expression`
+        Substr => build_substr_expr(prost),
+        Overlay => build_overlay_expr(prost),
+        Trim => build_trim_expr(prost),
+        Ltrim => build_ltrim_expr(prost),
+        Rtrim => build_rtrim_expr(prost),
+        DateTrunc => build_date_trunc_expr(prost),
+
+        // Dedicated types
+        All | Some => build_some_all_expr_prost(prost),
+        In => InExpression::try_from(prost).map(Expression::boxed),
+        Case => CaseExpression::try_from(prost).map(Expression::boxed),
+        Coalesce => CoalesceExpression::try_from(prost).map(Expression::boxed),
+        ConcatWs => ConcatWsExpression::try_from(prost).map(Expression::boxed),
+        ConstantValue => LiteralExpression::try_from(prost).map(Expression::boxed),
+        InputRef => InputRefExpression::try_from(prost).map(Expression::boxed),
+        Field => FieldExpression::try_from(prost).map(Expression::boxed),
+        Array => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        Row => NestedConstructExpression::try_from(prost).map(Expression::boxed),
+        RegexpMatch => RegexpMatchExpression::try_from(prost).map(Expression::boxed),
+        ArrayCat | ArrayAppend | ArrayPrepend => {
+            // Now we implement these three functions as a single expression for the
+            // sake of simplicity. If performance matters at some time, we can split
+            // the implementation to improve performance.
+            ArrayConcatExpression::try_from(prost).map(Expression::boxed)
+        }
+        ArrayToString => ArrayToStringExpression::try_from(prost).map(Expression::boxed),
+        ArrayDistinct => ArrayDistinctExpression::try_from(prost).map(Expression::boxed),
+        Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
+        Now => build_now_expr(prost),
+        Udf => UdfExpression::try_from(prost).map(Expression::boxed),
+        _ => Err(ExprError::UnsupportedFunction(format!(
+            "{:?}",
+            prost.get_expr_type()
+        ))),
+    }
+}
 
 fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());
@@ -54,14 +133,14 @@ fn get_children_and_return_type(prost: &ExprNode) -> Result<(Vec<ExprNode>, Data
     }
 }
 
-pub fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_unary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     let [child]: [_; 1] = children.try_into().unwrap();
     let child_expr = expr_build_from_prost(&child)?;
     new_unary_expr(prost.get_expr_type().unwrap(), ret_type, child_expr)
 }
 
-pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
     let left_expr = expr_build_from_prost(&left_child)?;
@@ -74,7 +153,7 @@ pub fn build_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     )
 }
 
-pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
     let left_expr = expr_build_from_prost(&left_child)?;
@@ -87,7 +166,7 @@ pub fn build_nullable_binary_expr_prost(prost: &ExprNode) -> Result<BoxedExpress
     )
 }
 
-pub fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3 || children.len() == 4);
 
@@ -105,7 +184,7 @@ pub fn build_overlay_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     let [left_child, right_child]: [_; 2] = children.try_into().unwrap();
     let left_expr = expr_build_from_prost(&left_child)?;
@@ -113,7 +192,7 @@ pub fn build_repeat_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_repeat(left_expr, right_expr, ret_type))
 }
 
-pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     let child = expr_build_from_prost(&children[0])?;
     ensure!(children.len() == 2 || children.len() == 3);
@@ -129,7 +208,7 @@ pub fn build_substr_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(!children.is_empty() && children.len() <= 2);
     let original = expr_build_from_prost(&children[0])?;
@@ -143,7 +222,7 @@ pub fn build_trim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(!children.is_empty() && children.len() <= 2);
     let original = expr_build_from_prost(&children[0])?;
@@ -157,7 +236,7 @@ pub fn build_ltrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(!children.is_empty() && children.len() <= 2);
     let original = expr_build_from_prost(&children[0])?;
@@ -171,7 +250,7 @@ pub fn build_rtrim_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
-pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
     let s = expr_build_from_prost(&children[0])?;
@@ -180,7 +259,7 @@ pub fn build_replace_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_replace_expr(s, from_str, to_str, ret_type))
 }
 
-pub fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2 || children.len() == 3);
     let field = expr_build_from_prost(&children[0])?;
@@ -193,7 +272,7 @@ pub fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_date_trunc_expr(ret_type, field, source, time_zone))
 }
 
-pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add encoding length expr
     let [child]: [_; 1] = children.try_into().unwrap();
@@ -201,7 +280,7 @@ pub fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_length_default(child, ret_type))
 }
 
-pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let expr_ia1 = expr_build_from_prost(&children[0])?;
@@ -209,7 +288,7 @@ pub fn build_like_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_like_default(expr_ia1, expr_ia2, ret_type))
 }
 
-pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
     let s = expr_build_from_prost(&children[0])?;
@@ -218,7 +297,7 @@ pub fn build_translate_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_translate_expr(s, match_str, replace_str, ret_type))
 }
 
-pub fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 3);
     let string_expr = expr_build_from_prost(&children[0])?;
@@ -232,7 +311,7 @@ pub fn build_split_part_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     ))
 }
 
-pub fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let data_expr = expr_build_from_prost(&children[0])?;
@@ -316,12 +395,12 @@ pub fn build_some_all_expr_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         let left_expr_input_ref = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(left_expr.return_type().to_protobuf()),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 0 })),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let right_expr_input_ref = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(right_expr_return_type.to_protobuf()),
-            rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: 1 })),
+            rex_node: Some(RexNode::InputRef(1)),
         };
         let mut root_expr_node = ExprNode {
             expr_type: inner_expr_type as i32,

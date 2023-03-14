@@ -8,15 +8,20 @@ license = { workspace = true }
 repository = { workspace = true }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
-async-trait = "0.1"
-async_stack_trace = { path = "../async_stack_trace" }
+await-tree = "0.1.1"
 console = "0.15"
 console-subscriber = "0.1.8"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 parking_lot = { version = "0.12", features = ["deadlock_detection"] }
 pprof = { version = "0.11", features = ["flamegraph"] }
-tokio = { version = "0.2.11", package = "madsim-tokio", features = [
+tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
     "sync",
@@ -25,7 +30,6 @@ tokio = { version = "0.2.11", package = "madsim-tokio", features = [
     "signal",
     "fs"
 ] }
-tokio-stream = "0.1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.16", features = ["fmt", "parking_lot", "std", "time", "local-time"] }
 

@@ -20,12 +20,16 @@ use risingwave_backup::error::BackupResult;
 use risingwave_backup::meta_snapshot::{ClusterMetadata, MetaSnapshot};
 use risingwave_backup::MetaSnapshotId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta, HummockVersionStats};
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::user::UserInfo;
 
+use crate::manager::model::SystemParamsModel;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
+
+const VERSION: u32 = 1;
 
 pub struct MetaSnapshotBuilder<S> {
     snapshot: MetaSnapshot,
@@ -41,6 +45,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
     }
 
     pub async fn build(&mut self, id: MetaSnapshotId) -> BackupResult<()> {
+        self.snapshot.format_version = VERSION;
         self.snapshot.id = id;
         // Caveat: snapshot impl of etcd meta store doesn't prevent it from expiration.
         // So expired snapshot read may return error. If that happens,
@@ -69,13 +74,11 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .next()
             .ok_or_else(|| anyhow!("hummock version stats not found in meta store"))?;
         let compaction_groups =
-            crate::hummock::compaction_group::CompactionGroup::list_at_snapshot::<S>(
-                &meta_store_snapshot,
-            )
-            .await?
-            .iter()
-            .map(MetadataModel::to_protobuf)
-            .collect();
+            crate::hummock::model::CompactionGroup::list_at_snapshot::<S>(&meta_store_snapshot)
+                .await?
+                .iter()
+                .map(MetadataModel::to_protobuf)
+                .collect();
         let table_fragments =
             crate::model::TableFragments::list_at_snapshot::<S>(&meta_store_snapshot)
                 .await?
@@ -91,6 +94,10 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let sink = Sink::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let source = Source::list_at_snapshot::<S>(&meta_store_snapshot).await?;
         let view = View::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let function = Function::list_at_snapshot::<S>(&meta_store_snapshot).await?;
+        let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
+            .await?
+            .ok_or_else(|| anyhow!("system params not found in meta store"))?;
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
@@ -106,6 +113,8 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             view,
             table_fragments,
             user_info,
+            function,
+            system_param,
         };
         Ok(())
     }
@@ -136,9 +145,11 @@ mod tests {
     use risingwave_backup::error::BackupError;
     use risingwave_backup::meta_snapshot::MetaSnapshot;
     use risingwave_common::error::ToErrorStr;
+    use risingwave_common::system_param::default_system_params;
     use risingwave_pb::hummock::{HummockVersion, HummockVersionStats};
 
     use crate::backup_restore::meta_snapshot_builder::MetaSnapshotBuilder;
+    use crate::manager::model::SystemParamsModel;
     use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
 
@@ -172,6 +183,14 @@ mod tests {
             ..Default::default()
         };
         hummock_version_stats
+            .insert(meta_store.deref())
+            .await
+            .unwrap();
+        let err = builder.build(1).await.unwrap_err();
+        let err = assert_matches!(err, BackupError::Other(e) => e);
+        assert_eq!("system params not found in meta store", err.to_error_str());
+
+        default_system_params()
             .insert(meta_store.deref())
             .await
             .unwrap();

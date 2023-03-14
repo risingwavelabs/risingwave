@@ -32,7 +32,7 @@ use risingwave_pb::hummock::{
 };
 
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::compaction_group::TableOption;
+use crate::hummock::compaction::default_level_selector;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef};
 use crate::manager::{ClusterManager, ClusterManagerRef, MetaSrvEnv, META_NODE_ID};
 use crate::rpc::metrics::MetaMetrics;
@@ -90,8 +90,9 @@ where
         temp_compactor = true;
     }
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
+    let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
-        .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+        .get_compact_task(StaticCompactionGroupId::StateDefault.into(), &mut selector)
         .await
         .unwrap()
         .unwrap();
@@ -157,11 +158,14 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
                 right_exclusive: false,
             }),
             file_size: 2,
-            table_ids: vec![(i + 1) as u32, (i + 2) as u32],
+            table_ids: vec![sst_id as u32, sst_id as u32 * 10000],
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
             divide_version: 0,
+            uncompressed_file_size: 2,
+            min_epoch: 0,
+            max_epoch: 0,
         });
     }
     sst_info
@@ -198,9 +202,9 @@ pub async fn register_table_ids_to_compaction_group<S>(
 {
     hummock_manager_ref
         .register_table_ids(
-            &mut table_ids
+            &table_ids
                 .iter()
-                .map(|table_id| (*table_id, compaction_group_id, TableOption::default()))
+                .map(|table_id| (*table_id, compaction_group_id))
                 .collect_vec(),
         )
         .await
@@ -305,8 +309,7 @@ pub async fn setup_compute_env_with_config(
         compactor_manager,
         config,
     )
-    .await
-    .unwrap();
+    .await;
     let fake_host_address = HostAddress {
         host: "127.0.0.1".to_string(),
         port,

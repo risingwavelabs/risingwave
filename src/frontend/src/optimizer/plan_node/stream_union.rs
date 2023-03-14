@@ -16,16 +16,18 @@ use std::fmt;
 use std::ops::BitAnd;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::UnionNode;
 
-use super::PlanRef;
+use super::{ExprRewritable, PlanRef};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::{LogicalUnion, PlanBase, PlanTreeNode, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamUnion {
     pub base: PlanBase,
     logical: LogicalUnion,
@@ -43,7 +45,11 @@ impl StreamUnion {
             .iter()
             .all(|input| *input.distribution() == dist));
         let watermark_columns = inputs.iter().fold(
-            FixedBitSet::with_capacity(schema.len()),
+            {
+                let mut bitset = FixedBitSet::with_capacity(schema.len());
+                bitset.toggle_range(..);
+                bitset
+            },
             |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
         );
 
@@ -62,7 +68,22 @@ impl StreamUnion {
 
 impl fmt::Display for StreamUnion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.logical.fmt_with_name(f, "StreamUnion")
+        let mut builder = f.debug_struct("StreamUnion");
+        self.logical.fmt_fields_with_builder(&mut builder);
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
+
+        builder.finish()
     }
 }
 
@@ -88,3 +109,5 @@ impl StreamNode for StreamUnion {
         ProstStreamNode::Union(UnionNode {})
     }
 }
+
+impl ExprRewritable for StreamUnion {}

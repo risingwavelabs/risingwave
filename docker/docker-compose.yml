@@ -7,6 +7,8 @@ services:
       - compactor-node
       - "--listen-addr"
       - "0.0.0.0:6660"
+      - "--advertise-addr"
+      - "compactor-0:6660"
       - "--prometheus-listener-addr"
       - "0.0.0.0:1260"
       - "--metrics-level"
@@ -44,16 +46,18 @@ services:
       - compute-node
       - "--listen-addr"
       - "0.0.0.0:5688"
-      - "--prometheus-listener-addr"
-      - "0.0.0.0:1222"
       - "--advertise-addr"
       - "compute-node-0:5688"
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:1222"
       - "--metrics-level"
       - "1"
       - "--state-store"
       - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
+      - "--connector-rpc-endpoint"
+      - "connector-node:50051"
       - "--config-path"
       - /risingwave.toml
     expose:
@@ -128,8 +132,14 @@ services:
       - "0.0.0.0:4566"
       - "--meta-addr"
       - "http://meta-node-0:5690"
+      - "--advertise-addr"
+      - "frontend-node-0:4566"
       - "--config-path"
       - /risingwave.toml
+      - "--prometheus-listener-addr"
+      - "0.0.0.0:2222"
+      - "--metrics-level"
+      - "1"
     expose:
       - "4566"
     ports:
@@ -191,14 +201,19 @@ services:
       - etcd
       - "--etcd-endpoints"
       - "etcd-0:2388"
+      - "--connector-rpc-endpoint"
+      - "connector-node:50051"
       - "--config-path"
       - /risingwave.toml
     expose:
       - "5690"
       - "1250"
       - "5691"
-    ports: []
-    depends_on: []
+    ports:
+      - "5690:5690"
+      - "5691:5691"
+    depends_on:
+      - "etcd-0"
     volumes:
       - "./risingwave.toml:/risingwave.toml"
     environment:
@@ -276,13 +291,20 @@ services:
       interval: 1s
       timeout: 5s
       retries: 5
-  redpanda:
+  connector-node:
+    image: ghcr.io/risingwavelabs/risingwave:latest
+    entrypoint: "/risingwave/bin/connector-node/start-service.sh"
+    ports:
+      - 50051
+      - 50052
+    container_name: connector-node
+  message_queue:
     image: "docker.vectorized.io/vectorized/redpanda:latest"
     command:
       - redpanda
       - start
       - "--smp"
-      - "4"
+      - "1"
       - "--reserve-memory"
       - 0M
       - "--memory"
@@ -294,18 +316,20 @@ services:
       - "--kafka-addr"
       - "PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092"
       - "--advertise-kafka-addr"
-      - "PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092"
+      - "PLAINTEXT://message_queue:29092,OUTSIDE://localhost:9092"
     expose:
       - "29092"
       - "9092"
+      - "9644"
     ports:
+      - "29092:29092"
       - "9092:9092"
       - "9644:9644"
     depends_on: []
     volumes:
-      - "redpanda:/var/lib/redpanda/data"
+      - "message_queue:/var/lib/redpanda/data"
     environment: {}
-    container_name: redpanda
+    container_name: message_queue
     healthcheck:
       test:
         - CMD
@@ -324,6 +348,6 @@ volumes:
     external: false
   prometheus-0:
     external: false
-  redpanda:
+  message_queue:
     external: false
 name: risingwave-compose

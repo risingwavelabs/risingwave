@@ -29,6 +29,7 @@ cargo sort --check --workspace
 
 echo "--- Rust cargo-hakari check"
 cargo hakari generate --diff
+cargo hakari verify
 
 echo "--- Rust format check"
 cargo fmt --all -- --check
@@ -41,15 +42,17 @@ cargo build \
     -p risingwave_sqlsmith \
     -p risingwave_compaction_test \
     -p risingwave_backup_cmd \
+    -p risingwave_java_binding \
     --features "static-link static-log-level" --profile "$profile"
 
-artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test)
-
-echo "--- Compress debug info for artifacts"
-echo -n "${artifacts[*]}" | parallel -d ' ' "objcopy --compress-debug-sections=zlib-gnu target/$target/{} && echo \"compressed {}\""
+# the file name suffix of artifact for risingwave_java_binding is so only for linux. It is dylib for MacOS
+artifacts=(risingwave sqlsmith compaction-test backup-restore risingwave_regress_test risedev-dev delete-range-test librisingwave_java_binding.so)
 
 echo "--- Show link info"
 ldd target/"$target"/risingwave
 
 echo "--- Upload artifacts"
 echo -n "${artifacts[*]}" | parallel -d ' ' "mv target/$target/{} ./{}-$profile && buildkite-agent artifact upload ./{}-$profile"
+
+echo "--- Show sccache stats"
+sccache --show-stats

@@ -1,30 +1,30 @@
 statement ok
 CREATE SOURCE person
-    (id INTEGER, name VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, city VARCHAR, state VARCHAR, "date_time" TIMESTAMP)
+    (id BIGINT, name VARCHAR, "email_address" VARCHAR, "credit_card" VARCHAR, city VARCHAR, state VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR)
 with (
   connector = 'nexmark',
   nexmark.table.type = 'Person',
   nexmark.split.num = '12',
   nexmark.min.event.gap.in.ns = '0'
-) ROW FORMAT JSON;
+);
 
 statement ok
-CREATE SOURCE auction (id INTEGER, "item_name" VARCHAR, description VARCHAR, "initial_bid" INTEGER, reserve INTEGER, "date_time" TIMESTAMP, expires TIMESTAMP, seller INTEGER, category INTEGER)
+CREATE SOURCE auction (id BIGINT, "item_name" VARCHAR, description VARCHAR, "initial_bid" BIGINT, reserve BIGINT, "date_time" TIMESTAMP, expires TIMESTAMP, seller BIGINT, category BIGINT, "extra" VARCHAR)
 with (
   connector = 'nexmark',
   nexmark.table.type = 'Auction',
   nexmark.split.num = '12',
   nexmark.min.event.gap.in.ns = '0'
-) ROW FORMAT JSON;
+);
 
 statement ok
-CREATE SOURCE bid (auction INTEGER, bidder INTEGER, price INTEGER, "date_time" TIMESTAMP)
+CREATE SOURCE bid (auction BIGINT, bidder BIGINT, price BIGINT, "channel" VARCHAR, "url" VARCHAR, "date_time" TIMESTAMP, "extra" VARCHAR)
 with (
   connector = 'nexmark',
   nexmark.table.type = 'Bid',
   nexmark.split.num = '12',
   nexmark.min.event.gap.in.ns = '0'
-) ROW FORMAT JSON;
+);
 
 statement ok
 CREATE MATERIALIZED VIEW nexmark_q7 AS

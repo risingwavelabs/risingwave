@@ -30,6 +30,7 @@ use crate::types::{
     hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
     DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
 };
+use crate::util::iter_util::ZipEqFast;
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
@@ -93,7 +94,7 @@ impl ArrayBuilder for StructArrayBuilder {
                 self.bitmap.append_n(n, true);
                 let fields = v.fields_ref();
                 assert_eq!(fields.len(), self.children_array.len());
-                for (child, f) in self.children_array.iter_mut().zip_eq(fields) {
+                for (child, f) in self.children_array.iter_mut().zip_eq_fast(fields) {
                     child.append_datum_n(n, f);
                 }
             }
@@ -153,7 +154,7 @@ impl StructArrayBuilder {
             self.bitmap.append(true);
         }
         self.len += len;
-        for (a, r) in self.children_array.iter_mut().zip_eq(refs.iter()) {
+        for (a, r) in self.children_array.iter_mut().zip_eq_fast(refs.iter()) {
             a.append_array(r);
         }
     }

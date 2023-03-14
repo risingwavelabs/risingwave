@@ -22,6 +22,7 @@ use risingwave_common::array::{
     NaiveDateTimeArray,
 };
 use risingwave_common::types::{CheckedAdd, IsNegative, Scalar, ScalarRef};
+use risingwave_common::util::iter_util::ZipEqDebug;
 
 use super::*;
 use crate::ExprError;
@@ -121,7 +122,7 @@ where
             Some(bitmap) => {
                 for ((start, stop, step), visible) in
                     multizip((arr_start.iter(), arr_stop.iter(), arr_step.iter()))
-                        .zip_eq(bitmap.iter())
+                        .zip_eq_debug(bitmap.iter())
                 {
                     let array = if !visible {
                         empty_array(self.return_type())
@@ -178,6 +179,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
 
     use super::*;

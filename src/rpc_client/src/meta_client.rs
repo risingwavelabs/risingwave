@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
-use std::collections::{HashMap, HashSet};
-use std::fmt::Debug;
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,10 +23,14 @@ use async_trait::async_trait;
 use either::Either;
 use futures::stream::BoxStream;
 use itertools::Itertools;
+use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
@@ -55,6 +59,7 @@ use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
 use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
+use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -162,28 +167,44 @@ impl MetaClient {
         worker_type: WorkerType,
         addr: &HostAddr,
         worker_node_parallelism: usize,
-    ) -> Result<Self> {
+    ) -> Result<(Self, SystemParamsReader)> {
         let addr_strategy = Self::parse_meta_addr(meta_addr)?;
+        tracing::info!("register meta client using strategy: {}", addr_strategy);
 
         let grpc_meta_client = GrpcMetaClient::new(addr_strategy).await?;
-        let request = AddWorkerNodeRequest {
+
+        let add_worker_request = AddWorkerNodeRequest {
             worker_type: worker_type as i32,
             host: Some(addr.to_protobuf()),
             worker_node_parallelism: worker_node_parallelism as u64,
         };
-        let retry_strategy = GrpcMetaClient::retry_strategy_for_request();
-        let resp = tokio_retry::Retry::spawn(retry_strategy, || async {
-            let request = request.clone();
-            grpc_meta_client.add_worker_node(request).await
-        })
-        .await?;
-        let worker_node = resp.node.expect("AddWorkerNodeResponse::node is empty");
-        Ok(Self {
-            worker_id: worker_node.id,
-            worker_type,
-            host_addr: addr.clone(),
-            inner: grpc_meta_client,
-        })
+        let add_worker_resp =
+            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
+                let request = add_worker_request.clone();
+                grpc_meta_client.add_worker_node(request).await
+            })
+            .await?;
+        let worker_node = add_worker_resp
+            .node
+            .expect("AddWorkerNodeResponse::node is empty");
+
+        let system_params_request = GetSystemParamsRequest {};
+        let system_params_resp =
+            tokio_retry::Retry::spawn(GrpcMetaClient::retry_strategy_for_request(), || async {
+                let request = system_params_request.clone();
+                grpc_meta_client.get_system_params(request).await
+            })
+            .await?;
+
+        Ok((
+            Self {
+                worker_id: worker_node.id,
+                worker_type,
+                host_addr: addr.clone(),
+                inner: grpc_meta_client,
+            },
+            system_params_resp.params.unwrap().into(),
+        ))
     }
 
     /// Activate the current node in cluster to confirm it's ready to serve.
@@ -315,6 +336,22 @@ impl MetaClient {
             new_table_name: name.to_string(),
         };
         let resp = self.inner.alter_table_name(request).await?;
+        Ok(resp.version)
+    }
+
+    pub async fn replace_table(
+        &self,
+        table: ProstTable,
+        graph: StreamFragmentGraph,
+        table_col_index_mapping: ColIndexMapping,
+    ) -> Result<CatalogVersion> {
+        let request = ReplaceTablePlanRequest {
+            table: Some(table),
+            fragment_graph: Some(graph),
+            table_col_index_mapping: Some(table_col_index_mapping.to_protobuf()),
+        };
+        let resp = self.inner.replace_table_plan(request).await?;
+        // TODO: handle error in `resp.status` here
         Ok(resp.version)
     }
 
@@ -552,6 +589,12 @@ impl MetaClient {
         Ok(resp.snapshot.unwrap())
     }
 
+    pub async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        let request = CancelCreatingJobsRequest { infos };
+        let _ = self.inner.cancel_creating_jobs(request).await?;
+        Ok(())
+    }
+
     pub async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -608,7 +651,7 @@ impl MetaClient {
     pub async fn init_metadata_for_replay(
         &self,
         tables: Vec<ProstTable>,
-        compaction_groups: Vec<CompactionGroup>,
+        compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
             tables,
@@ -695,7 +738,7 @@ impl MetaClient {
         Ok(resp.num_tasks as usize)
     }
 
-    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroup>> {
+    pub async fn risectl_list_compaction_group(&self) -> Result<Vec<CompactionGroupInfo>> {
         let req = RiseCtlListCompactionGroupRequest {};
         let resp = self.inner.rise_ctl_list_compaction_group(req).await?;
         Ok(resp.compaction_groups)
@@ -745,6 +788,37 @@ impl MetaClient {
         let req = GetMetaSnapshotManifestRequest {};
         let resp = self.inner.get_meta_snapshot_manifest(req).await?;
         Ok(resp.manifest.expect("should exist"))
+    }
+
+    pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
+        let req = GetSystemParamsRequest {};
+        let resp = self.inner.get_system_params(req).await?;
+        Ok(resp.params.unwrap().into())
+    }
+
+    pub async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        let req = SetSystemParamRequest { param, value };
+        self.inner.set_system_param(req).await?;
+        Ok(())
+    }
+
+    pub async fn get_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let req = GetDdlProgressRequest {};
+        let resp = self.inner.get_ddl_progress(req).await?;
+        Ok(resp.ddl_progress)
+    }
+
+    pub async fn split_compaction_group(
+        &self,
+        group_id: CompactionGroupId,
+        table_ids_to_new_group: &[StateTableId],
+    ) -> Result<CompactionGroupId> {
+        let req = SplitCompactionGroupRequest {
+            group_id,
+            table_ids: table_ids_to_new_group.to_vec(),
+        };
+        let resp = self.inner.split_compaction_group(req).await?;
+        Ok(resp.new_group_id)
     }
 }
 
@@ -876,12 +950,6 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_compaction_groups(&self) -> Result<Vec<CompactionGroup>> {
-        let req = GetCompactionGroupsRequest {};
-        let resp = self.inner.get_compaction_groups(req).await?;
-        Ok(resp.compaction_groups)
-    }
-
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
@@ -924,6 +992,7 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    system_params_client: SystemParamsServiceClient<Channel>,
 }
 
 impl GrpcMetaClientCore {
@@ -937,7 +1006,8 @@ impl GrpcMetaClientCore {
         let stream_client = StreamManagerServiceClient::new(channel.clone());
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
-        let backup_client = BackupServiceClient::new(channel);
+        let backup_client = BackupServiceClient::new(channel.clone());
+        let system_params_client = SystemParamsServiceClient::new(channel);
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -949,6 +1019,7 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            system_params_client,
         }
     }
 }
@@ -968,11 +1039,24 @@ pub enum MetaAddressStrategy {
     List(Vec<String>),
 }
 
+impl fmt::Display for MetaAddressStrategy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            MetaAddressStrategy::LoadBalance(addr) => {
+                write!(f, "LoadBalance({})", addr)?;
+            }
+            MetaAddressStrategy::List(addrs) => {
+                write!(f, "List({:?})", addrs)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 type MetaMemberClient = MetaMemberServiceClient<Channel>;
 
 struct MetaMemberGroup {
-    client_cache: HashMap<String, MetaMemberClient>,
-    members: HashSet<String>,
+    members: LruCache<String, Option<MetaMemberClient>>,
 }
 
 struct ElectionMemberManagement {
@@ -1003,60 +1087,35 @@ impl ElectionMemberManagement {
             Either::Right(member_group) => {
                 let mut fetched_members = None;
 
-                for addr in &member_group.members {
-                    let mut client = match member_group.client_cache.get(addr) {
-                        Some(cached_client) => cached_client.to_owned(),
-                        None => {
-                            let endpoint = match GrpcMetaClient::addr_to_endpoint(addr.clone()) {
-                                Ok(endpoint) => endpoint,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create endpoint from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
+                for (addr, client) in member_group.members.iter_mut() {
+                    let client: Result<MetaMemberClient> = try {
+                        match client {
+                            Some(cached_client) => cached_client.to_owned(),
+                            None => {
+                                let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone())?;
+                                let channel = GrpcMetaClient::connect_to_endpoint(endpoint).await?;
+                                let new_client: MetaMemberServiceClient<Channel> =
+                                    MetaMemberServiceClient::new(channel);
+                                *client = Some(new_client.clone());
 
-                            let channel = match GrpcMetaClient::connect_to_endpoint(endpoint).await
-                            {
-                                Ok(channel) => channel,
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "failed to create rpc channel from {}, {}",
-                                        addr,
-                                        e
-                                    );
-                                    continue;
-                                }
-                            };
-
-                            let client: MetaMemberServiceClient<Channel> =
-                                MetaMemberServiceClient::new(channel);
-                            member_group
-                                .client_cache
-                                .insert(addr.clone(), client.clone());
-                            client.to_owned()
+                                new_client
+                            }
                         }
                     };
-
-                    let MembersResponse { members } = match client.members(MembersRequest {}).await
-                    {
-                        Ok(members) => members.into_inner(),
-                        Err(e) => {
-                            tracing::warn!(
-                                "failed to fetch members from MetaMemberClient {}: {}",
-                                addr,
-                                e
-                            );
+                    if let Err(err) = client {
+                        tracing::warn!("failed to create client from {}: {}", addr, err);
+                        continue;
+                    }
+                    match client.unwrap().members(MembersRequest {}).await {
+                        Err(err) => {
+                            tracing::warn!("failed to fetch members from {}: {}", addr, err);
                             continue;
                         }
-                    };
-
-                    fetched_members = Some(members);
-
-                    break;
+                        Ok(resp) => {
+                            fetched_members = Some(resp.into_inner().members);
+                            break;
+                        }
+                    }
                 }
 
                 let members =
@@ -1064,26 +1123,18 @@ impl ElectionMemberManagement {
 
                 // find new leader
                 let mut leader = None;
-                let mut member_addrs = HashSet::new();
                 for member in members {
                     if member.is_leader {
                         leader = Some(member.clone());
                     }
 
-                    member_addrs.insert(Self::host_address_to_url(member.address.unwrap()));
+                    let addr = Self::host_address_to_url(member.address.unwrap());
+                    // We don't clean any expired addrs here to deal with some extreme situations.
+                    if !member_group.members.contains(&addr) {
+                        tracing::info!("new meta member joined: {}", addr);
+                        member_group.members.put(addr, None);
+                    }
                 }
-
-                // drain old cache
-                let drained = member_group
-                    .client_cache
-                    .drain_filter(|addr, _| !member_addrs.borrow().contains(addr));
-
-                for (addr, _) in drained {
-                    tracing::info!("dropping meta client from {}", addr);
-                }
-
-                // update members
-                member_group.members = member_addrs;
 
                 leader
             }
@@ -1199,17 +1250,14 @@ impl GrpcMetaClient {
         let meta_member_client = client.core.read().await.meta_member_client.clone();
         let members = match &strategy {
             MetaAddressStrategy::LoadBalance(_) => Either::Left(meta_member_client),
-            MetaAddressStrategy::List(_) => {
-                let mut client_cache = HashMap::new();
-                let mut members = HashSet::new();
-                members.insert(addr.to_string());
+            MetaAddressStrategy::List(addrs) => {
+                let mut members = LruCache::new(20);
+                for addr in addrs {
+                    members.put(addr.clone(), None);
+                }
+                members.put(addr.clone(), Some(meta_member_client));
 
-                client_cache.insert(addr.to_string(), meta_member_client);
-
-                Either::Right(MetaMemberGroup {
-                    client_cache,
-                    members,
-                })
+                Either::Right(MetaMemberGroup { members })
             }
         };
 
@@ -1251,7 +1299,7 @@ impl GrpcMetaClient {
                     }
                     Err(e) => {
                         tracing::warn!(
-                            "Failed to connect to meta server {}, trying next address: {}",
+                            "Failed to connect to meta server {}, trying again: {}",
                             addr,
                             e
                         )
@@ -1260,7 +1308,7 @@ impl GrpcMetaClient {
             }
 
             Err(RpcError::Internal(anyhow!(
-                "Failed to connect to any meta server"
+                "Failed to connect to meta server"
             )))
         })
         .await?;
@@ -1296,6 +1344,7 @@ macro_rules! for_all_meta_rpc {
             //(not used) ,{ cluster_client, list_all_nodes, ListAllNodesRequest, ListAllNodesResponse }
             ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
             ,{ stream_client, flush, FlushRequest, FlushResponse }
+            ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
              ,{ ddl_client, alter_table_name, AlterTableNameRequest, AlterTableNameResponse }
@@ -1316,7 +1365,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_schema, DropSchemaRequest, DropSchemaResponse }
             ,{ ddl_client, drop_index, DropIndexRequest, DropIndexResponse }
             ,{ ddl_client, drop_function, DropFunctionRequest, DropFunctionResponse }
+            ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
+            ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1334,7 +1385,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
             ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
-            ,{ hummock_client, get_compaction_groups, GetCompactionGroupsRequest, GetCompactionGroupsResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
             ,{ hummock_client, trigger_full_gc, TriggerFullGcRequest, TriggerFullGcResponse }
@@ -1344,6 +1394,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_update_compaction_config, RiseCtlUpdateCompactionConfigRequest, RiseCtlUpdateCompactionConfigResponse }
             ,{ hummock_client, init_metadata_for_replay, InitMetadataForReplayRequest, InitMetadataForReplayResponse }
             ,{ hummock_client, set_compactor_runtime_config, SetCompactorRuntimeConfigRequest, SetCompactorRuntimeConfigResponse }
+            ,{ hummock_client, split_compaction_group, SplitCompactionGroupRequest, SplitCompactionGroupResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }
@@ -1358,6 +1409,8 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
+            ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }
     };
 }

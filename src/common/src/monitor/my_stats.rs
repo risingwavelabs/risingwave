@@ -17,6 +17,8 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 use prometheus::proto::Histogram;
 
+use crate::util::iter_util::ZipEqFast;
+
 #[derive(Clone, Default, Debug)]
 pub struct MyHistogram {
     pub upper_bound_list: Vec<f64>,
@@ -57,7 +59,7 @@ impl MyHistogram {
                 false => prev
                     .count_list
                     .iter()
-                    .zip_eq(cur.count_list.iter())
+                    .zip_eq_fast(cur.count_list.iter())
                     .map(|(&pb, &cb)| cb - pb)
                     .collect_vec(),
             },
@@ -76,7 +78,11 @@ impl MyHistogram {
         let threshold = (sample_count as f64 * (p / 100.0_f64)).ceil() as u64;
         let mut last_upper_bound = 0.0;
         let mut last_count = 0;
-        for (&upper_bound, &count) in self.upper_bound_list.iter().zip_eq(self.count_list.iter()) {
+        for (&upper_bound, &count) in self
+            .upper_bound_list
+            .iter()
+            .zip_eq_fast(self.count_list.iter())
+        {
             if count >= threshold {
                 // assume scale linearly within this bucket,
                 // return a value between last_upper_bound and upper_bound

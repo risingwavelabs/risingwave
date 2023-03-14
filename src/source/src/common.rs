@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_common::types::Datum;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::SourceColumnDesc;
 
 pub(crate) trait SourceChunkBuilder {
@@ -31,7 +31,7 @@ pub(crate) trait SourceChunkBuilder {
             .collect();
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq(&mut builders) {
+            for (datum, builder) in row.iter().zip_eq_fast(&mut builders) {
                 builder.append_datum(datum);
             }
         }

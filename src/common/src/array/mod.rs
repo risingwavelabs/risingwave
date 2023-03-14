@@ -26,9 +26,11 @@ mod decimal_array;
 pub mod error;
 pub mod interval_array;
 mod iterator;
+mod jsonb_array;
 pub mod list_array;
 mod macros;
 mod primitive_array;
+pub mod serial_array;
 pub mod stream_chunk;
 mod stream_chunk_iter;
 pub mod struct_array;
@@ -52,6 +54,7 @@ pub use data_chunk_iter::RowRef;
 pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
+pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -62,8 +65,10 @@ pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
+use crate::array::serial_array::{Serial, SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
+use crate::util::iter_util::ZipEqFast;
 pub type ArrayResult<T> = std::result::Result<T, ArrayError>;
 
 pub type I64Array = PrimitiveArray<i64>;
@@ -308,9 +313,8 @@ trait CompactableArray: Array {
 
 impl<A: Array> CompactableArray for A {
     fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
-        use itertools::Itertools;
         let mut builder = A::Builder::with_meta(cardinality, self.array_meta());
-        for (elem, visible) in self.iter().zip_eq(visibility.iter()) {
+        for (elem, visible) in self.iter().zip_eq_fast(visibility.iter()) {
             if visible {
                 builder.append(elem);
             }
@@ -343,6 +347,8 @@ macro_rules! for_all_variants {
             { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
             { NaiveDateTime, naivedatetime, NaiveDateTimeArray, NaiveDateTimeArrayBuilder },
             { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
+            { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
             { List, list, ListArray, ListArrayBuilder },
             { Bytea, bytea, BytesArray, BytesArrayBuilder}
@@ -378,6 +384,12 @@ impl From<BoolArray> for ArrayImpl {
 impl From<Utf8Array> for ArrayImpl {
     fn from(arr: Utf8Array) -> Self {
         Self::Utf8(arr)
+    }
+}
+
+impl From<JsonbArray> for ArrayImpl {
+    fn from(arr: JsonbArray) -> Self {
+        Self::Jsonb(arr)
     }
 }
 
@@ -646,7 +658,7 @@ macro_rules! impl_array {
 for_all_variants! { impl_array }
 
 impl ArrayImpl {
-    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> {
+    pub fn iter(&self) -> impl DoubleEndedIterator<Item = DatumRef<'_>> + ExactSizeIterator {
         (0..self.len()).map(|i| self.value_at(i))
     }
 
@@ -657,6 +669,9 @@ impl ArrayImpl {
             ProstArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
             ProstArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
             ProstArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
+            ProstArrayType::Serial => {
+                read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
+            }
             ProstArrayType::Float32 => {
                 read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
             }
@@ -674,6 +689,9 @@ impl ArrayImpl {
             ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
             ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
             ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            ProstArrayType::Jsonb => {
+                read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
+            }
             ProstArrayType::Struct => StructArray::from_protobuf(array)?,
             ProstArrayType::List => ListArray::from_protobuf(array)?,
             ProstArrayType::Unspecified => unreachable!(),
@@ -702,7 +720,6 @@ impl PartialEq for ArrayImpl {
 
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
     use super::*;
 
@@ -743,7 +760,7 @@ mod tests {
         T3: PrimitiveArrayItemType + CheckedAdd,
     {
         let mut builder = PrimitiveArrayBuilder::<T3>::new(a.len());
-        for (a, b) in a.iter().zip_eq(b.iter()) {
+        for (a, b) in a.iter().zip_eq_fast(b.iter()) {
             let item = match (a, b) {
                 (Some(a), Some(b)) => Some(a.as_() + b.as_()),
                 _ => None,
@@ -780,9 +797,8 @@ mod tests {
 mod test_util {
     use std::hash::{BuildHasher, Hasher};
 
-    use itertools::Itertools;
-
     use super::Array;
+    use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &mut [H]) -> Vec<u64> {
         return hashers
@@ -808,8 +824,8 @@ mod test_util {
         itertools::cons_tuples(
             expects
                 .iter()
-                .zip_eq(hash_finish(&mut states_scalar[..]))
-                .zip_eq(hash_finish(&mut states_vec[..])),
+                .zip_eq_fast(hash_finish(&mut states_scalar[..]))
+                .zip_eq_fast(hash_finish(&mut states_vec[..])),
         )
         .all(|(a, b, c)| *a == b && b == c);
     }

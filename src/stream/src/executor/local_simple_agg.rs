@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::array::column::Column;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::aggregation::agg_impl::{create_streaming_agg_impl, StreamingAggImpl};
 use super::aggregation::{agg_call_filter_res, generate_agg_schema, AggCall};
@@ -75,8 +76,8 @@ impl LocalSimpleAggExecutor {
             .try_collect()?;
         agg_calls
             .iter()
-            .zip_eq(visibilities)
-            .zip_eq(aggregators)
+            .zip_eq_fast(visibilities)
+            .zip_eq_fast(aggregators)
             .try_for_each(|((agg_call, visibility), state)| {
                 let col_refs = agg_call
                     .args
@@ -115,10 +116,7 @@ impl LocalSimpleAggExecutor {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-                }
-
+                Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
                     is_dirty = true;
@@ -130,7 +128,7 @@ impl LocalSimpleAggExecutor {
                         let mut builders = info.schema.create_array_builders(1);
                         aggregators
                             .iter_mut()
-                            .zip_eq(builders.iter_mut())
+                            .zip_eq_fast(builders.iter_mut())
                             .try_for_each(|(state, builder)| {
                                 let data = state.get_output()?;
                                 trace!("append_datum: {:?}", data);
@@ -205,9 +203,10 @@ mod tests {
             kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }];
 
         let simple_agg = Box::new(
@@ -263,25 +262,28 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
             AggCall {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
+                distinct: false,
             },
         ];
 

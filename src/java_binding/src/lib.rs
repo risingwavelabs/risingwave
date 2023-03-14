@@ -15,6 +15,7 @@
 #![feature(error_generic_member_access)]
 #![feature(provide_any)]
 #![feature(once_cell)]
+#![feature(type_alias_impl_trait)]
 
 mod iterator;
 
@@ -27,9 +28,10 @@ use std::sync::LazyLock;
 
 use iterator::{Iterator, KeyedRow};
 use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
-use jni::sys::{jboolean, jbyte, jbyteArray, jint, jlong};
+use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::hash::VirtualNode;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
@@ -208,6 +210,13 @@ where
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
+    _env: EnvParam<'_>,
+) -> jint {
+    VirtualNode::COUNT as jint
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
@@ -258,10 +267,27 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
     pointer: Pointer<'a, KeyedRow>,
     idx: jint,
 ) -> jboolean {
-    execute_and_catch(
-        env,
-        move || Ok(pointer.as_ref().is_null(idx as usize) as u8),
-    )
+    execute_and_catch(env, move || {
+        Ok(pointer.as_ref().is_null(idx as usize) as jboolean)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt16Value<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jshort {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_int16(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt32Value<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jint {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_int32(idx as usize)))
 }
 
 #[no_mangle]
@@ -271,6 +297,35 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value
     idx: jint,
 ) -> jlong {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetFloatValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jfloat {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_f32(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDoubleValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jdouble {
+    execute_and_catch(env, move || Ok(pointer.as_ref().get_f64(idx as usize)))
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetBooleanValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, KeyedRow>,
+    idx: jint,
+) -> jboolean {
+    execute_and_catch(env, move || {
+        Ok(pointer.as_ref().get_bool(idx as usize) as jboolean)
+    })
 }
 
 #[no_mangle]

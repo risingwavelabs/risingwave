@@ -26,7 +26,7 @@ use crate::optimizer::property::{Order, OrderDisplay};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
 /// collation required by user or parent plan node.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSort {
     pub base: PlanBase,
     input: PlanRef,

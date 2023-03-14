@@ -37,6 +37,7 @@ use crate::hummock::store::memtable::ImmutableMemtable;
 use crate::hummock::store::state_store::LocalHummockStorage;
 use crate::hummock::store::version::read_filter_for_batch;
 use crate::hummock::{HummockEpoch, HummockError};
+use crate::monitor::StoreLocalStatistic;
 use crate::store::*;
 use crate::{
     define_state_store_associated_type, define_state_store_read_associated_type, StateStore,
@@ -52,13 +53,13 @@ impl HummockStorage {
     /// failed due to other non-EOF errors.
     pub async fn get(
         &self,
-        key: &[u8],
+        key: Bytes,
         epoch: HummockEpoch,
         read_options: ReadOptions,
     ) -> StorageResult<Option<Bytes>> {
         let key_range = (
-            Bound::Included(TableKey(key.to_vec())),
-            Bound::Included(TableKey(key.to_vec())),
+            Bound::Included(TableKey(key.clone())),
+            Bound::Included(TableKey(key.clone())),
         );
 
         let read_version_tuple = if read_options.read_version_from_backup {
@@ -148,18 +149,13 @@ impl StateStoreRead for HummockStorage {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         self.get(key, epoch, read_options)
     }
 
     fn iter(
         &self,
-        key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        key_range: IterKeyRange,
         epoch: u64,
         read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -178,7 +174,7 @@ impl StateStore for HummockStorage {
     /// we will only check whether it is le `sealed_epoch` and won't wait.
     fn try_wait_epoch(&self, wait_epoch: HummockReadEpoch) -> Self::WaitEpochFuture<'_> {
         async move {
-            self.validate_read_epoch(wait_epoch.clone())?;
+            self.validate_read_epoch(wait_epoch)?;
             let wait_epoch = match wait_epoch {
                 HummockReadEpoch::Committed(epoch) => {
                     assert_ne!(epoch, HummockEpoch::MAX, "epoch should not be u64::MAX");
@@ -268,6 +264,7 @@ impl StateStore for HummockStorage {
                 is_checkpoint,
             })
             .expect("should send success");
+        StoreLocalStatistic::flush_all();
     }
 
     fn clear_shared_buffer(&self) -> Self::ClearSharedBufferFuture<'_> {
@@ -283,8 +280,8 @@ impl StateStore for HummockStorage {
         }
     }
 
-    fn new_local(&self, table_id: TableId) -> Self::NewLocalFuture<'_> {
-        async move { self.new_local_inner(table_id).await }
+    fn new_local(&self, option: NewLocalOptions) -> Self::NewLocalFuture<'_> {
+        self.new_local_inner(option)
     }
 
     fn validate_read_epoch(&self, epoch: HummockReadEpoch) -> StorageResult<()> {

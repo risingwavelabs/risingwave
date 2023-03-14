@@ -24,7 +24,7 @@ use risingwave_pb::expr::ExprNode;
 use crate::expr::Expression;
 use crate::{bail, ensure, ExprError, Result};
 
-/// `InputRefExpression` references to a column in input relation
+/// A reference to a column in input relation.
 #[derive(Debug, Clone)]
 pub struct InputRefExpression {
     return_type: DataType,
@@ -67,10 +67,10 @@ impl<'a> TryFrom<&'a ExprNode> for InputRefExpression {
         ensure!(prost.get_expr_type().unwrap() == Type::InputRef);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
-        if let RexNode::InputRef(input_ref_node) = prost.get_rex_node().unwrap() {
+        if let RexNode::InputRef(input_col_idx) = prost.get_rex_node().unwrap() {
             Ok(Self {
                 return_type: ret_type,
-                idx: input_ref_node.column_idx as usize,
+                idx: *input_col_idx as _,
             })
         } else {
             bail!("Expect an input ref node")

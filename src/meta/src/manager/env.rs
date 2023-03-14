@@ -14,10 +14,11 @@
 
 use std::ops::Deref;
 use std::sync::Arc;
-use std::time::Duration;
 
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::{StreamClientPool, StreamClientPoolRef};
 
+use super::{SystemParamsManager, SystemParamsManagerRef};
 use crate::manager::{
     IdGeneratorManager, IdGeneratorManagerRef, IdleManager, IdleManagerRef, NotificationManager,
     NotificationManagerRef,
@@ -25,6 +26,7 @@ use crate::manager::{
 #[cfg(any(test, feature = "test"))]
 use crate::storage::MemStore;
 use crate::storage::MetaStore;
+use crate::MetaResult;
 
 /// [`MetaSrvEnv`] is the global environment in Meta service. The instance will be shared by all
 /// kind of managers inside Meta.
@@ -48,6 +50,9 @@ where
     /// idle status manager.
     idle_manager: IdleManagerRef,
 
+    /// system param manager.
+    system_params_manager: SystemParamsManagerRef<S>,
+
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 }
@@ -58,8 +63,6 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
-    /// The interval of periodic barrier.
-    pub barrier_interval: Duration,
     /// The maximum number of barriers in-flight in the compute nodes.
     pub in_flight_barrier_nums: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
@@ -67,8 +70,6 @@ pub struct MetaOpts {
     pub max_idle_ms: u64,
     /// Whether run in compaction detection test mode
     pub compaction_deterministic_test: bool,
-
-    pub checkpoint_frequency: usize,
 
     /// Interval of GC metadata in meta store and stale SSTs in object store.
     pub vacuum_interval_sec: u64,
@@ -90,10 +91,11 @@ pub struct MetaOpts {
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
 
-    /// The storage url for storing backups.
-    pub backup_storage_url: String,
-    /// The storage directory for storing backups.
-    pub backup_storage_directory: String,
+    /// Schedule space_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -101,10 +103,8 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
-            barrier_interval: Duration::from_millis(250),
             in_flight_barrier_nums: 40,
             max_idle_ms: 0,
-            checkpoint_frequency: 10,
             compaction_deterministic_test: false,
             vacuum_interval_sec: 30,
             min_sst_retention_time_sec: 3600 * 24 * 7,
@@ -114,8 +114,8 @@ impl MetaOpts {
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
             connector_rpc_endpoint: None,
-            backup_storage_url: "memory".to_string(),
-            backup_storage_directory: "backup".to_string(),
+            periodic_space_reclaim_compaction_interval_sec: 60,
+            periodic_ttl_reclaim_compaction_interval_sec: 60,
         }
     }
 }
@@ -124,21 +124,34 @@ impl<S> MetaSrvEnv<S>
 where
     S: MetaStore,
 {
-    pub async fn new(opts: MetaOpts, meta_store: Arc<S>) -> Self {
+    pub async fn new(
+        opts: MetaOpts,
+        init_system_params: SystemParams,
+        meta_store: Arc<S>,
+    ) -> MetaResult<Self> {
         // change to sync after refactor `IdGeneratorManager::new` sync.
         let id_gen_manager = Arc::new(IdGeneratorManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
+        let system_params_manager = Arc::new(
+            SystemParamsManager::new(
+                meta_store.clone(),
+                notification_manager.clone(),
+                init_system_params,
+            )
+            .await?,
+        );
 
-        Self {
+        Ok(Self {
             id_gen_manager,
             meta_store,
             notification_manager,
             stream_client_pool,
             idle_manager,
+            system_params_manager,
             opts: opts.into(),
-        }
+        })
     }
 
     pub fn meta_store_ref(&self) -> Arc<S> {
@@ -173,6 +186,14 @@ where
         self.idle_manager.deref()
     }
 
+    pub fn system_params_manager_ref(&self) -> SystemParamsManagerRef<S> {
+        self.system_params_manager.clone()
+    }
+
+    pub fn system_params_manager(&self) -> &SystemParamsManager<S> {
+        self.system_params_manager.deref()
+    }
+
     pub fn stream_client_pool_ref(&self) -> StreamClientPoolRef {
         self.stream_client_pool.clone()
     }
@@ -196,6 +217,15 @@ impl MetaSrvEnv<MemStore> {
         let notification_manager = Arc::new(NotificationManager::new(meta_store.clone()).await);
         let stream_client_pool = Arc::new(StreamClientPool::default());
         let idle_manager = Arc::new(IdleManager::disabled());
+        let system_params_manager = Arc::new(
+            SystemParamsManager::new(
+                meta_store.clone(),
+                notification_manager.clone(),
+                risingwave_common::system_param::default_system_params(),
+            )
+            .await
+            .unwrap(),
+        );
 
         Self {
             id_gen_manager,
@@ -203,6 +233,7 @@ impl MetaSrvEnv<MemStore> {
             notification_manager,
             stream_client_pool,
             idle_manager,
+            system_params_manager,
             opts,
         }
     }

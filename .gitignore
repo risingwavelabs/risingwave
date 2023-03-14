@@ -2,7 +2,8 @@
 .DS_Store
 
 # Visual Studio Code
-.vscode/
+.vscode/*
+!.vscode/*.example
 .devcontainer/
 
 # JetBrains
@@ -21,6 +22,9 @@ cmake-build-debug/
 *.exe
 *.app
 build/
+
+# Python
+*.pyc
 
 # Golang
 go/bin/
@@ -57,6 +61,7 @@ ft.txt
 src/tests/regress/output/*
 src/tests/sync_point/slt/e2e_test
 # generated e2e tests
-e2e_test/generated
+e2e_test/generated/*
+!e2e_test/generated/README.md
 # generated scale tests by `cargo nextest`
 scale-test.tar.zst

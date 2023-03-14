@@ -7,8 +7,14 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
-clap = { version = "3", features = ["derive"] }
+clap = { version = "4", features = ["derive"] }
 risingwave_backup = { path = "../../backup" }
 risingwave_meta = { path = "../../../meta" }
 risingwave_rt = { path = "../../../utils/runtime" }

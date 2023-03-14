@@ -39,15 +39,29 @@ import FragmentGraph from "../components/FragmentGraph"
 import Title from "../components/Title"
 import { ActorBox } from "../lib/layout"
 import { TableFragments, TableFragments_Fragment } from "../proto/gen/meta"
-import { StreamNode } from "../proto/gen/stream_plan"
+import { Dispatcher, StreamNode } from "../proto/gen/stream_plan"
+import useFetch from "./api/fetch"
 import { getFragments, getStreamingJobs } from "./api/streaming"
+
+interface DispatcherNode {
+  [actorId: number]: Dispatcher[]
+}
+
+/** Associated data of each plan node in the fragment graph, including the dispatchers. */
+export interface PlanNodeDatum {
+  name: string
+  children?: PlanNodeDatum[]
+  operatorId: string | number
+  node: StreamNode | DispatcherNode
+  extraInfo?: string
+}
 
 function buildPlanNodeDependency(
   fragment: TableFragments_Fragment
-): d3.HierarchyNode<any> {
-  const actor = fragment.actors[0]
+): d3.HierarchyNode<PlanNodeDatum> {
+  const firstActor = fragment.actors[0]
 
-  const hierarchyActorNode = (node: StreamNode): any => {
+  const hierarchyActorNode = (node: StreamNode): PlanNodeDatum => {
     return {
       name: node.nodeBody?.$case.toString() || "unknown",
       children: (node.input || []).map(hierarchyActorNode),
@@ -56,13 +70,24 @@ function buildPlanNodeDependency(
     }
   }
 
+  let dispatcherName = "noDispatcher"
+  if (firstActor.dispatcher.length > 1) {
+    dispatcherName = "multipleDispatchers"
+  } else if (firstActor.dispatcher.length === 1) {
+    dispatcherName = `${toLower(firstActor.dispatcher[0].type)}Dispatcher`
+  }
+
+  const dispatcherNode = fragment.actors.reduce((obj, actor) => {
+    obj[actor.actorId] = actor.dispatcher
+    return obj
+  }, {} as DispatcherNode)
+
   return d3.hierarchy({
-    name:
-      actor.dispatcher.map((d) => `${toLower(d.type)}Dispatcher`).join(",") ||
-      "noDispatcher",
+    name: dispatcherName,
     extraInfo: `Actor ${fragment.actors.map((a) => a.actorId).join(", ")}`,
-    children: actor.nodes ? [hierarchyActorNode(actor.nodes)] : [],
+    children: firstActor.nodes ? [hierarchyActorNode(firstActor.nodes)] : [],
     operatorId: "dispatcher",
+    node: dispatcherNode,
   })
 }
 
@@ -100,32 +125,6 @@ function buildFragmentDependencyAsEdges(fragments: TableFragments): ActorBox[] {
 }
 
 const SIDEBAR_WIDTH = 200
-
-function useFetch<T>(fetchFn: () => Promise<T>) {
-  const [response, setResponse] = useState<T>()
-  const toast = useToast()
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const res = await fetchFn()
-        setResponse(res)
-      } catch (e: any) {
-        toast({
-          title: "Error Occurred",
-          description: e.toString(),
-          status: "error",
-          duration: 5000,
-          isClosable: true,
-        })
-        console.error(e)
-      }
-    }
-    fetchData()
-  }, [toast, fetchFn])
-
-  return { response }
-}
 
 export default function Streaming() {
   const { response: relationList } = useFetch(getStreamingJobs)
@@ -170,7 +169,10 @@ export default function Streaming() {
   const planNodeDependenciesCallback = useCallback(() => {
     const fragments_ = fragments?.fragments
     if (fragments_) {
-      const planNodeDependencies = new Map<string, d3.HierarchyNode<any>>()
+      const planNodeDependencies = new Map<
+        string,
+        d3.HierarchyNode<PlanNodeDatum>
+      >()
       for (const fragmentId in fragments_) {
         const fragment = fragments_[fragmentId]
         const dep = buildPlanNodeDependency(fragment)

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::{DatabaseId, SchemaId, UserId};
 use risingwave_common::error::Result;
-use risingwave_pb::catalog::{Sink as ProstSink, Table};
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     CreateSink, CreateSinkStatement, ObjectName, Query, Select, SelectItem, SetExpr, TableFactor,
@@ -25,33 +26,18 @@ use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::handler::HandlerArgs;
+use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 use crate::Planner;
-
-fn into_sink_prost(table: Table) -> ProstSink {
-    ProstSink {
-        id: 0,
-        schema_id: table.schema_id,
-        database_id: table.database_id,
-        name: table.name,
-        columns: table.columns,
-        pk: table.pk,
-        dependent_relations: table.dependent_relations,
-        distribution_key: table.distribution_key,
-        stream_key: table.stream_key,
-        append_only: table.append_only,
-        properties: table.properties,
-        owner: table.owner,
-        definition: table.definition,
-    }
-}
 
 pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
+        for_system_time_as_of_now: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -77,7 +63,7 @@ pub fn gen_sink_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: CreateSinkStatement,
-) -> Result<(PlanRef, ProstSink)> {
+) -> Result<(PlanRef, SinkCatalog)> {
     let db_name = session.database();
     let (sink_schema_name, sink_table_name) =
         Binder::resolve_schema_qualified_name(db_name, stmt.sink_name.clone())?;
@@ -109,11 +95,13 @@ pub fn gen_sink_plan(
 
     let sink_plan = plan_root.gen_sink_plan(sink_table_name, definition, properties)?;
 
-    let sink_catalog_prost = sink_plan
-        .sink_catalog()
-        .to_prost(sink_schema_id, sink_database_id);
-
-    let sink_prost = into_sink_prost(sink_catalog_prost);
+    let sink_desc = sink_plan.sink_desc().clone();
+    let sink_catalog = sink_desc.into_catalog(
+        SchemaId::new(sink_schema_id),
+        DatabaseId::new(sink_database_id),
+        UserId::new(session.user_id()),
+        vec![],
+    );
 
     let sink_plan: PlanRef = sink_plan.into();
 
@@ -125,7 +113,7 @@ pub fn gen_sink_plan(
         ctx.trace(sink_plan.explain_to_string().unwrap());
     }
 
-    Ok((sink_plan, sink_prost))
+    Ok((sink_plan, sink_catalog))
 }
 
 pub async fn handle_create_sink(
@@ -147,8 +135,19 @@ pub async fn handle_create_sink(
         (sink, graph)
     };
 
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                sink.database_id.database_id,
+                sink.schema_id.schema_id,
+                sink.name.clone(),
+            ));
+
     let catalog_writer = session.env().catalog_writer();
-    catalog_writer.create_sink(sink, graph).await?;
+    catalog_writer.create_sink(sink.to_proto(), graph).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
@@ -165,7 +164,7 @@ pub mod tests {
         let proto_file = create_proto_file(PROTO_FILE_DATA);
         let sql = format!(
             r#"CREATE SOURCE t1
-    WITH (kafka.topic = 'abc', kafka.servers = 'localhost:1001')
+    WITH (connector = 'kafka', kafka.topic = 'abc', kafka.servers = 'localhost:1001')
     ROW FORMAT PROTOBUF MESSAGE '.test.TestRecord' ROW SCHEMA LOCATION 'file://{}';"#,
             proto_file.path().to_str().unwrap()
         );
@@ -178,7 +177,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>');"#.to_string();
+                        mysql.password = '<password>', format = 'append_only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt;
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{LogicalScan, PlanBase, PlanNodeId, StreamIndexScan, StreamNode};
+use super::{
+    ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamIndexScan, StreamNode,
+};
 use crate::catalog::ColumnId;
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -31,7 +33,7 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to chain + merge node (for upstream materialize) + batch table scan when converting to `MView`
 /// creation request.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTableScan {
     pub base: PlanBase,
     logical: LogicalScan,
@@ -50,14 +52,19 @@ impl StreamTableScan {
         let batch_plan_id = ctx.next_plan_node_id();
 
         let distribution = {
-            let distribution_key = logical
-                .distribution_key()
-                .expect("distribution key of stream chain must exist in output columns");
-            if distribution_key.is_empty() {
-                Distribution::Single
-            } else {
-                // See also `BatchSeqScan::clone_with_dist`.
-                Distribution::UpstreamHashShard(distribution_key, logical.table_desc().table_id)
+            match logical.distribution_key() {
+                Some(distribution_key) => {
+                    if distribution_key.is_empty() {
+                        Distribution::Single
+                    } else {
+                        // See also `BatchSeqScan::clone_with_dist`.
+                        Distribution::UpstreamHashShard(
+                            distribution_key,
+                            logical.table_desc().table_id,
+                        )
+                    }
+                }
+                None => Distribution::SomeShard,
             }
         };
         let base = PlanBase::new_stream(
@@ -67,8 +74,7 @@ impl StreamTableScan {
             logical.functional_dependency().clone(),
             distribution,
             logical.table_desc().append_only,
-            // TODO: https://github.com/risingwavelabs/risingwave/issues/7660
-            FixedBitSet::with_capacity(logical.schema().len()),
+            logical.watermark_columns(),
         );
         Self {
             base,
@@ -90,7 +96,7 @@ impl StreamTableScan {
         &self,
         index_name: &str,
         index_table_desc: Rc<TableDesc>,
-        primary_to_secondary_mapping: &HashMap<usize, usize>,
+        primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         chain_type: ChainType,
     ) -> StreamIndexScan {
         StreamIndexScan::new(
@@ -200,7 +206,6 @@ impl StreamTableScan {
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
-                same_worker_node: false,
                 chain_type: self.chain_type as i32,
                 // The fields from upstream
                 upstream_fields: self
@@ -232,5 +237,23 @@ impl StreamTableScan {
             },
             append_only: self.append_only(),
         }
+    }
+}
+
+impl ExprRewritable for StreamTableScan {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new_with_chain_type(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_scan()
+                .unwrap()
+                .clone(),
+            self.chain_type,
+        )
+        .into()
     }
 }

@@ -18,42 +18,55 @@ use std::hash::Hash;
 
 use super::Watermark;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct StagedWatermarks {
     in_heap: bool,
     staged: VecDeque<Watermark>,
 }
 
-pub(super) struct BufferedWatermarks<ID> {
+pub(super) struct BufferedWatermarks<Id> {
     /// We store the smallest watermark of each upstream, because the next watermark to emit is
     /// among them.
-    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, ID)>>,
+    pub first_buffered_watermarks: BinaryHeap<Reverse<(Watermark, Id)>>,
     /// We buffer other watermarks of each upstream. The next-to-smallest one will become the
     /// smallest when the smallest is emitted and be moved into heap.
-    pub other_buffered_watermarks: BTreeMap<ID, StagedWatermarks>,
+    pub other_buffered_watermarks: BTreeMap<Id, StagedWatermarks>,
 }
 
-impl<ID: Ord + Hash> BufferedWatermarks<ID> {
-    pub fn with_ids(buffer_ids: Vec<ID>) -> Self {
+impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
+    pub fn with_ids(buffer_ids: impl IntoIterator<Item = Id>) -> Self {
+        let other_buffered_watermarks: BTreeMap<_, _> = buffer_ids
+            .into_iter()
+            .map(|id| (id, Default::default()))
+            .collect();
+        let first_buffered_watermarks = BinaryHeap::with_capacity(other_buffered_watermarks.len());
+
         BufferedWatermarks {
-            first_buffered_watermarks: BinaryHeap::with_capacity(buffer_ids.len()),
-            other_buffered_watermarks: BTreeMap::from_iter(
-                buffer_ids.into_iter().map(|id| (id, Default::default())),
-            ),
+            first_buffered_watermarks,
+            other_buffered_watermarks,
         }
     }
 
-    pub fn add_buffers(&mut self, buffer_ids: Vec<ID>) {
+    pub fn add_buffers(&mut self, buffer_ids: impl IntoIterator<Item = Id>) {
         buffer_ids.into_iter().for_each(|id| {
             self.other_buffered_watermarks
-                .insert(id, Default::default())
+                .try_insert(id, Default::default())
                 .unwrap();
         });
     }
 
+    pub fn clear(&mut self) {
+        self.first_buffered_watermarks.clear();
+        self.other_buffered_watermarks
+            .values_mut()
+            .for_each(|staged_watermarks| {
+                std::mem::take(staged_watermarks);
+            });
+    }
+
     /// Handle a new watermark message. Optionally returns the watermark message to emit and the
     /// buffer id.
-    pub fn handle_watermark(&mut self, buffer_id: ID, watermark: Watermark) -> Option<Watermark> {
+    pub fn handle_watermark(&mut self, buffer_id: Id, watermark: Watermark) -> Option<Watermark> {
         // Note: The staged watermark buffer should be created before handling the watermark.
         let mut staged = self.other_buffered_watermarks.get_mut(&buffer_id).unwrap();
 
@@ -91,7 +104,7 @@ impl<ID: Ord + Hash> BufferedWatermarks<ID> {
     }
 
     /// Remove buffers and return watermark to emit.
-    pub fn remove_buffer(&mut self, buffer_ids_to_remove: HashSet<ID>) -> Option<Watermark> {
+    pub fn remove_buffer(&mut self, buffer_ids_to_remove: HashSet<Id>) -> Option<Watermark> {
         self.first_buffered_watermarks
             .retain(|Reverse((_, id))| !buffer_ids_to_remove.contains(id));
         self.other_buffered_watermarks

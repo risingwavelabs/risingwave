@@ -14,9 +14,10 @@
 
 use itertools::Itertools as _;
 use num_integer::Integer as _;
-use risingwave_common::error::{ErrorCode, Result};
+use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{DataType, DataTypeName, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::func::*;
 
 use super::{align_types, cast_ok_base, CastContext};
@@ -43,14 +44,22 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
     let inputs_owned = std::mem::take(inputs);
     *inputs = inputs_owned
         .into_iter()
-        .zip_eq(&sig.inputs_type)
+        .zip_eq_fast(&sig.inputs_type)
         .map(|(expr, t)| {
             if DataTypeName::from(expr.return_type()) != *t {
-                return expr.cast_implicit((*t).into());
+                if t.is_scalar() {
+                    return expr.cast_implicit((*t).into()).map_err(Into::into);
+                } else {
+                    return Err(ErrorCode::BindError(format!(
+                        "Cannot implicitly cast '{:?}' to polymorphic type {:?}",
+                        &expr, t
+                    ))
+                    .into());
+                }
             }
             Ok(expr)
         })
-        .try_collect()?;
+        .try_collect::<_, _, RwError>()?;
     Ok(sig.ret_type.into())
 }
 
@@ -208,7 +217,7 @@ fn infer_struct_cast_target_type(
             let mut lcasts = false;
             let mut rcasts = false;
             tys.reserve(lty.len());
-            for (lf, rf) in lty.into_iter().zip_eq(rty) {
+            for (lf, rf) in lty.into_iter().zip_eq_fast(rty) {
                 let (lcast, rcast, ty) = infer_struct_cast_target_type(func_type, lf, rf)?;
                 lcasts |= lcast;
                 rcasts |= rcast;
@@ -309,7 +318,7 @@ fn infer_type_for_special(
                 .enumerate()
                 .map(|(i, input)| match i {
                     // 0-th arg must be string
-                    0 => input.cast_implicit(DataType::Varchar),
+                    0 => input.cast_implicit(DataType::Varchar).map_err(Into::into),
                     // subsequent can be any type, using the output format
                     _ => input.cast_output(),
                 })
@@ -514,6 +523,25 @@ fn infer_type_for_special(
                 .into()),
             }
         }
+        ExprType::ArrayDistinct => {
+            ensure_arity!("array_distinct", | inputs | == 1);
+            let ret_type = inputs[0].return_type();
+            if inputs[0].is_unknown() {
+                return Err(ErrorCode::BindError(
+                    "could not determine polymorphic type because input has type unknown"
+                        .to_string(),
+                )
+                .into());
+            }
+            match ret_type {
+                DataType::List {
+                    datatype: list_elem_type,
+                } => Ok(Some(DataType::List {
+                    datatype: list_elem_type,
+                })),
+                _ => Ok(None),
+            }
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))
@@ -662,7 +690,7 @@ fn top_matches<'a>(
         let mut n_exact = 0;
         let mut n_preferred = 0;
         let mut castable = true;
-        for (formal, actual) in sig.inputs_type.iter().zip_eq(inputs) {
+        for (formal, actual) in sig.inputs_type.iter().zip_eq_fast(inputs) {
             let Some(actual) = actual else { continue };
             if formal == actual {
                 n_exact += 1;
@@ -756,7 +784,7 @@ fn narrow_category<'a>(
         .filter(|sig| {
             sig.inputs_type
                 .iter()
-                .zip_eq(&categories)
+                .zip_eq_fast(&categories)
                 .all(|(formal, category)| {
                     // category.is_none() means the actual argument is non-null and skipped category
                     // selection.

@@ -31,6 +31,7 @@ pub fn compute_risectl_env(services: &Vec<ServiceConfig>) -> Result<String> {
                 let mut cmd = Command::new("compute-node");
                 if add_storage_backend(
                     "risectl",
+                    c.provide_opendal.as_ref().unwrap(),
                     c.provide_minio.as_ref().unwrap(),
                     c.provide_aws_s3.as_ref().unwrap(),
                     HummockInMemoryStrategy::Disallowed,

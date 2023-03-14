@@ -21,15 +21,18 @@ use crate::error::{Result, RwError};
 
 pub mod addr;
 pub mod chunk_coalesce;
+pub mod column_index_mapping;
 pub mod compress;
 pub mod encoding_for_comparison;
 pub mod env_var;
 pub mod epoch;
 mod future_utils;
 pub mod hash_util;
+pub mod iter_util;
 pub mod ordered;
 pub mod prost;
 pub mod resource_util;
+pub mod row_id;
 pub mod scan_range;
 pub mod schema_check;
 pub mod sort_util;

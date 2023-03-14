@@ -102,7 +102,7 @@ pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDate
 mod tests {
     use std::assert_matches::assert_matches;
 
-    use itertools::Itertools;
+    use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
     use crate::vector_op::cast::str_to_timestamp;
@@ -131,15 +131,18 @@ mod tests {
         ];
         for case in test_cases {
             let usecs = str_to_timestamptz(case[0], "UTC").unwrap();
-            case.iter().skip(1).zip_eq(zones).for_each(|(local, zone)| {
-                let local = str_to_timestamp(local).unwrap();
+            case.iter()
+                .skip(1)
+                .zip_eq_fast(zones)
+                .for_each(|(local, zone)| {
+                    let local = str_to_timestamp(local).unwrap();
 
-                let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
-                assert_eq!(local, actual);
+                    let actual = timestamptz_at_time_zone(usecs, zone).unwrap();
+                    assert_eq!(local, actual);
 
-                let actual = timestamp_at_time_zone(local, zone).unwrap();
-                assert_eq!(usecs, actual);
-            });
+                    let actual = timestamp_at_time_zone(local, zone).unwrap();
+                    assert_eq!(usecs, actual);
+                });
         }
     }
 

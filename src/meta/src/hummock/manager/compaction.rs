@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockContextId};
-use risingwave_pb::hummock::{CompactTaskAssignment, CompactionConfig};
+use risingwave_pb::hummock::CompactTaskAssignment;
 
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::manager::read_lock;
@@ -107,16 +107,6 @@ where
             .values()
             .filter(|s| s.context_id == context_id)
             .count() as u64
-    }
-
-    pub async fn get_compaction_config(
-        &self,
-        compaction_group_id: CompactionGroupId,
-    ) -> CompactionConfig {
-        self.compaction_group(compaction_group_id)
-            .await
-            .expect("compaction group exists")
-            .compaction_config()
     }
 
     #[named]

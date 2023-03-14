@@ -18,7 +18,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 
-use super::generic::{self, GenericPlanNode};
+use super::generic::{self, push_down_into_join, push_down_join_condition, GenericPlanNode};
 use super::{
     ColPrunable, LogicalJoin, LogicalProject, PlanBase, PlanRef, PlanTreeNodeBinary,
     PredicatePushdown, ToBatch, ToStream,
@@ -33,7 +33,7 @@ use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// `LogicalApply` represents a correlated join, where the right side may refer to columns from the
 /// left side.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalApply {
     pub base: PlanBase,
     left: PlanRef,
@@ -318,28 +318,12 @@ impl PredicatePushdown for LogicalApply {
         let right_col_num = self.right().schema().len();
         let join_type = self.join_type();
 
-        let (left_from_filter, right_from_filter, on) = LogicalJoin::push_down(
-            &mut predicate,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_filter(join_type),
-            LogicalJoin::can_push_right_from_filter(join_type),
-            LogicalJoin::can_push_on_from_filter(join_type),
-        );
+        let (left_from_filter, right_from_filter, on) =
+            push_down_into_join(&mut predicate, left_col_num, right_col_num, join_type);
 
         let mut new_on = self.on.clone().and(on);
-        let (left_from_on, right_from_on, on) = LogicalJoin::push_down(
-            &mut new_on,
-            left_col_num,
-            right_col_num,
-            LogicalJoin::can_push_left_from_on(join_type),
-            LogicalJoin::can_push_right_from_on(join_type),
-            false,
-        );
-        assert!(
-            on.always_true(),
-            "On-clause should not be pushed to on-clause."
-        );
+        let (left_from_on, right_from_on) =
+            push_down_join_condition(&mut new_on, left_col_num, right_col_num, join_type);
 
         let left_predicate = left_from_filter.and(left_from_on);
         let right_predicate = right_from_filter.and(right_from_on);

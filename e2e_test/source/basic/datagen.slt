@@ -7,9 +7,9 @@ create table s1 (v1 int, v2 float) with (
     fields.v2.kind = 'sequence',
     fields.v2.start = '11',
     fields.v2.end = '20',
-    datagen.rows.per.second='15',
+    datagen.rows.per.second = '15',
     datagen.split.num = '1'
-) row format json;
+);
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s
@@ -19,7 +19,7 @@ flush;
 
 # Will only generate 10 records since `fields.v1.end` is 10
 query II rowsort
-select v1, v2 from s1 where v1 is not null limit 15;
+select v1, v2 from s1 limit 15;
 ----
 1 11
 10 20
@@ -43,7 +43,7 @@ create table s1 (v1 int)  with (
     fields.v1.end = '100',
     datagen.rows.per.second = '10',
     datagen.split.num = '5'
-) row format json;
+);
 
 # Wait enough time to ensure Datagen connector generate data
 sleep 2s

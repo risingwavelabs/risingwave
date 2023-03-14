@@ -9,6 +9,7 @@ extend = [
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -23,6 +24,7 @@ env_scripts = [
 
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
+is_hdfs_backend = get_env ENABLE_HDFS
 
 if ${is_sanitizer_enabled}
   set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "-Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -38,8 +40,16 @@ if ${is_all_in_one_enabled}
 else
   set_env RISEDEV_CARGO_BUILD_CRATE "risingwave_cmd"
 end
+
+if ${is_hdfs_backend}
+  set_env BUILD_HDFS_BACKEND_CMD "-p risingwave_object_store --features hdfs-backend"
+else
+  set_env BUILD_HDFS_BACKEND_CMD ""
+end
+
 ''',
 ]
+
 
 [config]
 default_to_workspace = false
@@ -314,7 +324,7 @@ echo "$(tput setaf 4)$(tput bold)[Reminder]$(tput sgr0) risedev will only build 
 [[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
 echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
 set -xe
-cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev \
+cargo build -p ${RISEDEV_CARGO_BUILD_CRATE} -p risedev ${BUILD_HDFS_BACKEND_CMD}\
             --profile "${RISINGWAVE_BUILD_PROFILE}" \
             ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
 '''
@@ -360,6 +370,8 @@ category = "RiseDev - Components"
 description = "Download all available components at once"
 dependencies = [
   "download-connector",
+  "download-maven",
+  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -504,12 +516,17 @@ set -e
 cargo install cargo-quickinstall --locked
 cargo quickinstall cargo-binstall
 
-for tool in cargo-llvm-cov cargo-nextest cargo-udeps cargo-hakari cargo-sort cargo-make
+for tool in cargo-llvm-cov cargo-nextest cargo-hakari cargo-sort cargo-make
 do
   echo "install: $(tput setaf 4)$tool$(tput sgr0)"
   cargo binstall -y --no-symlinks $tool
   echo
 done
+
+# Need https://github.com/est31/cargo-udeps/pull/147 to make --exclude work
+echo "install: $(tput setaf 4)cargo-udeps$(tput sgr0)"
+cargo install cargo-udeps --locked --git https://github.com/est31/cargo-udeps --rev 63dd458
+echo
 
 # Tools that fallback to `cargo install` when using `cargo binstall`.
 # We directly use `cargo install` here to be faster.
@@ -532,7 +549,7 @@ echo "check: $(tput setaf 4)cmake$(tput sgr0)"
 cmake --version || echo "$(tput setaf 3)cmake$(tput sgr0) not found."
 echo
 
-echo "check: $(tput setaf 4)protoc$(tput sgr0)"
+echo "check: $(tput setaf 4)protoc >= 3.12.0$(tput sgr0)"
 protoc --version || echo "$(tput setaf 3)protoc$(tput sgr0) not found."
 echo
 """
@@ -566,6 +583,37 @@ set -e
 cargo nextest run "$@"
 """
 description = "Run unit tests"
+
+[tasks.build-connector-node]
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+description = "Build RisingWave Connector from source"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+ARTIFACT="risingwave-connector-1.0.0.tar.gz"
+TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
+
+if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
+  echo "Rebuild connector node"
+  cd "${JAVA_DIR}"
+  "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+else
+  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
+fi
+rm -rf ${PREFIX_BIN}/connector-node
+mkdir -p "${PREFIX_BIN}/connector-node"
+tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
+'''
+
 
 [tasks.sbuild]
 category = "RiseDev - Build in simulation mode"
@@ -653,7 +701,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation "$@"
+cargo check -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]
@@ -690,6 +738,44 @@ script = """
 set -e
 
 cargo llvm-cov run -p risingwave_simulation --html "$@"
+"""
+
+[tasks.check-java]
+category = "RiseDev - Check"
+description = "Run mvn spotless:check in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" spotless:check
+"""
+
+[tasks.check-java-fix]
+category = "RiseDev - Check"
+description = "Run mvn spotless:apply in connector-node"
+dependencies = ["warn-on-missing-tools"]
+condition = { env_set = [ "ENABLE_RW_CONNECTOR", "ENABLE_BUILD_RW_CONNECTOR"] }
+script = """
+#!/usr/bin/env bash
+set -e
+
+if command -v mvn &> /dev/null; then
+  MAVEN_PATH="$(command -v mvn)"
+else
+  MAVEN_PATH="${PREFIX_BIN}/maven/bin/mvn"
+fi
+
+cd "${JAVA_DIR}"
+"${MAVEN_PATH}" spotless:apply
 """
 
 [tasks.check-hakari]
@@ -739,6 +825,26 @@ script = """
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 cargo clippy --all-targets --all-features
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
+echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
+"""
+
+[tasks.check-clippy-fix]
+category = "RiseDev - Check"
+description = "Run cargo clippy check and fixes all files (including dirty and staged)"
+script = """
+#!/usr/bin/env bash
+
+echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks and attempting to fix"
+if [ $# -gt 0 ]; then
+  ARGS=("$@")
+
+  echo "Applying clippy --fix for $@ (including dirty and staged files)"
+  cargo clippy ${ARGS[@]/#/--package risingwave_} --all-features --fix --allow-dirty --allow-staged
+else
+  echo "Applying clippy --fix for all targets to all files (including dirty and staged files)"
+  echo "Tip: run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to only check-fix those packages (e.g. frontend, meta)."
+  cargo clippy --all-targets --all-features --fix --allow-dirty --allow-staged
+fi
 """
 
 [tasks.check-typos]
@@ -755,6 +861,21 @@ if ! typos ; then
 fi
 """
 
+[tasks.check-udeps]
+category = "RiseDev - Check"
+description = "Check unused dependencies"
+env = { RUSTFLAGS = "--cfg tokio_unstable" }
+script = """
+#!/usr/bin/env bash
+
+# TODO: after cargo-machete supports excluding packages, we may use it instead of cargo udeps.
+# It's much faster so we can add it to CI and [tasks.check].
+
+echo "Running $(tput setaf 4)cargo udeps$(tput sgr0) checks"
+
+cargo udeps --workspace --all-targets --all-features --exclude workspace-hack --exclude risingwave_bench --exclude risingwave_udf --exclude risingwave_simulation
+"""
+
 
 [tasks.check]
 category = "RiseDev - Check"
@@ -765,16 +886,41 @@ dependencies = [
   "check-fmt",
   "check-clippy",
   "check-typos",
+  "check-java",
 ]
 script = """
 #!/usr/bin/env bash
 
+echo "Tip: use the alias $(tput setaf 4)./risedev c$(tput sgr0)."
 echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
 """
 description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, cargo fmt warnings"
 
 [tasks.c]
 alias = "check"
+
+[tasks.check-fix]
+category = "RiseDev - Check"
+dependencies = [
+  "warn-on-missing-tools",
+  "check-hakari",
+  "check-dep-sort",
+  "check-fmt",
+  "check-clippy-fix",
+  "check-typos",
+  "check-java-fix",
+]
+script = """
+#!/usr/bin/env bash
+
+echo "Tip: use the alias $(tput setaf 4)./risedev cf$(tput sgr0)."
+echo "Good work! You may run $(tput setaf 4)./risedev test$(tput sgr0) or $(tput setaf 4)./risedev test-cov$(tput sgr0) to run unit tests."
+"""
+description = "Perform pre-CI checks and automatically fix cargo sort, cargo hakari, fixes cargo fmt warnings"
+
+[tasks.cf]
+alias = "check-fix"
+
 
 [tasks.install]
 category = "RiseDev - Prepare"
@@ -835,7 +981,7 @@ description = "Run all streaming e2e tests"
 [tasks.slt-batch]
 category = "RiseDev - SQLLogicTest"
 extend = "slt"
-args = ["${@}", "./e2e_test/batch/**/*.slt"]
+args = ["${@}", "./e2e_test/batch/*.slt"]
 description = "Run all batch e2e tests"
 
 [tasks.slt-generated]

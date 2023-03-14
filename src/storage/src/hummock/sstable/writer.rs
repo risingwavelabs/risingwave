@@ -74,8 +74,8 @@ impl SstableWriter for InMemWriter {
 mod tests {
 
     use bytes::Bytes;
-    use itertools::Itertools;
     use rand::{Rng, SeedableRng};
+    use risingwave_common::util::iter_util::ZipEqFast;
 
     use crate::hummock::sstable::VERSION;
     use crate::hummock::{BlockMeta, InMemWriter, SstableMeta, SstableWriter};
@@ -100,7 +100,7 @@ mod tests {
         }
         let meta = SstableMeta {
             block_metas,
-            bloom_filter: Vec::new(),
+            bloom_filter: vec![],
             estimated_size: 0,
             key_count: 0,
             smallest_key: Vec::new(),
@@ -117,7 +117,7 @@ mod tests {
     async fn test_in_mem_writer() {
         let (data, blocks, meta) = get_sst();
         let mut writer = Box::new(InMemWriter::new(0));
-        for (block, meta) in blocks.iter().zip_eq(meta.block_metas.iter()) {
+        for (block, meta) in blocks.iter().zip_eq_fast(meta.block_metas.iter()) {
             writer.write_block(&block[..], meta).await.unwrap();
         }
 

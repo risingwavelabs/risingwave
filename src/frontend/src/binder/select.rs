@@ -18,6 +18,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema, PG_CATALOG_SCHEMA_NAME};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
@@ -158,7 +159,7 @@ impl Binder {
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
         let fields = select_items
             .iter()
-            .zip_eq(aliases.iter())
+            .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 Ok(Field::with_name(s.return_type(), name))
@@ -272,7 +273,7 @@ impl Binder {
 
         let fields = returning_list
             .iter()
-            .zip_eq(aliases.iter())
+            .zip_eq_fast(aliases.iter())
             .map(|(s, a)| {
                 let name = a.clone().unwrap_or_else(|| UNNAMED_COLUMN.to_string());
                 Ok::<Field, RwError>(Field::with_name(s.return_type(), name))
@@ -308,6 +309,7 @@ impl Binder {
             Some(PG_CATALOG_SCHEMA_NAME),
             PG_USER_TABLE_NAME,
             None,
+            false,
         )?);
         let where_clause = Some(
             FunctionCall::new(
@@ -401,9 +403,14 @@ fn derive_alias(expr: &Expr) -> Option<String> {
         Expr::CompoundIdentifier(idents) => idents.last().map(|ident| ident.real_value()),
         Expr::FieldIdentifier(_, idents) => idents.last().map(|ident| ident.real_value()),
         Expr::Function(func) => Some(func.name.real_value()),
+        Expr::Extract { .. } => Some("extract".to_string()),
         Expr::Case { .. } => Some("case".to_string()),
         Expr::Cast { expr, data_type } => {
             derive_alias(&expr).or_else(|| data_type_to_alias(&data_type))
+        }
+        Expr::TypedString { data_type, .. } => data_type_to_alias(&data_type),
+        Expr::Value(risingwave_sqlparser::ast::Value::Interval { .. }) => {
+            Some("interval".to_string())
         }
         Expr::Row(_) => Some("row".to_string()),
         Expr::Array(_) => Some("array".to_string()),

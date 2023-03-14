@@ -175,6 +175,21 @@ impl fmt::Display for AlterColumnOperation {
     }
 }
 
+/// The watermark on source.
+/// `WATERMARK FOR <column> AS (<expr>)`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct SourceWatermark {
+    pub column: Ident,
+    pub expr: Expr,
+}
+
+impl fmt::Display for SourceWatermark {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
+    }
+}
+
 /// A table-level constraint, specified in a `CREATE TABLE` or an
 /// `ALTER TABLE ADD <constraint>` statement.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

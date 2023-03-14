@@ -15,6 +15,7 @@
 use itertools::Itertools as _;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_common::util::iter_util::ZipEqFast;
 pub use risingwave_expr::sig::cast::*;
 
 use crate::expr::{Expr as _, ExprImpl};
@@ -114,9 +115,11 @@ pub fn align_array_and_element(
         .enumerate()
         .map(|(idx, input)| {
             if idx == array_idx {
-                input.cast_implicit(array_type.clone())
+                input.cast_implicit(array_type.clone()).map_err(Into::into)
             } else {
-                input.cast_implicit(common_ele_type.clone())
+                input
+                    .cast_implicit(common_ele_type.clone())
+                    .map_err(Into::into)
             }
         })
         .try_collect();
@@ -153,7 +156,7 @@ fn cast_ok_struct(source: &DataType, target: &DataType, allows: CastContext) -> 
             // ... and all fields are castable
             lty.fields
                 .iter()
-                .zip_eq(rty.fields.iter())
+                .zip_eq_fast(rty.fields.iter())
                 .all(|(src, dst)| src == dst || cast_ok(src, dst, allows))
         }
         // The automatic casts to string types are treated as assignment casts, while the automatic

@@ -1,12 +1,11 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo, Table } from "./catalog";
-import { Buffer } from "./common";
-import { DataType, Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
-import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem } from "./expr";
+import { SinkType, sinkTypeFromJSON, sinkTypeToJSON, StreamSourceInfo, Table, WatermarkDesc } from "./catalog";
+import { Buffer, ColumnOrder } from "./common";
+import { Datum, Epoch, IntervalUnit, StreamChunk } from "./data";
+import { AggCall, ExprNode, InputRef, ProjectSetSelectItem } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
@@ -16,6 +15,47 @@ import {
 import { ConnectorSplits } from "./source";
 
 export const protobufPackage = "stream_plan";
+
+export const HandleConflictBehavior = {
+  NO_CHECK_UNSPECIFIED: "NO_CHECK_UNSPECIFIED",
+  OVERWRITE: "OVERWRITE",
+  IGNORE: "IGNORE",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type HandleConflictBehavior = typeof HandleConflictBehavior[keyof typeof HandleConflictBehavior];
+
+export function handleConflictBehaviorFromJSON(object: any): HandleConflictBehavior {
+  switch (object) {
+    case 0:
+    case "NO_CHECK_UNSPECIFIED":
+      return HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
+    case 1:
+    case "OVERWRITE":
+      return HandleConflictBehavior.OVERWRITE;
+    case 2:
+    case "IGNORE":
+      return HandleConflictBehavior.IGNORE;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return HandleConflictBehavior.UNRECOGNIZED;
+  }
+}
+
+export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): string {
+  switch (object) {
+    case HandleConflictBehavior.NO_CHECK_UNSPECIFIED:
+      return "NO_CHECK_UNSPECIFIED";
+    case HandleConflictBehavior.OVERWRITE:
+      return "OVERWRITE";
+    case HandleConflictBehavior.IGNORE:
+      return "IGNORE";
+    case HandleConflictBehavior.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 export const ChainType = {
   CHAIN_UNSPECIFIED: "CHAIN_UNSPECIFIED",
@@ -261,6 +301,14 @@ export interface UpdateMutation_MergeUpdate {
   /** Merge executor can be uniquely identified by a combination of actor id and upstream fragment id. */
   actorId: number;
   upstreamFragmentId: number;
+  /**
+   * - For scaling, this is always `None`.
+   * - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+   *   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+   */
+  newUpstreamFragmentId?:
+    | number
+    | undefined;
   /** Added upstream actors. */
   addedUpstreamActorId: number[];
   /** Removed upstream actors. */
@@ -310,11 +358,9 @@ export interface Barrier {
 }
 
 export interface Watermark {
-  /** The watermark column's index in the stream's schema. */
-  colIdx: number;
-  /** The watermark type, used for deserialization of the watermark value. */
-  dataType:
-    | DataType
+  /** The reference to the watermark column in the stream's schema. */
+  column:
+    | InputRef
     | undefined;
   /** The watermark value, there will be no record having a greater value in the watermark column. */
   val: Datum | undefined;
@@ -336,7 +382,7 @@ export interface ActorMapping {
 export interface StreamSource {
   sourceId: number;
   stateTable: Table | undefined;
-  rowIdIndex: ColumnIndex | undefined;
+  rowIdIndex?: number | undefined;
   columns: ColumnCatalog[];
   pkColumnIds: number[];
   properties: { [key: string]: string };
@@ -357,16 +403,25 @@ export interface SourceNode {
   sourceInner: StreamSource | undefined;
 }
 
-export interface SinkNode {
-  tableId: number;
+export interface SinkDesc {
+  id: number;
+  name: string;
+  definition: string;
+  columns: ColumnDesc[];
+  pk: ColumnOrder[];
+  streamKey: number[];
+  distributionKey: number[];
   properties: { [key: string]: string };
-  fields: Field[];
-  sinkPk: number[];
+  sinkType: SinkType;
 }
 
-export interface SinkNode_PropertiesEntry {
+export interface SinkDesc_PropertiesEntry {
   key: string;
   value: string;
+}
+
+export interface SinkNode {
+  sinkDesc: SinkDesc | undefined;
 }
 
 export interface ProjectNode {
@@ -401,8 +456,8 @@ export interface MaterializeNode {
   table:
     | Table
     | undefined;
-  /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  /** Used to handle pk conflict, open it when upstream executor is source executor. */
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 export interface AggCallState {
@@ -444,6 +499,13 @@ export interface SimpleAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
+}
+
+export interface SimpleAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface HashAggNode {
@@ -458,6 +520,13 @@ export interface HashAggNode {
    * It is true when the input is append-only
    */
   isAppendOnly: boolean;
+  distinctDedupTables: { [key: number]: Table };
+  rowCountIndex: number;
+}
+
+export interface HashAggNode_DistinctDedupTablesEntry {
+  key: number;
+  value: Table | undefined;
 }
 
 export interface TopNNode {
@@ -526,6 +595,24 @@ export interface HashJoinNode {
   isAppendOnly: boolean;
 }
 
+export interface TemporalJoinNode {
+  joinType: JoinType;
+  leftKey: number[];
+  rightKey: number[];
+  nullSafe: boolean[];
+  condition:
+    | ExprNode
+    | undefined;
+  /** The output indices of current node */
+  outputIndices: number[];
+  /** The table desc of the lookup side table. */
+  tableDesc:
+    | StorageTableDesc
+    | undefined;
+  /** The output indices of the lookup side table */
+  tableOutputIndices: number[];
+}
+
 export interface DynamicFilterNode {
   leftKey: number;
   /** Must be one of <, <=, >, >= */
@@ -568,10 +655,12 @@ export interface DeltaIndexJoinNode {
 }
 
 export interface HopWindowNode {
-  timeCol: InputRefExpr | undefined;
+  timeCol: number;
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
+  windowStartExprs: ExprNode[];
+  windowEndExprs: ExprNode[];
 }
 
 export interface MergeNode {
@@ -613,8 +702,6 @@ export interface ChainNode {
    * ChainType is used to decide which implementation for the ChainNode.
    */
   chainType: ChainType;
-  /** Whether to place this chain on the same worker node as upstream actors. */
-  sameWorkerNode: boolean;
   /**
    * Whether the upstream materialize is and this chain should be a singleton.
    * FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
@@ -663,7 +750,7 @@ export interface ArrangeNode {
     | Table
     | undefined;
   /** Used to control whether doing sanity check, open it when upstream executor is source executor. */
-  handlePkConflict: boolean;
+  handlePkConflictBehavior: HandleConflictBehavior;
 }
 
 /** Special node for shared state. LookupNode will join an arrangement with a stream. */
@@ -689,14 +776,10 @@ export interface LookupNode {
 
 /** WatermarkFilter needs to filter the upstream data by the water mark. */
 export interface WatermarkFilterNode {
-  /** The expression to calculate the watermark value. */
-  watermarkExpr:
-    | ExprNode
-    | undefined;
-  /** The column the event time belongs. */
-  eventTimeColIdx: number;
-  /** The table used to persist watermark, the key is vnode. */
-  table: Table | undefined;
+  /** The watermark descs */
+  watermarkDescs: WatermarkDesc[];
+  /** The tables used to persist watermarks, the key is vnode. */
+  tables: Table[];
 }
 
 /** Acts like a merger, but on different inputs. */
@@ -734,6 +817,8 @@ export interface SortNode {
 export interface DmlNode {
   /** Id of the table on which DML performs. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   /** Column descriptions of the table. */
   columnDescs: ColumnDesc[];
 }
@@ -779,7 +864,8 @@ export interface StreamNode {
     | { $case: "dml"; dml: DmlNode }
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
     | { $case: "now"; now: NowNode }
-    | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode };
+    | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode }
+    | { $case: "temporalJoin"; temporalJoin: TemporalJoinNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -794,9 +880,14 @@ export interface StreamNode {
   fields: Field[];
 }
 
+/**
+ * The property of an edge in the fragment graph.
+ * This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
+ */
 export interface DispatchStrategy {
   type: DispatcherType;
-  columnIndices: number[];
+  distKeyIndices: number[];
+  outputIndices: number[];
 }
 
 /**
@@ -809,7 +900,13 @@ export interface Dispatcher {
    * Indices of the columns to be used for hashing.
    * For dispatcher types other than HASH, this is ignored.
    */
-  columnIndices: number[];
+  distKeyIndices: number[];
+  /**
+   * Indices of the columns to output.
+   * In most cases, this contains all columns in the input. But for some cases like MV on MV or
+   * schema change, we may only output a subset of the columns.
+   */
+  outputIndices: number[];
   /**
    * The hash mapping for consistent hash.
    * For dispatcher types other than HASH, this is ignored.
@@ -819,19 +916,11 @@ export interface Dispatcher {
     | undefined;
   /**
    * Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-   * - For dispatchers within actors, the id is the same as its downstream fragment id.
-   *   We can't use the exchange operator id directly as the dispatch id, because an exchange
-   *   could belong to more than one downstream in DAG.
-   * - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+   * This is exactly the same as its downstream fragment id.
    */
   dispatcherId: number;
   /** Number of downstreams decides how many endpoints a dispatcher should dispatch. */
   downstreamActorId: number[];
-}
-
-/** Used to place an actor together with another actor in the same worker node. */
-export interface ColocatedActorId {
-  id: number;
 }
 
 /** A StreamActor is a running fragment of the overall stream graph, */
@@ -847,10 +936,6 @@ export interface StreamActor {
    * We duplicate the information here to ease the parsing logic in stream manager.
    */
   upstreamActorId: number[];
-  /** Placement rule for actor, need to stay on the same node as a specified upstream actor. */
-  colocatedUpstreamActorId:
-    | ColocatedActorId
-    | undefined;
   /**
    * Vnodes that the executors in this actor own.
    * If the fragment is a singleton, this field will not be set and leave a `None`.
@@ -873,7 +958,7 @@ export interface StreamFragmentGraph {
   fragments: { [key: number]: StreamFragmentGraph_StreamFragment };
   /** edges between fragments. */
   edges: StreamFragmentGraph_StreamFragmentEdge[];
-  dependentTableIds: number[];
+  dependentRelationIds: number[];
   tableIdsCnt: number;
   env:
     | StreamEnvironment
@@ -904,8 +989,6 @@ export interface StreamFragmentGraph_StreamFragmentEdge {
   dispatchStrategy:
     | DispatchStrategy
     | undefined;
-  /** Whether the two linked nodes should be placed on the same worker node */
-  sameWorkerNode: boolean;
   /**
    * A unique identifier of this edge. Generally it should be exchange node's operator id. When
    * rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
@@ -1257,7 +1340,13 @@ export const UpdateMutation_DispatcherUpdate = {
 };
 
 function createBaseUpdateMutation_MergeUpdate(): UpdateMutation_MergeUpdate {
-  return { actorId: 0, upstreamFragmentId: 0, addedUpstreamActorId: [], removedUpstreamActorId: [] };
+  return {
+    actorId: 0,
+    upstreamFragmentId: 0,
+    newUpstreamFragmentId: undefined,
+    addedUpstreamActorId: [],
+    removedUpstreamActorId: [],
+  };
 }
 
 export const UpdateMutation_MergeUpdate = {
@@ -1265,6 +1354,7 @@ export const UpdateMutation_MergeUpdate = {
     return {
       actorId: isSet(object.actorId) ? Number(object.actorId) : 0,
       upstreamFragmentId: isSet(object.upstreamFragmentId) ? Number(object.upstreamFragmentId) : 0,
+      newUpstreamFragmentId: isSet(object.newUpstreamFragmentId) ? Number(object.newUpstreamFragmentId) : undefined,
       addedUpstreamActorId: Array.isArray(object?.addedUpstreamActorId)
         ? object.addedUpstreamActorId.map((e: any) => Number(e))
         : [],
@@ -1278,6 +1368,8 @@ export const UpdateMutation_MergeUpdate = {
     const obj: any = {};
     message.actorId !== undefined && (obj.actorId = Math.round(message.actorId));
     message.upstreamFragmentId !== undefined && (obj.upstreamFragmentId = Math.round(message.upstreamFragmentId));
+    message.newUpstreamFragmentId !== undefined &&
+      (obj.newUpstreamFragmentId = Math.round(message.newUpstreamFragmentId));
     if (message.addedUpstreamActorId) {
       obj.addedUpstreamActorId = message.addedUpstreamActorId.map((e) => Math.round(e));
     } else {
@@ -1295,6 +1387,7 @@ export const UpdateMutation_MergeUpdate = {
     const message = createBaseUpdateMutation_MergeUpdate();
     message.actorId = object.actorId ?? 0;
     message.upstreamFragmentId = object.upstreamFragmentId ?? 0;
+    message.newUpstreamFragmentId = object.newUpstreamFragmentId ?? undefined;
     message.addedUpstreamActorId = object.addedUpstreamActorId?.map((e) => e) || [];
     message.removedUpstreamActorId = object.removedUpstreamActorId?.map((e) => e) || [];
     return message;
@@ -1566,31 +1659,28 @@ export const Barrier = {
 };
 
 function createBaseWatermark(): Watermark {
-  return { colIdx: 0, dataType: undefined, val: undefined };
+  return { column: undefined, val: undefined };
 }
 
 export const Watermark = {
   fromJSON(object: any): Watermark {
     return {
-      colIdx: isSet(object.colIdx) ? Number(object.colIdx) : 0,
-      dataType: isSet(object.dataType) ? DataType.fromJSON(object.dataType) : undefined,
+      column: isSet(object.column) ? InputRef.fromJSON(object.column) : undefined,
       val: isSet(object.val) ? Datum.fromJSON(object.val) : undefined,
     };
   },
 
   toJSON(message: Watermark): unknown {
     const obj: any = {};
-    message.colIdx !== undefined && (obj.colIdx = Math.round(message.colIdx));
-    message.dataType !== undefined && (obj.dataType = message.dataType ? DataType.toJSON(message.dataType) : undefined);
+    message.column !== undefined && (obj.column = message.column ? InputRef.toJSON(message.column) : undefined);
     message.val !== undefined && (obj.val = message.val ? Datum.toJSON(message.val) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<Watermark>, I>>(object: I): Watermark {
     const message = createBaseWatermark();
-    message.colIdx = object.colIdx ?? 0;
-    message.dataType = (object.dataType !== undefined && object.dataType !== null)
-      ? DataType.fromPartial(object.dataType)
+    message.column = (object.column !== undefined && object.column !== null)
+      ? InputRef.fromPartial(object.column)
       : undefined;
     message.val = (object.val !== undefined && object.val !== null) ? Datum.fromPartial(object.val) : undefined;
     return message;
@@ -1711,7 +1801,7 @@ export const StreamSource = {
     return {
       sourceId: isSet(object.sourceId) ? Number(object.sourceId) : 0,
       stateTable: isSet(object.stateTable) ? Table.fromJSON(object.stateTable) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
       pkColumnIds: Array.isArray(object?.pkColumnIds) ? object.pkColumnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -1730,8 +1820,7 @@ export const StreamSource = {
     message.sourceId !== undefined && (obj.sourceId = Math.round(message.sourceId));
     message.stateTable !== undefined &&
       (obj.stateTable = message.stateTable ? Table.toJSON(message.stateTable) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.columns) {
       obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
@@ -1759,9 +1848,7 @@ export const StreamSource = {
     message.stateTable = (object.stateTable !== undefined && object.stateTable !== null)
       ? Table.fromPartial(object.stateTable)
       : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.pkColumnIds = object.pkColumnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -1830,54 +1917,86 @@ export const SourceNode = {
   },
 };
 
-function createBaseSinkNode(): SinkNode {
-  return { tableId: 0, properties: {}, fields: [], sinkPk: [] };
+function createBaseSinkDesc(): SinkDesc {
+  return {
+    id: 0,
+    name: "",
+    definition: "",
+    columns: [],
+    pk: [],
+    streamKey: [],
+    distributionKey: [],
+    properties: {},
+    sinkType: SinkType.UNSPECIFIED,
+  };
 }
 
-export const SinkNode = {
-  fromJSON(object: any): SinkNode {
+export const SinkDesc = {
+  fromJSON(object: any): SinkDesc {
     return {
-      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      id: isSet(object.id) ? Number(object.id) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      definition: isSet(object.definition) ? String(object.definition) : "",
+      columns: Array.isArray(object?.columns)
+        ? object.columns.map((e: any) => ColumnDesc.fromJSON(e))
+        : [],
+      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
           return acc;
         }, {})
         : {},
-      fields: Array.isArray(object?.fields)
-        ? object.fields.map((e: any) => Field.fromJSON(e))
-        : [],
-      sinkPk: Array.isArray(object?.sinkPk)
-        ? object.sinkPk.map((e: any) => Number(e))
-        : [],
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
     };
   },
 
-  toJSON(message: SinkNode): unknown {
+  toJSON(message: SinkDesc): unknown {
     const obj: any = {};
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.name !== undefined && (obj.name = message.name);
+    message.definition !== undefined && (obj.definition = message.definition);
+    if (message.columns) {
+      obj.columns = message.columns.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
+    } else {
+      obj.columns = [];
+    }
+    if (message.pk) {
+      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    } else {
+      obj.pk = [];
+    }
+    if (message.streamKey) {
+      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    } else {
+      obj.streamKey = [];
+    }
+    if (message.distributionKey) {
+      obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
+    } else {
+      obj.distributionKey = [];
+    }
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
         obj.properties[k] = v;
       });
     }
-    if (message.fields) {
-      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
-    } else {
-      obj.fields = [];
-    }
-    if (message.sinkPk) {
-      obj.sinkPk = message.sinkPk.map((e) => Math.round(e));
-    } else {
-      obj.sinkPk = [];
-    }
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
-    const message = createBaseSinkNode();
-    message.tableId = object.tableId ?? 0;
+  fromPartial<I extends Exact<DeepPartial<SinkDesc>, I>>(object: I): SinkDesc {
+    const message = createBaseSinkDesc();
+    message.id = object.id ?? 0;
+    message.name = object.name ?? "";
+    message.definition = object.definition ?? "";
+    message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
+    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -1887,32 +2006,55 @@ export const SinkNode = {
       },
       {},
     );
-    message.fields = object.fields?.map((e) => Field.fromPartial(e)) || [];
-    message.sinkPk = object.sinkPk?.map((e) => e) || [];
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     return message;
   },
 };
 
-function createBaseSinkNode_PropertiesEntry(): SinkNode_PropertiesEntry {
+function createBaseSinkDesc_PropertiesEntry(): SinkDesc_PropertiesEntry {
   return { key: "", value: "" };
 }
 
-export const SinkNode_PropertiesEntry = {
-  fromJSON(object: any): SinkNode_PropertiesEntry {
+export const SinkDesc_PropertiesEntry = {
+  fromJSON(object: any): SinkDesc_PropertiesEntry {
     return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
   },
 
-  toJSON(message: SinkNode_PropertiesEntry): unknown {
+  toJSON(message: SinkDesc_PropertiesEntry): unknown {
     const obj: any = {};
     message.key !== undefined && (obj.key = message.key);
     message.value !== undefined && (obj.value = message.value);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<SinkNode_PropertiesEntry>, I>>(object: I): SinkNode_PropertiesEntry {
-    const message = createBaseSinkNode_PropertiesEntry();
+  fromPartial<I extends Exact<DeepPartial<SinkDesc_PropertiesEntry>, I>>(object: I): SinkDesc_PropertiesEntry {
+    const message = createBaseSinkDesc_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseSinkNode(): SinkNode {
+  return { sinkDesc: undefined };
+}
+
+export const SinkNode = {
+  fromJSON(object: any): SinkNode {
+    return { sinkDesc: isSet(object.sinkDesc) ? SinkDesc.fromJSON(object.sinkDesc) : undefined };
+  },
+
+  toJSON(message: SinkNode): unknown {
+    const obj: any = {};
+    message.sinkDesc !== undefined && (obj.sinkDesc = message.sinkDesc ? SinkDesc.toJSON(message.sinkDesc) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SinkNode>, I>>(object: I): SinkNode {
+    const message = createBaseSinkNode();
+    message.sinkDesc = (object.sinkDesc !== undefined && object.sinkDesc !== null)
+      ? SinkDesc.fromPartial(object.sinkDesc)
+      : undefined;
     return message;
   },
 };
@@ -1989,7 +2131,12 @@ export const FilterNode = {
 };
 
 function createBaseMaterializeNode(): MaterializeNode {
-  return { tableId: 0, columnOrders: [], table: undefined, handlePkConflict: false };
+  return {
+    tableId: 0,
+    columnOrders: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const MaterializeNode = {
@@ -2000,7 +2147,9 @@ export const MaterializeNode = {
         ? object.columnOrders.map((e: any) => ColumnOrder.fromJSON(e))
         : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -2013,7 +2162,8 @@ export const MaterializeNode = {
       obj.columnOrders = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -2022,7 +2172,7 @@ export const MaterializeNode = {
     message.tableId = object.tableId ?? 0;
     message.columnOrders = object.columnOrders?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
@@ -2185,7 +2335,15 @@ export const AggCallState_MaterializedInputState = {
 };
 
 function createBaseSimpleAggNode(): SimpleAggNode {
-  return { aggCalls: [], distributionKey: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    aggCalls: [],
+    distributionKey: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+    rowCountIndex: 0,
+  };
 }
 
 export const SimpleAggNode = {
@@ -2198,6 +2356,13 @@ export const SimpleAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2221,6 +2386,13 @@ export const SimpleAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2233,12 +2405,59 @@ export const SimpleAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
+    return message;
+  },
+};
+
+function createBaseSimpleAggNode_DistinctDedupTablesEntry(): SimpleAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const SimpleAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): SimpleAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SimpleAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SimpleAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): SimpleAggNode_DistinctDedupTablesEntry {
+    const message = createBaseSimpleAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
 
 function createBaseHashAggNode(): HashAggNode {
-  return { groupKey: [], aggCalls: [], aggCallStates: [], resultTable: undefined, isAppendOnly: false };
+  return {
+    groupKey: [],
+    aggCalls: [],
+    aggCallStates: [],
+    resultTable: undefined,
+    isAppendOnly: false,
+    distinctDedupTables: {},
+    rowCountIndex: 0,
+  };
 }
 
 export const HashAggNode = {
@@ -2251,6 +2470,13 @@ export const HashAggNode = {
         : [],
       resultTable: isSet(object.resultTable) ? Table.fromJSON(object.resultTable) : undefined,
       isAppendOnly: isSet(object.isAppendOnly) ? Boolean(object.isAppendOnly) : false,
+      distinctDedupTables: isObject(object.distinctDedupTables)
+        ? Object.entries(object.distinctDedupTables).reduce<{ [key: number]: Table }>((acc, [key, value]) => {
+          acc[Number(key)] = Table.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+      rowCountIndex: isSet(object.rowCountIndex) ? Number(object.rowCountIndex) : 0,
     };
   },
 
@@ -2274,6 +2500,13 @@ export const HashAggNode = {
     message.resultTable !== undefined &&
       (obj.resultTable = message.resultTable ? Table.toJSON(message.resultTable) : undefined);
     message.isAppendOnly !== undefined && (obj.isAppendOnly = message.isAppendOnly);
+    obj.distinctDedupTables = {};
+    if (message.distinctDedupTables) {
+      Object.entries(message.distinctDedupTables).forEach(([k, v]) => {
+        obj.distinctDedupTables[k] = Table.toJSON(v);
+      });
+    }
+    message.rowCountIndex !== undefined && (obj.rowCountIndex = Math.round(message.rowCountIndex));
     return obj;
   },
 
@@ -2286,6 +2519,45 @@ export const HashAggNode = {
       ? Table.fromPartial(object.resultTable)
       : undefined;
     message.isAppendOnly = object.isAppendOnly ?? false;
+    message.distinctDedupTables = Object.entries(object.distinctDedupTables ?? {}).reduce<{ [key: number]: Table }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = Table.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    message.rowCountIndex = object.rowCountIndex ?? 0;
+    return message;
+  },
+};
+
+function createBaseHashAggNode_DistinctDedupTablesEntry(): HashAggNode_DistinctDedupTablesEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HashAggNode_DistinctDedupTablesEntry = {
+  fromJSON(object: any): HashAggNode_DistinctDedupTablesEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? Table.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HashAggNode_DistinctDedupTablesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined && (obj.value = message.value ? Table.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HashAggNode_DistinctDedupTablesEntry>, I>>(
+    object: I,
+  ): HashAggNode_DistinctDedupTablesEntry {
+    const message = createBaseHashAggNode_DistinctDedupTablesEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null) ? Table.fromPartial(object.value) : undefined;
     return message;
   },
 };
@@ -2494,6 +2766,88 @@ export const HashJoinNode = {
   },
 };
 
+function createBaseTemporalJoinNode(): TemporalJoinNode {
+  return {
+    joinType: JoinType.UNSPECIFIED,
+    leftKey: [],
+    rightKey: [],
+    nullSafe: [],
+    condition: undefined,
+    outputIndices: [],
+    tableDesc: undefined,
+    tableOutputIndices: [],
+  };
+}
+
+export const TemporalJoinNode = {
+  fromJSON(object: any): TemporalJoinNode {
+    return {
+      joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
+      leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
+      rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
+      nullSafe: Array.isArray(object?.nullSafe) ? object.nullSafe.map((e: any) => Boolean(e)) : [],
+      condition: isSet(object.condition) ? ExprNode.fromJSON(object.condition) : undefined,
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
+      tableOutputIndices: Array.isArray(object?.tableOutputIndices)
+        ? object.tableOutputIndices.map((e: any) => Number(e))
+        : [],
+    };
+  },
+
+  toJSON(message: TemporalJoinNode): unknown {
+    const obj: any = {};
+    message.joinType !== undefined && (obj.joinType = joinTypeToJSON(message.joinType));
+    if (message.leftKey) {
+      obj.leftKey = message.leftKey.map((e) => Math.round(e));
+    } else {
+      obj.leftKey = [];
+    }
+    if (message.rightKey) {
+      obj.rightKey = message.rightKey.map((e) => Math.round(e));
+    } else {
+      obj.rightKey = [];
+    }
+    if (message.nullSafe) {
+      obj.nullSafe = message.nullSafe.map((e) => e);
+    } else {
+      obj.nullSafe = [];
+    }
+    message.condition !== undefined &&
+      (obj.condition = message.condition ? ExprNode.toJSON(message.condition) : undefined);
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
+    }
+    message.tableDesc !== undefined &&
+      (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
+    if (message.tableOutputIndices) {
+      obj.tableOutputIndices = message.tableOutputIndices.map((e) => Math.round(e));
+    } else {
+      obj.tableOutputIndices = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TemporalJoinNode>, I>>(object: I): TemporalJoinNode {
+    const message = createBaseTemporalJoinNode();
+    message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
+    message.leftKey = object.leftKey?.map((e) => e) || [];
+    message.rightKey = object.rightKey?.map((e) => e) || [];
+    message.nullSafe = object.nullSafe?.map((e) => e) || [];
+    message.condition = (object.condition !== undefined && object.condition !== null)
+      ? ExprNode.fromPartial(object.condition)
+      : undefined;
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
+      ? StorageTableDesc.fromPartial(object.tableDesc)
+      : undefined;
+    message.tableOutputIndices = object.tableOutputIndices?.map((e) => e) || [];
+    return message;
+  },
+};
+
 function createBaseDynamicFilterNode(): DynamicFilterNode {
   return { leftKey: 0, condition: undefined, leftTable: undefined, rightTable: undefined };
 }
@@ -2616,22 +2970,35 @@ export const DeltaIndexJoinNode = {
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: undefined, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return {
+    timeCol: 0,
+    windowSlide: undefined,
+    windowSize: undefined,
+    outputIndices: [],
+    windowStartExprs: [],
+    windowEndExprs: [],
+  };
 }
 
 export const HopWindowNode = {
   fromJSON(object: any): HopWindowNode {
     return {
-      timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
+      timeCol: isSet(object.timeCol) ? Number(object.timeCol) : 0,
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      windowStartExprs: Array.isArray(object?.windowStartExprs)
+        ? object.windowStartExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
+      windowEndExprs: Array.isArray(object?.windowEndExprs)
+        ? object.windowEndExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: HopWindowNode): unknown {
     const obj: any = {};
-    message.timeCol !== undefined && (obj.timeCol = message.timeCol ? InputRefExpr.toJSON(message.timeCol) : undefined);
+    message.timeCol !== undefined && (obj.timeCol = Math.round(message.timeCol));
     message.windowSlide !== undefined &&
       (obj.windowSlide = message.windowSlide ? IntervalUnit.toJSON(message.windowSlide) : undefined);
     message.windowSize !== undefined &&
@@ -2641,14 +3008,22 @@ export const HopWindowNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.windowStartExprs) {
+      obj.windowStartExprs = message.windowStartExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowStartExprs = [];
+    }
+    if (message.windowEndExprs) {
+      obj.windowEndExprs = message.windowEndExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowEndExprs = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<HopWindowNode>, I>>(object: I): HopWindowNode {
     const message = createBaseHopWindowNode();
-    message.timeCol = (object.timeCol !== undefined && object.timeCol !== null)
-      ? InputRefExpr.fromPartial(object.timeCol)
-      : undefined;
+    message.timeCol = object.timeCol ?? 0;
     message.windowSlide = (object.windowSlide !== undefined && object.windowSlide !== null)
       ? IntervalUnit.fromPartial(object.windowSlide)
       : undefined;
@@ -2656,6 +3031,8 @@ export const HopWindowNode = {
       ? IntervalUnit.fromPartial(object.windowSize)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.windowStartExprs = object.windowStartExprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.windowEndExprs = object.windowEndExprs?.map((e) => ExprNode.fromPartial(e)) || [];
     return message;
   },
 };
@@ -2735,7 +3112,6 @@ function createBaseChainNode(): ChainNode {
     upstreamFields: [],
     upstreamColumnIndices: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
-    sameWorkerNode: false,
     isSingleton: false,
     tableDesc: undefined,
   };
@@ -2752,7 +3128,6 @@ export const ChainNode = {
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
@@ -2772,7 +3147,6 @@ export const ChainNode = {
       obj.upstreamColumnIndices = [];
     }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableDesc !== undefined &&
       (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
@@ -2785,7 +3159,6 @@ export const ChainNode = {
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)
@@ -2874,7 +3247,12 @@ export const ArrangementInfo = {
 };
 
 function createBaseArrangeNode(): ArrangeNode {
-  return { tableInfo: undefined, distributionKey: [], table: undefined, handlePkConflict: false };
+  return {
+    tableInfo: undefined,
+    distributionKey: [],
+    table: undefined,
+    handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
+  };
 }
 
 export const ArrangeNode = {
@@ -2883,7 +3261,9 @@ export const ArrangeNode = {
       tableInfo: isSet(object.tableInfo) ? ArrangementInfo.fromJSON(object.tableInfo) : undefined,
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
-      handlePkConflict: isSet(object.handlePkConflict) ? Boolean(object.handlePkConflict) : false,
+      handlePkConflictBehavior: isSet(object.handlePkConflictBehavior)
+        ? handleConflictBehaviorFromJSON(object.handlePkConflictBehavior)
+        : HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     };
   },
 
@@ -2897,7 +3277,8 @@ export const ArrangeNode = {
       obj.distributionKey = [];
     }
     message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
-    message.handlePkConflict !== undefined && (obj.handlePkConflict = message.handlePkConflict);
+    message.handlePkConflictBehavior !== undefined &&
+      (obj.handlePkConflictBehavior = handleConflictBehaviorToJSON(message.handlePkConflictBehavior));
     return obj;
   },
 
@@ -2908,7 +3289,7 @@ export const ArrangeNode = {
       : undefined;
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
-    message.handlePkConflict = object.handlePkConflict ?? false;
+    message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     return message;
   },
 };
@@ -2996,34 +3377,40 @@ export const LookupNode = {
 };
 
 function createBaseWatermarkFilterNode(): WatermarkFilterNode {
-  return { watermarkExpr: undefined, eventTimeColIdx: 0, table: undefined };
+  return { watermarkDescs: [], tables: [] };
 }
 
 export const WatermarkFilterNode = {
   fromJSON(object: any): WatermarkFilterNode {
     return {
-      watermarkExpr: isSet(object.watermarkExpr) ? ExprNode.fromJSON(object.watermarkExpr) : undefined,
-      eventTimeColIdx: isSet(object.eventTimeColIdx) ? Number(object.eventTimeColIdx) : 0,
-      table: isSet(object.table) ? Table.fromJSON(object.table) : undefined,
+      watermarkDescs: Array.isArray(object?.watermarkDescs)
+        ? object.watermarkDescs.map((e: any) => WatermarkDesc.fromJSON(e))
+        : [],
+      tables: Array.isArray(object?.tables)
+        ? object.tables.map((e: any) => Table.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: WatermarkFilterNode): unknown {
     const obj: any = {};
-    message.watermarkExpr !== undefined &&
-      (obj.watermarkExpr = message.watermarkExpr ? ExprNode.toJSON(message.watermarkExpr) : undefined);
-    message.eventTimeColIdx !== undefined && (obj.eventTimeColIdx = Math.round(message.eventTimeColIdx));
-    message.table !== undefined && (obj.table = message.table ? Table.toJSON(message.table) : undefined);
+    if (message.watermarkDescs) {
+      obj.watermarkDescs = message.watermarkDescs.map((e) => e ? WatermarkDesc.toJSON(e) : undefined);
+    } else {
+      obj.watermarkDescs = [];
+    }
+    if (message.tables) {
+      obj.tables = message.tables.map((e) => e ? Table.toJSON(e) : undefined);
+    } else {
+      obj.tables = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<WatermarkFilterNode>, I>>(object: I): WatermarkFilterNode {
     const message = createBaseWatermarkFilterNode();
-    message.watermarkExpr = (object.watermarkExpr !== undefined && object.watermarkExpr !== null)
-      ? ExprNode.fromPartial(object.watermarkExpr)
-      : undefined;
-    message.eventTimeColIdx = object.eventTimeColIdx ?? 0;
-    message.table = (object.table !== undefined && object.table !== null) ? Table.fromPartial(object.table) : undefined;
+    message.watermarkDescs = object.watermarkDescs?.map((e) => WatermarkDesc.fromPartial(e)) || [];
+    message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3193,13 +3580,14 @@ export const SortNode = {
 };
 
 function createBaseDmlNode(): DmlNode {
-  return { tableId: 0, columnDescs: [] };
+  return { tableId: 0, tableVersionId: 0, columnDescs: [] };
 }
 
 export const DmlNode = {
   fromJSON(object: any): DmlNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnDescs: Array.isArray(object?.columnDescs) ? object.columnDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
     };
   },
@@ -3207,6 +3595,7 @@ export const DmlNode = {
   toJSON(message: DmlNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnDescs) {
       obj.columnDescs = message.columnDescs.map((e) => e ? ColumnDesc.toJSON(e) : undefined);
     } else {
@@ -3218,6 +3607,7 @@ export const DmlNode = {
   fromPartial<I extends Exact<DeepPartial<DmlNode>, I>>(object: I): DmlNode {
     const message = createBaseDmlNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnDescs = object.columnDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     return message;
   },
@@ -3339,6 +3729,8 @@ export const StreamNode = {
         ? { $case: "now", now: NowNode.fromJSON(object.now) }
         : isSet(object.appendOnlyGroupTopN)
         ? { $case: "appendOnlyGroupTopN", appendOnlyGroupTopN: GroupTopNNode.fromJSON(object.appendOnlyGroupTopN) }
+        : isSet(object.temporalJoin)
+        ? { $case: "temporalJoin", temporalJoin: TemporalJoinNode.fromJSON(object.temporalJoin) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3425,6 +3817,9 @@ export const StreamNode = {
       (obj.appendOnlyGroupTopN = message.nodeBody?.appendOnlyGroupTopN
         ? GroupTopNNode.toJSON(message.nodeBody?.appendOnlyGroupTopN)
         : undefined);
+    message.nodeBody?.$case === "temporalJoin" && (obj.temporalJoin = message.nodeBody?.temporalJoin
+      ? TemporalJoinNode.toJSON(message.nodeBody?.temporalJoin)
+      : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3656,6 +4051,16 @@ export const StreamNode = {
         appendOnlyGroupTopN: GroupTopNNode.fromPartial(object.nodeBody.appendOnlyGroupTopN),
       };
     }
+    if (
+      object.nodeBody?.$case === "temporalJoin" &&
+      object.nodeBody?.temporalJoin !== undefined &&
+      object.nodeBody?.temporalJoin !== null
+    ) {
+      message.nodeBody = {
+        $case: "temporalJoin",
+        temporalJoin: TemporalJoinNode.fromPartial(object.nodeBody.temporalJoin),
+      };
+    }
     message.operatorId = object.operatorId ?? 0;
     message.input = object.input?.map((e) => StreamNode.fromPartial(e)) || [];
     message.streamKey = object.streamKey?.map((e) => e) || [];
@@ -3667,24 +4072,30 @@ export const StreamNode = {
 };
 
 function createBaseDispatchStrategy(): DispatchStrategy {
-  return { type: DispatcherType.UNSPECIFIED, columnIndices: [] };
+  return { type: DispatcherType.UNSPECIFIED, distKeyIndices: [], outputIndices: [] };
 }
 
 export const DispatchStrategy = {
   fromJSON(object: any): DispatchStrategy {
     return {
       type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
-      columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
+      distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
 
   toJSON(message: DispatchStrategy): unknown {
     const obj: any = {};
     message.type !== undefined && (obj.type = dispatcherTypeToJSON(message.type));
-    if (message.columnIndices) {
-      obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
+    if (message.distKeyIndices) {
+      obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
     } else {
-      obj.columnIndices = [];
+      obj.distKeyIndices = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
     }
     return obj;
   },
@@ -3692,7 +4103,8 @@ export const DispatchStrategy = {
   fromPartial<I extends Exact<DeepPartial<DispatchStrategy>, I>>(object: I): DispatchStrategy {
     const message = createBaseDispatchStrategy();
     message.type = object.type ?? DispatcherType.UNSPECIFIED;
-    message.columnIndices = object.columnIndices?.map((e) => e) || [];
+    message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
 };
@@ -3700,7 +4112,8 @@ export const DispatchStrategy = {
 function createBaseDispatcher(): Dispatcher {
   return {
     type: DispatcherType.UNSPECIFIED,
-    columnIndices: [],
+    distKeyIndices: [],
+    outputIndices: [],
     hashMapping: undefined,
     dispatcherId: 0,
     downstreamActorId: [],
@@ -3711,7 +4124,8 @@ export const Dispatcher = {
   fromJSON(object: any): Dispatcher {
     return {
       type: isSet(object.type) ? dispatcherTypeFromJSON(object.type) : DispatcherType.UNSPECIFIED,
-      columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
+      distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
+      outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
       hashMapping: isSet(object.hashMapping) ? ActorMapping.fromJSON(object.hashMapping) : undefined,
       dispatcherId: isSet(object.dispatcherId) ? Number(object.dispatcherId) : 0,
       downstreamActorId: Array.isArray(object?.downstreamActorId)
@@ -3723,10 +4137,15 @@ export const Dispatcher = {
   toJSON(message: Dispatcher): unknown {
     const obj: any = {};
     message.type !== undefined && (obj.type = dispatcherTypeToJSON(message.type));
-    if (message.columnIndices) {
-      obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
+    if (message.distKeyIndices) {
+      obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
     } else {
-      obj.columnIndices = [];
+      obj.distKeyIndices = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
     }
     message.hashMapping !== undefined &&
       (obj.hashMapping = message.hashMapping ? ActorMapping.toJSON(message.hashMapping) : undefined);
@@ -3742,34 +4161,13 @@ export const Dispatcher = {
   fromPartial<I extends Exact<DeepPartial<Dispatcher>, I>>(object: I): Dispatcher {
     const message = createBaseDispatcher();
     message.type = object.type ?? DispatcherType.UNSPECIFIED;
-    message.columnIndices = object.columnIndices?.map((e) => e) || [];
+    message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.hashMapping = (object.hashMapping !== undefined && object.hashMapping !== null)
       ? ActorMapping.fromPartial(object.hashMapping)
       : undefined;
     message.dispatcherId = object.dispatcherId ?? 0;
     message.downstreamActorId = object.downstreamActorId?.map((e) => e) || [];
-    return message;
-  },
-};
-
-function createBaseColocatedActorId(): ColocatedActorId {
-  return { id: 0 };
-}
-
-export const ColocatedActorId = {
-  fromJSON(object: any): ColocatedActorId {
-    return { id: isSet(object.id) ? Number(object.id) : 0 };
-  },
-
-  toJSON(message: ColocatedActorId): unknown {
-    const obj: any = {};
-    message.id !== undefined && (obj.id = Math.round(message.id));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColocatedActorId>, I>>(object: I): ColocatedActorId {
-    const message = createBaseColocatedActorId();
-    message.id = object.id ?? 0;
     return message;
   },
 };
@@ -3781,7 +4179,6 @@ function createBaseStreamActor(): StreamActor {
     nodes: undefined,
     dispatcher: [],
     upstreamActorId: [],
-    colocatedUpstreamActorId: undefined,
     vnodeBitmap: undefined,
     mviewDefinition: "",
   };
@@ -3795,9 +4192,6 @@ export const StreamActor = {
       nodes: isSet(object.nodes) ? StreamNode.fromJSON(object.nodes) : undefined,
       dispatcher: Array.isArray(object?.dispatcher) ? object.dispatcher.map((e: any) => Dispatcher.fromJSON(e)) : [],
       upstreamActorId: Array.isArray(object?.upstreamActorId) ? object.upstreamActorId.map((e: any) => Number(e)) : [],
-      colocatedUpstreamActorId: isSet(object.colocatedUpstreamActorId)
-        ? ColocatedActorId.fromJSON(object.colocatedUpstreamActorId)
-        : undefined,
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       mviewDefinition: isSet(object.mviewDefinition) ? String(object.mviewDefinition) : "",
     };
@@ -3818,9 +4212,6 @@ export const StreamActor = {
     } else {
       obj.upstreamActorId = [];
     }
-    message.colocatedUpstreamActorId !== undefined && (obj.colocatedUpstreamActorId = message.colocatedUpstreamActorId
-      ? ColocatedActorId.toJSON(message.colocatedUpstreamActorId)
-      : undefined);
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.mviewDefinition !== undefined && (obj.mviewDefinition = message.mviewDefinition);
@@ -3836,10 +4227,6 @@ export const StreamActor = {
       : undefined;
     message.dispatcher = object.dispatcher?.map((e) => Dispatcher.fromPartial(e)) || [];
     message.upstreamActorId = object.upstreamActorId?.map((e) => e) || [];
-    message.colocatedUpstreamActorId =
-      (object.colocatedUpstreamActorId !== undefined && object.colocatedUpstreamActorId !== null)
-        ? ColocatedActorId.fromPartial(object.colocatedUpstreamActorId)
-        : undefined;
     message.vnodeBitmap = (object.vnodeBitmap !== undefined && object.vnodeBitmap !== null)
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
@@ -3871,7 +4258,7 @@ export const StreamEnvironment = {
 };
 
 function createBaseStreamFragmentGraph(): StreamFragmentGraph {
-  return { fragments: {}, edges: [], dependentTableIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
+  return { fragments: {}, edges: [], dependentRelationIds: [], tableIdsCnt: 0, env: undefined, parallelism: undefined };
 }
 
 export const StreamFragmentGraph = {
@@ -3889,8 +4276,8 @@ export const StreamFragmentGraph = {
       edges: Array.isArray(object?.edges)
         ? object.edges.map((e: any) => StreamFragmentGraph_StreamFragmentEdge.fromJSON(e))
         : [],
-      dependentTableIds: Array.isArray(object?.dependentTableIds)
-        ? object.dependentTableIds.map((e: any) => Number(e))
+      dependentRelationIds: Array.isArray(object?.dependentRelationIds)
+        ? object.dependentRelationIds.map((e: any) => Number(e))
         : [],
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       env: isSet(object.env) ? StreamEnvironment.fromJSON(object.env) : undefined,
@@ -3911,10 +4298,10 @@ export const StreamFragmentGraph = {
     } else {
       obj.edges = [];
     }
-    if (message.dependentTableIds) {
-      obj.dependentTableIds = message.dependentTableIds.map((e) => Math.round(e));
+    if (message.dependentRelationIds) {
+      obj.dependentRelationIds = message.dependentRelationIds.map((e) => Math.round(e));
     } else {
-      obj.dependentTableIds = [];
+      obj.dependentRelationIds = [];
     }
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     message.env !== undefined && (obj.env = message.env ? StreamEnvironment.toJSON(message.env) : undefined);
@@ -3934,7 +4321,7 @@ export const StreamFragmentGraph = {
       return acc;
     }, {});
     message.edges = object.edges?.map((e) => StreamFragmentGraph_StreamFragmentEdge.fromPartial(e)) || [];
-    message.dependentTableIds = object.dependentTableIds?.map((e) => e) || [];
+    message.dependentRelationIds = object.dependentRelationIds?.map((e) => e) || [];
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.env = (object.env !== undefined && object.env !== null)
       ? StreamEnvironment.fromPartial(object.env)
@@ -4003,14 +4390,13 @@ export const StreamFragmentGraph_StreamFragment = {
 };
 
 function createBaseStreamFragmentGraph_StreamFragmentEdge(): StreamFragmentGraph_StreamFragmentEdge {
-  return { dispatchStrategy: undefined, sameWorkerNode: false, linkId: 0, upstreamId: 0, downstreamId: 0 };
+  return { dispatchStrategy: undefined, linkId: 0, upstreamId: 0, downstreamId: 0 };
 }
 
 export const StreamFragmentGraph_StreamFragmentEdge = {
   fromJSON(object: any): StreamFragmentGraph_StreamFragmentEdge {
     return {
       dispatchStrategy: isSet(object.dispatchStrategy) ? DispatchStrategy.fromJSON(object.dispatchStrategy) : undefined,
-      sameWorkerNode: isSet(object.sameWorkerNode) ? Boolean(object.sameWorkerNode) : false,
       linkId: isSet(object.linkId) ? Number(object.linkId) : 0,
       upstreamId: isSet(object.upstreamId) ? Number(object.upstreamId) : 0,
       downstreamId: isSet(object.downstreamId) ? Number(object.downstreamId) : 0,
@@ -4021,7 +4407,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     const obj: any = {};
     message.dispatchStrategy !== undefined &&
       (obj.dispatchStrategy = message.dispatchStrategy ? DispatchStrategy.toJSON(message.dispatchStrategy) : undefined);
-    message.sameWorkerNode !== undefined && (obj.sameWorkerNode = message.sameWorkerNode);
     message.linkId !== undefined && (obj.linkId = Math.round(message.linkId));
     message.upstreamId !== undefined && (obj.upstreamId = Math.round(message.upstreamId));
     message.downstreamId !== undefined && (obj.downstreamId = Math.round(message.downstreamId));
@@ -4035,7 +4420,6 @@ export const StreamFragmentGraph_StreamFragmentEdge = {
     message.dispatchStrategy = (object.dispatchStrategy !== undefined && object.dispatchStrategy !== null)
       ? DispatchStrategy.fromPartial(object.dispatchStrategy)
       : undefined;
-    message.sameWorkerNode = object.sameWorkerNode ?? false;
     message.linkId = object.linkId ?? 0;
     message.upstreamId = object.upstreamId ?? 0;
     message.downstreamId = object.downstreamId ?? 0;

@@ -1,0 +1,94 @@
+---
+version: "3"
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    image: "prom/prometheus:latest"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.listen-address=0.0.0.0:9500"
+      - "--storage.tsdb.retention.time=5m" # Use prometheus for short-term storage.
+    expose:
+      - "9500"
+    ports:
+      - "9500:9500"
+    depends_on: []
+    volumes:
+      - "prometheus-0:/prometheus"
+      - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
+    environment: {}
+    container_name: prometheus-0
+    healthcheck:
+      test:
+        - CMD
+        - printf
+        - ""
+        - /dev/tcp/127.0.0.1/9500
+      interval: 1s
+      timeout: 5s
+      retries: 5
+  message_queue:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: message_queue
+  prometheus-kafka-adaptor:
+    image: "telefonica/prometheus-kafka-adapter:1.8.0"
+    expose:
+      - "9501"
+    ports:
+      - "9501:9501"
+    environment:
+      - KAFKA_BROKER_LIST=message_queue:29092
+      - KAFKA_TOPIC=prometheus
+      - PORT=9501
+      - GIN_MODE=release
+      - LOG_LEVEL=info
+      - SERIALIZATION_FORMAT=json
+    container_name: prometheus-kafka-adaptor
+    depends_on:
+      - prometheus-0
+      - message_queue
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
+name: risingwave-compose

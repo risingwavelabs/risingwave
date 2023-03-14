@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::str::FromStr;
-use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -27,9 +26,9 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::ParserConfig;
 use crate::source::base::SourceMessage;
 use crate::source::cdc::CdcProperties;
-use crate::source::monitor::SourceMetrics;
 use crate::source::{
-    BoxSourceWithStateStream, Column, SourceInfo, SplitId, SplitImpl, SplitMetaData, SplitReaderV2,
+    BoxSourceWithStateStream, Column, SourceContextRef, SplitId, SplitImpl, SplitMetaData,
+    SplitReader,
 };
 
 impl_common_split_reader_logic!(CdcSplitReader, CdcProperties);
@@ -41,12 +40,11 @@ pub struct CdcSplitReader {
 
     split_id: SplitId,
     parser_config: ParserConfig,
-    metrics: Arc<SourceMetrics>,
-    source_info: SourceInfo,
+    source_ctx: SourceContextRef,
 }
 
 #[async_trait]
-impl SplitReaderV2 for CdcSplitReader {
+impl SplitReader for CdcSplitReader {
     type Properties = CdcProperties;
 
     #[allow(clippy::unused_async)]
@@ -54,8 +52,7 @@ impl SplitReaderV2 for CdcSplitReader {
         conn_props: CdcProperties,
         splits: Vec<SplitImpl>,
         parser_config: ParserConfig,
-        metrics: Arc<SourceMetrics>,
-        source_info: SourceInfo,
+        source_ctx: SourceContextRef,
         _columns: Option<Vec<Column>>,
     ) -> Result<Self> {
         assert!(splits.len() == 1);
@@ -68,8 +65,7 @@ impl SplitReaderV2 for CdcSplitReader {
                 conn_props,
                 split_id,
                 parser_config,
-                metrics,
-                source_info,
+                source_ctx,
             }),
             _ => Err(anyhow!(
                 "failed to create cdc split reader: invalid splis info"

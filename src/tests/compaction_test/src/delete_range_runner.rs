@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Bound;
 use std::pin::Pin;
@@ -21,12 +21,13 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::StreamExt;
-use itertools::Itertools;
 use rand::rngs::StdRng;
 use rand::{RngCore, SeedableRng};
+use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::{load_config, StorageConfig, NO_OVERRIDE};
+use risingwave_common::config::{load_config, RwConfig, NO_OVERRIDE};
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::filter_key_extractor::{
     FilterKeyExtractorImpl, FilterKeyExtractorManager, FullKeyFilterKeyExtractor,
 };
@@ -37,18 +38,17 @@ use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::hummock::{CompactionConfig, CompactionGroup, TableOption};
+use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
+use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-use risingwave_storage::hummock::store::state_store::LocalHummockStorage;
 use risingwave_storage::hummock::{
     HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
-use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use risingwave_storage::opts::StorageOpts;
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -84,22 +84,13 @@ pub fn start_delete_range(opts: CompactionTestOpts) -> Pin<Box<dyn Future<Output
 }
 pub async fn compaction_test_main(opts: CompactionTestOpts) -> anyhow::Result<()> {
     let config = load_config(&opts.config_path, NO_OVERRIDE);
-    let mut storage_config = config.storage;
-    storage_config.enable_state_store_v1 = false;
     let compaction_config = CompactionConfigBuilder::new().build();
-    compaction_test(
-        compaction_config,
-        storage_config,
-        &opts.state_store,
-        1000000,
-        800,
-    )
-    .await
+    compaction_test(compaction_config, config, &opts.state_store, 1000000, 800).await
 }
 
 async fn compaction_test(
     compaction_config: CompactionConfig,
-    storage_config: StorageConfig,
+    config: RwConfig,
     state_store_type: &str,
     test_range: u64,
     test_count: u64,
@@ -122,48 +113,39 @@ async fn compaction_test(
         distribution_key: vec![],
         stream_key: vec![],
         owner: 0,
-        properties: Default::default(),
+        properties: HashMap::<String, String>::from([(
+            PROPERTIES_RETENTION_SECOND_KEY.to_string(),
+            0.to_string(),
+        )]),
         fragment_id: 0,
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
-        handle_pk_conflict: false,
+        handle_pk_conflict_behavior: 0,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
         append_only: false,
         row_id_index: None,
         version: None,
+        watermark_indices: vec![],
+        dist_key_in_pk: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
     delete_range_table.name = "delete-range-table".to_string();
-    let mut group1 = CompactionGroup {
-        id: 3,
+    let group1 = CompactionGroupInfo {
+        id: StaticCompactionGroupId::StateDefault as _,
         parent_id: 0,
         member_table_ids: vec![1],
         compaction_config: Some(compaction_config.clone()),
-        table_id_to_options: Default::default(),
     };
-    group1.table_id_to_options.insert(
-        1,
-        TableOption {
-            retention_seconds: 0,
-        },
-    );
-    let mut group2 = CompactionGroup {
-        id: 4,
+    let group2 = CompactionGroupInfo {
+        id: StaticCompactionGroupId::MaterializedView as _,
         parent_id: 0,
         member_table_ids: vec![2],
         compaction_config: Some(compaction_config.clone()),
-        table_id_to_options: Default::default(),
     };
-    group2.table_id_to_options.insert(
-        2,
-        TableOption {
-            retention_seconds: 0,
-        },
-    );
     hummock_manager_ref
         .init_metadata_for_version_replay(
             vec![delete_key_table, delete_range_table],
@@ -171,30 +153,37 @@ async fn compaction_test(
         )
         .await?;
 
-    let config = Arc::new(storage_config);
-
+    let system_params = SystemParams {
+        sstable_size_mb: Some(256),
+        block_size_kb: Some(1024),
+        bloom_false_positive: Some(0.001),
+        data_directory: Some("hummock_001".to_string()),
+        backup_storage_url: Some("memory".to_string()),
+        backup_storage_directory: Some("backup".to_string()),
+        ..Default::default()
+    }
+    .into();
+    let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
     let state_store_metrics = Arc::new(HummockStateStoreMetrics::unused());
     let compactor_metrics = Arc::new(CompactorMetrics::unused());
     let object_store_metrics = Arc::new(ObjectStoreMetrics::unused());
     let remote_object_store = parse_remote_object_store(
         state_store_type.strip_prefix("hummock+").unwrap(),
         object_store_metrics.clone(),
-        false,
         "Hummock",
     )
     .await;
     let sstable_store = Arc::new(SstableStore::new(
         Arc::new(remote_object_store),
-        config.data_directory.to_string(),
-        config.block_cache_capacity_mb * (1 << 20),
-        config.meta_cache_capacity_mb * (1 << 20),
+        system_params.data_directory().to_string(),
+        config.storage.block_cache_capacity_mb * (1 << 20),
+        config.storage.meta_cache_capacity_mb * (1 << 20),
         TieredCache::none(),
     ));
 
     let store = HummockStorage::new(
-        config.clone(),
+        storage_opts.clone(),
         sstable_store.clone(),
-        BackupReader::unused(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
@@ -218,7 +207,7 @@ async fn compaction_test(
     );
 
     let (compactor_thrd, compactor_shutdown_tx) = run_compactor_thread(
-        config,
+        storage_opts,
         sstable_store,
         meta_client.clone(),
         filter_key_extractor_manager,
@@ -269,14 +258,16 @@ async fn run_compare_result(
     test_range: u64,
     test_count: u64,
 ) -> Result<(), String> {
-    let mut normal = NormalState::new(hummock, 1, 0).await;
-    let mut delete_range = DeleteRangeState::new(hummock, 2, 0).await;
+    let init_epoch = hummock.get_pinned_version().max_committed_epoch() + 1;
+    let mut normal = NormalState::new(hummock, 1, init_epoch).await;
+    let mut delete_range = DeleteRangeState::new(hummock, 2, init_epoch).await;
     const RANGE_BASE: u64 = 400;
     let range_mod = test_range / RANGE_BASE;
 
     let mut rng = StdRng::seed_from_u64(10097);
     let mut overlap_ranges = vec![];
-    for epoch in 1..test_count {
+    for epoch_idx in 0..test_count {
+        let epoch = init_epoch + epoch_idx;
         for idx in 0..1000 {
             let op = rng.next_u32() % 50;
             let key_number = rng.next_u64() % test_range;
@@ -325,8 +316,9 @@ async fn run_compare_result(
                 delete_range.insert(key.as_bytes(), val.as_bytes());
             }
         }
-        normal.commit(epoch).await?;
-        delete_range.commit(epoch).await?;
+        let next_epoch = epoch + 1;
+        normal.commit(next_epoch).await?;
+        delete_range.commit(next_epoch).await?;
         // let checkpoint = epoch % 10 == 0;
         let ret = hummock.seal_and_sync_epoch(epoch).await.unwrap();
         meta_client
@@ -341,10 +333,8 @@ async fn run_compare_result(
 }
 
 struct NormalState {
-    storage: LocalHummockStorage,
-    cache: BTreeMap<Bytes, StorageValue>,
+    storage: <HummockStorage as StateStore>::Local,
     table_id: TableId,
-    epoch: u64,
 }
 
 struct DeleteRangeState {
@@ -373,61 +363,39 @@ trait CheckState {
 impl NormalState {
     async fn new(hummock: &HummockStorage, table_id: u32, epoch: u64) -> Self {
         let table_id = TableId::new(table_id);
-        let storage = hummock.new_local(table_id).await;
-        Self {
-            cache: BTreeMap::default(),
-            storage,
-            epoch,
-            table_id,
-        }
+        let mut storage = hummock.new_local(NewLocalOptions::for_test(table_id)).await;
+        storage.init(epoch);
+        Self { storage, table_id }
     }
 
     async fn commit_impl(
         &mut self,
         delete_ranges: Vec<(Bytes, Bytes)>,
-        epoch: u64,
+        next_epoch: u64,
     ) -> Result<(), String> {
-        let data = std::mem::take(&mut self.cache)
-            .into_iter()
-            .map(|(key, val)| (key, val))
-            .collect_vec();
         self.storage
-            .ingest_batch(
-                data,
-                delete_ranges,
-                WriteOptions {
-                    epoch,
-                    table_id: self.table_id,
-                },
-            )
+            .flush(delete_ranges)
             .await
             .map_err(|e| format!("{:?}", e))?;
-        self.epoch = epoch;
+        self.storage.seal_current_epoch(next_epoch);
         Ok(())
     }
 
-    async fn get_from_storage(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
+    async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                key,
-                self.epoch,
+                Bytes::copy_from_slice(key),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
             .unwrap()
-    }
-
-    async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
-        if let Some(val) = self.cache.get(key) {
-            return val.user_value.clone();
-        }
-        self.get_from_storage(key, ignore_range_tombstone).await
     }
 
     async fn scan_impl(
@@ -440,16 +408,16 @@ impl NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
-                    self.epoch,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -459,25 +427,8 @@ impl NormalState {
         while let Some(item) = iter.next().await {
             let (full_key, val) = item.unwrap();
             let tkey = full_key.user_key.table_key.0.clone();
-            if let Some(cache_val) = self.cache.get(&tkey) {
-                if cache_val.user_value.is_some() {
-                    ret.push((tkey, cache_val.user_value.clone().unwrap()));
-                } else {
-                    continue;
-                }
-            } else {
-                ret.push((tkey, val));
-            }
+            ret.push((tkey, val));
         }
-        for (key, val) in self.cache.range((
-            Bound::Included(Bytes::from(left.to_vec())),
-            Bound::Excluded(Bytes::from(right.to_vec())),
-        )) {
-            if let Some(uval) = val.user_value.as_ref() {
-                ret.push((key.clone(), uval.clone()));
-            }
-        }
-        ret.sort_by(|a, b| a.0.cmp(&b.0));
         ret
     }
 }
@@ -485,39 +436,40 @@ impl NormalState {
 #[async_trait::async_trait]
 impl CheckState for NormalState {
     async fn delete_range(&mut self, left: &[u8], right: &[u8]) {
-        self.cache
-            .retain(|key: &Bytes, _| key.as_ref().lt(left) || key.as_ref().ge(right));
         let mut iter = Box::pin(
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
-                    self.epoch,
                     ReadOptions {
                         prefix_hint: None,
                         ignore_range_tombstone: true,
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
                 .unwrap(),
         );
+        let mut delete_item = Vec::new();
         while let Some(item) = iter.next().await {
-            let (full_key, _) = item.unwrap();
-            self.cache
-                .insert(full_key.user_key.table_key.0, StorageValue::new_delete());
+            let (full_key, value) = item.unwrap();
+            delete_item.push((full_key.user_key.table_key.0, value));
+        }
+        drop(iter);
+        for (key, value) in delete_item {
+            self.storage.delete(key, value).unwrap();
         }
     }
 
     fn insert(&mut self, key: &[u8], val: &[u8]) {
-        self.cache.insert(
-            Bytes::from(key.to_vec()),
-            StorageValue::new_put(val.to_vec()),
-        );
+        self.storage
+            .insert(Bytes::from(key.to_vec()), Bytes::copy_from_slice(val), None)
+            .unwrap();
     }
 
     async fn get(&self, key: &[u8]) -> Option<Bytes> {
@@ -528,8 +480,8 @@ impl CheckState for NormalState {
         self.scan_impl(left, right, true).await
     }
 
-    async fn commit(&mut self, epoch: u64) -> Result<(), String> {
-        self.commit_impl(vec![], epoch).await
+    async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
+        self.commit_impl(vec![], next_epoch).await
     }
 }
 
@@ -566,14 +518,15 @@ impl CheckState for DeleteRangeState {
         self.inner.insert(key, val);
     }
 
-    async fn commit(&mut self, epoch: u64) -> Result<(), String> {
-        let delete_ranges = std::mem::take(&mut self.delete_ranges);
-        self.inner.commit_impl(delete_ranges, epoch).await
+    async fn commit(&mut self, next_epoch: u64) -> Result<(), String> {
+        let mut delete_ranges = std::mem::take(&mut self.delete_ranges);
+        delete_ranges.sort();
+        self.inner.commit_impl(delete_ranges, next_epoch).await
     }
 }
 
 fn run_compactor_thread(
-    config: Arc<StorageConfig>,
+    storage_opts: Arc<StorageOpts>,
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
@@ -584,7 +537,7 @@ fn run_compactor_thread(
     tokio::sync::oneshot::Sender<()>,
 ) {
     let compactor_context = Arc::new(CompactorContext {
-        storage_config: config,
+        storage_opts,
         hummock_meta_client: meta_client.clone(),
         sstable_store,
         compactor_metrics,
@@ -607,30 +560,21 @@ fn run_compactor_thread(
 #[cfg(test)]
 mod tests {
 
-    use risingwave_common::config::StorageConfig;
+    use risingwave_common::config::RwConfig;
     use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 
     use super::compaction_test;
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 3)]
     async fn test_small_data() {
-        let storage_config = StorageConfig {
-            enable_state_store_v1: false,
-            ..Default::default()
-        };
+        let config = RwConfig::default();
         let mut compaction_config = CompactionConfigBuilder::new().build();
         compaction_config.max_sub_compaction = 1;
         compaction_config.level0_tier_compact_file_number = 2;
         compaction_config.max_bytes_for_level_base = 512 * 1024;
         compaction_config.sub_level_max_compaction_bytes = 256 * 1024;
-        compaction_test(
-            compaction_config,
-            storage_config,
-            "hummock+memory",
-            10000,
-            60,
-        )
-        .await
-        .unwrap();
+        compaction_test(compaction_config, config, "hummock+memory", 10000, 60)
+            .await
+            .unwrap();
     }
 }

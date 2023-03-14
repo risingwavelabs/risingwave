@@ -185,7 +185,7 @@ impl FieldGeneratorImpl {
         Ok(FieldGeneratorImpl::List(Box::new(field), list_length))
     }
 
-    pub fn generate(&mut self, offset: u64) -> Value {
+    pub fn generate_json(&mut self, offset: u64) -> Value {
         match self {
             FieldGeneratorImpl::I16Sequence(f) => f.generate(),
             FieldGeneratorImpl::I32Sequence(f) => f.generate(),
@@ -202,13 +202,13 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
                     .iter_mut()
-                    .map(|(name, gen)| (name.clone(), gen.generate(offset)))
+                    .map(|(name, gen)| (name.clone(), gen.generate_json(offset)))
                     .collect();
                 Value::Object(map)
             }
             FieldGeneratorImpl::List(field, list_length) => {
                 let vec = (0..*list_length)
-                    .map(|_| field.generate(offset))
+                    .map(|_| field.generate_json(offset))
                     .collect::<Vec<_>>();
                 Value::Array(vec)
             }
@@ -269,7 +269,7 @@ mod tests {
 
         for step in 0..5 {
             for (index, i32_field) in i32_fields.iter_mut().enumerate() {
-                let value = i32_field.generate(0);
+                let value = i32_field.generate_json(0);
                 assert!(value.is_number());
                 let num = value.as_u64();
                 let expected_num = split_num * step + 1 + index as u64;
@@ -298,13 +298,13 @@ mod tests {
                 _ => FieldGeneratorImpl::with_number_random(data_type, None, None, seed).unwrap(),
             };
 
-            let val1 = generator.generate(1);
-            let val2 = generator.generate(2);
+            let val1 = generator.generate_json(1);
+            let val2 = generator.generate_json(2);
 
             assert_ne!(val1, val2);
 
-            let val1_new = generator.generate(1);
-            let val2_new = generator.generate(2);
+            let val1_new = generator.generate_json(1);
+            let val2_new = generator.generate_json(2);
 
             assert_eq!(val1_new, val1);
             assert_eq!(val2_new, val2);

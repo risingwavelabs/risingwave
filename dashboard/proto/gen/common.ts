@@ -8,6 +8,7 @@ export const WorkerType = {
   COMPUTE_NODE: "COMPUTE_NODE",
   RISE_CTL: "RISE_CTL",
   COMPACTOR: "COMPACTOR",
+  META: "META",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -30,6 +31,9 @@ export function workerTypeFromJSON(object: any): WorkerType {
     case 4:
     case "COMPACTOR":
       return WorkerType.COMPACTOR;
+    case 5:
+    case "META":
+      return WorkerType.META;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -49,7 +53,50 @@ export function workerTypeToJSON(object: WorkerType): string {
       return "RISE_CTL";
     case WorkerType.COMPACTOR:
       return "COMPACTOR";
+    case WorkerType.META:
+      return "META";
     case WorkerType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
+export const Direction = {
+  DIRECTION_UNSPECIFIED: "DIRECTION_UNSPECIFIED",
+  DIRECTION_ASCENDING: "DIRECTION_ASCENDING",
+  DIRECTION_DESCENDING: "DIRECTION_DESCENDING",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type Direction = typeof Direction[keyof typeof Direction];
+
+export function directionFromJSON(object: any): Direction {
+  switch (object) {
+    case 0:
+    case "DIRECTION_UNSPECIFIED":
+      return Direction.DIRECTION_UNSPECIFIED;
+    case 1:
+    case "DIRECTION_ASCENDING":
+      return Direction.DIRECTION_ASCENDING;
+    case 2:
+    case "DIRECTION_DESCENDING":
+      return Direction.DIRECTION_DESCENDING;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return Direction.UNRECOGNIZED;
+  }
+}
+
+export function directionToJSON(object: Direction): string {
+  switch (object) {
+    case Direction.DIRECTION_UNSPECIFIED:
+      return "DIRECTION_UNSPECIFIED";
+    case Direction.DIRECTION_ASCENDING:
+      return "DIRECTION_ASCENDING";
+    case Direction.DIRECTION_DESCENDING:
+      return "DIRECTION_DESCENDING";
+    case Direction.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
@@ -217,6 +264,20 @@ export interface BatchQueryEpoch {
     $case: "backup";
     backup: number;
   };
+}
+
+export interface OrderType {
+  /**
+   * TODO(rc): enable `NULLS FIRST | LAST`
+   * NullsAre nulls_are = 2;
+   */
+  direction: Direction;
+}
+
+/** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
+export interface ColumnOrder {
+  columnIndex: number;
+  orderType: OrderType | undefined;
 }
 
 function createBaseStatus(): Status {
@@ -479,6 +540,60 @@ export const BatchQueryEpoch = {
     if (object.epoch?.$case === "backup" && object.epoch?.backup !== undefined && object.epoch?.backup !== null) {
       message.epoch = { $case: "backup", backup: object.epoch.backup };
     }
+    return message;
+  },
+};
+
+function createBaseOrderType(): OrderType {
+  return { direction: Direction.DIRECTION_UNSPECIFIED };
+}
+
+export const OrderType = {
+  fromJSON(object: any): OrderType {
+    return {
+      direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
+    };
+  },
+
+  toJSON(message: OrderType): unknown {
+    const obj: any = {};
+    message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<OrderType>, I>>(object: I): OrderType {
+    const message = createBaseOrderType();
+    message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
+    return message;
+  },
+};
+
+function createBaseColumnOrder(): ColumnOrder {
+  return { columnIndex: 0, orderType: undefined };
+}
+
+export const ColumnOrder = {
+  fromJSON(object: any): ColumnOrder {
+    return {
+      columnIndex: isSet(object.columnIndex) ? Number(object.columnIndex) : 0,
+      orderType: isSet(object.orderType) ? OrderType.fromJSON(object.orderType) : undefined,
+    };
+  },
+
+  toJSON(message: ColumnOrder): unknown {
+    const obj: any = {};
+    message.columnIndex !== undefined && (obj.columnIndex = Math.round(message.columnIndex));
+    message.orderType !== undefined &&
+      (obj.orderType = message.orderType ? OrderType.toJSON(message.orderType) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ColumnOrder>, I>>(object: I): ColumnOrder {
+    const message = createBaseColumnOrder();
+    message.columnIndex = object.columnIndex ?? 0;
+    message.orderType = (object.orderType !== undefined && object.orderType !== null)
+      ? OrderType.fromPartial(object.orderType)
+      : undefined;
     return message;
   },
 };

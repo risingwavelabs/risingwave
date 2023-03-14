@@ -17,16 +17,17 @@ use std::fmt;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode};
 
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamExchange` imposes a particular distribution on its input
 /// without changing its content.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExchange {
     pub base: PlanBase,
     input: PlanRef,
+    no_shuffle: bool,
 }
 
 impl StreamExchange {
@@ -43,13 +44,46 @@ impl StreamExchange {
             input.append_only(),
             input.watermark_columns().clone(),
         );
-        StreamExchange { base, input }
+        StreamExchange {
+            base,
+            input,
+            no_shuffle: false,
+        }
+    }
+
+    pub fn new_no_shuffle(input: PlanRef) -> Self {
+        let ctx = input.ctx();
+        let pk_indices = input.logical_pk().to_vec();
+        // Dispatch executor won't change the append-only behavior of the stream.
+        let base = PlanBase::new_stream(
+            ctx,
+            input.schema().clone(),
+            pk_indices,
+            input.functional_dependency().clone(),
+            input.distribution().clone(),
+            input.append_only(),
+            input.watermark_columns().clone(),
+        );
+        StreamExchange {
+            base,
+            input,
+            no_shuffle: true,
+        }
+    }
+
+    pub fn no_shuffle(&self) -> bool {
+        self.no_shuffle
     }
 }
 
 impl fmt::Display for StreamExchange {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("StreamExchange");
+        let mut builder = if self.no_shuffle {
+            f.debug_struct("StreamNoShuffleExchange")
+        } else {
+            f.debug_struct("StreamExchange")
+        };
+
         builder
             .field(
                 "dist",
@@ -68,7 +102,11 @@ impl PlanTreeNodeUnary for StreamExchange {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.distribution().clone())
+        if self.no_shuffle {
+            Self::new_no_shuffle(input)
+        } else {
+            Self::new(input, self.distribution().clone())
+        }
     }
 }
 impl_plan_tree_node_for_unary! {StreamExchange}
@@ -76,18 +114,31 @@ impl_plan_tree_node_for_unary! {StreamExchange}
 impl StreamNode for StreamExchange {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
         NodeBody::Exchange(ExchangeNode {
-            strategy: Some(DispatchStrategy {
-                r#type: match &self.base.dist {
-                    Distribution::HashShard(_) => DispatcherType::Hash,
-                    Distribution::Single => DispatcherType::Simple,
-                    Distribution::Broadcast => DispatcherType::Broadcast,
-                    _ => panic!("Do not allow Any or AnyShard in serialization process"),
-                } as i32,
-                column_indices: match &self.base.dist {
-                    Distribution::HashShard(keys) => keys.iter().map(|num| *num as u32).collect(),
-                    _ => vec![],
-                },
-            }),
+            strategy: if self.no_shuffle {
+                Some(DispatchStrategy {
+                    r#type: DispatcherType::NoShuffle as i32,
+                    dist_key_indices: vec![],
+                    output_indices: (0..self.schema().len() as u32).collect(),
+                })
+            } else {
+                Some(DispatchStrategy {
+                    r#type: match &self.base.dist {
+                        Distribution::HashShard(_) => DispatcherType::Hash,
+                        Distribution::Single => DispatcherType::Simple,
+                        Distribution::Broadcast => DispatcherType::Broadcast,
+                        _ => panic!("Do not allow Any or AnyShard in serialization process"),
+                    } as i32,
+                    dist_key_indices: match &self.base.dist {
+                        Distribution::HashShard(keys) => {
+                            keys.iter().map(|num| *num as u32).collect()
+                        }
+                        _ => vec![],
+                    },
+                    output_indices: (0..self.schema().len() as u32).collect(),
+                })
+            },
         })
     }
 }
+
+impl ExprRewritable for StreamExchange {}

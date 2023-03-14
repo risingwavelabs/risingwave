@@ -15,6 +15,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
@@ -64,8 +65,10 @@ async fn test_read_version_basic() {
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         let key = iterator_test_table_key_of(epoch as usize);
-        let key_range =
-            map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
+        let key_range = map_table_key_range((
+            Bound::Included(Bytes::from(key.to_vec())),
+            Bound::Included(Bytes::from(key.to_vec())),
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -103,8 +106,10 @@ async fn test_read_version_basic() {
 
         for epoch in 1..epoch {
             let key = iterator_test_table_key_of(epoch as usize);
-            let key_range =
-                map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
+            let key_range = map_table_key_range((
+                Bound::Included(Bytes::from(key.to_vec())),
+                Bound::Included(Bytes::from(key.to_vec())),
+            ));
 
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
@@ -158,6 +163,9 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
+                    uncompressed_file_size: 1,
+                    min_epoch: 0,
+                    max_epoch: 0,
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
                     id: 2,
@@ -172,6 +180,9 @@ async fn test_read_version_basic() {
                     stale_key_count: 1,
                     total_key_count: 1,
                     divide_version: 0,
+                    uncompressed_file_size: 1,
+                    min_epoch: 0,
+                    max_epoch: 0,
                 }),
             ],
             epoch_id_vec_for_clear,
@@ -207,8 +218,8 @@ async fn test_read_version_basic() {
         let key_range_right = iterator_test_table_key_of(4_usize);
 
         let key_range = map_table_key_range((
-            Bound::Included(key_range_left),
-            Bound::Included(key_range_right),
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
         ));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -231,8 +242,8 @@ async fn test_read_version_basic() {
         let key_range_right = iterator_test_table_key_of(4);
 
         let key_range = map_table_key_range((
-            Bound::Included(key_range_left),
-            Bound::Included(key_range_right),
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
         ));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -281,7 +292,7 @@ async fn test_read_filter_basic() {
             .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         // directly prune_overlap
-        let key = iterator_test_table_key_of(epoch as usize);
+        let key = Bytes::from(iterator_test_table_key_of(epoch as usize));
         let key_range = map_table_key_range((Bound::Included(key.clone()), Bound::Included(key)));
 
         let (staging_imm, staging_sst) = {

@@ -98,10 +98,11 @@ fn make_prost_privilege(
                 grant_objs.push(ProstObject::AllTablesSchemaId(schema.id()));
             }
         }
-        _ => {
-            return Err(ErrorCode::BindError(
-                "GRANT statement does not support this object type".to_string(),
-            )
+        o => {
+            return Err(ErrorCode::BindError(format!(
+                "GRANT statement does not support object type: {:?}",
+                o
+            ))
             .into());
         }
     };

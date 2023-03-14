@@ -28,8 +28,11 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
+
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -59,9 +62,9 @@ createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
-node_port=60061
+node_port=50051
 node_timeout=10
-java -jar ./connector-service.jar --port $node_port > .risingwave/log/connector-source.log 2>&1 &
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
 echo "waiting for connector node to start"
 start_time=$(date +%s)
 while :
@@ -84,6 +87,7 @@ echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe
 
 echo "--- testing sinks"
+sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
 sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
 sleep 1
@@ -109,5 +113,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

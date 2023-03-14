@@ -20,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::{
     ArrayBuilder, DataChunk, I64Array, Op, PrimitiveArrayBuilder, StreamChunk,
 };
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -36,6 +36,7 @@ use crate::task::BatchTaskContext;
 pub struct InsertExecutor {
     /// Target table id.
     table_id: TableId,
+    table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
 
     child: BoxedExecutor,
@@ -52,6 +53,7 @@ impl InsertExecutor {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         table_id: TableId,
+        table_version_id: TableVersionId,
         dml_manager: DmlManagerRef,
         child: BoxedExecutor,
         chunk_size: usize,
@@ -63,6 +65,7 @@ impl InsertExecutor {
         let table_schema = child.schema().clone();
         Self {
             table_id,
+            table_version_id,
             dml_manager,
             child,
             chunk_size,
@@ -104,7 +107,7 @@ impl InsertExecutor {
         let mut notifiers = Vec::new();
 
         // Transform the data chunk to a stream chunk, then write to the source.
-        let mut write_chunk = |chunk: DataChunk| -> Result<()> {
+        let write_chunk = |chunk: DataChunk| async {
             let cap = chunk.capacity();
             let (mut columns, vis) = chunk.into_parts();
 
@@ -127,10 +130,9 @@ impl InsertExecutor {
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 
-            let notifier = self.dml_manager.write_chunk(&self.table_id, stream_chunk)?;
-            notifiers.push(notifier);
-
-            Ok(())
+            self.dml_manager
+                .write_chunk(self.table_id, self.table_version_id, stream_chunk)
+                .await
         };
 
         #[for_await]
@@ -140,12 +142,12 @@ impl InsertExecutor {
                 yield data_chunk.clone();
             }
             for chunk in builder.append_chunk(data_chunk) {
-                write_chunk(chunk)?;
+                notifiers.push(write_chunk(chunk).await?);
             }
         }
 
         if let Some(chunk) = builder.consume_all() {
-            write_chunk(chunk)?;
+            notifiers.push(write_chunk(chunk).await?);
         }
 
         // Wait for all chunks to be taken / written.
@@ -190,15 +192,13 @@ impl BoxedExecutorBuilder for InsertExecutor {
 
         Ok(Box::new(Self::new(
             table_id,
+            insert_node.table_version_id,
             source.context().dml_manager(),
             child,
             source.context.get_config().developer.batch_chunk_size,
             source.plan_node().get_identity().clone(),
             column_indices,
-            insert_node
-                .row_id_index
-                .as_ref()
-                .map(|index| index.index as _),
+            insert_node.row_id_index.as_ref().map(|index| *index as _),
             insert_node.returning,
         )))
     }
@@ -212,7 +212,9 @@ mod tests {
     use futures::StreamExt;
     use itertools::Itertools;
     use risingwave_common::array::{Array, ArrayImpl, I32Array, StructArray};
-    use risingwave_common::catalog::{schema_test_utils, ColumnDesc, ColumnId};
+    use risingwave_common::catalog::{
+        schema_test_utils, ColumnDesc, ColumnId, INITIAL_TABLE_VERSION_ID,
+    };
     use risingwave_common::column_nonnull;
     use risingwave_common::types::DataType;
     use risingwave_source::dml_manager::DmlManager;
@@ -274,13 +276,14 @@ mod tests {
         // We must create a variable to hold this `Arc<TableDmlHandle>` here, or it will be dropped
         // due to the `Weak` reference in `DmlManager`.
         let reader = dml_manager
-            .register_reader(table_id, &column_descs)
+            .register_reader(table_id, INITIAL_TABLE_VERSION_ID, &column_descs)
             .unwrap();
         let mut reader = reader.stream_reader().into_stream();
 
         // Insert
         let insert_executor = Box::new(InsertExecutor::new(
             table_id,
+            INITIAL_TABLE_VERSION_ID,
             dml_manager,
             Box::new(mock_executor),
             1024,
@@ -338,7 +341,7 @@ mod tests {
         assert_eq!(*chunk.chunk.columns()[2].array(), array);
 
         let epoch = u64::MAX;
-        let full_range = (Bound::<Vec<u8>>::Unbounded, Bound::<Vec<u8>>::Unbounded);
+        let full_range = (Bound::Unbounded, Bound::Unbounded);
         let store_content = store
             .scan(
                 full_range,
@@ -350,6 +353,7 @@ mod tests {
                     table_id: Default::default(),
                     retention_seconds: None,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;

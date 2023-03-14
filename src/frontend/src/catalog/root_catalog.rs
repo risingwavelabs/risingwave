@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
     Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
@@ -32,7 +33,6 @@ use super::view_catalog::ViewCatalog;
 use super::{CatalogError, CatalogResult, SinkId, SourceId, ViewId};
 use crate::catalog::database_catalog::DatabaseCatalog;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::sink_catalog::SinkCatalog;
 use crate::catalog::system_catalog::SystemCatalog;
 use crate::catalog::table_catalog::TableCatalog;
 use crate::catalog::{DatabaseId, IndexCatalog, SchemaId};

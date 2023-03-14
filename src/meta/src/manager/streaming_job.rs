@@ -14,14 +14,14 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableVersionId};
 use risingwave_pb::catalog::{Index, Sink, Source, Table};
 
 use crate::model::FragmentId;
 
 // This enum is used in order to re-use code in `DdlServiceImpl` for creating MaterializedView and
 // Sink.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum StreamingJob {
     MaterializedView(Table),
     Sink(Sink),
@@ -124,7 +124,8 @@ impl StreamingJob {
         match self {
             Self::MaterializedView(table) => table.definition.clone(),
             Self::Table(_, table) => table.definition.clone(),
-            _ => "".to_owned(),
+            Self::Index(_, table) => table.definition.clone(),
+            Self::Sink(sink) => sink.definition.clone(),
         }
     }
 
@@ -137,15 +138,17 @@ impl StreamingJob {
         }
     }
 
-    /// Returns the optional [`Source`] if this is a `Table` streaming job.
-    ///
-    /// Only used for registering sources for creating tables with connectors.
-    pub fn source(&self) -> Option<&Source> {
-        match self {
-            Self::MaterializedView(_) => None,
-            Self::Sink(_) => None,
-            Self::Table(source, _) => source.as_ref(),
-            Self::Index(_, _) => None,
+    /// Returns the [`TableVersionId`] if this job is `Table`.
+    pub fn table_version_id(&self) -> Option<TableVersionId> {
+        if let Self::Table(_, table) = self {
+            Some(
+                table
+                    .get_version()
+                    .expect("table must be versioned")
+                    .version,
+            )
+        } else {
+            None
         }
     }
 }

@@ -12,10 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![expect(clippy::extra_unused_type_parameters, reason = "used by macro")]
+
 use std::convert::TryInto;
 use std::fmt::Debug;
 
 use chrono::{Duration, NaiveDateTime};
+use num_traits::real::Real;
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Signed, Zero};
 use risingwave_common::types::{
     CheckedAdd, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -108,6 +111,15 @@ pub fn decimal_abs(decimal: Decimal) -> Result<Decimal> {
     Ok(Decimal::abs(&decimal))
 }
 
+pub fn pow_f64(l: OrderedF64, r: OrderedF64) -> Result<OrderedF64> {
+    let res = l.powf(r);
+    if res.is_infinite() {
+        Err(ExprError::NumericOutOfRange)
+    } else {
+        Ok(res)
+    }
+}
+
 #[inline(always)]
 pub fn general_atm<T1, T2, T3, F>(l: T1, r: T2, atm: F) -> Result<T3>
 where
@@ -125,8 +137,10 @@ pub fn timestamp_timestamp_sub<T1, T2, T3>(
 ) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
     let days = tmp.num_days();
-    let ms = (tmp - Duration::days(tmp.num_days())).num_milliseconds();
-    Ok(IntervalUnit::new(0, days as i32, ms))
+    let usecs = (tmp - Duration::days(tmp.num_days()))
+        .num_microseconds()
+        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    Ok(IntervalUnit::from_month_day_usec(0, days as i32, usecs))
 }
 
 #[inline(always)]
@@ -239,19 +253,14 @@ fn timestamptz_interval_inner(
     f: fn(i64, i64) -> Option<i64>,
 ) -> Result<i64> {
     // Without session TimeZone, we cannot add month/day in local time. See #5826.
-    // However, we only reject months but accept days, assuming them are always 24-hour and ignoring
-    // Daylight Saving.
-    // This is to keep consistent with `tumble_start` of RisingWave / `date_bin` of PostgreSQL.
-    if r.get_months() != 0 {
+    if r.get_months() != 0 || r.get_days() != 0 {
         return Err(ExprError::UnsupportedFunction(
-            "timestamp with time zone +/- interval of months".into(),
+            "timestamp with time zone +/- interval of days".into(),
         ));
     }
 
     let result: Option<i64> = try {
-        let d = (r.get_days() as i64).checked_mul(24 * 60 * 60 * 1_000_000)?;
-        let ms = r.get_ms().checked_mul(1000)?;
-        let delta_usecs = d.checked_add(ms)?;
+        let delta_usecs = r.get_usecs();
         f(l, delta_usecs)?
     };
 
@@ -294,8 +303,10 @@ pub fn time_date_add<T1, T2, T3>(
 #[inline(always)]
 pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
-    let ms = tmp.num_milliseconds();
-    Ok(IntervalUnit::new(0, 0, ms))
+    let usecs = tmp
+        .num_microseconds()
+        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    Ok(IntervalUnit::from_month_day_usec(0, 0, usecs))
 }
 
 #[inline(always)]
@@ -304,7 +315,7 @@ pub fn time_interval_sub<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
     let time = l.0;
-    let (new_time, ignored) = time.overflowing_sub_signed(Duration::milliseconds(r.get_ms()));
+    let (new_time, ignored) = time.overflowing_sub_signed(Duration::microseconds(r.get_usecs()));
     if ignored == 0 {
         Ok(NaiveTimeWrapper::new(new_time))
     } else {
@@ -318,7 +329,7 @@ pub fn time_interval_add<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
     let time = l.0;
-    let (new_time, ignored) = time.overflowing_add_signed(Duration::milliseconds(r.get_ms()));
+    let (new_time, ignored) = time.overflowing_add_signed(Duration::microseconds(r.get_usecs()));
     if ignored == 0 {
         Ok(NaiveTimeWrapper::new(new_time))
     } else {

@@ -20,7 +20,7 @@ import {
   generateBoxLinks,
   layout,
 } from "../lib/layout"
-import { StreamNode } from "../proto/gen/stream_plan"
+import { PlanNodeDatum } from "../pages/streaming_plan"
 
 const ReactJson = loadable(() => import("react-json-view"))
 
@@ -87,24 +87,19 @@ export default function FragmentGraph({
   fragmentDependency,
   selectedFragmentId,
 }: {
-  planNodeDependencies: Map<string, d3.HierarchyNode<any>>
+  planNodeDependencies: Map<string, d3.HierarchyNode<PlanNodeDatum>>
   fragmentDependency: ActorBox[]
   selectedFragmentId: string | undefined
 }) {
   const svgRef = useRef<any>()
 
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const [currentStreamNode, setCurrentStreamNode] = useState<StreamNode>()
+  const [currentStreamNode, setCurrentStreamNode] = useState<PlanNodeDatum>()
 
   const openPlanNodeDetail = useCallback(
-    () => (node: d3.HierarchyNode<any>) => {
-      const streamNode = cloneDeep(node.data.node as StreamNode)
-
-      if (streamNode) {
-        streamNode.input = []
-        setCurrentStreamNode(streamNode)
-        onOpen()
-      }
+    () => (node: d3.HierarchyNode<PlanNodeDatum>) => {
+      setCurrentStreamNode(node.data)
+      onOpen()
     },
     [onOpen]
   )()
@@ -115,7 +110,7 @@ export default function FragmentGraph({
     const layoutActorResult = new Map<
       string,
       {
-        layoutRoot: d3.HierarchyPointNode<any>
+        layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
         width: number
         height: number
         extraInfo: string
@@ -138,7 +133,7 @@ export default function FragmentGraph({
         layoutRoot,
         width,
         height,
-        extraInfo: fragmentRoot.data.extraInfo,
+        extraInfo: fragmentRoot.data.extraInfo ?? "",
       })
     }
     const fragmentLayout = layout(
@@ -169,7 +164,7 @@ export default function FragmentGraph({
   }, [planNodeDependencies, fragmentDependency])
 
   type PlanNodeDesc = {
-    layoutRoot: d3.HierarchyPointNode<any>
+    layoutRoot: d3.HierarchyPointNode<PlanNodeDatum>
     width: number
     height: number
     x: number
@@ -400,14 +395,16 @@ export default function FragmentGraph({
         <ModalOverlay />
         <ModalContent>
           <ModalHeader>
-            {currentStreamNode?.operatorId} -{" "}
-            {currentStreamNode?.nodeBody?.$case}
+            {currentStreamNode?.operatorId} - {currentStreamNode?.name}
           </ModalHeader>
           <ModalCloseButton />
           <ModalBody>
-            {isOpen && currentStreamNode && (
+            {isOpen && currentStreamNode?.node && (
               <ReactJson
-                src={currentStreamNode}
+                shouldCollapse={({ name }) =>
+                  name === "input" || name === "fields" || name === "streamKey"
+                } // collapse top-level fields for better readability
+                src={currentStreamNode.node}
                 collapsed={3}
                 name={null}
                 displayDataTypes={false}

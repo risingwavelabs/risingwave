@@ -24,7 +24,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
     pub is_sys_table: bool,
@@ -37,6 +37,9 @@ pub struct Scan {
     pub indexes: Vec<Rc<IndexCatalog>>,
     /// The pushed down predicates. It refers to column indexes of the table.
     pub predicate: Condition,
+    /// Help RowSeqScan executor use a better chunk size
+    pub chunk_size: Option<u32>,
+    pub for_system_time_as_of_now: bool,
 }
 
 impl Scan {

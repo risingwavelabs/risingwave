@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_connector::source::SplitImpl;
-use risingwave_pb::common::{Buffer, ParallelUnit, ParallelUnitMapping};
+use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping};
 use risingwave_pb::meta::table_fragments::actor_status::ActorState;
 use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::TableFragments as ProstTableFragments;
@@ -61,7 +61,7 @@ pub struct TableFragments {
     pub(crate) env: StreamEnvironment,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct StreamEnvironment {
     /// The timezone used to interpret timestamps and dates for conversion
     pub(crate) timezone: Option<String>,
@@ -74,7 +74,7 @@ impl StreamEnvironment {
         }
     }
 
-    fn from_protobuf(prost: ProstStreamEnvironment) -> Self {
+    pub fn from_protobuf(prost: &ProstStreamEnvironment) -> Self {
         Self {
             timezone: if prost.get_timezone().is_empty() {
                 None
@@ -105,7 +105,7 @@ impl MetadataModel for TableFragments {
     }
 
     fn from_protobuf(prost: Self::ProstType) -> Self {
-        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap().clone());
+        let env = StreamEnvironment::from_protobuf(prost.get_env().unwrap());
         Self {
             table_id: TableId::new(prost.table_id),
             state: prost.state(),
@@ -122,19 +122,44 @@ impl MetadataModel for TableFragments {
 }
 
 impl TableFragments {
-    /// Create a new `TableFragments` with state of `Initialized` with env.
+    /// Create a new `TableFragments` with state of `Initial`, with other fields empty.
+    pub fn for_test(table_id: TableId, fragments: BTreeMap<FragmentId, Fragment>) -> Self {
+        Self::new(
+            table_id,
+            fragments,
+            &BTreeMap::new(),
+            StreamEnvironment::default(),
+        )
+    }
+
+    /// Create a new `TableFragments` with state of `Initial`, with the status of actors set to
+    /// `Inactive` on the given parallel units.
     pub fn new(
         table_id: TableId,
         fragments: BTreeMap<FragmentId, Fragment>,
-        env: ProstStreamEnvironment,
+        actor_locations: &BTreeMap<ActorId, ParallelUnit>,
+        env: StreamEnvironment,
     ) -> Self {
+        let actor_status = actor_locations
+            .iter()
+            .map(|(&actor_id, parallel_unit)| {
+                (
+                    actor_id,
+                    ActorStatus {
+                        parallel_unit: Some(parallel_unit.clone()),
+                        state: ActorState::Inactive as i32,
+                    },
+                )
+            })
+            .collect();
+
         Self {
             table_id,
             state: State::Initial,
             fragments,
-            actor_status: BTreeMap::default(),
+            actor_status,
             actor_splits: HashMap::default(),
-            env: StreamEnvironment::from_protobuf(env),
+            env,
         }
     }
 
@@ -144,11 +169,6 @@ impl TableFragments {
 
     pub fn fragments(&self) -> Vec<&Fragment> {
         self.fragments.values().collect_vec()
-    }
-
-    /// Set the actor locations.
-    pub fn set_actor_status(&mut self, actor_status: BTreeMap<ActorId, ActorStatus>) {
-        self.actor_status = actor_status;
     }
 
     /// Returns the table id.
@@ -169,6 +189,12 @@ impl TableFragments {
     /// Returns whether the table fragments is in `Created` state.
     pub fn is_created(&self) -> bool {
         self.state == State::Created
+    }
+
+    /// Set the table ID.
+    // TODO: remove this workaround for replacing table.
+    pub fn set_table_id(&mut self, table_id: TableId) {
+        self.table_id = table_id;
     }
 
     /// Set the state of the table fragments.
@@ -264,25 +290,6 @@ impl TableFragments {
         .collect()
     }
 
-    /// Returns fragments that contains Chain node.
-    pub fn chain_fragment_ids(&self) -> HashSet<FragmentId> {
-        self.fragments
-            .values()
-            .filter(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::ChainNode as u32) != 0
-            })
-            .map(|f| f.fragment_id)
-            .collect()
-    }
-
-    pub fn fetch_parallel_unit_by_actor(&self, actor_id: &ActorId) -> Option<ParallelUnit> {
-        if let Some(status) = self.actor_status.get(actor_id) {
-            status.parallel_unit.clone()
-        } else {
-            None
-        }
-    }
-
     /// Find the source node that contains an external stream source inside the stream node, if any.
     pub fn find_source_node_with_stream_source(stream_node: &StreamNode) -> Option<&SourceNode> {
         if let Some(NodeBody::Source(source)) = stream_node.node_body.as_ref() {
@@ -368,15 +375,6 @@ impl TableFragments {
         map
     }
 
-    pub fn actor_to_worker(&self) -> HashMap<ActorId, WorkerId> {
-        let mut map = HashMap::default();
-        for (&actor_id, actor_status) in &self.actor_status {
-            let node_id = actor_status.get_parallel_unit().unwrap().worker_node_id as WorkerId;
-            map.insert(actor_id, node_id);
-        }
-        map
-    }
-
     pub fn update_vnode_mapping(&mut self, migrate_map: &HashMap<ParallelUnitId, ParallelUnit>) {
         for fragment in self.fragments.values_mut() {
             if fragment.vnode_mapping.is_some() {
@@ -437,128 +435,6 @@ impl TableFragments {
             });
         });
         actor_map
-    }
-
-    /// Returns fragment vnode mapping.
-    pub fn fragment_vnode_mapping(&self, fragment_id: FragmentId) -> Option<ParallelUnitMapping> {
-        if let Some(fragment) = self.fragments.get(&fragment_id) {
-            fragment.vnode_mapping.clone()
-        } else {
-            None
-        }
-    }
-
-    /// Returns mview actor vnode bitmap infos.
-    pub fn mview_vnode_bitmap_info(&self) -> Vec<(ActorId, Option<Buffer>)> {
-        self.fragments
-            .values()
-            .filter(|fragment| {
-                (fragment.get_fragment_type_mask() & FragmentTypeFlag::Mview as u32) != 0
-            })
-            .flat_map(|fragment| {
-                fragment
-                    .actors
-                    .iter()
-                    .map(|actor| (actor.actor_id, actor.vnode_bitmap.clone()))
-            })
-            .collect_vec()
-    }
-
-    pub fn mview_actor_parallel_units(&self) -> BTreeMap<ActorId, ParallelUnit> {
-        let sink_actor_ids = self.mview_actor_ids();
-        sink_actor_ids
-            .iter()
-            .map(|actor_id| {
-                (
-                    *actor_id,
-                    self.actor_status[actor_id]
-                        .get_parallel_unit()
-                        .unwrap()
-                        .clone(),
-                )
-            })
-            .collect()
-    }
-
-    /// Generate topological order of fragments. If `index(a) < index(b)` in vec, then a is the
-    /// downstream of b.
-    pub fn generate_topological_order(&self) -> Vec<FragmentId> {
-        let mut actionable_fragment_id = VecDeque::new();
-
-        // If downstream_edges[x][y] exists, then there's an edge from x to y.
-        let mut downstream_edges: HashMap<u32, HashSet<u32>> = HashMap::new();
-
-        // Counts how many upstreams are there for a given fragment
-        let mut upstream_cnts: HashMap<u32, usize> = HashMap::new();
-
-        let mut result = vec![];
-
-        let mut actor_to_fragment_mapping = HashMap::new();
-
-        // Firstly, record actor -> fragment mapping
-        for (fragment_id, fragment) in &self.fragments {
-            for actor in &fragment.actors {
-                let ret = actor_to_fragment_mapping.insert(actor.actor_id, *fragment_id);
-                assert!(ret.is_none(), "duplicated actor id found");
-            }
-        }
-
-        // Then, generate the DAG of fragments
-        for (fragment_id, fragment) in &self.fragments {
-            for upstream_actor in &fragment.actors {
-                for dispatcher in &upstream_actor.dispatcher {
-                    for downstream_actor in &dispatcher.downstream_actor_id {
-                        let downstream_fragment_id =
-                            actor_to_fragment_mapping.get(downstream_actor).unwrap();
-
-                        let did_not_have = downstream_edges
-                            .entry(*fragment_id)
-                            .or_default()
-                            .insert(*downstream_fragment_id);
-
-                        if did_not_have {
-                            *upstream_cnts.entry(*downstream_fragment_id).or_default() += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Find actionable fragments
-        for fragment_id in self.fragments.keys() {
-            if upstream_cnts.get(fragment_id).is_none() {
-                actionable_fragment_id.push_back(*fragment_id);
-            }
-        }
-
-        // After that, we can generate topological order
-        while let Some(fragment_id) = actionable_fragment_id.pop_front() {
-            result.push(fragment_id);
-
-            // Find if we can process more fragments
-            if let Some(downstreams) = downstream_edges.get(&fragment_id) {
-                for downstream_id in downstreams.iter() {
-                    let cnt = upstream_cnts
-                        .get_mut(downstream_id)
-                        .expect("the downstream should exist");
-
-                    *cnt -= 1;
-                    if *cnt == 0 {
-                        upstream_cnts.remove(downstream_id);
-                        actionable_fragment_id.push_back(*downstream_id);
-                    }
-                }
-            }
-        }
-
-        if !upstream_cnts.is_empty() {
-            // There are fragments that are not processed yet.
-            panic!("not a DAG");
-        }
-
-        assert_eq!(result.len(), self.fragments.len());
-
-        result
     }
 
     /// Returns the internal table ids without the mview table.

@@ -22,6 +22,7 @@ mod shared_buffer_compact;
 pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -39,7 +40,6 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -53,7 +53,7 @@ use tokio::task::JoinHandle;
 pub use self::compaction_utils::{CompactionStatistics, RemoteBuilderFactory, TaskConfig};
 use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
-use super::{HummockResult, SstableBuilderOptions};
+use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_memory_use_for_compaction, generate_splits,
 };
@@ -63,7 +63,7 @@ use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::multi_builder::{SplitTableOutput, TableBuilderFactory};
 use crate::hummock::vacuum::Vacuum;
 use crate::hummock::{
-    validate_ssts, BatchSstableWriterFactory, CachePolicy, DeleteRangeAggregator, HummockError,
+    validate_ssts, BatchSstableWriterFactory, DeleteRangeAggregator, HummockError,
     RangeTombstonesCollector, SstableWriterFactory, StreamingSstableWriterFactory,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
@@ -77,7 +77,7 @@ pub struct Compactor {
     get_id_time: Arc<AtomicU64>,
 }
 
-pub type CompactOutput = (usize, Vec<LocalSstableInfo>, TableStatsMap);
+pub type CompactOutput = (usize, Vec<LocalSstableInfo>, CompactionStatistics);
 
 impl Compactor {
     /// Handles a compaction task and reports its status to hummock manager.
@@ -155,9 +155,11 @@ impl Compactor {
 
         let need_quota = estimate_memory_use_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {}",
+            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
-            need_quota
+            need_quota,
+            compact_task.target_level,
+            compact_task.compression_algorithm,
         );
 
         let mut multi_filter = build_multi_compaction_filter(&compact_task);
@@ -217,8 +219,8 @@ impl Compactor {
                 }
                 future_result = buffered.next() => {
                     match future_result {
-                        Some(Ok(Ok((split_index, ssts, table_stats_map)))) => {
-                            output_ssts.push((split_index, ssts, table_stats_map));
+                        Some(Ok(Ok((split_index, ssts, compact_stat)))) => {
+                            output_ssts.push((split_index, ssts, compact_stat));
                         }
                         Some(Ok(Err(e))) => {
                             task_status = TaskStatus::ExecuteFailed;
@@ -245,7 +247,9 @@ impl Compactor {
         }
 
         // Sort by split/key range index.
-        output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+        if !output_ssts.is_empty() {
+            output_ssts.sort_by_key(|(split_index, ..)| *split_index);
+        }
 
         sync_point::sync_point!("BEFORE_COMPACT_REPORT");
         // After a compaction is done, mutate the compaction task.
@@ -279,8 +283,15 @@ impl Compactor {
             .sorted_output_ssts
             .reserve(compact_task.splits.len());
         let mut compaction_write_bytes = 0;
-        for (_, ssts, table_stats_change) in output_ssts {
-            add_table_stats_map(&mut table_stats_map, &table_stats_change);
+        for (
+            _,
+            ssts,
+            CompactionStatistics {
+                delta_drop_stat, ..
+            },
+        ) in output_ssts
+        {
+            add_table_stats_map(&mut table_stats_map, &delta_drop_stat);
             for sst_info in ssts {
                 compaction_write_bytes += sst_info.file_size();
                 compact_task.sorted_output_ssts.push(sst_info.sst_info);
@@ -581,7 +592,7 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(&iter_key, value, is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
@@ -602,22 +613,12 @@ impl Compactor {
     pub fn new(
         context: Arc<CompactorContext>,
         options: SstableBuilderOptions,
-        key_range: KeyRange,
-        cache_policy: CachePolicy,
-        gc_delete_keys: bool,
-        watermark: u64,
-        stats_target_table_ids: Option<HashSet<u32>>,
+        task_config: TaskConfig,
     ) -> Self {
         Self {
             context,
             options,
-            task_config: TaskConfig {
-                key_range,
-                cache_policy,
-                gc_delete_keys,
-                watermark,
-                stats_target_table_ids,
-            },
+            task_config,
             get_id_time: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -633,7 +634,7 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<(Vec<LocalSstableInfo>, TableStatsMap)> {
+    ) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         // Monitor time cost building shared buffer to SSTs.
         let compact_timer = if self.context.is_share_buffer_compact {
             self.context
@@ -648,10 +649,7 @@ impl Compactor {
         };
 
         let (split_table_outputs, table_stats_map) = if self.options.capacity as u64
-            > self
-                .context
-                .storage_config
-                .min_sst_size_for_streaming_upload
+            > self.context.storage_opts.min_sst_size_for_streaming_upload
         {
             self.compact_key_range_impl(
                 StreamingSstableWriterFactory::new(self.context.sstable_store.clone()),
@@ -732,8 +730,8 @@ impl Compactor {
         del_agg: Arc<RangeTombstonesCollector>,
         filter_key_extractor: Arc<FilterKeyExtractorImpl>,
         task_progress: Option<Arc<TaskProgress>>,
-    ) -> HummockResult<(Vec<SplitTableOutput>, TableStatsMap)> {
-        let builder_factory = RemoteBuilderFactory {
+    ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
+        let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
             sstable_id_manager: self.context.sstable_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
@@ -741,6 +739,7 @@ impl Compactor {
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
             sstable_writer_factory: writer_factory,
+            _phantom: PhantomData,
         };
 
         let mut sst_builder = CapacitySplitTableBuilder::new(
@@ -749,8 +748,9 @@ impl Compactor {
             task_progress,
             del_agg,
             self.task_config.key_range.clone(),
+            self.task_config.split_by_table,
         );
-        let compaction_statstics = Compactor::compact_and_build_sst(
+        let compaction_statistics = Compactor::compact_and_build_sst(
             &mut sst_builder,
             &self.task_config,
             self.context.compactor_metrics.clone(),
@@ -761,6 +761,6 @@ impl Compactor {
 
         let ssts = sst_builder.finish().await?;
 
-        Ok((ssts, compaction_statstics.delta_drop_stat))
+        Ok((ssts, compaction_statistics))
     }
 }

@@ -22,6 +22,7 @@ use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::Direction;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
@@ -33,7 +34,7 @@ use crate::handler::HandlerArgs;
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new(&session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
         let (column_catalogs, pk_column_catalogs, indices) = match relation {
@@ -59,7 +60,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .table_catalog
                     .pk()
                     .iter()
-                    .map(|idx| t.table_catalog.columns[idx.index].clone())
+                    .map(|x| t.table_catalog.columns[x.column_index].clone())
                     .collect_vec();
                 (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
             }
@@ -113,17 +114,24 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
     rows.extend(indices.iter().map(|index| {
         let index_table = index.index_table.clone();
 
-        let index_columns = index_table
+        let index_columns_with_ordering = index_table
             .pk
             .iter()
-            .filter(|x| !index_table.columns[x.index].is_hidden)
-            .map(|x| index_table.columns[x.index].name().to_string())
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
+            .map(|x| {
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                if Direction::Descending == x.order_type.direction() {
+                    index_column_name + " DESC"
+                } else {
+                    index_column_name
+                }
+            })
             .collect_vec();
 
         let pk_column_index_set = index_table
             .pk
             .iter()
-            .map(|x| x.index)
+            .map(|x| x.column_index)
             .collect::<HashSet<_>>();
 
         let include_columns = index_table
@@ -147,7 +155,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 Some(
                     format!(
                         "index({}) distributed by({})",
-                        display_comma_separated(&index_columns),
+                        display_comma_separated(&index_columns_with_ordering),
                         display_comma_separated(&distributed_by_columns),
                     )
                     .into(),
@@ -156,7 +164,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                 Some(
                     format!(
                         "index({}) include({}) distributed by({})",
-                        display_comma_separated(&index_columns),
+                        display_comma_separated(&index_columns_with_ordering),
                         display_comma_separated(&include_columns),
                         display_comma_separated(&distributed_by_columns),
                     )
@@ -168,19 +176,19 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
 
     // TODO: recover the original user statement
     Ok(PgResponse::new_for_stream(
-        StatementType::DESCRIBE_TABLE,
+        StatementType::DESCRIBE,
         None,
         rows.into(),
         vec![
             PgFieldDescriptor::new(
                 "Name".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
             PgFieldDescriptor::new(
                 "Type".to_owned(),
-                DataType::VARCHAR.to_oid(),
-                DataType::VARCHAR.type_len(),
+                DataType::Varchar.to_oid(),
+                DataType::Varchar.type_len(),
             ),
         ],
     ))
@@ -204,7 +212,7 @@ mod tests {
             .unwrap();
 
         frontend
-            .run_sql("create index idx1 on t (v1,v2);")
+            .run_sql("create index idx1 on t (v1 DESC, v2);")
             .await
             .unwrap();
 
@@ -233,7 +241,7 @@ mod tests {
             "v3".into() => "Int32".into(),
             "v4".into() => "Int32".into(),
             "primary key".into() => "v3".into(),
-            "idx1".into() => "index(v1, v2, v3) include(v4) distributed by(v1, v2)".into(),
+            "idx1".into() => "index(v1 DESC, v2, v3) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

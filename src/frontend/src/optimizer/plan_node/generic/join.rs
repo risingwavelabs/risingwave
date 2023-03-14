@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::EitherOrBoth;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::plan_common::JoinType;
 
@@ -26,7 +27,7 @@ use crate::utils::{ColIndexMapping, Condition};
 /// of the cartesian product of the two inputs; precisely which subset depends on the join
 /// condition. In addition, the output columns are a subset of the columns of the left and
 /// right columns, dependent on the output indices provided. A repeat output index is illegal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Join<PlanRef> {
     pub left: PlanRef,
     pub right: PlanRef,
@@ -97,19 +98,41 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
             let i2o =
                 ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num);
 
+            let either_or_both = self.add_which_join_key_to_pk();
+
             for (lk, rk) in eq_predicate.eq_indexes() {
-                if let Some(lk) = l2i.try_map(lk) {
-                    let out_k = i2o.try_map(lk)?;
-                    if !pk_indices.contains(&out_k) {
-                        pk_indices.push(out_k);
+                match either_or_both {
+                    EitherOrBoth::Left(_) => {
+                        if let Some(lk) = l2i.try_map(lk) {
+                            let out_k = i2o.try_map(lk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
+                        }
                     }
-                }
-                if let Some(rk) = r2i.try_map(rk) {
-                    let out_k = i2o.try_map(rk)?;
-                    if !pk_indices.contains(&out_k) {
-                        pk_indices.push(out_k);
+                    EitherOrBoth::Right(_) => {
+                        if let Some(rk) = r2i.try_map(rk) {
+                            let out_k = i2o.try_map(rk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
+                        }
                     }
-                }
+                    EitherOrBoth::Both(_, _) => {
+                        if let Some(lk) = l2i.try_map(lk) {
+                            let out_k = i2o.try_map(lk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
+                        }
+                        if let Some(rk) = r2i.try_map(rk) {
+                            let out_k = i2o.try_map(rk)?;
+                            if !pk_indices.contains(&out_k) {
+                                pk_indices.push(out_k);
+                            }
+                        }
+                    }
+                };
             }
             Some(pk_indices)
         })
@@ -211,4 +234,150 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     pub fn r2i_col_mapping(&self) -> ColIndexMapping {
         self.i2r_col_mapping().inverse()
     }
+
+    pub fn add_which_join_key_to_pk(&self) -> EitherOrBoth<(), ()> {
+        match self.join_type {
+            JoinType::Inner => {
+                // Theoretically adding either side is ok, but the distribution key of the inner
+                // join derived based on the left side by default, so we choose the left side here
+                // to ensure the pk comprises the distribution key.
+                EitherOrBoth::Left(())
+            }
+            JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti => EitherOrBoth::Left(()),
+            JoinType::RightSemi | JoinType::RightAnti | JoinType::RightOuter => {
+                EitherOrBoth::Right(())
+            }
+            JoinType::FullOuter => EitherOrBoth::Both((), ()),
+            JoinType::Unspecified => unreachable!(),
+        }
+    }
+}
+
+/// Try to split and pushdown `predicate` into a into a join condition and into the inputs of the
+/// join. Returns the pushed predicates. The pushed part will be removed from the original
+/// predicate.
+///
+/// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
+
+pub fn push_down_into_join(
+    predicate: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    ty: JoinType,
+) -> (Condition, Condition, Condition) {
+    let (left, right) = push_down_to_inputs(
+        predicate,
+        left_col_num,
+        right_col_num,
+        can_push_left_from_filter(ty),
+        can_push_right_from_filter(ty),
+    );
+
+    let on = if can_push_on_from_filter(ty) {
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        // Do not push now on to the on, it will be pulled up into a filter instead.
+        let on = Condition {
+            conjunctions: conjunctions
+                .drain_filter(|expr| expr.count_nows() == 0)
+                .collect(),
+        };
+        predicate.conjunctions = conjunctions;
+        on
+    } else {
+        Condition::true_cond()
+    };
+    (left, right, on)
+}
+
+/// Try to pushes parts of the join condition to its inputs. Returns the pushed predicates. The
+/// pushed part will be removed from the original join predicate.
+///
+/// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
+
+pub fn push_down_join_condition(
+    on_condition: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    ty: JoinType,
+) -> (Condition, Condition) {
+    push_down_to_inputs(
+        on_condition,
+        left_col_num,
+        right_col_num,
+        can_push_left_from_on(ty),
+        can_push_right_from_on(ty),
+    )
+}
+
+/// Try to split and pushdown `predicate` into a join's left/right child.
+/// Returns the pushed predicates. The pushed part will be removed from the original predicate.
+///
+/// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
+fn push_down_to_inputs(
+    predicate: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    push_left: bool,
+    push_right: bool,
+) -> (Condition, Condition) {
+    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+    let (mut left, right, mut others) =
+        Condition { conjunctions }.split(left_col_num, right_col_num);
+
+    if !push_left {
+        others.conjunctions.extend(left);
+        left = Condition::true_cond();
+    };
+
+    let right = if push_right {
+        let mut mapping = ColIndexMapping::with_shift_offset(
+            left_col_num + right_col_num,
+            -(left_col_num as isize),
+        );
+        right.rewrite_expr(&mut mapping)
+    } else {
+        others.conjunctions.extend(right);
+        Condition::true_cond()
+    };
+
+    predicate.conjunctions = others.conjunctions;
+
+    (left, right)
+}
+
+pub fn can_push_left_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+    )
+}
+
+pub fn can_push_right_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+    )
+}
+
+pub fn can_push_on_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
+    )
+}
+
+pub fn can_push_left_from_on(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+    )
+}
+
+pub fn can_push_right_from_on(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+    )
 }

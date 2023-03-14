@@ -1,0 +1,25 @@
+query I
+select array[array[1, 2], array[3, 4]];
+----
+{{1,2},{3,4}}
+
+query I
+select array[[1, 2], [3, 4]];
+----
+{{1,2},{3,4}}
+
+query I
+select array[[array[1, 2]], [[3, 4]]];
+----
+{{{1,2}},{{3,4}}}
+
+query I
+select array[[[1, 2]], [array[3, 4]]];
+----
+{{{1,2}},{{3,4}}}
+
+statement error syntax error at or near
+select array[array[1, 2], [3, 4]];
+
+statement error syntax error at or near
+select array[[1, 2], array[3, 4]];

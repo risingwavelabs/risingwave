@@ -7,45 +7,35 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["workspace-hack"]
+
+[package.metadata.cargo-udeps.ignore]
+normal = ["workspace-hack"]
+
 [dependencies]
-anyhow = "1"
 arc-swap = "1"
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
 auto_enums = { version = "0.7", features = ["futures"] }
-bitvec = "1"
-byteorder = "1"
+await-tree = "0.1.1"
 bytes = { version = "1", features = ["serde"] }
-chrono = { version = "0.4", default-features = false, features = [
-    "clock",
-    "std",
-] }
-crc32fast = "1"
 crossbeam = "0.8.1"
 dashmap = { version = "5", default-features = false }
 dyn-clone = "1.0.4"
-either = "1"
 enum-as-inner = "0.5"
 fail = "0.5"
-farmhash = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = "0.2"
-hyper = "0.14"
 itertools = "0.10"
 libc = "0.2"
 lz4 = "1.23.1"
 memcomparable = "0.1"
 minitrace = "0.4"
 minstant = "0.1"
-nix = { version = "0.25", features = ["fs", "mman"] }
-num-integer = "0.1"
-num-traits = "0.2"
 parking_lot = "0.12"
-paste = "1"
 prometheus = { version = "0.13", features = ["process"] }
 prost = "0.11"
 rand = "0.8"
-regex = "1"
 risingwave_backup = { path = "../storage/backup" }
 risingwave_common = { path = "../common" }
 risingwave_common_service = { path = "../common/common_service" }
@@ -55,13 +45,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_tracing = { path = "../tracing" }
 scopeguard = "1"
-# rocksdb = { git = "https://github.com/tikv/rust-rocksdb.git", rev = "fa83ff19", features = [
-#     "encryption",
-#     "static_libcpp",
-# ], optional = true }
-serde = { version = "1", features = ["derive"] }
 sled = "0.34.7"
-smallvec = "1"
 spin = "0.9"
 sync-point = { path = "../utils/sync-point" }
 tempfile = "3"
@@ -76,13 +60,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "time",
     "signal",
 ] }
-tokio-metrics = "0.1.0"
 tokio-retry = "0.3"
-tokio-stream = "0.1"
-tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
+xorf = "0.8.1"
 xxhash-rust = { version = "0.8.5", features = ["xxh32", "xxh64"] }
 zstd = "0.11.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nix = { version = "0.25", features = ["fs", "mman"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

@@ -28,8 +28,10 @@ buildkite-agent artifact download risedev-dev-"$profile" target/debug/
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 
-echo "--- Download connector node jar"
-buildkite-agent artifact download connector-service.jar ./
+echo "--- Download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
 echo "--- Adjust permission"
 chmod +x ./target/debug/risingwave
@@ -43,14 +45,14 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
+./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
-java -jar ./connector-service.jar --port 60061 > .risingwave/log/connector-sink.log 2>&1 &
 sleep 1
 
 # prepare minio iceberg sink
 echo "--- preparing iceberg"
 .risingwave/bin/mcli -C .risingwave/config/mcli mb hummock-minio/iceberg
-wget https://downloads.apache.org/spark/spark-3.3.1/spark-3.3.1-bin-hadoop3.tgz
+wget https://iceberg-ci-spark-dist.s3.amazonaws.com/spark-3.3.1-bin-hadoop3.tgz
 tar -xf spark-3.3.1-bin-hadoop3.tgz --no-same-owner
 DEPENDENCIES=org.apache.iceberg:iceberg-spark-runtime-3.3_2.12:1.0.0,org.apache.hadoop:hadoop-aws:3.3.2
 spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
@@ -60,7 +62,7 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.endpoint=http://127.0.0.1:9301 \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.access.key=hummockadmin \
     --conf spark.sql.catalog.demo.hadoop.fs.s3a.secret.key=hummockadmin \
-    --S --e "CREATE TABLE demo.demo_db.demo_table(v1 int, v2 int) TBLPROPERTIES ('format-version'='2');"
+    --S --e "CREATE TABLE demo.demo_db.demo_table(v1 int, v2 bigint, v3 string) TBLPROPERTIES ('format-version'='2');"
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/iceberg_sink.slt'
@@ -78,13 +80,13 @@ spark-3.3.1-bin-hadoop3/bin/spark-sql --packages $DEPENDENCIES \
 
 # check sink destination using shell
 if cat ./spark-output/*.csv | sort | awk -F "," '{
-if ($1 == 1 && $2 == 2) c1++;
- if ($1 == 13 && $2 == 2) c2++;
-  if ($1 == 21 && $2 == 2) c3++;
-   if ($1 == 2 && $2 == 2) c4++;
-    if ($1 == 3 && $2 == 2) c5++;
-     if ($1 == 5 && $2 == 2) c6++;
-      if ($1 == 8 && $2 == 2) c7++; }
+if ($1 == 1 && $2 == 2 && $3 == "1-2") c1++;
+ if ($1 == 13 && $2 == 2 && $3 == "13-2") c2++;
+  if ($1 == 21 && $2 == 2 && $3 == "21-2") c3++;
+   if ($1 == 2 && $2 == 2 && $3 == "2-2") c4++;
+    if ($1 == 3 && $2 == 2 && $3 == "3-2") c5++;
+     if ($1 == 5 && $2 == 2 && $3 == "5-2") c6++;
+      if ($1 == 8 && $2 == 2 && $3 == "8-2") c7++; }
        END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1 && c6 == 1 && c7 == 1); }'; then
   echo "Iceberg sink check passed"
 else
@@ -93,5 +95,5 @@ else
 fi
 
 echo "--- Kill cluster"
-pkill -f connector-service.jar
+pkill -f connector-node
 cargo make ci-kill

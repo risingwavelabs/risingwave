@@ -18,15 +18,15 @@ use std::sync::Arc;
 use bytes::Bytes;
 use criterion::{criterion_group, criterion_main, Criterion};
 use futures::{pin_mut, TryStreamExt};
-use risingwave_common::catalog::TableId;
 use risingwave_hummock_test::get_notification_client_for_test;
+use risingwave_hummock_test::test_utils::TestIngestBatch;
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
-use risingwave_storage::hummock::test_utils::default_config_for_test;
+use risingwave_storage::hummock::test_utils::default_opts_for_test;
 use risingwave_storage::hummock::HummockStorage;
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{ReadOptions, StateStoreRead, StateStoreWrite, WriteOptions};
+use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
 
 fn gen_interleave_shared_buffer_batch_iter(
@@ -51,7 +51,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let batches = gen_interleave_shared_buffer_batch_iter(10000, 100);
     let sstable_store = mock_sstable_store();
-    let hummock_options = Arc::new(default_config_for_test());
+    let hummock_options = Arc::new(default_opts_for_test());
     let (env, hummock_manager_ref, _cluster_manager_ref, worker_node) =
         runtime.block_on(setup_compute_env(8080));
     let meta_client = Arc::new(MockHummockMetaClient::new(
@@ -70,10 +70,14 @@ fn criterion_benchmark(c: &mut Criterion) {
         .unwrap()
     });
 
-    let hummock_storage =
-        runtime.block_on(async { global_hummock_storage.new_local(TableId::default()).await });
+    let mut hummock_storage = runtime.block_on(async {
+        global_hummock_storage
+            .new_local(NewLocalOptions::for_test(Default::default()))
+            .await
+    });
 
     let epoch = 100;
+    hummock_storage.init(epoch);
 
     for batch in batches {
         runtime
@@ -87,11 +91,12 @@ fn criterion_benchmark(c: &mut Criterion) {
             ))
             .unwrap();
     }
+    hummock_storage.seal_current_epoch(u64::MAX);
 
     c.bench_function("bench-hummock-iter", move |b| {
         b.iter(|| {
             let iter = runtime
-                .block_on(hummock_storage.iter(
+                .block_on(global_hummock_storage.iter(
                     (Unbounded, Unbounded),
                     epoch,
                     ReadOptions {
@@ -100,6 +105,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                         retention_seconds: None,
                         table_id: Default::default(),
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 ))
                 .unwrap();

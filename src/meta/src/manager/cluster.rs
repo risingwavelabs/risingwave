@@ -29,7 +29,6 @@ use tokio::task::JoinHandle;
 
 use crate::manager::{IdCategory, LocalNotification, MetaSrvEnv};
 use crate::model::{MetadataModel, Worker, INVALID_EXPIRE_AT};
-use crate::rpc::metrics::MetaMetrics;
 use crate::storage::MetaStore;
 use crate::{MetaError, MetaResult};
 
@@ -87,37 +86,8 @@ where
         self.core.read().await
     }
 
-    pub async fn start_worker_num_monitor(
-        cluster_manager: ClusterManagerRef<S>,
-        interval: Duration,
-        meta_metrics: Arc<MetaMetrics>,
-    ) -> (JoinHandle<()>, Sender<()>) {
-        let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let join_handle = tokio::spawn(async move {
-            let mut monitor_interval = tokio::time::interval(interval);
-            monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            loop {
-                tokio::select! {
-                    // Wait for interval
-                    _ = monitor_interval.tick() => {},
-                    // Shutdown monitor
-                    _ = &mut shutdown_rx => {
-                        return;
-                    }
-                }
-
-                for (worker_type, worker_num) in
-                    cluster_manager.core.read().await.count_worker_node()
-                {
-                    meta_metrics
-                        .worker_num
-                        .with_label_values(&[(worker_type.as_str_name())])
-                        .set(worker_num as i64);
-                }
-            }
-        });
-
-        (join_handle, shutdown_tx)
+    pub async fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
+        self.core.read().await.count_worker_node()
     }
 
     /// A worker node will immediately register itself to meta when it bootstraps.
@@ -339,9 +309,10 @@ where
         core.list_active_parallel_units()
     }
 
-    pub async fn get_active_parallel_unit_count(&self) -> usize {
+    /// Get the cluster info used for scheduling a streaming job.
+    pub async fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
         let core = self.core.read().await;
-        core.get_active_parallel_unit_count()
+        core.get_streaming_cluster_info()
     }
 
     /// Generate `parallel_degree` parallel units.
@@ -367,6 +338,16 @@ where
     pub async fn get_worker_by_id(&self, worker_id: WorkerId) -> Option<Worker> {
         self.core.read().await.get_worker_by_id(worker_id)
     }
+}
+
+/// The cluster info used for scheduling a streaming job.
+#[derive(Debug, Clone)]
+pub struct StreamingClusterInfo {
+    /// All **active** compute nodes in the cluster.
+    pub worker_nodes: HashMap<u32, WorkerNode>,
+
+    /// All parallel units of the **active** compute nodes in the cluster.
+    pub parallel_units: HashMap<ParallelUnitId, ParallelUnit>,
 }
 
 pub struct ClusterManagerCore {
@@ -467,6 +448,26 @@ impl ClusterManagerCore {
             .collect()
     }
 
+    fn get_streaming_cluster_info(&self) -> StreamingClusterInfo {
+        let active_workers: HashMap<_, _> = self
+            .list_worker_node(WorkerType::ComputeNode, Some(State::Running))
+            .into_iter()
+            .map(|w| (w.id, w))
+            .collect();
+
+        let active_parallel_units = self
+            .parallel_units
+            .iter()
+            .filter(|p| active_workers.contains_key(&p.worker_node_id))
+            .map(|p| (p.id, p.clone()))
+            .collect();
+
+        StreamingClusterInfo {
+            worker_nodes: active_workers,
+            parallel_units: active_parallel_units,
+        }
+    }
+
     fn count_worker_node(&self) -> HashMap<WorkerType, u64> {
         const MONITORED_WORKER_TYPES: [WorkerType; 3] = [
             WorkerType::Compactor,
@@ -488,10 +489,6 @@ impl ClusterManagerCore {
             ret.entry(wt).or_insert(0);
         }
         ret
-    }
-
-    fn get_active_parallel_unit_count(&self) -> usize {
-        self.list_active_parallel_units().len()
     }
 }
 

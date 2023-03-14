@@ -17,6 +17,7 @@ use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::worker_node::State::Running;
 use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
@@ -155,12 +156,8 @@ where
 
     async fn hummock_subscribe(&self) -> MetaSnapshot {
         let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await;
-        let hummock_version = self
-            .hummock_manager
-            .get_read_guard()
-            .await
-            .current_version
-            .clone();
+        let hummock_version = self.hummock_manager.get_current_version().await;
+        let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
 
         MetaSnapshot {
@@ -173,8 +170,15 @@ where
             meta_backup_manifest_id: Some(MetaBackupManifestId {
                 id: meta_backup_manifest_id,
             }),
+            hummock_write_limits: Some(WriteLimits {
+                write_limits: hummock_write_limits,
+            }),
             ..Default::default()
         }
+    }
+
+    fn compute_subscribe(&self) -> MetaSnapshot {
+        MetaSnapshot::default()
     }
 }
 
@@ -216,12 +220,13 @@ where
                     .await?;
                 self.hummock_subscribe().await
             }
+            SubscribeType::Compute => self.compute_subscribe(),
             SubscribeType::Unspecified => unreachable!(),
         };
 
         self.env
             .notification_manager()
-            .notify_snapshot(worker_key, meta_snapshot);
+            .notify_snapshot(worker_key, subscribe_type, meta_snapshot);
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }

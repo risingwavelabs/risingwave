@@ -11,19 +11,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use std::collections::HashMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
+use maplit::hashmap;
+use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::error::RwError;
 use risingwave_common::field_generator::FieldGeneratorImpl;
-use serde_json::Value;
+use risingwave_common::row::OwnedRow;
+use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 
-use crate::source::{SourceMessage, SourceMeta, SplitId};
+use crate::source::{SourceFormat, SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
 
 pub struct DatagenEventGenerator {
-    fields_map: HashMap<String, FieldGeneratorImpl>,
+    // fields_map: HashMap<String, FieldGeneratorImpl>,
+    field_names: Vec<String>,
+    fields_vec: Vec<FieldGeneratorImpl>,
+    source_format: SourceFormat,
+    data_types: Vec<DataType>,
     offset: u64,
     split_id: SplitId,
     partition_rows_per_second: u64,
@@ -36,8 +44,12 @@ pub struct DatagenMeta {
 }
 
 impl DatagenEventGenerator {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        fields_map: HashMap<String, FieldGeneratorImpl>,
+        fields_vec: Vec<FieldGeneratorImpl>,
+        field_names: Vec<String>,
+        source_format: SourceFormat,
+        data_types: Vec<DataType>,
         rows_per_second: u64,
         offset: u64,
         split_id: SplitId,
@@ -50,38 +62,60 @@ impl DatagenEventGenerator {
             rows_per_second / split_num
         };
         Ok(Self {
-            fields_map,
+            field_names,
+            fields_vec,
+            source_format,
+            data_types,
             offset,
             split_id,
             partition_rows_per_second,
         })
     }
 
-    #[try_stream(ok = Vec<SourceMessage>, error = anyhow::Error)]
-    pub async fn into_stream(mut self) {
+    #[try_stream(boxed, ok = Vec<SourceMessage>, error = anyhow::Error)]
+    pub async fn into_msg_stream(mut self) {
         let mut interval = tokio::time::interval(Duration::from_secs(1));
         const MAX_ROWS_PER_YIELD: u64 = 1024;
+        let mut reach_end = false;
         loop {
             // generate `partition_rows_per_second` rows per second
             interval.tick().await;
             let mut rows_generated_this_second = 0;
             while rows_generated_this_second < self.partition_rows_per_second {
-                let mut msgs = vec![];
                 let num_rows_to_generate = std::cmp::min(
                     MAX_ROWS_PER_YIELD,
                     self.partition_rows_per_second - rows_generated_this_second,
                 );
-                for _ in 0..num_rows_to_generate {
-                    let value = Value::Object(
-                        self.fields_map
-                            .iter_mut()
-                            .map(|(name, field_generator)| {
-                                (name.to_string(), field_generator.generate(self.offset))
-                            })
-                            .collect(),
-                    );
+                let mut msgs = Vec::with_capacity(num_rows_to_generate as usize);
+                'outer: for _ in 0..num_rows_to_generate {
+                    let payload = match self.source_format {
+                        SourceFormat::Json => {
+                            let mut map = serde_json::Map::with_capacity(self.fields_vec.len());
+                            for (name, field_generator) in self
+                                .field_names
+                                .iter()
+                                .zip_eq_fast(self.fields_vec.iter_mut())
+                            {
+                                let value = field_generator.generate_json(self.offset);
+                                if value.is_null() {
+                                    reach_end = true;
+                                    tracing::info!(
+                                        "datagen split {} stop generate, offset {}",
+                                        self.split_id,
+                                        self.offset
+                                    );
+                                    break 'outer;
+                                }
+                                map.insert(name.clone(), value);
+                            }
+                            Bytes::from(serde_json::Value::from(map).to_string())
+                        }
+                        _ => {
+                            unimplemented!("only json format is supported for now")
+                        }
+                    };
                     msgs.push(SourceMessage {
-                        payload: Some(Bytes::from(value.to_string())),
+                        payload: Some(payload),
                         offset: self.offset.to_string(),
                         split_id: self.split_id.clone(),
                         meta: SourceMeta::Datagen(DatagenMeta {
@@ -96,7 +130,67 @@ impl DatagenEventGenerator {
                     self.offset += 1;
                     rows_generated_this_second += 1;
                 }
-                yield msgs;
+                if !msgs.is_empty() {
+                    yield msgs;
+                }
+
+                if reach_end {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    #[try_stream(ok = StreamChunkWithState, error = RwError)]
+    pub async fn into_native_stream(mut self) {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        const MAX_ROWS_PER_YIELD: u64 = 1024;
+        let mut reach_end = false;
+        loop {
+            // generate `partition_rows_per_second` rows per second
+            interval.tick().await;
+            let mut rows_generated_this_second = 0;
+            while rows_generated_this_second < self.partition_rows_per_second {
+                let mut rows = vec![];
+                let num_rows_to_generate = std::cmp::min(
+                    MAX_ROWS_PER_YIELD,
+                    self.partition_rows_per_second - rows_generated_this_second,
+                );
+                'outer: for _ in 0..num_rows_to_generate {
+                    let mut row = Vec::with_capacity(self.fields_vec.len());
+                    for field_generator in &mut self.fields_vec {
+                        let datum = field_generator.generate_datum(self.offset);
+                        if datum.is_none() {
+                            reach_end = true;
+                            tracing::info!(
+                                "datagen split {} stop generate, offset {}",
+                                self.split_id,
+                                self.offset
+                            );
+                            break 'outer;
+                        }
+                        row.push(datum);
+                    }
+
+                    rows.push((Op::Insert, OwnedRow::new(row)));
+                    self.offset += 1;
+                    rows_generated_this_second += 1;
+                }
+
+                if !rows.is_empty() {
+                    let chunk = StreamChunk::from_rows(&rows, &self.data_types);
+                    let mapping = hashmap! {
+                        self.split_id.clone() => (self.offset - 1).to_string()
+                    };
+                    yield StreamChunkWithState {
+                        chunk,
+                        split_offset_mapping: Some(mapping),
+                    };
+                }
+
+                if reach_end {
+                    return Ok(());
+                }
             }
         }
     }
@@ -115,33 +209,34 @@ mod tests {
         expected_length: usize,
     ) {
         let split_id = format!("{}-{}", split_num, split_index).into();
-        let mut fields_map = HashMap::new();
-        fields_map.insert(
-            "v1".to_string(),
-            FieldGeneratorImpl::with_number_sequence(
-                risingwave_common::types::DataType::Int32,
-                Some("1".to_string()),
-                Some("10".to_string()),
-                split_index,
-                split_num,
-            )
-            .unwrap(),
-        );
+        let start = 1;
+        let end = 10;
 
-        fields_map.insert(
-            "v2".to_string(),
+        let data_types = vec![DataType::Int32, DataType::Float32];
+        let fields_vec = vec![
             FieldGeneratorImpl::with_number_sequence(
-                risingwave_common::types::DataType::Float32,
-                Some("1".to_string()),
-                Some("10".to_string()),
+                data_types[0].clone(),
+                Some(start.to_string()),
+                Some(end.to_string()),
                 split_index,
                 split_num,
             )
             .unwrap(),
-        );
+            FieldGeneratorImpl::with_number_sequence(
+                data_types[1].clone(),
+                Some(start.to_string()),
+                Some(end.to_string()),
+                split_index,
+                split_num,
+            )
+            .unwrap(),
+        ];
 
         let generator = DatagenEventGenerator::new(
-            fields_map,
+            fields_vec,
+            vec!["c1".to_owned(), "c2".to_owned()],
+            SourceFormat::Json,
+            data_types,
             rows_per_second,
             0,
             split_id,
@@ -150,14 +245,17 @@ mod tests {
         )
         .unwrap();
 
-        let chunk = generator
-            .into_stream()
-            .boxed()
-            .next()
-            .await
-            .unwrap()
-            .unwrap();
+        let mut stream = generator.into_msg_stream().boxed();
+
+        let chunk = stream.next().await.unwrap().unwrap();
         assert_eq!(expected_length, chunk.len());
+
+        let empty_chunk = stream.next().await;
+        if rows_per_second >= (end - start + 1) {
+            assert!(empty_chunk.is_none());
+        } else {
+            assert!(empty_chunk.is_some());
+        }
     }
 
     #[tokio::test]
@@ -176,5 +274,23 @@ mod tests {
         check_sequence_partition_result(3, 0, 10, 4).await;
         check_sequence_partition_result(3, 1, 10, 3).await;
         check_sequence_partition_result(3, 2, 10, 3).await;
+    }
+
+    #[tokio::test]
+    async fn test_one_partition_sequence_reach_end() {
+        check_sequence_partition_result(1, 0, 15, 10).await;
+    }
+
+    #[tokio::test]
+    async fn test_two_partition_sequence_reach_end() {
+        check_sequence_partition_result(2, 0, 15, 5).await;
+        check_sequence_partition_result(2, 1, 15, 5).await;
+    }
+
+    #[tokio::test]
+    async fn test_three_partition_sequence_reach_end() {
+        check_sequence_partition_result(3, 0, 15, 4).await;
+        check_sequence_partition_result(3, 1, 15, 3).await;
+        check_sequence_partition_result(3, 2, 15, 3).await;
     }
 }

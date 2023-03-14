@@ -16,9 +16,10 @@ use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::error::Result;
+use risingwave_common::error::Result as RwResult;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr::expr::{build_from_prost, AggKind};
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 
 mod agg_call;
@@ -176,22 +177,22 @@ impl ExprImpl {
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
-    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_implicit(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Implicit)
     }
 
     /// Shorthand to create cast expr to `target` type in assign context.
-    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_assign(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Assign)
     }
 
     /// Shorthand to create cast expr to `target` type in explicit context.
-    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl> {
+    pub fn cast_explicit(self, target: DataType) -> Result<ExprImpl, CastError> {
         FunctionCall::new_cast(self, target, CastContext::Explicit)
     }
 
     /// Shorthand to enforce implicit cast to boolean
-    pub fn enforce_bool_clause(self, clause: &str) -> Result<ExprImpl> {
+    pub fn enforce_bool_clause(self, clause: &str) -> RwResult<ExprImpl> {
         if self.is_unknown() {
             let inner = self.cast_implicit(DataType::Boolean)?;
             return Ok(inner);
@@ -217,26 +218,27 @@ impl ExprImpl {
     /// References in `PostgreSQL`:
     /// * [cast](https://github.com/postgres/postgres/blob/a3ff08e0b08dbfeb777ccfa8f13ebaa95d064c04/src/include/catalog/pg_cast.dat#L437-L444)
     /// * [impl](https://github.com/postgres/postgres/blob/27b77ecf9f4d5be211900eda54d8155ada50d696/src/backend/utils/adt/bool.c#L204-L209)
-    pub fn cast_output(self) -> Result<ExprImpl> {
+    pub fn cast_output(self) -> RwResult<ExprImpl> {
         if self.return_type() == DataType::Boolean {
             return Ok(FunctionCall::new(ExprType::BoolOut, vec![self])?.into());
         }
         // Use normal cast for other types. Both `assign` and `explicit` can pass the castability
         // check and there is no difference.
         self.cast_assign(DataType::Varchar)
+            .map_err(|err| err.into())
     }
 
     /// Evaluate the expression on the given input.
     ///
     /// TODO: This is a naive implementation. We should avoid proto ser/de.
     /// Tracking issue: <https://github.com/risingwavelabs/risingwave/issues/3479>
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    fn eval_row(&self, input: &OwnedRow) -> RwResult<Datum> {
         let backend_expr = build_from_prost(&self.to_expr_proto())?;
         backend_expr.eval_row(input).map_err(Into::into)
     }
 
     /// Evaluate a constant expression.
-    pub fn eval_row_const(&self) -> Result<Datum> {
+    pub fn eval_row_const(&self) -> RwResult<Datum> {
         assert!(self.is_const());
         self.eval_row(&OwnedRow::empty())
     }
@@ -726,6 +728,25 @@ impl ExprImpl {
             }),
         }
     }
+
+    pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {
+        let rex_node = proto.get_rex_node()?;
+        let ret_type = proto.get_return_type()?.into();
+        let expr_type = proto.get_expr_type()?;
+        Ok(match rex_node {
+            RexNode::InputRef(column_index) => Self::InputRef(Box::new(InputRef::from_expr_proto(
+                *column_index as _,
+                ret_type,
+            )?)),
+            RexNode::Constant(_) => Self::Literal(Box::new(Literal::from_expr_proto(proto)?)),
+            RexNode::Udf(udf) => Self::UserDefinedFunction(Box::new(
+                UserDefinedFunction::from_expr_proto(udf, ret_type)?,
+            )),
+            RexNode::FuncCall(function_call) => Self::FunctionCall(Box::new(
+                FunctionCall::from_expr_proto(function_call, expr_type, ret_type)?,
+            )),
+        })
+    }
 }
 
 impl Expr for ExprImpl {
@@ -873,6 +894,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::OwnedRow;
 
+use self::function_call::CastError;
 use crate::binder::BoundSetExpr;
 use crate::utils::Condition;
 

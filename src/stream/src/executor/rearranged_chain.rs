@@ -25,7 +25,7 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::PkIndices;
+use crate::executor::{BoxedMessageStream, PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -49,22 +49,29 @@ pub struct RearrangedChainExecutor {
     info: ExecutorInfo,
 }
 
-fn mapping(upstream_indices: &[usize], msg: Message) -> Message {
+fn mapping(upstream_indices: &[usize], msg: Message) -> Option<Message> {
     match msg {
-        Message::Watermark(_) => {
-            todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+        Message::Watermark(watermark) => {
+            mapping_watermark(watermark, upstream_indices).map(Message::Watermark)
         }
-
         Message::Chunk(chunk) => {
             let (ops, columns, visibility) = chunk.into_inner();
             let mapped_columns = upstream_indices
                 .iter()
                 .map(|&i| columns[i].clone())
                 .collect();
-            Message::Chunk(StreamChunk::new(ops, mapped_columns, visibility))
+            Some(Message::Chunk(StreamChunk::new(
+                ops,
+                mapped_columns,
+                visibility,
+            )))
         }
-        _ => msg,
+        Message::Barrier(_) => Some(msg),
     }
+}
+
+fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
+    watermark.transform_with_indices(upstream_indices)
 }
 
 #[derive(Debug)]
@@ -72,12 +79,14 @@ enum RearrangedMessage {
     RearrangedBarrier(Barrier),
     PhantomBarrier(Barrier),
     Chunk(StreamChunk),
+    // This watermark is just a place holder.
+    Watermark,
 }
 
 impl RearrangedMessage {
     fn phantom_into(self) -> Option<Message> {
         match self {
-            RearrangedMessage::RearrangedBarrier(_) => None,
+            RearrangedMessage::RearrangedBarrier(_) | RearrangedMessage::Watermark => None,
             RearrangedMessage::PhantomBarrier(barrier) => Message::Barrier(barrier).into(),
             RearrangedMessage::Chunk(chunk) => Message::Chunk(chunk).into(),
         }
@@ -87,10 +96,7 @@ impl RearrangedMessage {
 impl RearrangedMessage {
     fn rearranged_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::RearrangedBarrier(barrier),
         }
@@ -98,10 +104,7 @@ impl RearrangedMessage {
 
     fn phantom_from(msg: Message) -> Self {
         match msg {
-            Message::Watermark(_) => {
-                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
-            }
-
+            Message::Watermark(_) => RearrangedMessage::Watermark,
             Message::Chunk(chunk) => RearrangedMessage::Chunk(chunk),
             Message::Barrier(barrier) => RearrangedMessage::PhantomBarrier(barrier),
         }
@@ -135,10 +138,11 @@ impl RearrangedChainExecutor {
     async fn execute_inner(mut self) {
         // 0. Project the upstream with `upstream_indices`.
         let upstream_indices = self.upstream_indices.clone();
-        let mut upstream = self
-            .upstream
-            .execute()
-            .map(move |result| result.map(|msg| mapping(&upstream_indices, msg)));
+
+        let mut upstream = Box::pin(Self::mapping_stream(
+            self.upstream.execute(),
+            &upstream_indices,
+        ));
 
         // 1. Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -190,6 +194,8 @@ impl RearrangedChainExecutor {
             let mut last_rearranged_epoch = create_epoch;
             let mut stop_rearrange_tx = Some(stop_rearrange_tx);
 
+            let mut processed_rows: u64 = 0;
+
             // 6. Consume the merged `rearranged` stream.
             #[for_await]
             for rearranged_msg in &mut rearranged {
@@ -201,8 +207,11 @@ impl RearrangedChainExecutor {
                     // consumed the whole snapshot and be on the upstream now.
                     RearrangedMessage::PhantomBarrier(barrier) => {
                         // Update the progress since we've consumed all chunks before this phantom.
-                        self.progress
-                            .update(last_rearranged_epoch.curr, barrier.epoch.curr);
+                        self.progress.update(
+                            last_rearranged_epoch.curr,
+                            barrier.epoch.curr,
+                            processed_rows,
+                        );
 
                         if barrier.epoch.curr >= last_rearranged_epoch.curr {
                             // Stop the background rearrangement task.
@@ -218,7 +227,13 @@ impl RearrangedChainExecutor {
                         last_rearranged_epoch = barrier.epoch;
                         yield Message::Barrier(barrier);
                     }
-                    RearrangedMessage::Chunk(chunk) => yield Message::Chunk(chunk),
+                    RearrangedMessage::Chunk(chunk) => {
+                        processed_rows += chunk.cardinality() as u64;
+                        yield Message::Chunk(chunk)
+                    }
+                    RearrangedMessage::Watermark => {
+                        // Ignore watermark during snapshot consumption.
+                    }
                 }
             }
 
@@ -272,7 +287,6 @@ impl RearrangedChainExecutor {
     /// after stopped.
     ///
     /// Check `execute_inner` for more details.
-    #[expect(clippy::needless_lifetimes, reason = "code generated by try_stream")]
     #[try_stream(ok = Barrier, error = StreamExecutorError)]
     async fn rearrange_barrier<U>(
         upstream: &mut U,
@@ -307,6 +321,17 @@ impl RearrangedChainExecutor {
                 Either::Right((None, _)) => {
                     Err(StreamExecutorError::channel_closed("upstream"))?;
                 }
+            }
+        }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn mapping_stream(stream: BoxedMessageStream, upstream_indices: &[usize]) {
+        #[for_await]
+        for msg in stream {
+            match mapping(upstream_indices, msg?) {
+                Some(msg) => yield msg,
+                None => continue,
             }
         }
     }

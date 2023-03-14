@@ -22,6 +22,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::agg::{AggStateFactory, BoxedAggState};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HashAggNode;
@@ -245,7 +246,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                 key.deserialize_to_builders(&mut group_builders[..], &self.group_key_types)?;
                 states
                     .into_iter()
-                    .zip_eq(&mut agg_builders)
+                    .zip_eq_fast(&mut agg_builders)
                     .try_for_each(|(mut aggregator, builder)| aggregator.output(builder))?;
             }
             if !has_next {
@@ -270,8 +271,8 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::agg_call::{Arg, Type};
-    use risingwave_pb::expr::{AggCall, InputRefExpr};
+    use risingwave_pb::expr::agg_call::Type;
+    use risingwave_pb::expr::{AggCall, InputRef};
 
     use super::*;
     use crate::executor::test_utils::{diff_executor_output, MockExecutor};
@@ -306,8 +307,8 @@ mod tests {
 
         let agg_call = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: 2 }),
+            args: vec![InputRef {
+                index: 2,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
@@ -318,7 +319,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -386,7 +387,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 

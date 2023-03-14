@@ -90,9 +90,10 @@ mod tests {
             kind: risingwave_expr::expr::AggKind::Count,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
+            distinct: false,
         }
     }
 
@@ -132,9 +133,10 @@ mod tests {
             kind: risingwave_expr::expr::AggKind::Max,
             args: AggArgs::Unary(DataType::Int64, 0),
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: true,
             filter: None,
+            distinct: false,
         }
     }
 

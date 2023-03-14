@@ -1,19 +1,24 @@
 /* eslint-disable */
-import { ColumnIndex, StreamSourceInfo } from "./catalog";
-import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
+import { StreamSourceInfo } from "./catalog";
+import {
+  BatchQueryEpoch,
+  Buffer,
+  ColumnOrder,
+  Direction,
+  directionFromJSON,
+  directionToJSON,
+  HostAddress,
+  WorkerNode,
+} from "./common";
 import { IntervalUnit } from "./data";
-import { AggCall, ExprNode, InputRefExpr, ProjectSetSelectItem, TableFunction } from "./expr";
+import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
   joinTypeToJSON,
-  OrderType,
-  orderTypeFromJSON,
-  orderTypeToJSON,
   StorageTableDesc,
 } from "./plan_common";
 
@@ -38,6 +43,12 @@ export interface RowSeqScanNode {
     | undefined;
   /** Whether the order on output columns should be preserved. */
   ordered: boolean;
+  /** If along with `batch_limit`, `chunk_size` will be set. */
+  chunkSize: RowSeqScanNode_ChunkSize | undefined;
+}
+
+export interface RowSeqScanNode_ChunkSize {
+  chunkSize: number;
 }
 
 export interface SysRowSeqScanNode {
@@ -94,25 +105,31 @@ export interface FilterNode {
 export interface InsertNode {
   /** Id of the table to perform inserting. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   columnIndices: number[];
   /**
    * An optional field and will be `None` for tables without user-defined pk.
    * The `BatchInsertExecutor` should add a column with NULL value which will
    * be filled in streaming.
    */
-  rowIdIndex: ColumnIndex | undefined;
+  rowIdIndex?: number | undefined;
   returning: boolean;
 }
 
 export interface DeleteNode {
   /** Id of the table to perform deleting. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   returning: boolean;
 }
 
 export interface UpdateNode {
   /** Id of the table to perform updating. */
   tableId: number;
+  /** Version of the table. */
+  tableVersionId: number;
   exprs: ExprNode[];
   returning: boolean;
 }
@@ -195,15 +212,17 @@ export interface SortMergeJoinNode {
   joinType: JoinType;
   leftKey: number[];
   rightKey: number[];
-  direction: OrderType;
+  direction: Direction;
   outputIndices: number[];
 }
 
 export interface HopWindowNode {
-  timeCol: InputRefExpr | undefined;
+  timeCol: number;
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
+  windowStartExprs: ExprNode[];
+  windowEndExprs: ExprNode[];
 }
 
 export interface TableFunctionNode {
@@ -414,7 +433,14 @@ export interface PlanFragment {
 }
 
 function createBaseRowSeqScanNode(): RowSeqScanNode {
-  return { tableDesc: undefined, columnIds: [], scanRanges: [], vnodeBitmap: undefined, ordered: false };
+  return {
+    tableDesc: undefined,
+    columnIds: [],
+    scanRanges: [],
+    vnodeBitmap: undefined,
+    ordered: false,
+    chunkSize: undefined,
+  };
 }
 
 export const RowSeqScanNode = {
@@ -425,6 +451,7 @@ export const RowSeqScanNode = {
       scanRanges: Array.isArray(object?.scanRanges) ? object.scanRanges.map((e: any) => ScanRange.fromJSON(e)) : [],
       vnodeBitmap: isSet(object.vnodeBitmap) ? Buffer.fromJSON(object.vnodeBitmap) : undefined,
       ordered: isSet(object.ordered) ? Boolean(object.ordered) : false,
+      chunkSize: isSet(object.chunkSize) ? RowSeqScanNode_ChunkSize.fromJSON(object.chunkSize) : undefined,
     };
   },
 
@@ -445,6 +472,8 @@ export const RowSeqScanNode = {
     message.vnodeBitmap !== undefined &&
       (obj.vnodeBitmap = message.vnodeBitmap ? Buffer.toJSON(message.vnodeBitmap) : undefined);
     message.ordered !== undefined && (obj.ordered = message.ordered);
+    message.chunkSize !== undefined &&
+      (obj.chunkSize = message.chunkSize ? RowSeqScanNode_ChunkSize.toJSON(message.chunkSize) : undefined);
     return obj;
   },
 
@@ -459,6 +488,31 @@ export const RowSeqScanNode = {
       ? Buffer.fromPartial(object.vnodeBitmap)
       : undefined;
     message.ordered = object.ordered ?? false;
+    message.chunkSize = (object.chunkSize !== undefined && object.chunkSize !== null)
+      ? RowSeqScanNode_ChunkSize.fromPartial(object.chunkSize)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseRowSeqScanNode_ChunkSize(): RowSeqScanNode_ChunkSize {
+  return { chunkSize: 0 };
+}
+
+export const RowSeqScanNode_ChunkSize = {
+  fromJSON(object: any): RowSeqScanNode_ChunkSize {
+    return { chunkSize: isSet(object.chunkSize) ? Number(object.chunkSize) : 0 };
+  },
+
+  toJSON(message: RowSeqScanNode_ChunkSize): unknown {
+    const obj: any = {};
+    message.chunkSize !== undefined && (obj.chunkSize = Math.round(message.chunkSize));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<RowSeqScanNode_ChunkSize>, I>>(object: I): RowSeqScanNode_ChunkSize {
+    const message = createBaseRowSeqScanNode_ChunkSize();
+    message.chunkSize = object.chunkSize ?? 0;
     return message;
   },
 };
@@ -701,15 +755,16 @@ export const FilterNode = {
 };
 
 function createBaseInsertNode(): InsertNode {
-  return { tableId: 0, columnIndices: [], rowIdIndex: undefined, returning: false };
+  return { tableId: 0, tableVersionId: 0, columnIndices: [], rowIdIndex: undefined, returning: false };
 }
 
 export const InsertNode = {
   fromJSON(object: any): InsertNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       columnIndices: Array.isArray(object?.columnIndices) ? object.columnIndices.map((e: any) => Number(e)) : [],
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
@@ -717,13 +772,13 @@ export const InsertNode = {
   toJSON(message: InsertNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.columnIndices) {
       obj.columnIndices = message.columnIndices.map((e) => Math.round(e));
     } else {
       obj.columnIndices = [];
     }
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
@@ -731,23 +786,23 @@ export const InsertNode = {
   fromPartial<I extends Exact<DeepPartial<InsertNode>, I>>(object: I): InsertNode {
     const message = createBaseInsertNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.columnIndices = object.columnIndices?.map((e) => e) || [];
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.returning = object.returning ?? false;
     return message;
   },
 };
 
 function createBaseDeleteNode(): DeleteNode {
-  return { tableId: 0, returning: false };
+  return { tableId: 0, tableVersionId: 0, returning: false };
 }
 
 export const DeleteNode = {
   fromJSON(object: any): DeleteNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
   },
@@ -755,6 +810,7 @@ export const DeleteNode = {
   toJSON(message: DeleteNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     message.returning !== undefined && (obj.returning = message.returning);
     return obj;
   },
@@ -762,19 +818,21 @@ export const DeleteNode = {
   fromPartial<I extends Exact<DeepPartial<DeleteNode>, I>>(object: I): DeleteNode {
     const message = createBaseDeleteNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.returning = object.returning ?? false;
     return message;
   },
 };
 
 function createBaseUpdateNode(): UpdateNode {
-  return { tableId: 0, exprs: [], returning: false };
+  return { tableId: 0, tableVersionId: 0, exprs: [], returning: false };
 }
 
 export const UpdateNode = {
   fromJSON(object: any): UpdateNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
+      tableVersionId: isSet(object.tableVersionId) ? Number(object.tableVersionId) : 0,
       exprs: Array.isArray(object?.exprs) ? object.exprs.map((e: any) => ExprNode.fromJSON(e)) : [],
       returning: isSet(object.returning) ? Boolean(object.returning) : false,
     };
@@ -783,6 +841,7 @@ export const UpdateNode = {
   toJSON(message: UpdateNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
+    message.tableVersionId !== undefined && (obj.tableVersionId = Math.round(message.tableVersionId));
     if (message.exprs) {
       obj.exprs = message.exprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
     } else {
@@ -795,6 +854,7 @@ export const UpdateNode = {
   fromPartial<I extends Exact<DeepPartial<UpdateNode>, I>>(object: I): UpdateNode {
     const message = createBaseUpdateNode();
     message.tableId = object.tableId ?? 0;
+    message.tableVersionId = object.tableVersionId ?? 0;
     message.exprs = object.exprs?.map((e) => ExprNode.fromPartial(e)) || [];
     message.returning = object.returning ?? false;
     return message;
@@ -1270,7 +1330,7 @@ function createBaseSortMergeJoinNode(): SortMergeJoinNode {
     joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
-    direction: OrderType.ORDER_UNSPECIFIED,
+    direction: Direction.DIRECTION_UNSPECIFIED,
     outputIndices: [],
   };
 }
@@ -1281,7 +1341,7 @@ export const SortMergeJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
+      direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1299,7 +1359,7 @@ export const SortMergeJoinNode = {
     } else {
       obj.rightKey = [];
     }
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
+    message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -1313,29 +1373,42 @@ export const SortMergeJoinNode = {
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
+    message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: undefined, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return {
+    timeCol: 0,
+    windowSlide: undefined,
+    windowSize: undefined,
+    outputIndices: [],
+    windowStartExprs: [],
+    windowEndExprs: [],
+  };
 }
 
 export const HopWindowNode = {
   fromJSON(object: any): HopWindowNode {
     return {
-      timeCol: isSet(object.timeCol) ? InputRefExpr.fromJSON(object.timeCol) : undefined,
+      timeCol: isSet(object.timeCol) ? Number(object.timeCol) : 0,
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      windowStartExprs: Array.isArray(object?.windowStartExprs)
+        ? object.windowStartExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
+      windowEndExprs: Array.isArray(object?.windowEndExprs)
+        ? object.windowEndExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
   toJSON(message: HopWindowNode): unknown {
     const obj: any = {};
-    message.timeCol !== undefined && (obj.timeCol = message.timeCol ? InputRefExpr.toJSON(message.timeCol) : undefined);
+    message.timeCol !== undefined && (obj.timeCol = Math.round(message.timeCol));
     message.windowSlide !== undefined &&
       (obj.windowSlide = message.windowSlide ? IntervalUnit.toJSON(message.windowSlide) : undefined);
     message.windowSize !== undefined &&
@@ -1345,14 +1418,22 @@ export const HopWindowNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.windowStartExprs) {
+      obj.windowStartExprs = message.windowStartExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowStartExprs = [];
+    }
+    if (message.windowEndExprs) {
+      obj.windowEndExprs = message.windowEndExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowEndExprs = [];
+    }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<HopWindowNode>, I>>(object: I): HopWindowNode {
     const message = createBaseHopWindowNode();
-    message.timeCol = (object.timeCol !== undefined && object.timeCol !== null)
-      ? InputRefExpr.fromPartial(object.timeCol)
-      : undefined;
+    message.timeCol = object.timeCol ?? 0;
     message.windowSlide = (object.windowSlide !== undefined && object.windowSlide !== null)
       ? IntervalUnit.fromPartial(object.windowSlide)
       : undefined;
@@ -1360,6 +1441,8 @@ export const HopWindowNode = {
       ? IntervalUnit.fromPartial(object.windowSize)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.windowStartExprs = object.windowStartExprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.windowEndExprs = object.windowEndExprs?.map((e) => ExprNode.fromPartial(e)) || [];
     return message;
   },
 };

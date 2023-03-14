@@ -23,12 +23,13 @@ use super::create_index::gen_create_index_plan;
 use super::create_mv::gen_create_mv_plan;
 use super::create_sink::gen_sink_plan;
 use super::create_table::{
-    check_create_table_with_source, gen_create_table_plan, ColumnIdGenerator,
+    check_create_table_with_source, gen_create_table_plan, gen_create_table_plan_with_source,
+    ColumnIdGenerator,
 };
 use super::query::gen_batch_query_plan;
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::Convention;
+use crate::optimizer::plan_node::{Convention, Explain};
 use crate::optimizer::OptimizerContext;
 use crate::scheduler::BatchPlanFragmenter;
 use crate::stream_fragmenter::build_graph;
@@ -67,14 +68,23 @@ pub async fn handle_explain(
                 columns,
                 constraints,
                 source_schema,
+                source_watermarks,
+                append_only,
                 ..
             } => match check_create_table_with_source(&handler_args.with_options, source_schema)? {
-                Some(_) => {
-                    return Err(ErrorCode::NotImplemented(
-                        "explain create table with a connector".to_string(),
-                        None.into(),
+                Some(s) => {
+                    gen_create_table_plan_with_source(
+                        context,
+                        name,
+                        columns,
+                        constraints,
+                        s,
+                        source_watermarks,
+                        ColumnIdGenerator::new_initial(),
+                        append_only,
                     )
-                    .into())
+                    .await?
+                    .0
                 }
                 None => {
                     gen_create_table_plan(
@@ -83,6 +93,8 @@ pub async fn handle_explain(
                         columns,
                         constraints,
                         ColumnIdGenerator::new_initial(),
+                        source_watermarks,
+                        append_only,
                     )?
                     .0
                 }
@@ -190,8 +202,8 @@ pub async fn handle_explain(
         rows.into(),
         vec![PgFieldDescriptor::new(
             "QUERY PLAN".to_owned(),
-            DataType::VARCHAR.to_oid(),
-            DataType::VARCHAR.type_len(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
         )],
     ))
 }

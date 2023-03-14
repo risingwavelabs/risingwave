@@ -55,6 +55,8 @@ pub fn read_numeric_array<T: PrimitiveArrayItemType, R: PrimitiveValueReader<T>>
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }
 
@@ -68,7 +70,7 @@ pub fn read_bool_array(array: &ProstArray, cardinality: usize) -> ArrayResult<Ar
     let bitmap: Bitmap = array.get_null_bitmap()?.into();
 
     let arr = BoolArray::new(data, bitmap);
-    assert_eq!(arr.len(), cardinality);
+    ensure_eq!(arr.len(), cardinality);
 
     Ok(arr.into())
 }
@@ -99,9 +101,9 @@ pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUni
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
-        let ms = cursor.read_i64::<BigEndian>()?;
+        let usecs = cursor.read_i64::<BigEndian>()?;
 
-        Ok::<_, std::io::Error>(IntervalUnit::new(months, days, ms))
+        Ok::<_, std::io::Error>(IntervalUnit::from_month_day_usec(months, days, usecs))
     };
 
     match read() {
@@ -133,6 +135,8 @@ macro_rules! read_one_value_array {
                     }
                 }
                 let arr = builder.finish();
+                ensure_eq!(arr.len(), cardinality);
+
                 Ok(arr.into())
             }
             )*
@@ -189,12 +193,13 @@ pub fn read_string_array<B: ArrayBuilder, R: VarSizedValueReader<B>>(
                     offset
                 )
             })?;
-            let v = R::read(buf.as_slice())?;
-            builder.append(Some(v));
+            R::read(buf.as_slice(), &mut builder)?;
         } else {
             builder.append(None);
         }
     }
     let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
     Ok(arr.into())
 }

@@ -24,7 +24,7 @@ use postgres_types::FromSql;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::session_config::QueryMode;
-use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::ast::{SetExpr, Statement};
 
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
@@ -32,7 +32,8 @@ use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
 use crate::handler::HandlerArgs;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef};
+use crate::optimizer::plan_node::Explain;
+use crate::optimizer::{ExecutionModeDecider, OptimizerContext, OptimizerContextRef};
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
 use crate::scheduler::{
@@ -42,12 +43,43 @@ use crate::scheduler::{
 use crate::session::SessionImpl;
 use crate::PlanRef;
 
+fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
+    fn is_insert_using_select(stmt: &Statement) -> bool {
+        fn has_select_query(set_expr: &SetExpr) -> bool {
+            match set_expr {
+                SetExpr::Select(_) => true,
+                SetExpr::Query(query) => has_select_query(&query.body),
+                SetExpr::SetOperation { left, right, .. } => {
+                    has_select_query(left) || has_select_query(right)
+                }
+                SetExpr::Values(_) => false,
+            }
+        }
+
+        matches!(
+            stmt,
+            Statement::Insert {source, ..} if has_select_query(&source.body)
+        )
+    }
+
+    let stmt_type = StatementType::infer_from_statement(stmt)
+        .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
+
+    Ok(matches!(
+        stmt_type,
+        StatementType::UPDATE
+            | StatementType::DELETE
+            | StatementType::UPDATE_RETURNING
+            | StatementType::DELETE_RETURNING
+    ) | is_insert_using_select(stmt))
+}
+
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
 ) -> Result<(PlanRef, QueryMode, Schema)> {
-    let stmt_type = to_statement_type(&stmt)?;
+    let must_dist = must_run_in_distributed_mode(&stmt)?;
 
     let bound = {
         let mut binder = Binder::new(session);
@@ -67,7 +99,10 @@ pub fn gen_batch_query_plan(
                 must_local = true;
         }
     }
-    let must_dist = stmt_type.is_dml();
+
+    let mut logical = planner.plan(bound)?;
+    let schema = logical.schema();
+    let batch_plan = logical.gen_batch_plan()?;
 
     let query_mode = match (must_dist, must_local) {
         (true, true) => {
@@ -78,17 +113,27 @@ pub fn gen_batch_query_plan(
         }
         (true, false) => QueryMode::Distributed,
         (false, true) => QueryMode::Local,
-        (false, false) => session.config().get_query_mode(),
+        (false, false) => match session.config().get_query_mode() {
+            QueryMode::Auto => determine_query_mode(batch_plan.clone()),
+            QueryMode::Local => QueryMode::Local,
+            QueryMode::Distributed => QueryMode::Distributed,
+        },
     };
-
-    let mut logical = planner.plan(bound)?;
-    let schema = logical.schema();
 
     let physical = match query_mode {
-        QueryMode::Local => logical.gen_batch_local_plan()?,
-        QueryMode::Distributed => logical.gen_batch_distributed_plan()?,
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
+        QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
     };
     Ok((physical, query_mode, schema))
+}
+
+fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
+    if ExecutionModeDecider::run_in_local_mode(batch_plan) {
+        QueryMode::Local
+    } else {
+        QueryMode::Distributed
+    }
 }
 
 pub async fn handle_query(
@@ -96,7 +141,8 @@ pub async fn handle_query(
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
-    let stmt_type = to_statement_type(&stmt)?;
+    let stmt_type = StatementType::infer_from_statement(&stmt)
+        .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let session = handler_args.session.clone();
     let query_start_time = Instant::now();
     let only_checkpoint_visible = handler_args.session.config().only_checkpoint_visible();
@@ -151,6 +197,7 @@ pub async fn handle_query(
             PinnedHummockSnapshot::FrontendPinned(pinned_snapshot, only_checkpoint_visible)
         };
         match query_mode {
+            QueryMode::Auto => unreachable!(),
             QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
                 local_execute(session.clone(), query, query_snapshot).await?,
                 column_types,
@@ -218,18 +265,36 @@ pub async fn handle_query(
         }
 
         // update some metrics
-        if query_mode == QueryMode::Local {
-            session
-                .env()
-                .frontend_metrics
-                .latency_local_execution
-                .observe(query_start_time.elapsed().as_secs_f64());
+        match query_mode {
+            QueryMode::Auto => unreachable!(),
+            QueryMode::Local => {
+                session
+                    .env()
+                    .frontend_metrics
+                    .latency_local_execution
+                    .observe(query_start_time.elapsed().as_secs_f64());
 
-            session
-                .env()
-                .frontend_metrics
-                .query_counter_local_execution
-                .inc();
+                session
+                    .env()
+                    .frontend_metrics
+                    .query_counter_local_execution
+                    .inc();
+            }
+            QueryMode::Distributed => {
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .query_latency
+                    .observe(query_start_time.elapsed().as_secs_f64());
+
+                session
+                    .env()
+                    .query_manager()
+                    .query_metrics
+                    .completed_query_counter
+                    .inc();
+            }
         }
 
         Ok(())
@@ -238,38 +303,6 @@ pub async fn handle_query(
     Ok(PgResponse::new_for_stream_extra(
         stmt_type, rows_count, row_stream, pg_descs, notice, callback,
     ))
-}
-
-fn to_statement_type(stmt: &Statement) -> Result<StatementType> {
-    use StatementType::*;
-
-    match stmt {
-        Statement::Query(_) => Ok(SELECT),
-        Statement::Insert { returning, .. } => {
-            if returning.is_empty() {
-                Ok(INSERT)
-            } else {
-                Ok(INSERT_RETURNING)
-            }
-        }
-        Statement::Delete { returning, .. } => {
-            if returning.is_empty() {
-                Ok(DELETE)
-            } else {
-                Ok(DELETE_RETURNING)
-            }
-        }
-        Statement::Update { returning, .. } => {
-            if returning.is_empty() {
-                Ok(UPDATE)
-            } else {
-                Ok(UPDATE_RETURNING)
-            }
-        }
-        _ => Err(RwError::from(ErrorCode::InvalidInputSyntax(
-            "unsupported statement type".to_string(),
-        ))),
-    }
 }
 
 pub async fn distribute_execute(

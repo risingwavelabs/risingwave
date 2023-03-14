@@ -44,6 +44,10 @@ message UpdateMutation {
     // Merge executor can be uniquely identified by a combination of actor id and upstream fragment id.
     uint32 actor_id = 1;
     uint32 upstream_fragment_id = 2;
+    // - For scaling, this is always `None`.
+    // - For plan change, the upstream fragment will be changed to a new one, and this will be `Some`.
+    //   In this case, all the upstream actors should be removed and replaced by the `new` ones.
+    optional uint32 new_upstream_fragment_id = 5;
     // Added upstream actors.
     repeated uint32 added_upstream_actor_id = 3;
     // Removed upstream actors.
@@ -96,10 +100,8 @@ message Barrier {
 }
 
 message Watermark {
-  // The watermark column's index in the stream's schema.
-  uint32 col_idx = 1;
-  // The watermark type, used for deserialization of the watermark value.
-  data.DataType data_type = 2;
+  // The reference to the watermark column in the stream's schema.
+  expr.InputRef column = 1;
   // The watermark value, there will be no record having a greater value in the watermark column.
   data.Datum val = 3;
 }
@@ -121,7 +123,7 @@ message ActorMapping {
 message StreamSource {
   uint32 source_id = 1;
   catalog.Table state_table = 2;
-  catalog.ColumnIndex row_id_index = 3;
+  optional uint32 row_id_index = 3;
   repeated plan_common.ColumnCatalog columns = 4;
   repeated int32 pk_column_ids = 5;
   map<string, string> properties = 6;
@@ -135,11 +137,20 @@ message SourceNode {
   StreamSource source_inner = 1;
 }
 
+message SinkDesc {
+  uint32 id = 1;
+  string name = 2;
+  string definition = 3;
+  repeated plan_common.ColumnDesc columns = 4;
+  repeated common.ColumnOrder pk = 5;
+  repeated uint32 stream_key = 6;
+  repeated uint32 distribution_key = 7;
+  map<string, string> properties = 8;
+  catalog.SinkType sink_type = 9;
+}
+
 message SinkNode {
-  uint32 table_id = 1;
-  map<string, string> properties = 3;
-  repeated plan_common.Field fields = 4;
-  repeated uint32 sink_pk = 5;
+  SinkDesc sink_desc = 1;
 }
 
 message ProjectNode {
@@ -165,11 +176,17 @@ message FilterNode {
 message MaterializeNode {
   uint32 table_id = 1;
   // Column indexes and orders of primary key.
-  repeated plan_common.ColumnOrder column_orders = 2;
+  repeated common.ColumnOrder column_orders = 2;
   // Used for internal table states.
   catalog.Table table = 3;
-  // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  // Used to handle pk conflict, open it when upstream executor is source executor.
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
+}
+
+enum HandleConflictBehavior {
+  NO_CHECK_UNSPECIFIED = 0;
+  OVERWRITE = 1;
+  IGNORE = 2;
 }
 
 message AggCallState {
@@ -205,6 +222,8 @@ message SimpleAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message HashAggNode {
@@ -215,6 +234,8 @@ message HashAggNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 5;
+  map<uint32, catalog.Table> distinct_dedup_tables = 6;
+  uint32 row_count_index = 7;
 }
 
 message TopNNode {
@@ -222,7 +243,7 @@ message TopNNode {
   uint64 limit = 1;
   uint64 offset = 2;
   catalog.Table table = 3;
-  repeated plan_common.ColumnOrder order_by = 4;
+  repeated common.ColumnOrder order_by = 4;
   bool with_ties = 5;
 }
 
@@ -232,7 +253,7 @@ message GroupTopNNode {
   uint64 offset = 2;
   repeated uint32 group_key = 3;
   catalog.Table table = 4;
-  repeated plan_common.ColumnOrder order_by = 5;
+  repeated common.ColumnOrder order_by = 5;
   bool with_ties = 6;
 }
 
@@ -266,6 +287,20 @@ message HashJoinNode {
   // Whether to optimize for append only stream.
   // It is true when the input is append-only
   bool is_append_only = 14;
+}
+
+message TemporalJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  repeated bool null_safe = 4;
+  expr.ExprNode condition = 5;
+  // The output indices of current node
+  repeated uint32 output_indices = 6;
+  // The table desc of the lookup side table.
+  plan_common.StorageTableDesc table_desc = 7;
+  // The output indices of the lookup side table
+  repeated uint32 table_output_indices = 8;
 }
 
 message DynamicFilterNode {
@@ -303,10 +338,12 @@ message DeltaIndexJoinNode {
 }
 
 message HopWindowNode {
-  expr.InputRefExpr time_col = 1;
+  uint32 time_col = 1;
   data.IntervalUnit window_slide = 2;
   data.IntervalUnit window_size = 3;
   repeated uint32 output_indices = 4;
+  repeated expr.ExprNode window_start_exprs = 5;
+  repeated expr.ExprNode window_end_exprs = 6;
 }
 
 message MergeNode {
@@ -346,6 +383,9 @@ enum ChainType {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
+  reserved 5;
+  reserved "same_worker_node";
+
   uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
@@ -356,8 +396,6 @@ message ChainNode {
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
-  // Whether to place this chain on the same worker node as upstream actors.
-  bool same_worker_node = 5;
   // Whether the upstream materialize is and this chain should be a singleton.
   // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
   // fragment in the downstream mview. Remove this when we refactor the fragmenter.
@@ -378,7 +416,7 @@ message BatchPlanNode {
 message ArrangementInfo {
   // Order key of the arrangement, including order by columns and pk from the materialize
   // executor.
-  repeated plan_common.ColumnOrder arrange_key_orders = 1;
+  repeated common.ColumnOrder arrange_key_orders = 1;
   // Column descs of the arrangement
   repeated plan_common.ColumnDesc column_descs = 2;
   // Used to build storage table by stream lookup join of delta join.
@@ -395,7 +433,7 @@ message ArrangeNode {
   // Used for internal table states.
   catalog.Table table = 3;
   // Used to control whether doing sanity check, open it when upstream executor is source executor.
-  bool handle_pk_conflict = 4;
+  HandleConflictBehavior handle_pk_conflict_behavior = 4;
 }
 
 // Special node for shared state. LookupNode will join an arrangement with a stream.
@@ -422,12 +460,10 @@ message LookupNode {
 
 // WatermarkFilter needs to filter the upstream data by the water mark.
 message WatermarkFilterNode {
-  // The expression to calculate the watermark value.
-  expr.ExprNode watermark_expr = 1;
-  // The column the event time belongs.
-  uint64 event_time_col_idx = 2;
-  // The table used to persist watermark, the key is vnode.
-  catalog.Table table = 3;
+  // The watermark descs
+  repeated catalog.WatermarkDesc watermark_descs = 1;
+  // The tables used to persist watermarks, the key is vnode.
+  repeated catalog.Table tables = 2;
 }
 
 // Acts like a merger, but on different inputs.
@@ -461,6 +497,8 @@ message SortNode {
 message DmlNode {
   // Id of the table on which DML performs.
   uint32 table_id = 1;
+  // Version of the table.
+  uint64 table_version_id = 3;
   // Column descriptions of the table.
   repeated plan_common.ColumnDesc column_descs = 2;
 }
@@ -507,6 +545,7 @@ message StreamNode {
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
+    TemporalJoinNode temporal_join = 131;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -537,9 +576,12 @@ enum DispatcherType {
   NO_SHUFFLE = 4;
 }
 
+// The property of an edge in the fragment graph.
+// This is essientially a "logical" version of `Dispatcher`. See the doc of `Dispatcher` for more details.
 message DispatchStrategy {
   DispatcherType type = 1;
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  repeated uint32 output_indices = 3;
 }
 
 // A dispatcher redistribute messages.
@@ -548,27 +590,26 @@ message Dispatcher {
   DispatcherType type = 1;
   // Indices of the columns to be used for hashing.
   // For dispatcher types other than HASH, this is ignored.
-  repeated uint32 column_indices = 2;
+  repeated uint32 dist_key_indices = 2;
+  // Indices of the columns to output.
+  // In most cases, this contains all columns in the input. But for some cases like MV on MV or
+  // schema change, we may only output a subset of the columns.
+  repeated uint32 output_indices = 6;
   // The hash mapping for consistent hash.
   // For dispatcher types other than HASH, this is ignored.
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
-  // - For dispatchers within actors, the id is the same as its downstream fragment id.
-  //   We can't use the exchange operator id directly as the dispatch id, because an exchange
-  //   could belong to more than one downstream in DAG.
-  // - For MV on MV, the id is the same as the actor id of chain node in the downstream MV.
+  // This is exactly the same as its downstream fragment id.
   uint64 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
 
-// Used to place an actor together with another actor in the same worker node.
-message ColocatedActorId {
-  uint32 id = 1;
-}
-
 // A StreamActor is a running fragment of the overall stream graph,
 message StreamActor {
+  reserved 7;
+  reserved "colocated_upstream_actor_id";
+
   uint32 actor_id = 1;
   uint32 fragment_id = 2;
   StreamNode nodes = 3;
@@ -578,8 +619,6 @@ message StreamActor {
   // It is painstaking to traverse through the node tree and get upstream actor id from the root StreamNode.
   // We duplicate the information here to ease the parsing logic in stream manager.
   repeated uint32 upstream_actor_id = 6;
-  // Placement rule for actor, need to stay on the same node as a specified upstream actor.
-  ColocatedActorId colocated_upstream_actor_id = 7;
   // Vnodes that the executors in this actor own.
   // If the fragment is a singleton, this field will not be set and leave a `None`.
   common.Buffer vnode_bitmap = 8;
@@ -619,10 +658,11 @@ message StreamFragmentGraph {
   }
 
   message StreamFragmentEdge {
+    reserved 2;
+    reserved "same_worker_node";
+
     // Dispatch strategy for the fragment.
     DispatchStrategy dispatch_strategy = 1;
-    // Whether the two linked nodes should be placed on the same worker node
-    bool same_worker_node = 2;
     // A unique identifier of this edge. Generally it should be exchange node's operator id. When
     // rewriting fragments into delta joins or when inserting 1-to-1 exchange, there will be
     // virtual links generated.
@@ -640,7 +680,7 @@ message StreamFragmentGraph {
   // edges between fragments.
   repeated StreamFragmentEdge edges = 2;
 
-  repeated uint32 dependent_table_ids = 3;
+  repeated uint32 dependent_relation_ids = 3;
   uint32 table_ids_cnt = 4;
   StreamEnvironment env = 5;
   // If none, default parallelism will be applied.

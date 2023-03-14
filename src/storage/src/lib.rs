@@ -42,6 +42,7 @@
 #![feature(provide_any)]
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
+#![feature(local_key_cell_methods)]
 
 pub mod hummock;
 pub mod memory;
@@ -52,6 +53,7 @@ pub mod storage_value;
 #[macro_use]
 pub mod store;
 pub mod error;
+pub mod opts;
 pub mod store_impl;
 pub mod table;
 pub mod write_batch;

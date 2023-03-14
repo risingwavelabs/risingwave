@@ -21,17 +21,18 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{ArrangementInfo, DeltaIndexJoinNode};
 
 use super::generic::GenericPlanRef;
-use super::{LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
-use crate::expr::Expr;
+use super::{ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamNode};
+use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::stream::StreamPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`StreamDeltaJoin`] implements [`super::LogicalJoin`] with delta join. It requires its two
 /// inputs to be indexes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDeltaJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -192,17 +193,12 @@ impl StreamNode for StreamDeltaJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x)
-                        .to_expr_proto()
-                }),
+                .map(|x| x.to_expr_proto()),
             left_table_id: left_table_desc.table_id.table_id(),
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: left_table
                     .column_descs()
@@ -213,7 +209,7 @@ impl StreamNode for StreamDeltaJoin {
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: right_table
                     .column_descs()
@@ -229,5 +225,23 @@ impl StreamNode for StreamDeltaJoin {
                 .map(|&x| x as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamDeltaJoin {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_join()
+                .unwrap()
+                .clone(),
+            self.eq_join_predicate.rewrite_exprs(r),
+        )
+        .into()
     }
 }

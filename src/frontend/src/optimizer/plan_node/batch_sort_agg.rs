@@ -28,8 +28,9 @@ use super::{
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchSortAgg {
     pub base: PlanBase,
     logical: LogicalAgg,
@@ -48,21 +49,16 @@ impl BatchSortAgg {
             d => d.clone(),
         };
         let input_order = Order {
-            field_order: input
+            column_orders: input
                 .order()
-                .field_order
+                .column_orders
                 .iter()
-                .filter(|field_ord| {
-                    logical
-                        .group_key()
-                        .iter()
-                        .any(|g_k| *g_k == field_ord.index)
-                })
+                .filter(|o| logical.group_key().iter().any(|g_k| *g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
 
-        assert_eq!(input_order.field_order.len(), logical.group_key().len());
+        assert_eq!(input_order.column_orders.len(), logical.group_key().len());
 
         let order = logical
             .i2o_col_mapping()
@@ -119,18 +115,13 @@ impl ToBatchProst for BatchSortAgg {
             agg_calls: self
                 .agg_calls()
                 .iter()
-                .map(|x| PlanAggCall::to_protobuf(x, self.base.ctx()))
+                .map(PlanAggCall::to_protobuf)
                 .collect(),
             group_key: self
                 .group_key()
                 .iter()
                 .map(|idx| ExprImpl::InputRef(Box::new(InputRef::new(*idx, DataType::Int32))))
-                .map(|expr| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(expr)
-                        .to_expr_proto()
-                })
+                .map(|expr| expr.to_expr_proto())
                 .collect::<Vec<ExprNode>>(),
         })
     }

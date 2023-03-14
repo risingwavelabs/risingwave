@@ -634,11 +634,17 @@ impl Zero for Decimal {
     }
 }
 
+impl From<RustDecimal> for Decimal {
+    fn from(d: RustDecimal) -> Self {
+        Self::Normalized(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use itertools::Itertools;
 
     use super::*;
+    use crate::util::iter_util::ZipEqFast;
 
     fn check(lhs: f32, rhs: f32) -> bool {
         if lhs.is_nan() && rhs.is_nan() {
@@ -674,8 +680,8 @@ mod tests {
             -1.0f32,
             0.0f32,
         ];
-        for (d_lhs, f_lhs) in decimals.iter().zip_eq(floats.iter()) {
-            for (d_rhs, f_rhs) in decimals.iter().zip_eq(floats.iter()) {
+        for (d_lhs, f_lhs) in decimals.iter().zip_eq_fast(floats.iter()) {
+            for (d_rhs, f_rhs) in decimals.iter().zip_eq_fast(floats.iter()) {
                 assert!(check((*d_lhs + *d_rhs).to_f32().unwrap(), f_lhs + f_rhs));
                 assert!(check((*d_lhs - *d_rhs).to_f32().unwrap(), f_lhs - f_rhs));
                 assert!(check((*d_lhs * *d_rhs).to_f32().unwrap(), f_lhs * f_rhs));

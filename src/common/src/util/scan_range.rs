@@ -27,7 +27,7 @@ use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::value_encoding::serialize_datum_into;
 
 /// See also [`ScanRangeProst`]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ScanRange {
     pub eq_conds: Vec<Datum>,
     pub range: (Bound<ScalarImpl>, Bound<ScalarImpl>),
@@ -68,6 +68,16 @@ impl ScanRange {
         self.eq_conds.is_empty() && self.range == full_range()
     }
 
+    pub fn has_eq_conds(&self) -> bool {
+        !self.eq_conds.is_empty()
+    }
+
+    pub fn two_side_bound(&self) -> bool {
+        let bounds = &self.range;
+        !matches!(bounds.start_bound(), Bound::Unbounded)
+            && !matches!(bounds.end_bound(), Bound::Unbounded)
+    }
+
     pub const fn full_table_scan() -> Self {
         Self {
             eq_conds: vec![],
@@ -81,7 +91,7 @@ impl ScanRange {
         pk_indices: &[usize],
     ) -> Option<VirtualNode> {
         if dist_key_indices.is_empty() {
-            return None;
+            return Some(VirtualNode::ZERO);
         }
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);

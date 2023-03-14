@@ -16,11 +16,8 @@ use prost::Message;
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::HummockPinnedVersion;
 
+use crate::hummock::model::HUMMOCK_PINNED_VERSION_CF_NAME;
 use crate::model::{MetadataModel, MetadataModelResult};
-
-/// Column family name for hummock pinned version
-/// `cf(hummock_pinned_version)`: `HummockContextId` -> `HummockPinnedVersion`
-const HUMMOCK_PINNED_VERSION_CF_NAME: &str = "cf/hummock_pinned_version";
 
 /// `HummockPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockPinnedVersion {

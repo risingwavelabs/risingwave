@@ -23,7 +23,7 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::Order;
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TopN<PlanRef> {
     pub input: PlanRef,
     pub limit: u64,
@@ -43,7 +43,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         let schema = me.schema();
         let pk_indices = me.logical_pk();
         let columns_fields = schema.fields().to_vec();
-        let field_order = &self.order.field_order;
+        let column_orders = &self.order.column_orders;
         let mut internal_table_catalog_builder =
             TableCatalogBuilder::new(me.ctx().with_options().internal_table_subset());
 
@@ -58,21 +58,21 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
         // does a prefix scanning with the group key, we can fetch the data in the
         // desired order.
         self.group_key.iter().for_each(|&idx| {
-            internal_table_catalog_builder.add_order_column(idx, OrderType::Ascending);
+            internal_table_catalog_builder.add_order_column(idx, OrderType::ascending());
             order_cols.insert(idx);
         });
 
-        field_order.iter().for_each(|field_order| {
-            if !order_cols.contains(&field_order.index) {
+        column_orders.iter().for_each(|order| {
+            if !order_cols.contains(&order.column_index) {
                 internal_table_catalog_builder
-                    .add_order_column(field_order.index, OrderType::from(field_order.direct));
-                order_cols.insert(field_order.index);
+                    .add_order_column(order.column_index, order.order_type);
+                order_cols.insert(order.column_index);
             }
         });
 
         pk_indices.iter().for_each(|idx| {
             if !order_cols.contains(idx) {
-                internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending);
+                internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending());
                 order_cols.insert(*idx);
             }
         });

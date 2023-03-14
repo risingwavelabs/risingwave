@@ -22,6 +22,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::{ArrayBuilder, DataChunk, I64ArrayBuilder, Op, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::table_function::ProjectSetSelectItem;
 
 use super::error::StreamExecutorError;
@@ -166,7 +167,7 @@ impl ProjectSetExecutor {
                             projected_row_id_builder.append(Some(i as i64));
                         }
 
-                        for (item, builder) in items.into_iter().zip_eq(builders.iter_mut()) {
+                        for (item, builder) in items.into_iter().zip_eq_fast(builders.iter_mut()) {
                             match item {
                                 Either::Left(array_ref) => {
                                     builder.append_array(&array_ref);
@@ -208,8 +209,9 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::{Expression, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{
+        new_binary_expr, Expression, InputRefExpression, LiteralExpression,
+    };
     use risingwave_expr::table_function::repeat_tf;
     use risingwave_pb::expr::expr_node::Type;
 

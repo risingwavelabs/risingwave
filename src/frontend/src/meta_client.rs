@@ -14,9 +14,12 @@
 
 use std::collections::HashMap;
 
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
+use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockSnapshot;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::CreatingJobInfo;
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 
@@ -33,6 +36,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot>;
 
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()>;
+
     async fn list_table_fragments(
         &self,
         table_ids: &[u32],
@@ -43,6 +48,12 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn unpin_snapshot_before(&self, epoch: u64) -> Result<()>;
 
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>>;
+
+    async fn get_system_params(&self) -> Result<SystemParamsReader>;
+
+    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()>;
+
+    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -59,6 +70,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn flush(&self, checkpoint: bool) -> Result<HummockSnapshot> {
         self.0.flush(checkpoint).await
+    }
+
+    async fn cancel_creating_jobs(&self, infos: Vec<CreatingJobInfo>) -> Result<()> {
+        self.0.cancel_creating_jobs(infos).await
     }
 
     async fn list_table_fragments(
@@ -79,5 +94,18 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
     async fn list_meta_snapshots(&self) -> Result<Vec<MetaSnapshotMetadata>> {
         let manifest = self.0.get_meta_snapshot_manifest().await?;
         Ok(manifest.snapshot_metadata)
+    }
+
+    async fn get_system_params(&self) -> Result<SystemParamsReader> {
+        self.0.get_system_params().await
+    }
+
+    async fn set_system_param(&self, param: String, value: Option<String>) -> Result<()> {
+        self.0.set_system_param(param, value).await
+    }
+
+    async fn list_ddl_progress(&self) -> Result<Vec<DdlProgress>> {
+        let ddl_progress = self.0.get_ddl_progress().await?;
+        Ok(ddl_progress)
     }
 }

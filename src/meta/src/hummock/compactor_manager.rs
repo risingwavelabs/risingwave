@@ -205,6 +205,14 @@ impl CompactorManager {
         rx
     }
 
+    /// Used when meta exiting to support graceful shutdown.
+    pub fn abort_all_compactors(&self) {
+        let mut policy = self.policy.write();
+        while let Some(compactor) = policy.next_compactor() {
+            policy.remove_compactor(compactor.context_id);
+        }
+    }
+
     pub fn pause_compactor(&self, context_id: HummockContextId) {
         let mut policy = self.policy.write();
         policy.pause_compactor(context_id);
@@ -396,6 +404,7 @@ mod tests {
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
     use risingwave_pb::hummock::CompactTaskProgress;
 
+    use crate::hummock::compaction::default_level_selector;
     use crate::hummock::test_utils::{add_ssts, setup_compute_env};
     use crate::hummock::CompactorManager;
 
@@ -410,7 +419,10 @@ mod tests {
             let _receiver = compactor_manager.add_compactor(context_id, 1);
             let _compactor = hummock_manager.get_idle_compactor().await.unwrap();
             let task = hummock_manager
-                .get_compact_task(StaticCompactionGroupId::StateDefault.into())
+                .get_compact_task(
+                    StaticCompactionGroupId::StateDefault.into(),
+                    &mut default_level_selector(),
+                )
                 .await
                 .unwrap()
                 .unwrap();

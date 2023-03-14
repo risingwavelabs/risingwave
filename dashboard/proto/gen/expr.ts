@@ -1,13 +1,13 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType, Datum } from "./data";
-import { OrderType, orderTypeFromJSON, orderTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "expr";
 
 export interface ExprNode {
   exprType: ExprNode_Type;
   returnType: DataType | undefined;
-  rexNode?: { $case: "inputRef"; inputRef: InputRefExpr } | { $case: "constant"; constant: Datum } | {
+  rexNode?: { $case: "inputRef"; inputRef: number } | { $case: "constant"; constant: Datum } | {
     $case: "funcCall";
     funcCall: FunctionCall;
   } | { $case: "udf"; udf: UserDefinedFunction };
@@ -105,6 +105,8 @@ export const ExprNode_Type = {
   BIT_LENGTH: "BIT_LENGTH",
   OVERLAY: "OVERLAY",
   REGEXP_MATCH: "REGEXP_MATCH",
+  POW: "POW",
+  EXP: "EXP",
   /** IS_TRUE - Boolean comparison */
   IS_TRUE: "IS_TRUE",
   IS_NOT_TRUE: "IS_NOT_TRUE",
@@ -122,12 +124,21 @@ export const ExprNode_Type = {
   ARRAY: "ARRAY",
   ARRAY_ACCESS: "ARRAY_ACCESS",
   ROW: "ROW",
+  ARRAY_TO_STRING: "ARRAY_TO_STRING",
   /** ARRAY_CAT - Array functions */
   ARRAY_CAT: "ARRAY_CAT",
   ARRAY_APPEND: "ARRAY_APPEND",
   ARRAY_PREPEND: "ARRAY_PREPEND",
+  FORMAT_TYPE: "FORMAT_TYPE",
+  ARRAY_DISTINCT: "ARRAY_DISTINCT",
+  /** JSONB_ACCESS_INNER - jsonb -> int, jsonb -> text, jsonb #> text[] that returns jsonb */
+  JSONB_ACCESS_INNER: "JSONB_ACCESS_INNER",
+  /** JSONB_ACCESS_STR - jsonb ->> int, jsonb ->> text, jsonb #>> text[] that returns text */
+  JSONB_ACCESS_STR: "JSONB_ACCESS_STR",
+  JSONB_TYPEOF: "JSONB_TYPEOF",
+  JSONB_ARRAY_LENGTH: "JSONB_ARRAY_LENGTH",
   /**
-   * VNODE - Non-pure functions below (> 600)
+   * VNODE - Non-pure functions below (> 1000)
    * ------------------------
    * Internal functions
    */
@@ -338,6 +349,12 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 232:
     case "REGEXP_MATCH":
       return ExprNode_Type.REGEXP_MATCH;
+    case 233:
+    case "POW":
+      return ExprNode_Type.POW;
+    case 234:
+    case "EXP":
+      return ExprNode_Type.EXP;
     case 301:
     case "IS_TRUE":
       return ExprNode_Type.IS_TRUE;
@@ -377,6 +394,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 523:
     case "ROW":
       return ExprNode_Type.ROW;
+    case 524:
+    case "ARRAY_TO_STRING":
+      return ExprNode_Type.ARRAY_TO_STRING;
     case 531:
     case "ARRAY_CAT":
       return ExprNode_Type.ARRAY_CAT;
@@ -386,6 +406,24 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 533:
     case "ARRAY_PREPEND":
       return ExprNode_Type.ARRAY_PREPEND;
+    case 534:
+    case "FORMAT_TYPE":
+      return ExprNode_Type.FORMAT_TYPE;
+    case 535:
+    case "ARRAY_DISTINCT":
+      return ExprNode_Type.ARRAY_DISTINCT;
+    case 600:
+    case "JSONB_ACCESS_INNER":
+      return ExprNode_Type.JSONB_ACCESS_INNER;
+    case 601:
+    case "JSONB_ACCESS_STR":
+      return ExprNode_Type.JSONB_ACCESS_STR;
+    case 602:
+    case "JSONB_TYPEOF":
+      return ExprNode_Type.JSONB_TYPEOF;
+    case 603:
+    case "JSONB_ARRAY_LENGTH":
+      return ExprNode_Type.JSONB_ARRAY_LENGTH;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -534,6 +572,10 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "OVERLAY";
     case ExprNode_Type.REGEXP_MATCH:
       return "REGEXP_MATCH";
+    case ExprNode_Type.POW:
+      return "POW";
+    case ExprNode_Type.EXP:
+      return "EXP";
     case ExprNode_Type.IS_TRUE:
       return "IS_TRUE";
     case ExprNode_Type.IS_NOT_TRUE:
@@ -560,12 +602,26 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "ARRAY_ACCESS";
     case ExprNode_Type.ROW:
       return "ROW";
+    case ExprNode_Type.ARRAY_TO_STRING:
+      return "ARRAY_TO_STRING";
     case ExprNode_Type.ARRAY_CAT:
       return "ARRAY_CAT";
     case ExprNode_Type.ARRAY_APPEND:
       return "ARRAY_APPEND";
     case ExprNode_Type.ARRAY_PREPEND:
       return "ARRAY_PREPEND";
+    case ExprNode_Type.FORMAT_TYPE:
+      return "FORMAT_TYPE";
+    case ExprNode_Type.ARRAY_DISTINCT:
+      return "ARRAY_DISTINCT";
+    case ExprNode_Type.JSONB_ACCESS_INNER:
+      return "JSONB_ACCESS_INNER";
+    case ExprNode_Type.JSONB_ACCESS_STR:
+      return "JSONB_ACCESS_STR";
+    case ExprNode_Type.JSONB_TYPEOF:
+      return "JSONB_TYPEOF";
+    case ExprNode_Type.JSONB_ARRAY_LENGTH:
+      return "JSONB_ARRAY_LENGTH";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
@@ -637,8 +693,10 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
   }
 }
 
-export interface InputRefExpr {
-  columnIdx: number;
+/** Reference to an upstream column, containing its index and data type. */
+export interface InputRef {
+  index: number;
+  type: DataType | undefined;
 }
 
 /**
@@ -680,10 +738,10 @@ export interface FunctionCall {
 /** Aggregate Function Calls for Aggregation */
 export interface AggCall {
   type: AggCall_Type;
-  args: AggCall_Arg[];
+  args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
-  orderByFields: AggCall_OrderByField[];
+  orderBy: ColumnOrder[];
   filter: ExprNode | undefined;
 }
 
@@ -699,6 +757,10 @@ export const AggCall_Type = {
   ARRAY_AGG: "ARRAY_AGG",
   FIRST_VALUE: "FIRST_VALUE",
   SUM0: "SUM0",
+  VAR_POP: "VAR_POP",
+  VAR_SAMP: "VAR_SAMP",
+  STDDEV_POP: "STDDEV_POP",
+  STDDEV_SAMP: "STDDEV_SAMP",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -739,6 +801,18 @@ export function aggCall_TypeFromJSON(object: any): AggCall_Type {
     case 10:
     case "SUM0":
       return AggCall_Type.SUM0;
+    case 11:
+    case "VAR_POP":
+      return AggCall_Type.VAR_POP;
+    case 12:
+    case "VAR_SAMP":
+      return AggCall_Type.VAR_SAMP;
+    case 13:
+    case "STDDEV_POP":
+      return AggCall_Type.STDDEV_POP;
+    case 14:
+    case "STDDEV_SAMP":
+      return AggCall_Type.STDDEV_SAMP;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -770,22 +844,18 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
       return "FIRST_VALUE";
     case AggCall_Type.SUM0:
       return "SUM0";
+    case AggCall_Type.VAR_POP:
+      return "VAR_POP";
+    case AggCall_Type.VAR_SAMP:
+      return "VAR_SAMP";
+    case AggCall_Type.STDDEV_POP:
+      return "STDDEV_POP";
+    case AggCall_Type.STDDEV_SAMP:
+      return "STDDEV_SAMP";
     case AggCall_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
   }
-}
-
-export interface AggCall_Arg {
-  input: InputRefExpr | undefined;
-  type: DataType | undefined;
-}
-
-export interface AggCall_OrderByField {
-  input: InputRefExpr | undefined;
-  type: DataType | undefined;
-  direction: OrderType;
-  nullsFirst: boolean;
 }
 
 export interface UserDefinedFunction {
@@ -793,7 +863,8 @@ export interface UserDefinedFunction {
   name: string;
   argTypes: DataType[];
   language: string;
-  path: string;
+  link: string;
+  identifier: string;
 }
 
 function createBaseExprNode(): ExprNode {
@@ -806,7 +877,7 @@ export const ExprNode = {
       exprType: isSet(object.exprType) ? exprNode_TypeFromJSON(object.exprType) : ExprNode_Type.UNSPECIFIED,
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       rexNode: isSet(object.inputRef)
-        ? { $case: "inputRef", inputRef: InputRefExpr.fromJSON(object.inputRef) }
+        ? { $case: "inputRef", inputRef: Number(object.inputRef) }
         : isSet(object.constant)
         ? { $case: "constant", constant: Datum.fromJSON(object.constant) }
         : isSet(object.funcCall)
@@ -822,8 +893,7 @@ export const ExprNode = {
     message.exprType !== undefined && (obj.exprType = exprNode_TypeToJSON(message.exprType));
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
-    message.rexNode?.$case === "inputRef" &&
-      (obj.inputRef = message.rexNode?.inputRef ? InputRefExpr.toJSON(message.rexNode?.inputRef) : undefined);
+    message.rexNode?.$case === "inputRef" && (obj.inputRef = Math.round(message.rexNode?.inputRef));
     message.rexNode?.$case === "constant" &&
       (obj.constant = message.rexNode?.constant ? Datum.toJSON(message.rexNode?.constant) : undefined);
     message.rexNode?.$case === "funcCall" &&
@@ -844,7 +914,7 @@ export const ExprNode = {
       object.rexNode?.inputRef !== undefined &&
       object.rexNode?.inputRef !== null
     ) {
-      message.rexNode = { $case: "inputRef", inputRef: InputRefExpr.fromPartial(object.rexNode.inputRef) };
+      message.rexNode = { $case: "inputRef", inputRef: object.rexNode.inputRef };
     }
     if (
       object.rexNode?.$case === "constant" &&
@@ -908,24 +978,29 @@ export const TableFunction = {
   },
 };
 
-function createBaseInputRefExpr(): InputRefExpr {
-  return { columnIdx: 0 };
+function createBaseInputRef(): InputRef {
+  return { index: 0, type: undefined };
 }
 
-export const InputRefExpr = {
-  fromJSON(object: any): InputRefExpr {
-    return { columnIdx: isSet(object.columnIdx) ? Number(object.columnIdx) : 0 };
+export const InputRef = {
+  fromJSON(object: any): InputRef {
+    return {
+      index: isSet(object.index) ? Number(object.index) : 0,
+      type: isSet(object.type) ? DataType.fromJSON(object.type) : undefined,
+    };
   },
 
-  toJSON(message: InputRefExpr): unknown {
+  toJSON(message: InputRef): unknown {
     const obj: any = {};
-    message.columnIdx !== undefined && (obj.columnIdx = Math.round(message.columnIdx));
+    message.index !== undefined && (obj.index = Math.round(message.index));
+    message.type !== undefined && (obj.type = message.type ? DataType.toJSON(message.type) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<InputRefExpr>, I>>(object: I): InputRefExpr {
-    const message = createBaseInputRefExpr();
-    message.columnIdx = object.columnIdx ?? 0;
+  fromPartial<I extends Exact<DeepPartial<InputRef>, I>>(object: I): InputRef {
+    const message = createBaseInputRef();
+    message.index = object.index ?? 0;
+    message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
     return message;
   },
 };
@@ -1008,7 +1083,7 @@ function createBaseAggCall(): AggCall {
     args: [],
     returnType: undefined,
     distinct: false,
-    orderByFields: [],
+    orderBy: [],
     filter: undefined,
   };
 }
@@ -1017,12 +1092,10 @@ export const AggCall = {
   fromJSON(object: any): AggCall {
     return {
       type: isSet(object.type) ? aggCall_TypeFromJSON(object.type) : AggCall_Type.UNSPECIFIED,
-      args: Array.isArray(object?.args) ? object.args.map((e: any) => AggCall_Arg.fromJSON(e)) : [],
+      args: Array.isArray(object?.args) ? object.args.map((e: any) => InputRef.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
-      orderByFields: Array.isArray(object?.orderByFields)
-        ? object.orderByFields.map((e: any) => AggCall_OrderByField.fromJSON(e))
-        : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       filter: isSet(object.filter) ? ExprNode.fromJSON(object.filter) : undefined,
     };
   },
@@ -1031,17 +1104,17 @@ export const AggCall = {
     const obj: any = {};
     message.type !== undefined && (obj.type = aggCall_TypeToJSON(message.type));
     if (message.args) {
-      obj.args = message.args.map((e) => e ? AggCall_Arg.toJSON(e) : undefined);
+      obj.args = message.args.map((e) => e ? InputRef.toJSON(e) : undefined);
     } else {
       obj.args = [];
     }
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.distinct !== undefined && (obj.distinct = message.distinct);
-    if (message.orderByFields) {
-      obj.orderByFields = message.orderByFields.map((e) => e ? AggCall_OrderByField.toJSON(e) : undefined);
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.orderByFields = [];
+      obj.orderBy = [];
     }
     message.filter !== undefined && (obj.filter = message.filter ? ExprNode.toJSON(message.filter) : undefined);
     return obj;
@@ -1050,12 +1123,12 @@ export const AggCall = {
   fromPartial<I extends Exact<DeepPartial<AggCall>, I>>(object: I): AggCall {
     const message = createBaseAggCall();
     message.type = object.type ?? AggCall_Type.UNSPECIFIED;
-    message.args = object.args?.map((e) => AggCall_Arg.fromPartial(e)) || [];
+    message.args = object.args?.map((e) => InputRef.fromPartial(e)) || [];
     message.returnType = (object.returnType !== undefined && object.returnType !== null)
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.distinct = object.distinct ?? false;
-    message.orderByFields = object.orderByFields?.map((e) => AggCall_OrderByField.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.filter = (object.filter !== undefined && object.filter !== null)
       ? ExprNode.fromPartial(object.filter)
       : undefined;
@@ -1063,72 +1136,8 @@ export const AggCall = {
   },
 };
 
-function createBaseAggCall_Arg(): AggCall_Arg {
-  return { input: undefined, type: undefined };
-}
-
-export const AggCall_Arg = {
-  fromJSON(object: any): AggCall_Arg {
-    return {
-      input: isSet(object.input) ? InputRefExpr.fromJSON(object.input) : undefined,
-      type: isSet(object.type) ? DataType.fromJSON(object.type) : undefined,
-    };
-  },
-
-  toJSON(message: AggCall_Arg): unknown {
-    const obj: any = {};
-    message.input !== undefined && (obj.input = message.input ? InputRefExpr.toJSON(message.input) : undefined);
-    message.type !== undefined && (obj.type = message.type ? DataType.toJSON(message.type) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AggCall_Arg>, I>>(object: I): AggCall_Arg {
-    const message = createBaseAggCall_Arg();
-    message.input = (object.input !== undefined && object.input !== null)
-      ? InputRefExpr.fromPartial(object.input)
-      : undefined;
-    message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
-    return message;
-  },
-};
-
-function createBaseAggCall_OrderByField(): AggCall_OrderByField {
-  return { input: undefined, type: undefined, direction: OrderType.ORDER_UNSPECIFIED, nullsFirst: false };
-}
-
-export const AggCall_OrderByField = {
-  fromJSON(object: any): AggCall_OrderByField {
-    return {
-      input: isSet(object.input) ? InputRefExpr.fromJSON(object.input) : undefined,
-      type: isSet(object.type) ? DataType.fromJSON(object.type) : undefined,
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
-      nullsFirst: isSet(object.nullsFirst) ? Boolean(object.nullsFirst) : false,
-    };
-  },
-
-  toJSON(message: AggCall_OrderByField): unknown {
-    const obj: any = {};
-    message.input !== undefined && (obj.input = message.input ? InputRefExpr.toJSON(message.input) : undefined);
-    message.type !== undefined && (obj.type = message.type ? DataType.toJSON(message.type) : undefined);
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
-    message.nullsFirst !== undefined && (obj.nullsFirst = message.nullsFirst);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AggCall_OrderByField>, I>>(object: I): AggCall_OrderByField {
-    const message = createBaseAggCall_OrderByField();
-    message.input = (object.input !== undefined && object.input !== null)
-      ? InputRefExpr.fromPartial(object.input)
-      : undefined;
-    message.type = (object.type !== undefined && object.type !== null) ? DataType.fromPartial(object.type) : undefined;
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
-    message.nullsFirst = object.nullsFirst ?? false;
-    return message;
-  },
-};
-
 function createBaseUserDefinedFunction(): UserDefinedFunction {
-  return { children: [], name: "", argTypes: [], language: "", path: "" };
+  return { children: [], name: "", argTypes: [], language: "", link: "", identifier: "" };
 }
 
 export const UserDefinedFunction = {
@@ -1138,7 +1147,8 @@ export const UserDefinedFunction = {
       name: isSet(object.name) ? String(object.name) : "",
       argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
       language: isSet(object.language) ? String(object.language) : "",
-      path: isSet(object.path) ? String(object.path) : "",
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
     };
   },
 
@@ -1156,7 +1166,8 @@ export const UserDefinedFunction = {
       obj.argTypes = [];
     }
     message.language !== undefined && (obj.language = message.language);
-    message.path !== undefined && (obj.path = message.path);
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
     return obj;
   },
 
@@ -1166,7 +1177,8 @@ export const UserDefinedFunction = {
     message.name = object.name ?? "";
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.language = object.language ?? "";
-    message.path = object.path ?? "";
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
     return message;
   },
 };

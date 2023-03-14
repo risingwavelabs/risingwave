@@ -20,6 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
@@ -31,9 +32,10 @@ use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
-use crate::optimizer::plan_node::{LogicalProject, LogicalScan, StreamMaterialize};
-use crate::optimizer::property::{Distribution, FieldOrder, Order, RequiredDist};
+use crate::optimizer::plan_node::{Explain, LogicalProject, LogicalScan, StreamMaterialize};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, PlanRoot};
+use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::stream_fragmenter::build_graph;
 
@@ -83,6 +85,14 @@ pub(crate) fn gen_create_index_plan(
         .map(|(x, y)| (y.name.clone(), x))
         .collect::<HashMap<_, _>>();
 
+    let to_column_order = |(ident, order): &(Ident, OrderType)| {
+        let x = ident.real_value();
+        table_desc_map
+            .get(&x)
+            .map(|x| ColumnOrder::new(*x, *order))
+            .ok_or_else(|| ErrorCode::ItemNotFound(x).into())
+    };
+
     let to_column_indices = |ident: &Ident| {
         let x = ident.real_value();
         table_desc_map
@@ -93,7 +103,7 @@ pub(crate) fn gen_create_index_plan(
 
     let mut index_columns = columns
         .iter()
-        .map(to_column_indices)
+        .map(to_column_order)
         .try_collect::<_, Vec<_>, RwError>()?;
 
     let mut include_columns = if include.is_empty() {
@@ -121,7 +131,7 @@ pub(crate) fn gen_create_index_plan(
     let mut set = HashSet::new();
     index_columns = index_columns
         .into_iter()
-        .filter(|x| set.insert(*x))
+        .filter(|x| set.insert(x.column_index))
         .collect_vec();
 
     // Remove include columns are already in index columns
@@ -133,7 +143,12 @@ pub(crate) fn gen_create_index_plan(
     // Remove duplicate columns of distributed by columns
     let distributed_by_columns = distributed_by_columns.into_iter().unique().collect_vec();
     // Distributed by columns should be a prefix of index columns
-    if !index_columns.starts_with(&distributed_by_columns) {
+    if !index_columns
+        .iter()
+        .map(|x| x.column_index)
+        .collect_vec()
+        .starts_with(&distributed_by_columns)
+    {
         return Err(ErrorCode::InvalidInputSyntax(
             "Distributed by columns should be a prefix of index columns".to_string(),
         )
@@ -189,6 +204,9 @@ pub(crate) fn gen_create_index_plan(
             .map(InputRef::to_expr_proto)
             .collect_vec(),
         original_columns: index_columns
+            .iter()
+            .map(|x| x.column_index)
+            .collect_vec()
             .iter()
             .chain(include_columns.iter())
             .map(|index| *index as i32)
@@ -251,13 +269,15 @@ fn assemble_materialize(
     table_desc: Rc<TableDesc>,
     context: OptimizerContextRef,
     index_name: String,
-    index_columns: &[usize],
+    index_columns: &[ColumnOrder],
     include_columns: &[usize],
     distributed_by_columns_len: usize,
 ) -> Result<StreamMaterialize> {
     // Build logical plan and then call gen_create_index_plan
     // LogicalProject(index_columns, include_columns)
     //   LogicalScan(table_desc)
+
+    let definition = context.normalized_sql().to_owned();
 
     let logical_scan = LogicalScan::create(
         table_name,
@@ -266,9 +286,13 @@ fn assemble_materialize(
         // Index table has no indexes.
         vec![],
         context,
+        false,
     );
 
     let exprs = index_columns
+        .iter()
+        .map(|x| x.column_index)
+        .collect_vec()
         .iter()
         .chain(include_columns.iter())
         .map(|&i| {
@@ -284,6 +308,9 @@ fn assemble_materialize(
 
     let out_names: Vec<String> = index_columns
         .iter()
+        .map(|x| x.column_index)
+        .collect_vec()
+        .iter()
         .chain(include_columns.iter())
         .map(|&i| table_desc.columns.get(i).unwrap().name.clone())
         .collect_vec();
@@ -294,26 +321,23 @@ fn assemble_materialize(
             (0..distributed_by_columns_len).collect(),
         )),
         Order::new(
-            (0..index_columns.len())
-                .map(FieldOrder::ascending)
+            index_columns
+                .iter()
+                .enumerate()
+                .map(|(i, column_order)| ColumnOrder::new(i, column_order.order_type))
                 .collect(),
         ),
         project_required_cols,
         out_names,
     )
-    .gen_index_plan(index_name)
+    .gen_index_plan(index_name, definition)
 }
 
-fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
+fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            if column.asc.is_some() {
-                return Err(
-                    ErrorCode::NotImplemented("asc not supported".into(), None.into()).into(),
-                );
-            }
-
+            // TODO(rc): support `NULLS FIRST | LAST`
             if column.nulls_first.is_some() {
                 return Err(ErrorCode::NotImplemented(
                     "nulls_first not supported".into(),
@@ -325,7 +349,16 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<Ident>> {
             use risingwave_sqlparser::ast::Expr;
 
             if let Expr::Identifier(ident) = column.expr {
-                Ok::<_, RwError>(ident)
+                Ok::<(_, _), RwError>((
+                    ident,
+                    column.asc.map_or(OrderType::ascending(), |x| {
+                        if x {
+                            OrderType::ascending()
+                        } else {
+                            OrderType::descending()
+                        }
+                    }),
+                ))
             } else {
                 Err(ErrorCode::NotImplemented(
                     "only identifier is supported for create index".into(),
@@ -385,6 +418,17 @@ pub async fn handle_create_index(
         index_name,
         serde_json::to_string_pretty(&graph).unwrap()
     );
+
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                index.database_id,
+                index.schema_id,
+                index.name.clone(),
+            ));
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer

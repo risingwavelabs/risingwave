@@ -22,9 +22,11 @@ use itertools::Itertools;
 use risingwave_pb::common::{ParallelUnit, ParallelUnitMapping as ParallelUnitMappingProto};
 use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 
+use super::bitmap::VnodeBitmapExt;
 use super::vnode::{ParallelUnitId, VirtualNode};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::util::compress::compress_data;
+use crate::util::iter_util::ZipEqDebug;
 
 // TODO: find a better place for this.
 pub type ActorId = u32;
@@ -117,12 +119,21 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         self[vnode]
     }
 
+    /// Get the item matched by the virtual nodes indicated by high bits in the given `bitmap`.
+    /// Returns `None` if the no virtual node is set in the bitmap.
+    pub fn get_matched(&self, bitmap: &Bitmap) -> Option<T::Item> {
+        bitmap
+            .iter_vnodes()
+            .next() // only need to check the first one
+            .map(|v| self.get(v))
+    }
+
     /// Iterate over all items in this mapping, in the order of vnodes.
     pub fn iter(&self) -> impl Iterator<Item = T::Item> + '_ {
         self.data
             .iter()
             .copied()
-            .zip_eq(
+            .zip_eq_debug(
                 std::iter::once(0)
                     .chain(self.original_indices.iter().copied().map(|i| i + 1))
                     .tuple_windows()
@@ -142,6 +153,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
     pub fn iter_unique(&self) -> impl Iterator<Item = T::Item> + '_ {
         // Note: we can't ensure there's no duplicated items in the `data` after some scaling.
         self.data.iter().copied().sorted().dedup()
+    }
+
+    /// Returns the item if it's the only item in this mapping, otherwise returns `None`.
+    pub fn to_single(&self) -> Option<T::Item> {
+        self.data.iter().copied().dedup().exactly_one().ok()
     }
 
     /// Convert this vnode mapping to a mapping from items to bitmaps, where each bitmap represents
@@ -313,6 +329,7 @@ mod tests {
     use rand::Rng;
 
     use super::*;
+    use crate::util::iter_util::ZipEqDebug;
 
     struct Test;
     impl VnodeMappingItem for Test {
@@ -400,7 +417,7 @@ mod tests {
                 .collect();
             let vnode_mapping_2: Test2Mapping = vnode_mapping.transform(&transform_map);
 
-            for (item, item_2) in vnode_mapping.iter().zip_eq(vnode_mapping_2.iter()) {
+            for (item, item_2) in vnode_mapping.iter().zip_eq_debug(vnode_mapping_2.iter()) {
                 assert_eq!(item + 1, item_2);
             }
 

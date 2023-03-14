@@ -111,6 +111,20 @@ pub struct Args {
     #[clap(long)]
     sqlsmith: Option<usize>,
 
+    /// Run sqlsmith pre-generated queries with the given [`files`] directory,
+    /// containing `ddl.sql` and `queries.sql`.
+    #[clap(long)]
+    run_sqlsmith_queries: bool,
+
+    /// Run sqlsmith to generate queries with the given testdata [`files`],
+    /// and output the ddl + queries to the given directory,
+    /// indicated by this argument.
+    /// We generate sqlsmith queries via `madsim` because
+    /// it provides a degree of determinism, and we can spawn several
+    /// instances in parallel.
+    #[clap(long)]
+    generate_sqlsmith_queries: Option<String>,
+
     /// Load etcd data from toml file.
     #[clap(long)]
     etcd_data: Option<PathBuf>,
@@ -130,12 +144,12 @@ async fn main() {
     use risingwave_simulation::slt::*;
     use tracing_subscriber::EnvFilter;
 
-    tracing_subscriber::fmt()
+    _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
         .with_writer(std::io::stderr)
-        .init();
+        .try_init();
 
     let args = Args::parse();
     let config = Configuration {
@@ -163,16 +177,47 @@ async fn main() {
     );
 
     if let Some(datadir) = args.kafka_datadir {
-        cluster.create_kafka_producer(&datadir);
+        cluster.create_kafka_producer(&datadir).await;
     }
 
+    let seed = madsim::runtime::Handle::current().seed();
     if let Some(count) = args.sqlsmith {
         cluster
             .run_on_client(async move {
                 let rw = RisingWave::connect("frontend".into(), "dev".into())
                     .await
                     .unwrap();
-                risingwave_sqlsmith::runner::run(rw.pg_client(), &args.files, count).await;
+                if let Some(outdir) = args.generate_sqlsmith_queries {
+                    risingwave_sqlsmith::runner::generate(
+                        rw.pg_client(),
+                        &args.files,
+                        count,
+                        &outdir,
+                        Some(seed),
+                    )
+                    .await;
+                } else {
+                    risingwave_sqlsmith::runner::run(
+                        rw.pg_client(),
+                        &args.files,
+                        count,
+                        Some(seed),
+                    )
+                    .await;
+                }
+            })
+            .await;
+        return;
+    }
+
+    if args.run_sqlsmith_queries {
+        let outdir = args.files;
+        cluster
+            .run_on_client(async move {
+                let rw = RisingWave::connect("frontend".into(), "dev".into())
+                    .await
+                    .unwrap();
+                risingwave_sqlsmith::runner::run_pre_generated(rw.pg_client(), &outdir).await;
             })
             .await;
         return;
@@ -201,4 +246,5 @@ async fn main() {
             })
             .await;
     }
+    cluster.graceful_shutdown().await;
 }

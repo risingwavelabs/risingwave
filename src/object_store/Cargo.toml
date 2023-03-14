@@ -10,20 +10,20 @@ repository = { workspace = true }
 
 [dependencies]
 async-trait = "0.1"
-async_stack_trace = { path = "../utils/async_stack_trace" }
+await-tree = "0.1.1"
 aws-config = { workspace = true }
-aws-endpoint = { workspace = true }
-aws-sdk-s3 = { workspace = true }
+aws-sdk-s3 = { version = "0.2.15", package = "madsim-aws-sdk-s3" }
 aws-smithy-http = { workspace = true }
 aws-smithy-types = { workspace = true }
-aws-types = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 crc32fast = "1.3.2"
 fail = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hyper = "0.14"
 itertools = "0.10"
+opendal = "0.30"
 prometheus = { version = "0.13", features = ["process"] }
+random-string = "1.0"
 risingwave_common = { path = "../common" }
 spin = "0.9"
 tempfile = "3"
@@ -32,6 +32,16 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
 ] }
 tracing = "0.1"
+# This crate is excluded from hakari (see hakari.toml) after hdfs is introduced...
+#
+# [target.'cfg(not(madsim))'.dependencies]
+# workspace-hack = { path = "../workspace-hack" }
+#
+# [package.metadata.cargo-machete]
+# ignored = ["workspace-hack"]
+#
+# [package.metadata.cargo-udeps.ignore]
+# normal = ["workspace-hack"]
 
-[target.'cfg(not(madsim))'.dependencies]
-workspace-hack = { path = "../workspace-hack" }
+# [features]
+# hdfs-backend = ["opendal/services-hdfs"]

@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::io::{Error, ErrorKind};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
-// use tokio::sync::Mutex;
 use std::time::Duration;
 
 use parking_lot::{RwLock, RwLockReadGuard};
@@ -35,6 +34,7 @@ use risingwave_common::config::{load_config, BatchConfig};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
@@ -67,9 +67,12 @@ use crate::monitor::FrontendMetrics;
 use crate::observer::FrontendObserverNode;
 use crate::optimizer::OptimizerContext;
 use crate::planner::Planner;
+use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::worker_node_manager::{WorkerNodeManager, WorkerNodeManagerRef};
 use crate::scheduler::SchedulerError::QueryCancelError;
-use crate::scheduler::{HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager};
+use crate::scheduler::{
+    DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
+};
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -102,6 +105,10 @@ pub struct FrontendEnv {
     source_metrics: Arc<SourceMetrics>,
 
     batch_config: BatchConfig,
+
+    /// Track creating streaming jobs, used to cancel creating streaming job when cancel request
+    /// received.
+    creating_streaming_job_tracker: StreamingJobTrackerRef,
 }
 
 type SessionMapRef = Arc<Mutex<HashMap<(i32, i32), Arc<SessionImpl>>>>;
@@ -125,9 +132,12 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(DistributedQueryMetrics::for_test()),
+            None,
         );
         let server_addr = HostAddr::try_from("127.0.0.1:4565").unwrap();
         let client_pool = Arc::new(ComputeClientPool::default());
+        let creating_streaming_tracker = StreamingJobTracker::new(meta_client.clone());
         Self {
             meta_client,
             catalog_writer,
@@ -143,6 +153,7 @@ impl FrontendEnv {
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             batch_config: BatchConfig::default(),
             source_metrics: Arc::new(SourceMetrics::default()),
+            creating_streaming_job_tracker: Arc::new(creating_streaming_tracker),
         }
     }
 
@@ -172,7 +183,7 @@ impl FrontendEnv {
         info!("advertise addr is {}", frontend_address);
 
         // Register in meta by calling `AddWorkerNode` RPC.
-        let meta_client = MetaClient::register_new(
+        let (meta_client, system_params_reader) = MetaClient::register_new(
             opts.meta_addr.clone().as_str(),
             WorkerType::Frontend,
             &frontend_address,
@@ -197,6 +208,9 @@ impl FrontendEnv {
 
         let worker_node_manager = Arc::new(WorkerNodeManager::new());
 
+        let registry = prometheus::Registry::new();
+        monitor_process(&registry).unwrap();
+
         let frontend_meta_client = Arc::new(FrontendMetaClientImpl(meta_client.clone()));
         let hummock_snapshot_manager =
             Arc::new(HummockSnapshotManager::new(frontend_meta_client.clone()));
@@ -207,6 +221,8 @@ impl FrontendEnv {
             hummock_snapshot_manager.clone(),
             compute_client_pool,
             catalog_reader.clone(),
+            Arc::new(DistributedQueryMetrics::new(registry.clone())),
+            batch_config.distributed_query_limit,
         );
 
         let user_info_manager = Arc::new(RwLock::new(UserInfoManager::default()));
@@ -217,6 +233,7 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
+        let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -224,6 +241,7 @@ impl FrontendEnv {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
+            system_params_manager,
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
@@ -234,8 +252,6 @@ impl FrontendEnv {
 
         let client_pool = Arc::new(ComputeClientPool::new(config.server.connection_pool_size));
 
-        let registry = prometheus::Registry::new();
-        monitor_process(&registry).unwrap();
         let frontend_metrics = Arc::new(FrontendMetrics::new(registry.clone()));
         let source_metrics = Arc::new(SourceMetrics::new(registry.clone()));
 
@@ -257,6 +273,9 @@ impl FrontendEnv {
             opts.health_check_listener_addr.clone()
         );
 
+        let creating_streaming_job_tracker =
+            Arc::new(StreamingJobTracker::new(frontend_meta_client.clone()));
+
         Ok((
             Self {
                 catalog_reader,
@@ -273,6 +292,7 @@ impl FrontendEnv {
                 sessions_map: Arc::new(Mutex::new(HashMap::new())),
                 batch_config,
                 source_metrics,
+                creating_streaming_job_tracker,
             },
             observer_join_handle,
             heartbeat_join_handle,
@@ -338,6 +358,10 @@ impl FrontendEnv {
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
         self.source_metrics.clone()
+    }
+
+    pub fn creating_streaming_job_tracker(&self) -> &StreamingJobTrackerRef {
+        &self.creating_streaming_job_tracker
     }
 }
 
@@ -513,6 +537,10 @@ impl SessionImpl {
             self.env.query_manager().cancel_queries_in_session(self.id)
         }
     }
+
+    pub fn cancel_current_creating_job(&self) {
+        self.env.creating_streaming_job_tracker.abort_jobs(self.id);
+    }
 }
 
 pub struct SessionManagerImpl {
@@ -615,13 +643,22 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
         }
     }
 
-    /// Used when cancel request happened, returned corresponding session ref.
+    /// Used when cancel request happened.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
         let guard = self.env.sessions_map.lock().unwrap();
         if let Some(session) = guard.get(&session_id) {
             session.cancel_current_query()
         } else {
             info!("Current session finished, ignoring cancel query request")
+        }
+    }
+
+    fn cancel_creating_jobs_in_session(&self, session_id: SessionId) {
+        let guard = self.env.sessions_map.lock().unwrap();
+        if let Some(session) = guard.get(&session_id) {
+            session.cancel_current_creating_job()
+        } else {
+            info!("Current session finished, ignoring cancel creating request")
         }
     }
 
@@ -756,49 +793,63 @@ impl Session<PgResponseStream> for SessionImpl {
                     vec![
                         PgFieldDescriptor::new(
                             "Name".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Type".to_owned(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                     ]
                 }
                 _ => {
                     vec![PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     )]
                 }
             },
+            Statement::ShowCreateObject { .. } => {
+                vec![
+                    PgFieldDescriptor::new(
+                        "Name".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                    PgFieldDescriptor::new(
+                        "Create Sql".to_owned(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
+                    ),
+                ]
+            }
             Statement::ShowVariable { variable } => {
                 let name = &variable[0].real_value().to_lowercase();
                 if name.eq_ignore_ascii_case("ALL") {
                     vec![
                         PgFieldDescriptor::new(
                             "Name".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Setting".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                         PgFieldDescriptor::new(
                             "Description".to_string(),
-                            DataType::VARCHAR.to_oid(),
-                            DataType::VARCHAR.type_len(),
+                            DataType::Varchar.to_oid(),
+                            DataType::Varchar.type_len(),
                         ),
                     ]
                 } else {
                     vec![PgFieldDescriptor::new(
                         name.to_ascii_lowercase(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     )]
                 }
             }
@@ -806,21 +857,21 @@ impl Session<PgResponseStream> for SessionImpl {
                 vec![
                     PgFieldDescriptor::new(
                         "Name".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                     PgFieldDescriptor::new(
                         "Type".to_owned(),
-                        DataType::VARCHAR.to_oid(),
-                        DataType::VARCHAR.type_len(),
+                        DataType::Varchar.to_oid(),
+                        DataType::Varchar.type_len(),
                     ),
                 ]
             }
             Statement::Explain { .. } => {
                 vec![PgFieldDescriptor::new(
                     "QUERY PLAN".to_owned(),
-                    DataType::VARCHAR.to_oid(),
-                    DataType::VARCHAR.type_len(),
+                    DataType::Varchar.to_oid(),
+                    DataType::Varchar.type_len(),
                 )]
             }
             _ => {

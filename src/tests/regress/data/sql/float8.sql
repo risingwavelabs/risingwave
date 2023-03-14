@@ -182,7 +182,7 @@ SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 = '0.0' ;
 
 SELECT ln(f.f1) from FLOAT8_TBL f where f.f1 < '0.0' ;
 
-SELECT exp(f.f1) from FLOAT8_TBL f;
+--@ SELECT exp(f.f1) from FLOAT8_TBL f;
 
 --@ SELECT f.f1 / '0.0' from FLOAT8_TBL f;
 

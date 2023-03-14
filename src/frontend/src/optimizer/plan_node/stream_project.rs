@@ -16,17 +16,18 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::generic::GenericPlanRef;
-use super::{LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl};
+use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// `StreamProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
 /// rows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamProject {
     pub base: PlanBase,
     logical: LogicalProject,
@@ -38,26 +39,14 @@ pub struct StreamProject {
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamProject");
-        let input = self.input();
-        let input_schema = input.schema();
-        builder.field(
-            "exprs",
-            &self
-                .exprs()
-                .iter()
-                .map(|expr| ExprDisplay { expr, input_schema })
-                .collect_vec(),
-        );
+        self.logical.fmt_fields_with_builder(&mut builder);
         if !self.watermark_derivations.is_empty() {
             builder.field(
-                "watermark_columns",
+                "output_watermarks",
                 &self
                     .watermark_derivations
                     .iter()
-                    .map(|(_, idx)| ExprDisplay {
-                        expr: &self.exprs()[*idx],
-                        input_schema,
-                    })
+                    .map(|(_, idx)| FieldDisplay(self.schema().fields.get(*idx).unwrap()))
                     .collect_vec(),
             );
         };
@@ -130,12 +119,7 @@ impl StreamNode for StreamProject {
                 .logical
                 .exprs()
                 .iter()
-                .map(|x| {
-                    self.base
-                        .ctx()
-                        .expr_with_session_timezone(x.clone())
-                        .to_expr_proto()
-                })
+                .map(|x| x.to_expr_proto())
                 .collect(),
             watermark_input_key: self
                 .watermark_derivations
@@ -148,5 +132,22 @@ impl StreamNode for StreamProject {
                 .map(|(_, y)| *y as u32)
                 .collect(),
         })
+    }
+}
+
+impl ExprRewritable for StreamProject {
+    fn has_rewritable_expr(&self) -> bool {
+        true
+    }
+
+    fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
+        Self::new(
+            self.logical
+                .rewrite_exprs(r)
+                .as_logical_project()
+                .unwrap()
+                .clone(),
+        )
+        .into()
     }
 }

@@ -19,11 +19,11 @@ use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::ExpandNode;
 
-use super::{LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamExpand {
     pub base: PlanBase,
     logical: LogicalExpand,
@@ -101,3 +101,5 @@ fn subset_to_protobuf(subset: &[usize]) -> Subset {
     let column_indices = subset.iter().map(|key| *key as u32).collect();
     Subset { column_indices }
 }
+
+impl ExprRewritable for StreamExpand {}

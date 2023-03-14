@@ -13,13 +13,24 @@
 // limitations under the License.
 
 use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::time::Duration;
 
+use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry, Histogram, HistogramVec, IntCounterVec, IntGauge,
+    IntGaugeVec, Registry,
 };
+use risingwave_pb::common::WorkerType;
+use tokio::sync::oneshot::Sender;
+use tokio::task::JoinHandle;
+
+use crate::manager::ClusterManagerRef;
+use crate::rpc::server::ElectionClientRef;
+use crate::storage::MetaStore;
 
 pub struct MetaMetrics {
     registry: Registry,
@@ -34,7 +45,7 @@ pub struct MetaMetrics {
 
     /// Latency between each barrier send
     pub barrier_send_latency: Histogram,
-    /// The number of all barriers. It is the sum of barreriers that are in-flight or completed but
+    /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
     pub all_barrier_nums: IntGauge,
     /// The number of in-flight barriers
@@ -66,6 +77,9 @@ pub struct MetaMetrics {
     pub min_safepoint_version_id: IntGauge,
     /// Hummock version stats
     pub version_stats: IntGaugeVec,
+    /// Total number of SSTs that is no longer referenced by versions but is not yet deleted from
+    /// storage.
+    pub stale_ssts_count: IntGauge,
 
     /// Latency for hummock manager to acquire lock
     pub hummock_manager_lock_time: HistogramVec,
@@ -78,6 +92,13 @@ pub struct MetaMetrics {
     /// The number of workers in the cluster.
     pub worker_num: IntGaugeVec,
     pub compact_skip_frequency: IntCounterVec,
+
+    /// The roles of all meta nodes in the cluster.
+    pub meta_type: IntGaugeVec,
+
+    /// compaction
+    pub compact_pending_bytes: IntGaugeVec,
+    pub compact_level_compression_ratio: GenericGaugeVec<AtomicF64>,
 }
 
 impl MetaMetrics {
@@ -163,7 +184,7 @@ impl MetaMetrics {
         let compact_frequency = register_int_counter_vec_with_registry!(
             "storage_level_compact_frequency",
             "num of compactions from each level to next level",
-            &["compactor", "group", "result"],
+            &["compactor", "group", "task_type", "result"],
             registry
         )
         .unwrap();
@@ -223,6 +244,12 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let stale_ssts_count = register_int_gauge_with_registry!(
+            "storage_stale_ssts_count",
+            "total number of SSTs that is no longer referenced by versions but is not yet deleted from storage",
+            registry
+        ).unwrap();
+
         let hummock_manager_lock_time = register_histogram_vec_with_registry!(
             "hummock_manager_lock_time",
             "latency for hummock manager to acquire the rwlock",
@@ -247,6 +274,30 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let meta_type = register_int_gauge_vec_with_registry!(
+            "meta_num",
+            "role of meta nodes in the cluster",
+            &["worker_addr", "role"],
+            registry,
+        )
+        .unwrap();
+
+        let compact_pending_bytes = register_int_gauge_vec_with_registry!(
+            "storage_compact_pending_bytes",
+            "bytes of lsm tree needed to reach balance",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compact_level_compression_ratio = register_gauge_vec_with_registry!(
+            "storage_compact_level_compression_ratio",
+            "compression ratio of each level of the lsm tree",
+            &["group", "level", "algorithm"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -267,6 +318,7 @@ impl MetaMetrics {
             level_file_size,
             version_size,
             version_stats,
+            stale_ssts_count,
             current_version_id,
             checkpoint_version_id,
             min_pinned_version_id,
@@ -274,8 +326,10 @@ impl MetaMetrics {
             hummock_manager_lock_time,
             hummock_manager_real_process_time,
             time_after_last_observation: AtomicU64::new(0),
-
             worker_num,
+            meta_type,
+            compact_pending_bytes,
+            compact_level_compression_ratio,
         }
     }
 
@@ -287,4 +341,47 @@ impl Default for MetaMetrics {
     fn default() -> Self {
         Self::new()
     }
+}
+
+pub async fn start_worker_info_monitor<S: MetaStore>(
+    cluster_manager: ClusterManagerRef<S>,
+    election_client: Option<ElectionClientRef>,
+    interval: Duration,
+    meta_metrics: Arc<MetaMetrics>,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut monitor_interval = tokio::time::interval(interval);
+        monitor_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                // Wait for interval
+                _ = monitor_interval.tick() => {},
+                // Shutdown monitor
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Worker number monitor is stopped");
+                    return;
+                }
+            }
+
+            for (worker_type, worker_num) in cluster_manager.count_worker_node().await {
+                meta_metrics
+                    .worker_num
+                    .with_label_values(&[(worker_type.as_str_name())])
+                    .set(worker_num as i64);
+            }
+            if let Some(client) = &election_client && let Ok(meta_members) = client.get_members().await {
+                meta_metrics
+                    .worker_num
+                    .with_label_values(&[WorkerType::Meta.as_str_name()])
+                    .set(meta_members.len() as i64);
+                meta_members.into_iter().for_each(|m| {
+                    let role = if m.is_leader {"leader"} else {"follower"};
+                    meta_metrics.meta_type.with_label_values(&[&m.id, role]).set(1);
+                });
+            }
+        }
+    });
+
+    (join_handle, shutdown_tx)
 }

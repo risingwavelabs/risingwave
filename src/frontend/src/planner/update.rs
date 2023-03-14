@@ -35,6 +35,7 @@ impl Planner {
             input,
             update.table_name.clone(),
             update.table_id,
+            update.table_version_id,
             update.exprs,
             returning,
         )?

@@ -207,6 +207,9 @@ pub trait StreamExecutorTestExt: MessageStream + Unpin {
 impl StreamExecutorTestExt for BoxedMessageStream {}
 
 pub mod agg_executor {
+    use std::sync::atomic::AtomicU64;
+    use std::sync::Arc;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::OrderType;
@@ -215,14 +218,15 @@ pub mod agg_executor {
 
     use crate::common::table::state_table::StateTable;
     use crate::common::StateTableColumnMapping;
+    use crate::executor::agg_common::AggExecutorArgs;
     use crate::executor::aggregation::{AggCall, AggStateStorage};
     use crate::executor::{
         ActorContextRef, BoxedExecutor, Executor, GlobalSimpleAggExecutor, PkIndices,
     };
 
-    /// Create state table for the given agg call.
+    /// Create state storage for the given agg call.
     /// Should infer the schema in the same way as `LogicalAgg::infer_stream_agg_state`.
-    pub async fn create_agg_state_table<S: StateStore>(
+    pub async fn create_agg_state_storage<S: StateStore>(
         store: S,
         table_id: TableId,
         agg_call: &AggCall,
@@ -250,17 +254,17 @@ pub mod agg_executor {
                 };
 
                 for idx in group_key_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
                 }
 
                 add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
-                    OrderType::Descending
+                    OrderType::descending()
                 } else {
-                    OrderType::Ascending
+                    OrderType::ascending()
                 });
 
                 for idx in pk_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
                 }
 
                 let state_table = StateTable::new_without_distribution(
@@ -312,7 +316,7 @@ pub mod agg_executor {
 
         group_key_indices.iter().for_each(|idx| {
             add_column_desc(input_fields[*idx].data_type());
-            order_types.push(OrderType::Ascending);
+            order_types.push(OrderType::ascending());
         });
 
         agg_calls.iter().for_each(|agg_call| {
@@ -330,17 +334,18 @@ pub mod agg_executor {
     }
 
     pub async fn new_boxed_simple_agg_executor<S: StateStore>(
-        ctx: ActorContextRef,
+        actor_ctx: ActorContextRef,
         store: S,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
-        let mut agg_state_tables = Vec::with_capacity(agg_calls.iter().len());
+        let mut storages = Vec::with_capacity(agg_calls.iter().len());
         for (idx, agg_call) in agg_calls.iter().enumerate() {
-            agg_state_tables.push(
-                create_agg_state_table(
+            storages.push(
+                create_agg_state_storage(
                     store.clone(),
                     TableId::new(idx as u32),
                     agg_call,
@@ -361,19 +366,25 @@ pub mod agg_executor {
         )
         .await;
 
-        Box::new(
-            GlobalSimpleAggExecutor::new(
-                ctx,
-                input,
-                agg_calls,
-                agg_state_tables,
-                result_table,
-                pk_indices,
-                executor_id,
-                1 << 10,
-            )
-            .unwrap(),
-        )
+        GlobalSimpleAggExecutor::new(AggExecutorArgs {
+            input,
+            actor_ctx,
+            pk_indices,
+            executor_id,
+
+            extreme_cache_size: 1024,
+
+            agg_calls,
+            row_count_index,
+            storages,
+            result_table,
+            distinct_dedup_tables: Default::default(),
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
+
+            extra: None,
+        })
+        .unwrap()
+        .boxed()
     }
 }
 

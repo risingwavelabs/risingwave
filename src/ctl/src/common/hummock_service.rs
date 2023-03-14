@@ -17,7 +17,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
-use risingwave_common::config::{RwConfig, StorageConfig};
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
@@ -25,6 +24,7 @@ use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
+use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::{StateStore, StateStoreImpl};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -93,16 +93,12 @@ For `./risedev apply-compose-deploy` users,
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
         // FIXME: allow specify custom config
-        let config = StorageConfig {
+        let opts = StorageOpts {
             share_buffer_compaction_worker_threads_number: 0,
             ..Default::default()
         };
-        let rw_config = RwConfig {
-            storage: config.clone(),
-            ..Default::default()
-        };
 
-        tracing::info!("using Hummock config: {:#?}", config);
+        tracing::info!("using StorageOpts: {:#?}", opts);
 
         let metrics = Metrics {
             hummock_metrics: Arc::new(HummockMetrics::unused()),
@@ -114,8 +110,7 @@ For `./risedev apply-compose-deploy` users,
 
         let state_store_impl = StateStoreImpl::new(
             &self.hummock_url,
-            "",
-            &rw_config,
+            Arc::new(opts),
             Arc::new(MonitoredHummockMetaClient::new(
                 meta_client.clone(),
                 metrics.hummock_metrics.clone(),

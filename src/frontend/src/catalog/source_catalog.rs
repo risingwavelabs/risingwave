@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo};
+use risingwave_common::catalog::ColumnCatalog;
+use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
 
-use super::column_catalog::ColumnCatalog;
 use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
 use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `ProstSource`, it only maintains information used during optimization.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
@@ -33,7 +33,8 @@ pub struct SourceCatalog {
     pub owner: UserId,
     pub info: StreamSourceInfo,
     pub row_id_index: Option<usize>,
-    pub properties: HashMap<String, String>,
+    pub properties: BTreeMap<String, String>,
+    pub watermark_descs: Vec<WatermarkDesc>,
 }
 
 impl From<&ProstSource> for SourceCatalog {
@@ -49,13 +50,11 @@ impl From<&ProstSource> for SourceCatalog {
             .collect();
         let with_options = WithOptions::new(prost.properties.clone());
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
-        let row_id_index = prost
-            .row_id_index
-            .clone()
-            .map(|row_id_index| row_id_index.index as _);
+        let row_id_index = prost.row_id_index.map(|idx| idx as _);
 
         let append_only = row_id_index.is_some();
         let owner = prost.owner;
+        let watermark_descs = prost.get_watermark_descs().clone();
 
         Self {
             id,
@@ -67,6 +66,7 @@ impl From<&ProstSource> for SourceCatalog {
             info: prost.info.clone().unwrap(),
             row_id_index,
             properties: with_options.into_inner(),
+            watermark_descs,
         }
     }
 }

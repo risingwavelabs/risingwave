@@ -123,8 +123,12 @@ impl ManagedBarrierState {
                         chain_actor_id: actor,
                         done: matches!(state, ChainState::Done),
                         consumed_epoch: match state {
-                            ChainState::ConsumingUpstream(consumed_epoch) => consumed_epoch,
+                            ChainState::ConsumingUpstream(consumed_epoch, _) => consumed_epoch,
                             ChainState::Done => epoch,
+                        },
+                        consumed_rows: match state {
+                            ChainState::ConsumingUpstream(_, consumed_rows) => consumed_rows,
+                            ChainState::Done => 0,
                         },
                     })
                     .collect();

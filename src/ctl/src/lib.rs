@@ -15,6 +15,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
+use cmd_impl::hummock::SstDumpArgs;
 
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_snapshots, list_pinned_versions,
@@ -95,7 +96,7 @@ enum HummockCommands {
         #[clap(short, long = "table-id")]
         table_id: u32,
     },
-    SstDump,
+    SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
     TriggerManualCompaction {
         #[clap(short, long = "compaction-group-id", default_value_t = 2)]
@@ -139,6 +140,15 @@ enum HummockCommands {
         compaction_filter_mask: Option<u32>,
         #[clap(long)]
         max_sub_compaction: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_sub_level_number: Option<u64>,
+    },
+    /// Split given compaction group into two. Moves the given tables to the new group.
+    SplitCompactionGroup {
+        #[clap(long)]
+        compaction_group_id: u64,
+        #[clap(long)]
+        table_ids: Vec<u32>,
     },
 }
 
@@ -222,8 +232,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
             cmd_impl::hummock::list_kv(context, epoch, table_id).await?;
         }
-        Commands::Hummock(HummockCommands::SstDump) => {
-            cmd_impl::hummock::sst_dump(context).await.unwrap()
+        Commands::Hummock(HummockCommands::SstDump(args)) => {
+            cmd_impl::hummock::sst_dump(context, args).await.unwrap()
         }
         Commands::Hummock(HummockCommands::TriggerManualCompaction {
             compaction_group_id,
@@ -260,6 +270,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             target_file_size_base,
             compaction_filter_mask,
             max_sub_compaction,
+            level0_stop_write_threshold_sub_level_number,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -273,9 +284,17 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     target_file_size_base,
                     compaction_filter_mask,
                     max_sub_compaction,
+                    level0_stop_write_threshold_sub_level_number,
                 ),
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::SplitCompactionGroup {
+            compaction_group_id,
+            table_ids,
+        }) => {
+            cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
+                .await?;
         }
         Commands::Table(TableCommands::Scan { mv_name }) => {
             cmd_impl::table::scan(context, mv_name).await?

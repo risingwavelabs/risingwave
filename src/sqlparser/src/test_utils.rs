@@ -130,14 +130,15 @@ pub fn number(n: &'static str) -> Value {
 
 pub fn table_alias(name: impl Into<String>) -> Option<TableAlias> {
     Some(TableAlias {
-        name: Ident::new(name),
+        name: Ident::new_unchecked(name),
         columns: vec![],
     })
 }
 
 pub fn table(name: impl Into<String>) -> TableFactor {
     TableFactor::Table {
-        name: ObjectName(vec![Ident::new(name.into())]),
+        name: ObjectName(vec![Ident::new_unchecked(name.into())]),
+        for_system_time_as_of_now: false,
         alias: None,
     }
 }

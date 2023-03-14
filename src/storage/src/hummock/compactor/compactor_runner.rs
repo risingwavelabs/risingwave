@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -23,6 +24,7 @@ use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_pb::hummock::{CompactTask, LevelType};
 
 use super::task_progress::TaskProgress;
+use super::TaskConfig;
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::{CompactOutput, CompactionFilter, Compactor, CompactorContext};
 use crate::hummock::iterator::{Forward, HummockIterator, UnorderedMergeIteratorInner};
@@ -43,14 +45,26 @@ pub struct CompactorRunner {
 
 impl CompactorRunner {
     pub fn new(split_index: usize, context: Arc<CompactorContext>, task: CompactTask) -> Self {
-        let max_target_file_size = context.storage_config.sstable_size_mb as usize * (1 << 20);
+        let max_target_file_size = context.storage_opts.sstable_size_mb as usize * (1 << 20);
         let total_file_size = task
             .input_ssts
             .iter()
             .flat_map(|level| level.table_infos.iter())
             .map(|table| table.file_size)
             .sum::<u64>();
-        let mut options: SstableBuilderOptions = context.storage_config.as_ref().into();
+
+        let stats_target_table_ids: HashSet<u32> = task
+            .input_ssts
+            .iter()
+            .flat_map(|i| {
+                i.table_infos
+                    .iter()
+                    .flat_map(|t| t.table_ids.clone())
+                    .collect_vec()
+            })
+            .collect();
+
+        let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
             0 => CompressionAlgorithm::None,
@@ -66,24 +80,19 @@ impl CompactorRunner {
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
             right_exclusive: true,
         };
-        let stats_target_table_ids = task
-            .input_ssts
-            .iter()
-            .flat_map(|i| {
-                i.table_infos
-                    .iter()
-                    .flat_map(|t| t.table_ids.clone())
-                    .collect_vec()
-            })
-            .collect();
+
         let compactor = Compactor::new(
             context.clone(),
             options,
-            key_range.clone(),
-            CachePolicy::NotFill,
-            task.gc_delete_keys,
-            task.watermark,
-            Some(stats_target_table_ids),
+            TaskConfig {
+                key_range: key_range.clone(),
+                cache_policy: CachePolicy::NotFill,
+                gc_delete_keys: task.gc_delete_keys,
+                watermark: task.watermark,
+                stats_target_table_ids: Some(stats_target_table_ids),
+                task_type: task.task_type(),
+                split_by_table: task.split_by_state_table,
+            },
         );
 
         Self {
@@ -103,7 +112,7 @@ impl CompactorRunner {
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
         let iter = self.build_sst_iter()?;
-        let (ssts, table_stats_map) = self
+        let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
@@ -113,7 +122,7 @@ impl CompactorRunner {
                 Some(task_progress),
             )
             .await?;
-        Ok((self.split_index, ssts, table_stats_map))
+        Ok((self.split_index, ssts, compaction_stat))
     }
 
     pub async fn build_delete_range_iter<F: CompactionFilter>(

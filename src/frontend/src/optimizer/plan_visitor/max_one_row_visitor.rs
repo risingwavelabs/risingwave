@@ -16,10 +16,11 @@ use std::collections::HashSet;
 
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalExpand, LogicalFilter, LogicalHopWindow, LogicalLimit,
-    LogicalNow, LogicalProjectSet, LogicalTopN, LogicalUnion, LogicalValues, PlanTreeNodeBinary,
-    PlanTreeNodeUnary,
+    LogicalNow, LogicalProject, LogicalProjectSet, LogicalScan, LogicalTopN, LogicalUnion,
+    LogicalValues, PlanTreeNodeBinary, PlanTreeNodeUnary,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
+use crate::optimizer::PlanTreeNode;
 
 pub struct MaxOneRowVisitor;
 
@@ -43,6 +44,10 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
 
     fn visit_logical_now(&mut self, _plan: &LogicalNow) -> bool {
         true
+    }
+
+    fn visit_logical_project(&mut self, plan: &LogicalProject) -> bool {
+        self.visit(plan.input())
     }
 
     fn visit_logical_top_n(&mut self, plan: &LogicalTopN) -> bool {
@@ -72,8 +77,12 @@ impl PlanVisitor<bool> for MaxOneRowVisitor {
         plan.column_subsets().len() == 1 && self.visit(plan.input())
     }
 
-    fn visit_logical_project_set(&mut self, plan: &LogicalProjectSet) -> bool {
-        plan.select_list().len() == 1 && self.visit(plan.input())
+    fn visit_logical_project_set(&mut self, _plan: &LogicalProjectSet) -> bool {
+        false
+    }
+
+    fn visit_logical_scan(&mut self, _plan: &LogicalScan) -> bool {
+        false
     }
 
     fn visit_logical_hop_window(&mut self, _plan: &LogicalHopWindow) -> bool {
@@ -90,5 +99,52 @@ impl PlanVisitor<bool> for HasMaxOneRowApply {
 
     fn visit_logical_apply(&mut self, plan: &LogicalApply) -> bool {
         plan.max_one_row() | self.visit(plan.left()) | self.visit(plan.right())
+    }
+}
+
+pub struct CountRows;
+
+impl PlanVisitor<Option<usize>> for CountRows {
+    fn merge(_a: Option<usize>, _b: Option<usize>) -> Option<usize> {
+        // Impossible to determine count e.g. after a join
+        None
+    }
+
+    fn visit_logical_agg(&mut self, plan: &LogicalAgg) -> Option<usize> {
+        if plan.group_key().is_empty() {
+            Some(1)
+        } else {
+            None
+        }
+    }
+
+    fn visit_logical_values(&mut self, plan: &LogicalValues) -> Option<usize> {
+        Some(plan.rows().len())
+    }
+
+    fn visit_logical_project(&mut self, plan: &LogicalProject) -> Option<usize> {
+        self.visit(plan.input())
+    }
+
+    fn visit_logical_union(&mut self, plan: &LogicalUnion) -> Option<usize> {
+        if !plan.all() {
+            // We cannot deal with deduplication
+            return None;
+        }
+        plan.inputs()
+            .iter()
+            .fold(Some(0), |init, i| match (init, self.visit(i.clone())) {
+                (None, _) => None,
+                (_, None) => None,
+                (Some(a), Some(b)) => Some(a + b),
+            })
+    }
+
+    fn visit_logical_filter(&mut self, _plan: &LogicalFilter) -> Option<usize> {
+        None
+    }
+
+    fn visit_logical_now(&mut self, _plan: &LogicalNow) -> Option<usize> {
+        Some(1)
     }
 }

@@ -29,6 +29,7 @@ mod tests {
 
     use super::*;
     use crate::array::{Array, ArrayBuilder};
+    use crate::util::iter_util::ZipEqFast;
 
     #[test]
     fn test_naivedate_builder() {
@@ -41,7 +42,7 @@ mod tests {
             builder.append(*i);
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq(a.iter()).all(|(a, b)| *a == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| *a == b);
         assert!(res)
     }
 

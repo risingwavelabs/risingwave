@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, Op, StreamChunk};
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum};
+use risingwave_common::util::iter_util::ZipEqFast;
 
 type IndexMappings = Vec<(usize, usize)>;
 
@@ -45,8 +45,13 @@ pub struct StreamChunkBuilder {
 
 impl Drop for StreamChunkBuilder {
     fn drop(&mut self) {
-        // Possible to fail in some corner cases but should not in unit tests
-        debug_assert_eq!(self.size, 0, "dropping non-empty stream chunk builder");
+        // Possible to fail when async task gets cancelled.
+        if self.size != 0 {
+            tracing::warn!(
+                remaining = self.size,
+                "dropping non-empty stream chunk builder"
+            );
+        }
     }
 }
 
@@ -180,7 +185,7 @@ impl StreamChunkBuilder {
         let new_columns = self
             .column_builders
             .iter_mut()
-            .zip_eq(&self.data_types)
+            .zip_eq_fast(&self.data_types)
             .map(|(builder, datatype)| {
                 std::mem::replace(builder, datatype.create_array_builder(self.capacity)).finish()
             })

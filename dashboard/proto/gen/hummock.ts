@@ -56,11 +56,15 @@ export interface SstableInfo {
   totalKeyCount: number;
   /** When a SST is divided, its divide_version will increase one. */
   divideVersion: number;
+  minEpoch: number;
+  maxEpoch: number;
+  uncompressedFileSize: number;
 }
 
 export interface OverlappingLevel {
   subLevels: Level[];
   totalFileSize: number;
+  uncompressedFileSize: number;
 }
 
 export interface Level {
@@ -69,6 +73,7 @@ export interface Level {
   tableInfos: SstableInfo[];
   totalFileSize: number;
   subLevelId: number;
+  uncompressedFileSize: number;
 }
 
 export interface InputLevel {
@@ -91,16 +96,23 @@ export interface GroupConstruct {
   /** If `parent_group_id` is not 0, it means `parent_group_id` splits into `parent_group_id` and this group, so this group is not empty initially. */
   parentGroupId: number;
   tableIds: number[];
+  groupId: number;
+}
+
+export interface GroupMetaChange {
+  tableIdsAdd: number[];
+  tableIdsRemove: number[];
 }
 
 export interface GroupDestroy {
 }
 
 export interface GroupDelta {
-  deltaType?: { $case: "intraLevel"; intraLevel: IntraLevelDelta } | {
-    $case: "groupConstruct";
-    groupConstruct: GroupConstruct;
-  } | { $case: "groupDestroy"; groupDestroy: GroupDestroy };
+  deltaType?:
+    | { $case: "intraLevel"; intraLevel: IntraLevelDelta }
+    | { $case: "groupConstruct"; groupConstruct: GroupConstruct }
+    | { $case: "groupDestroy"; groupDestroy: GroupDestroy }
+    | { $case: "groupMetaChange"; groupMetaChange: GroupMetaChange };
 }
 
 export interface UncommittedEpoch {
@@ -123,6 +135,9 @@ export interface HummockVersion {
 export interface HummockVersion_Levels {
   levels: Level[];
   l0: OverlappingLevel | undefined;
+  groupId: number;
+  parentGroupId: number;
+  memberTableIds: number[];
 }
 
 export interface HummockVersion_LevelsEntry {
@@ -286,6 +301,9 @@ export interface CompactTask {
   tableOptions: { [key: number]: TableOption };
   currentEpochTime: number;
   targetSubLevelId: number;
+  /** Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum */
+  taskType: CompactTask_TaskType;
+  splitByStateTable: boolean;
 }
 
 export const CompactTask_TaskStatus = {
@@ -383,6 +401,65 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
   }
 }
 
+export const CompactTask_TaskType = {
+  TYPE_UNSPECIFIED: "TYPE_UNSPECIFIED",
+  DYNAMIC: "DYNAMIC",
+  SPACE_RECLAIM: "SPACE_RECLAIM",
+  MANUAL: "MANUAL",
+  SHARED_BUFFER: "SHARED_BUFFER",
+  TTL: "TTL",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type CompactTask_TaskType = typeof CompactTask_TaskType[keyof typeof CompactTask_TaskType];
+
+export function compactTask_TaskTypeFromJSON(object: any): CompactTask_TaskType {
+  switch (object) {
+    case 0:
+    case "TYPE_UNSPECIFIED":
+      return CompactTask_TaskType.TYPE_UNSPECIFIED;
+    case 1:
+    case "DYNAMIC":
+      return CompactTask_TaskType.DYNAMIC;
+    case 2:
+    case "SPACE_RECLAIM":
+      return CompactTask_TaskType.SPACE_RECLAIM;
+    case 3:
+    case "MANUAL":
+      return CompactTask_TaskType.MANUAL;
+    case 4:
+    case "SHARED_BUFFER":
+      return CompactTask_TaskType.SHARED_BUFFER;
+    case 5:
+    case "TTL":
+      return CompactTask_TaskType.TTL;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return CompactTask_TaskType.UNRECOGNIZED;
+  }
+}
+
+export function compactTask_TaskTypeToJSON(object: CompactTask_TaskType): string {
+  switch (object) {
+    case CompactTask_TaskType.TYPE_UNSPECIFIED:
+      return "TYPE_UNSPECIFIED";
+    case CompactTask_TaskType.DYNAMIC:
+      return "DYNAMIC";
+    case CompactTask_TaskType.SPACE_RECLAIM:
+      return "SPACE_RECLAIM";
+    case CompactTask_TaskType.MANUAL:
+      return "MANUAL";
+    case CompactTask_TaskType.SHARED_BUFFER:
+      return "SHARED_BUFFER";
+    case CompactTask_TaskType.TTL:
+      return "TTL";
+    case CompactTask_TaskType.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface CompactTask_TableOptionsEntry {
   key: number;
   value: TableOption | undefined;
@@ -405,17 +482,21 @@ export interface CompactStatus {
   levelHandlers: LevelHandler[];
 }
 
+/** Config info of compaction group. */
 export interface CompactionGroup {
+  id: number;
+  compactionConfig: CompactionConfig | undefined;
+}
+
+/**
+ * Complete info of compaction group.
+ * The info is the aggregate of `HummockVersion` and `CompactionGroupConfig`
+ */
+export interface CompactionGroupInfo {
   id: number;
   parentId: number;
   memberTableIds: number[];
   compactionConfig: CompactionConfig | undefined;
-  tableIdToOptions: { [key: number]: TableOption };
-}
-
-export interface CompactionGroup_TableIdToOptionsEntry {
-  key: number;
-  value: TableOption | undefined;
 }
 
 export interface CompactTaskAssignment {
@@ -539,14 +620,6 @@ export interface ReportVacuumTaskResponse {
   status: Status | undefined;
 }
 
-export interface GetCompactionGroupsRequest {
-}
-
-export interface GetCompactionGroupsResponse {
-  status: Status | undefined;
-  compactionGroups: CompactionGroup[];
-}
-
 export interface TriggerManualCompactionRequest {
   compactionGroupId: number;
   keyRange: KeyRange | undefined;
@@ -621,7 +694,7 @@ export interface RiseCtlGetPinnedSnapshotsSummaryResponse {
 
 export interface InitMetadataForReplayRequest {
   tables: Table[];
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface InitMetadataForReplayResponse {
@@ -656,7 +729,7 @@ export interface RiseCtlListCompactionGroupRequest {
 
 export interface RiseCtlListCompactionGroupResponse {
   status: Status | undefined;
-  compactionGroups: CompactionGroup[];
+  compactionGroups: CompactionGroupInfo[];
 }
 
 export interface RiseCtlUpdateCompactionConfigRequest {
@@ -673,7 +746,8 @@ export interface RiseCtlUpdateCompactionConfigRequest_MutableConfig {
     | { $case: "level0TierCompactFileNumber"; level0TierCompactFileNumber: number }
     | { $case: "targetFileSizeBase"; targetFileSizeBase: number }
     | { $case: "compactionFilterMask"; compactionFilterMask: number }
-    | { $case: "maxSubCompaction"; maxSubCompaction: number };
+    | { $case: "maxSubCompaction"; maxSubCompaction: number }
+    | { $case: "level0StopWriteThresholdSubLevelNumber"; level0StopWriteThresholdSubLevelNumber: number };
 }
 
 export interface RiseCtlUpdateCompactionConfigResponse {
@@ -696,6 +770,15 @@ export interface PinVersionResponse {
   pinnedVersion: HummockVersion | undefined;
 }
 
+export interface SplitCompactionGroupRequest {
+  groupId: number;
+  tableIds: number[];
+}
+
+export interface SplitCompactionGroupResponse {
+  newGroupId: number;
+}
+
 export interface CompactionConfig {
   maxBytesForLevelBase: number;
   maxLevel: number;
@@ -708,6 +791,10 @@ export interface CompactionConfig {
   targetFileSizeBase: number;
   compactionFilterMask: number;
   maxSubCompaction: number;
+  maxSpaceReclaimBytes: number;
+  splitByStateTable: boolean;
+  /** soft limit for max number of sub level number */
+  level0StopWriteThresholdSubLevelNumber: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -762,6 +849,21 @@ export interface HummockVersionStats_TableStatsEntry {
   value: TableStats | undefined;
 }
 
+export interface WriteLimits {
+  /** < compaction group id, write limit info > */
+  writeLimits: { [key: number]: WriteLimits_WriteLimit };
+}
+
+export interface WriteLimits_WriteLimit {
+  tableIds: number[];
+  reason: string;
+}
+
+export interface WriteLimits_WriteLimitsEntry {
+  key: number;
+  value: WriteLimits_WriteLimit | undefined;
+}
+
 function createBaseSstableInfo(): SstableInfo {
   return {
     id: 0,
@@ -772,6 +874,9 @@ function createBaseSstableInfo(): SstableInfo {
     staleKeyCount: 0,
     totalKeyCount: 0,
     divideVersion: 0,
+    minEpoch: 0,
+    maxEpoch: 0,
+    uncompressedFileSize: 0,
   };
 }
 
@@ -786,6 +891,9 @@ export const SstableInfo = {
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
       divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
+      minEpoch: isSet(object.minEpoch) ? Number(object.minEpoch) : 0,
+      maxEpoch: isSet(object.maxEpoch) ? Number(object.maxEpoch) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -803,6 +911,9 @@ export const SstableInfo = {
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
     message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
+    message.minEpoch !== undefined && (obj.minEpoch = Math.round(message.minEpoch));
+    message.maxEpoch !== undefined && (obj.maxEpoch = Math.round(message.maxEpoch));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -818,12 +929,15 @@ export const SstableInfo = {
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
     message.divideVersion = object.divideVersion ?? 0;
+    message.minEpoch = object.minEpoch ?? 0;
+    message.maxEpoch = object.maxEpoch ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
 
 function createBaseOverlappingLevel(): OverlappingLevel {
-  return { subLevels: [], totalFileSize: 0 };
+  return { subLevels: [], totalFileSize: 0, uncompressedFileSize: 0 };
 }
 
 export const OverlappingLevel = {
@@ -831,6 +945,7 @@ export const OverlappingLevel = {
     return {
       subLevels: Array.isArray(object?.subLevels) ? object.subLevels.map((e: any) => Level.fromJSON(e)) : [],
       totalFileSize: isSet(object.totalFileSize) ? Number(object.totalFileSize) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -842,6 +957,7 @@ export const OverlappingLevel = {
       obj.subLevels = [];
     }
     message.totalFileSize !== undefined && (obj.totalFileSize = Math.round(message.totalFileSize));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -849,12 +965,20 @@ export const OverlappingLevel = {
     const message = createBaseOverlappingLevel();
     message.subLevels = object.subLevels?.map((e) => Level.fromPartial(e)) || [];
     message.totalFileSize = object.totalFileSize ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
 
 function createBaseLevel(): Level {
-  return { levelIdx: 0, levelType: LevelType.UNSPECIFIED, tableInfos: [], totalFileSize: 0, subLevelId: 0 };
+  return {
+    levelIdx: 0,
+    levelType: LevelType.UNSPECIFIED,
+    tableInfos: [],
+    totalFileSize: 0,
+    subLevelId: 0,
+    uncompressedFileSize: 0,
+  };
 }
 
 export const Level = {
@@ -865,6 +989,7 @@ export const Level = {
       tableInfos: Array.isArray(object?.tableInfos) ? object.tableInfos.map((e: any) => SstableInfo.fromJSON(e)) : [],
       totalFileSize: isSet(object.totalFileSize) ? Number(object.totalFileSize) : 0,
       subLevelId: isSet(object.subLevelId) ? Number(object.subLevelId) : 0,
+      uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
     };
   },
 
@@ -879,6 +1004,7 @@ export const Level = {
     }
     message.totalFileSize !== undefined && (obj.totalFileSize = Math.round(message.totalFileSize));
     message.subLevelId !== undefined && (obj.subLevelId = Math.round(message.subLevelId));
+    message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
     return obj;
   },
 
@@ -889,6 +1015,7 @@ export const Level = {
     message.tableInfos = object.tableInfos?.map((e) => SstableInfo.fromPartial(e)) || [];
     message.totalFileSize = object.totalFileSize ?? 0;
     message.subLevelId = object.subLevelId ?? 0;
+    message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
     return message;
   },
 };
@@ -971,7 +1098,7 @@ export const IntraLevelDelta = {
 };
 
 function createBaseGroupConstruct(): GroupConstruct {
-  return { groupConfig: undefined, parentGroupId: 0, tableIds: [] };
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0 };
 }
 
 export const GroupConstruct = {
@@ -980,6 +1107,7 @@ export const GroupConstruct = {
       groupConfig: isSet(object.groupConfig) ? CompactionConfig.fromJSON(object.groupConfig) : undefined,
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
     };
   },
 
@@ -993,6 +1121,7 @@ export const GroupConstruct = {
     } else {
       obj.tableIds = [];
     }
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
     return obj;
   },
 
@@ -1003,6 +1132,42 @@ export const GroupConstruct = {
       : undefined;
     message.parentGroupId = object.parentGroupId ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.groupId = object.groupId ?? 0;
+    return message;
+  },
+};
+
+function createBaseGroupMetaChange(): GroupMetaChange {
+  return { tableIdsAdd: [], tableIdsRemove: [] };
+}
+
+export const GroupMetaChange = {
+  fromJSON(object: any): GroupMetaChange {
+    return {
+      tableIdsAdd: Array.isArray(object?.tableIdsAdd) ? object.tableIdsAdd.map((e: any) => Number(e)) : [],
+      tableIdsRemove: Array.isArray(object?.tableIdsRemove) ? object.tableIdsRemove.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: GroupMetaChange): unknown {
+    const obj: any = {};
+    if (message.tableIdsAdd) {
+      obj.tableIdsAdd = message.tableIdsAdd.map((e) => Math.round(e));
+    } else {
+      obj.tableIdsAdd = [];
+    }
+    if (message.tableIdsRemove) {
+      obj.tableIdsRemove = message.tableIdsRemove.map((e) => Math.round(e));
+    } else {
+      obj.tableIdsRemove = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupMetaChange>, I>>(object: I): GroupMetaChange {
+    const message = createBaseGroupMetaChange();
+    message.tableIdsAdd = object.tableIdsAdd?.map((e) => e) || [];
+    message.tableIdsRemove = object.tableIdsRemove?.map((e) => e) || [];
     return message;
   },
 };
@@ -1040,6 +1205,8 @@ export const GroupDelta = {
         ? { $case: "groupConstruct", groupConstruct: GroupConstruct.fromJSON(object.groupConstruct) }
         : isSet(object.groupDestroy)
         ? { $case: "groupDestroy", groupDestroy: GroupDestroy.fromJSON(object.groupDestroy) }
+        : isSet(object.groupMetaChange)
+        ? { $case: "groupMetaChange", groupMetaChange: GroupMetaChange.fromJSON(object.groupMetaChange) }
         : undefined,
     };
   },
@@ -1054,6 +1221,9 @@ export const GroupDelta = {
       : undefined);
     message.deltaType?.$case === "groupDestroy" && (obj.groupDestroy = message.deltaType?.groupDestroy
       ? GroupDestroy.toJSON(message.deltaType?.groupDestroy)
+      : undefined);
+    message.deltaType?.$case === "groupMetaChange" && (obj.groupMetaChange = message.deltaType?.groupMetaChange
+      ? GroupMetaChange.toJSON(message.deltaType?.groupMetaChange)
       : undefined);
     return obj;
   },
@@ -1085,6 +1255,16 @@ export const GroupDelta = {
       message.deltaType = {
         $case: "groupDestroy",
         groupDestroy: GroupDestroy.fromPartial(object.deltaType.groupDestroy),
+      };
+    }
+    if (
+      object.deltaType?.$case === "groupMetaChange" &&
+      object.deltaType?.groupMetaChange !== undefined &&
+      object.deltaType?.groupMetaChange !== null
+    ) {
+      message.deltaType = {
+        $case: "groupMetaChange",
+        groupMetaChange: GroupMetaChange.fromPartial(object.deltaType.groupMetaChange),
       };
     }
     return message;
@@ -1174,7 +1354,7 @@ export const HummockVersion = {
 };
 
 function createBaseHummockVersion_Levels(): HummockVersion_Levels {
-  return { levels: [], l0: undefined };
+  return { levels: [], l0: undefined, groupId: 0, parentGroupId: 0, memberTableIds: [] };
 }
 
 export const HummockVersion_Levels = {
@@ -1182,6 +1362,9 @@ export const HummockVersion_Levels = {
     return {
       levels: Array.isArray(object?.levels) ? object.levels.map((e: any) => Level.fromJSON(e)) : [],
       l0: isSet(object.l0) ? OverlappingLevel.fromJSON(object.l0) : undefined,
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
+      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
     };
   },
 
@@ -1193,6 +1376,13 @@ export const HummockVersion_Levels = {
       obj.levels = [];
     }
     message.l0 !== undefined && (obj.l0 = message.l0 ? OverlappingLevel.toJSON(message.l0) : undefined);
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    message.parentGroupId !== undefined && (obj.parentGroupId = Math.round(message.parentGroupId));
+    if (message.memberTableIds) {
+      obj.memberTableIds = message.memberTableIds.map((e) => Math.round(e));
+    } else {
+      obj.memberTableIds = [];
+    }
     return obj;
   },
 
@@ -1200,6 +1390,9 @@ export const HummockVersion_Levels = {
     const message = createBaseHummockVersion_Levels();
     message.levels = object.levels?.map((e) => Level.fromPartial(e)) || [];
     message.l0 = (object.l0 !== undefined && object.l0 !== null) ? OverlappingLevel.fromPartial(object.l0) : undefined;
+    message.groupId = object.groupId ?? 0;
+    message.parentGroupId = object.parentGroupId ?? 0;
+    message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -1973,6 +2166,8 @@ function createBaseCompactTask(): CompactTask {
     tableOptions: {},
     currentEpochTime: 0,
     targetSubLevelId: 0,
+    taskType: CompactTask_TaskType.TYPE_UNSPECIFIED,
+    splitByStateTable: false,
   };
 }
 
@@ -2006,6 +2201,10 @@ export const CompactTask = {
         : {},
       currentEpochTime: isSet(object.currentEpochTime) ? Number(object.currentEpochTime) : 0,
       targetSubLevelId: isSet(object.targetSubLevelId) ? Number(object.targetSubLevelId) : 0,
+      taskType: isSet(object.taskType)
+        ? compactTask_TaskTypeFromJSON(object.taskType)
+        : CompactTask_TaskType.TYPE_UNSPECIFIED,
+      splitByStateTable: isSet(object.splitByStateTable) ? Boolean(object.splitByStateTable) : false,
     };
   },
 
@@ -2048,6 +2247,8 @@ export const CompactTask = {
     }
     message.currentEpochTime !== undefined && (obj.currentEpochTime = Math.round(message.currentEpochTime));
     message.targetSubLevelId !== undefined && (obj.targetSubLevelId = Math.round(message.targetSubLevelId));
+    message.taskType !== undefined && (obj.taskType = compactTask_TaskTypeToJSON(message.taskType));
+    message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     return obj;
   },
 
@@ -2077,6 +2278,8 @@ export const CompactTask = {
     );
     message.currentEpochTime = object.currentEpochTime ?? 0;
     message.targetSubLevelId = object.targetSubLevelId ?? 0;
+    message.taskType = object.taskType ?? CompactTask_TaskType.TYPE_UNSPECIFIED;
+    message.splitByStateTable = object.splitByStateTable ?? false;
     return message;
   },
 };
@@ -2218,26 +2421,50 @@ export const CompactStatus = {
 };
 
 function createBaseCompactionGroup(): CompactionGroup {
-  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined, tableIdToOptions: {} };
+  return { id: 0, compactionConfig: undefined };
 }
 
 export const CompactionGroup = {
   fromJSON(object: any): CompactionGroup {
     return {
       id: isSet(object.id) ? Number(object.id) : 0,
-      parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
-      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
       compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
-      tableIdToOptions: isObject(object.tableIdToOptions)
-        ? Object.entries(object.tableIdToOptions).reduce<{ [key: number]: TableOption }>((acc, [key, value]) => {
-          acc[Number(key)] = TableOption.fromJSON(value);
-          return acc;
-        }, {})
-        : {},
     };
   },
 
   toJSON(message: CompactionGroup): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.compactionConfig !== undefined &&
+      (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
+    const message = createBaseCompactionGroup();
+    message.id = object.id ?? 0;
+    message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
+      ? CompactionConfig.fromPartial(object.compactionConfig)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseCompactionGroupInfo(): CompactionGroupInfo {
+  return { id: 0, parentId: 0, memberTableIds: [], compactionConfig: undefined };
+}
+
+export const CompactionGroupInfo = {
+  fromJSON(object: any): CompactionGroupInfo {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      parentId: isSet(object.parentId) ? Number(object.parentId) : 0,
+      memberTableIds: Array.isArray(object?.memberTableIds) ? object.memberTableIds.map((e: any) => Number(e)) : [],
+      compactionConfig: isSet(object.compactionConfig) ? CompactionConfig.fromJSON(object.compactionConfig) : undefined,
+    };
+  },
+
+  toJSON(message: CompactionGroupInfo): unknown {
     const obj: any = {};
     message.id !== undefined && (obj.id = Math.round(message.id));
     message.parentId !== undefined && (obj.parentId = Math.round(message.parentId));
@@ -2248,62 +2475,16 @@ export const CompactionGroup = {
     }
     message.compactionConfig !== undefined &&
       (obj.compactionConfig = message.compactionConfig ? CompactionConfig.toJSON(message.compactionConfig) : undefined);
-    obj.tableIdToOptions = {};
-    if (message.tableIdToOptions) {
-      Object.entries(message.tableIdToOptions).forEach(([k, v]) => {
-        obj.tableIdToOptions[k] = TableOption.toJSON(v);
-      });
-    }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup>, I>>(object: I): CompactionGroup {
-    const message = createBaseCompactionGroup();
+  fromPartial<I extends Exact<DeepPartial<CompactionGroupInfo>, I>>(object: I): CompactionGroupInfo {
+    const message = createBaseCompactionGroupInfo();
     message.id = object.id ?? 0;
     message.parentId = object.parentId ?? 0;
     message.memberTableIds = object.memberTableIds?.map((e) => e) || [];
     message.compactionConfig = (object.compactionConfig !== undefined && object.compactionConfig !== null)
       ? CompactionConfig.fromPartial(object.compactionConfig)
-      : undefined;
-    message.tableIdToOptions = Object.entries(object.tableIdToOptions ?? {}).reduce<{ [key: number]: TableOption }>(
-      (acc, [key, value]) => {
-        if (value !== undefined) {
-          acc[Number(key)] = TableOption.fromPartial(value);
-        }
-        return acc;
-      },
-      {},
-    );
-    return message;
-  },
-};
-
-function createBaseCompactionGroup_TableIdToOptionsEntry(): CompactionGroup_TableIdToOptionsEntry {
-  return { key: 0, value: undefined };
-}
-
-export const CompactionGroup_TableIdToOptionsEntry = {
-  fromJSON(object: any): CompactionGroup_TableIdToOptionsEntry {
-    return {
-      key: isSet(object.key) ? Number(object.key) : 0,
-      value: isSet(object.value) ? TableOption.fromJSON(object.value) : undefined,
-    };
-  },
-
-  toJSON(message: CompactionGroup_TableIdToOptionsEntry): unknown {
-    const obj: any = {};
-    message.key !== undefined && (obj.key = Math.round(message.key));
-    message.value !== undefined && (obj.value = message.value ? TableOption.toJSON(message.value) : undefined);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<CompactionGroup_TableIdToOptionsEntry>, I>>(
-    object: I,
-  ): CompactionGroup_TableIdToOptionsEntry {
-    const message = createBaseCompactionGroup_TableIdToOptionsEntry();
-    message.key = object.key ?? 0;
-    message.value = (object.value !== undefined && object.value !== null)
-      ? TableOption.fromPartial(object.value)
       : undefined;
     return message;
   },
@@ -3012,61 +3193,6 @@ export const ReportVacuumTaskResponse = {
   },
 };
 
-function createBaseGetCompactionGroupsRequest(): GetCompactionGroupsRequest {
-  return {};
-}
-
-export const GetCompactionGroupsRequest = {
-  fromJSON(_: any): GetCompactionGroupsRequest {
-    return {};
-  },
-
-  toJSON(_: GetCompactionGroupsRequest): unknown {
-    const obj: any = {};
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GetCompactionGroupsRequest>, I>>(_: I): GetCompactionGroupsRequest {
-    const message = createBaseGetCompactionGroupsRequest();
-    return message;
-  },
-};
-
-function createBaseGetCompactionGroupsResponse(): GetCompactionGroupsResponse {
-  return { status: undefined, compactionGroups: [] };
-}
-
-export const GetCompactionGroupsResponse = {
-  fromJSON(object: any): GetCompactionGroupsResponse {
-    return {
-      status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
-      compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
-        : [],
-    };
-  },
-
-  toJSON(message: GetCompactionGroupsResponse): unknown {
-    const obj: any = {};
-    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
-    if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
-    } else {
-      obj.compactionGroups = [];
-    }
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<GetCompactionGroupsResponse>, I>>(object: I): GetCompactionGroupsResponse {
-    const message = createBaseGetCompactionGroupsResponse();
-    message.status = (object.status !== undefined && object.status !== null)
-      ? Status.fromPartial(object.status)
-      : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
-    return message;
-  },
-};
-
 function createBaseTriggerManualCompactionRequest(): TriggerManualCompactionRequest {
   return { compactionGroupId: 0, keyRange: undefined, tableId: 0, level: 0, sstIds: [] };
 }
@@ -3561,7 +3687,7 @@ export const InitMetadataForReplayRequest = {
     return {
       tables: Array.isArray(object?.tables) ? object.tables.map((e: any) => Table.fromJSON(e)) : [],
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -3574,7 +3700,7 @@ export const InitMetadataForReplayRequest = {
       obj.tables = [];
     }
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -3584,7 +3710,7 @@ export const InitMetadataForReplayRequest = {
   fromPartial<I extends Exact<DeepPartial<InitMetadataForReplayRequest>, I>>(object: I): InitMetadataForReplayRequest {
     const message = createBaseInitMetadataForReplayRequest();
     message.tables = object.tables?.map((e) => Table.fromPartial(e)) || [];
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3805,7 +3931,7 @@ export const RiseCtlListCompactionGroupResponse = {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       compactionGroups: Array.isArray(object?.compactionGroups)
-        ? object.compactionGroups.map((e: any) => CompactionGroup.fromJSON(e))
+        ? object.compactionGroups.map((e: any) => CompactionGroupInfo.fromJSON(e))
         : [],
     };
   },
@@ -3814,7 +3940,7 @@ export const RiseCtlListCompactionGroupResponse = {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     if (message.compactionGroups) {
-      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroup.toJSON(e) : undefined);
+      obj.compactionGroups = message.compactionGroups.map((e) => e ? CompactionGroupInfo.toJSON(e) : undefined);
     } else {
       obj.compactionGroups = [];
     }
@@ -3828,7 +3954,7 @@ export const RiseCtlListCompactionGroupResponse = {
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
-    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroup.fromPartial(e)) || [];
+    message.compactionGroups = object.compactionGroups?.map((e) => CompactionGroupInfo.fromPartial(e)) || [];
     return message;
   },
 };
@@ -3903,6 +4029,11 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
         ? { $case: "compactionFilterMask", compactionFilterMask: Number(object.compactionFilterMask) }
         : isSet(object.maxSubCompaction)
         ? { $case: "maxSubCompaction", maxSubCompaction: Number(object.maxSubCompaction) }
+        : isSet(object.level0StopWriteThresholdSubLevelNumber)
+        ? {
+          $case: "level0StopWriteThresholdSubLevelNumber",
+          level0StopWriteThresholdSubLevelNumber: Number(object.level0StopWriteThresholdSubLevelNumber),
+        }
         : undefined,
     };
   },
@@ -3925,6 +4056,10 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       (obj.compactionFilterMask = Math.round(message.mutableConfig?.compactionFilterMask));
     message.mutableConfig?.$case === "maxSubCompaction" &&
       (obj.maxSubCompaction = Math.round(message.mutableConfig?.maxSubCompaction));
+    message.mutableConfig?.$case === "level0StopWriteThresholdSubLevelNumber" &&
+      (obj.level0StopWriteThresholdSubLevelNumber = Math.round(
+        message.mutableConfig?.level0StopWriteThresholdSubLevelNumber,
+      ));
     return obj;
   },
 
@@ -4008,6 +4143,16 @@ export const RiseCtlUpdateCompactionConfigRequest_MutableConfig = {
       object.mutableConfig?.maxSubCompaction !== null
     ) {
       message.mutableConfig = { $case: "maxSubCompaction", maxSubCompaction: object.mutableConfig.maxSubCompaction };
+    }
+    if (
+      object.mutableConfig?.$case === "level0StopWriteThresholdSubLevelNumber" &&
+      object.mutableConfig?.level0StopWriteThresholdSubLevelNumber !== undefined &&
+      object.mutableConfig?.level0StopWriteThresholdSubLevelNumber !== null
+    ) {
+      message.mutableConfig = {
+        $case: "level0StopWriteThresholdSubLevelNumber",
+        level0StopWriteThresholdSubLevelNumber: object.mutableConfig.level0StopWriteThresholdSubLevelNumber,
+      };
     }
     return message;
   },
@@ -4140,6 +4285,59 @@ export const PinVersionResponse = {
   },
 };
 
+function createBaseSplitCompactionGroupRequest(): SplitCompactionGroupRequest {
+  return { groupId: 0, tableIds: [] };
+}
+
+export const SplitCompactionGroupRequest = {
+  fromJSON(object: any): SplitCompactionGroupRequest {
+    return {
+      groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+    };
+  },
+
+  toJSON(message: SplitCompactionGroupRequest): unknown {
+    const obj: any = {};
+    message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupRequest>, I>>(object: I): SplitCompactionGroupRequest {
+    const message = createBaseSplitCompactionGroupRequest();
+    message.groupId = object.groupId ?? 0;
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseSplitCompactionGroupResponse(): SplitCompactionGroupResponse {
+  return { newGroupId: 0 };
+}
+
+export const SplitCompactionGroupResponse = {
+  fromJSON(object: any): SplitCompactionGroupResponse {
+    return { newGroupId: isSet(object.newGroupId) ? Number(object.newGroupId) : 0 };
+  },
+
+  toJSON(message: SplitCompactionGroupResponse): unknown {
+    const obj: any = {};
+    message.newGroupId !== undefined && (obj.newGroupId = Math.round(message.newGroupId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SplitCompactionGroupResponse>, I>>(object: I): SplitCompactionGroupResponse {
+    const message = createBaseSplitCompactionGroupResponse();
+    message.newGroupId = object.newGroupId ?? 0;
+    return message;
+  },
+};
+
 function createBaseCompactionConfig(): CompactionConfig {
   return {
     maxBytesForLevelBase: 0,
@@ -4153,6 +4351,9 @@ function createBaseCompactionConfig(): CompactionConfig {
     targetFileSizeBase: 0,
     compactionFilterMask: 0,
     maxSubCompaction: 0,
+    maxSpaceReclaimBytes: 0,
+    splitByStateTable: false,
+    level0StopWriteThresholdSubLevelNumber: 0,
   };
 }
 
@@ -4180,6 +4381,11 @@ export const CompactionConfig = {
       targetFileSizeBase: isSet(object.targetFileSizeBase) ? Number(object.targetFileSizeBase) : 0,
       compactionFilterMask: isSet(object.compactionFilterMask) ? Number(object.compactionFilterMask) : 0,
       maxSubCompaction: isSet(object.maxSubCompaction) ? Number(object.maxSubCompaction) : 0,
+      maxSpaceReclaimBytes: isSet(object.maxSpaceReclaimBytes) ? Number(object.maxSpaceReclaimBytes) : 0,
+      splitByStateTable: isSet(object.splitByStateTable) ? Boolean(object.splitByStateTable) : false,
+      level0StopWriteThresholdSubLevelNumber: isSet(object.level0StopWriteThresholdSubLevelNumber)
+        ? Number(object.level0StopWriteThresholdSubLevelNumber)
+        : 0,
     };
   },
 
@@ -4204,6 +4410,10 @@ export const CompactionConfig = {
     message.targetFileSizeBase !== undefined && (obj.targetFileSizeBase = Math.round(message.targetFileSizeBase));
     message.compactionFilterMask !== undefined && (obj.compactionFilterMask = Math.round(message.compactionFilterMask));
     message.maxSubCompaction !== undefined && (obj.maxSubCompaction = Math.round(message.maxSubCompaction));
+    message.maxSpaceReclaimBytes !== undefined && (obj.maxSpaceReclaimBytes = Math.round(message.maxSpaceReclaimBytes));
+    message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
+    message.level0StopWriteThresholdSubLevelNumber !== undefined &&
+      (obj.level0StopWriteThresholdSubLevelNumber = Math.round(message.level0StopWriteThresholdSubLevelNumber));
     return obj;
   },
 
@@ -4220,6 +4430,9 @@ export const CompactionConfig = {
     message.targetFileSizeBase = object.targetFileSizeBase ?? 0;
     message.compactionFilterMask = object.compactionFilterMask ?? 0;
     message.maxSubCompaction = object.maxSubCompaction ?? 0;
+    message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
+    message.splitByStateTable = object.splitByStateTable ?? false;
+    message.level0StopWriteThresholdSubLevelNumber = object.level0StopWriteThresholdSubLevelNumber ?? 0;
     return message;
   },
 };
@@ -4325,6 +4538,109 @@ export const HummockVersionStats_TableStatsEntry = {
     message.key = object.key ?? 0;
     message.value = (object.value !== undefined && object.value !== null)
       ? TableStats.fromPartial(object.value)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseWriteLimits(): WriteLimits {
+  return { writeLimits: {} };
+}
+
+export const WriteLimits = {
+  fromJSON(object: any): WriteLimits {
+    return {
+      writeLimits: isObject(object.writeLimits)
+        ? Object.entries(object.writeLimits).reduce<{ [key: number]: WriteLimits_WriteLimit }>((acc, [key, value]) => {
+          acc[Number(key)] = WriteLimits_WriteLimit.fromJSON(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: WriteLimits): unknown {
+    const obj: any = {};
+    obj.writeLimits = {};
+    if (message.writeLimits) {
+      Object.entries(message.writeLimits).forEach(([k, v]) => {
+        obj.writeLimits[k] = WriteLimits_WriteLimit.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits>, I>>(object: I): WriteLimits {
+    const message = createBaseWriteLimits();
+    message.writeLimits = Object.entries(object.writeLimits ?? {}).reduce<{ [key: number]: WriteLimits_WriteLimit }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[Number(key)] = WriteLimits_WriteLimit.fromPartial(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseWriteLimits_WriteLimit(): WriteLimits_WriteLimit {
+  return { tableIds: [], reason: "" };
+}
+
+export const WriteLimits_WriteLimit = {
+  fromJSON(object: any): WriteLimits_WriteLimit {
+    return {
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      reason: isSet(object.reason) ? String(object.reason) : "",
+    };
+  },
+
+  toJSON(message: WriteLimits_WriteLimit): unknown {
+    const obj: any = {};
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    message.reason !== undefined && (obj.reason = message.reason);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits_WriteLimit>, I>>(object: I): WriteLimits_WriteLimit {
+    const message = createBaseWriteLimits_WriteLimit();
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.reason = object.reason ?? "";
+    return message;
+  },
+};
+
+function createBaseWriteLimits_WriteLimitsEntry(): WriteLimits_WriteLimitsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const WriteLimits_WriteLimitsEntry = {
+  fromJSON(object: any): WriteLimits_WriteLimitsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? WriteLimits_WriteLimit.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: WriteLimits_WriteLimitsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined &&
+      (obj.value = message.value ? WriteLimits_WriteLimit.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<WriteLimits_WriteLimitsEntry>, I>>(object: I): WriteLimits_WriteLimitsEntry {
+    const message = createBaseWriteLimits_WriteLimitsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? WriteLimits_WriteLimit.fromPartial(object.value)
       : undefined;
     return message;
   },

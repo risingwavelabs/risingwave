@@ -32,6 +32,8 @@ enum ObjectErrorInner {
         inner: io::Error,
     },
 
+    #[error(transparent)]
+    Opendal(BoxedError),
     #[error("Internal error: {0}")]
     Internal(String),
 }
@@ -69,6 +71,10 @@ impl ObjectError {
         ObjectErrorInner::Disk { msg, inner: err }.into()
     }
 
+    pub fn opendal(err: impl Into<BoxedError>) -> Self {
+        ObjectErrorInner::Opendal(err.into()).into()
+    }
+
     pub fn s3(err: impl Into<BoxedError>) -> Self {
         ObjectErrorInner::S3(err.into()).into()
     }
@@ -86,6 +92,17 @@ where
 impl From<aws_smithy_http::byte_stream::Error> for ObjectError {
     fn from(e: aws_smithy_http::byte_stream::Error) -> Self {
         ObjectErrorInner::S3(e.into()).into()
+    }
+}
+impl From<opendal::Error> for ObjectError {
+    fn from(e: opendal::Error) -> Self {
+        ObjectErrorInner::Opendal(e.into()).into()
+    }
+}
+
+impl From<io::Error> for ObjectError {
+    fn from(e: io::Error) -> Self {
+        ObjectErrorInner::Opendal(e.into()).into()
     }
 }
 

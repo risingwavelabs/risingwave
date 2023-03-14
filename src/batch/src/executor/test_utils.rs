@@ -25,6 +25,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::field_generator::FieldGeneratorImpl;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
+use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
 use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
 
@@ -219,7 +220,7 @@ pub async fn diff_executor_output(actual: BoxedExecutor, expect: BoxedExecutor) 
     expect
         .columns()
         .iter()
-        .zip_eq(actual.columns().iter())
+        .zip_eq_fast(actual.columns().iter())
         .for_each(|(c1, c2)| assert_eq!(c1.array().to_protobuf(), c2.array().to_protobuf()));
 
     is_data_chunk_eq(&expect, &actual)
@@ -236,7 +237,7 @@ fn is_data_chunk_eq(left: &DataChunk, right: &DataChunk) {
     );
 
     left.rows()
-        .zip_eq(right.rows())
+        .zip_eq_debug(right.rows())
         .for_each(|(row1, row2)| assert_eq!(row1, row2));
 }
 

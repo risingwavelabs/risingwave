@@ -33,6 +33,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
@@ -160,6 +161,7 @@ pub struct JoinHashMapMetrics {
     total_lookup_count: usize,
     /// How many times have we miss the cache when insert row
     insert_cache_miss_count: usize,
+    may_exist_true_count: usize,
 }
 
 impl JoinHashMapMetrics {
@@ -171,6 +173,7 @@ impl JoinHashMapMetrics {
             lookup_miss_count: 0,
             total_lookup_count: 0,
             insert_cache_miss_count: 0,
+            may_exist_true_count: 0,
         }
     }
 
@@ -187,9 +190,14 @@ impl JoinHashMapMetrics {
             .join_insert_cache_miss_count
             .with_label_values(&[&self.actor_id, self.side])
             .inc_by(self.insert_cache_miss_count as u64);
+        self.metrics
+            .join_may_exist_true_count
+            .with_label_values(&[&self.actor_id, self.side])
+            .inc_by(self.may_exist_true_count as u64);
         self.total_lookup_count = 0;
         self.lookup_miss_count = 0;
         self.insert_cache_miss_count = 0;
+        self.may_exist_true_count = 0;
     }
 }
 
@@ -262,7 +270,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect();
         let pk_serializer = OrderedRowSerde::new(
             pk_data_types,
-            vec![OrderType::Ascending; state_pk_indices.len()],
+            vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
         let state = TableInner {
@@ -357,8 +365,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self.state.table.iter_key_and_val(&key);
-            let degree_table_iter_fut = self.degree_state.table.iter_key_and_val(&key);
+            let table_iter_fut = self.state.table.iter_key_and_val(&key, Default::default());
+            let degree_table_iter_fut = self
+                .degree_state
+                .table
+                .iter_key_and_val(&key, Default::default());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;
@@ -384,7 +395,11 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
                 );
             }
         } else {
-            let table_iter = self.state.table.iter_with_pk_prefix(&key).await?;
+            let table_iter = self
+                .state
+                .table
+                .iter_with_pk_prefix(&key, PrefetchOptions::new_for_exhaust_iter())
+                .await?;
 
             #[for_await]
             for row in table_iter {
@@ -417,11 +432,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             entry.insert(pk, value.encode());
         } else if self.pk_contained_in_jk {
-            // Refill cache when the join key exist in neither cache or storage.
+            // Refill cache when the join key contains primary key.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
             state.insert(pk, value.encode());
             self.update_state(key, state.into());
+        } else {
+            let prefix = key.deserialize(&self.join_key_data_types)?;
+            self.metrics.insert_cache_miss_count += 1;
+            // Refill cache when the join key exists in neither cache or storage.
+            if !self.state.table.may_exist(&prefix).await? {
+                let mut state = JoinEntryState::default();
+                state.insert(pk, value.encode());
+                self.update_state(key, state.into());
+            } else {
+                self.metrics.may_exist_true_count += 1;
+            }
         }
 
         // Update the flush buffer.
@@ -433,7 +459,6 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     /// Insert a row.
     /// Used when the side does not need to update degree.
-    #[allow(clippy::unused_async)]
     pub async fn insert_row(&mut self, key: &K, value: impl Row) -> StreamExecutorResult<()> {
         let join_row = JoinRow::new(&value, 0);
         let pk = (&value)
@@ -443,11 +468,22 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             // Update cache
             entry.insert(pk, join_row.encode());
         } else if self.pk_contained_in_jk {
-            // Refill cache when the join key exist in neither cache or storage.
+            // Refill cache when the join key contains primary key.
             self.metrics.insert_cache_miss_count += 1;
             let mut state = JoinEntryState::default();
             state.insert(pk, join_row.encode());
             self.update_state(key, state.into());
+        } else {
+            let prefix = key.deserialize(&self.join_key_data_types)?;
+            self.metrics.insert_cache_miss_count += 1;
+            // Refill cache when the join key exists in neither cache or storage.
+            if !self.state.table.may_exist(&prefix).await? {
+                let mut state = JoinEntryState::default();
+                state.insert(pk, join_row.encode());
+                self.update_state(key, state.into());
+            } else {
+                self.metrics.may_exist_true_count += 1;
+            }
         }
 
         // Update the flush buffer.

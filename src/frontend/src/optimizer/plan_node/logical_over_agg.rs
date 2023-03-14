@@ -19,8 +19,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay};
 
-use super::generic::{PlanAggOrderByField, PlanAggOrderByFieldDisplay};
 use super::{
     gen_filter_and_pushdown, ColPrunable, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
@@ -29,17 +29,15 @@ use crate::expr::{Expr, ExprImpl, InputRef, InputRefDisplay, WindowFunction, Win
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// Rewritten version of [`WindowFunction`] which uses `InputRef` instead of `ExprImpl`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PlanWindowFunction {
     pub function_type: WindowFunctionType,
     pub return_type: DataType,
     pub partition_by: Vec<InputRef>,
-    /// TODO: rename & move `PlanAggOrderByField` so that it can be better shared like
-    /// [`crate::expr::OrderByExpr`]
-    pub order_by: Vec<PlanAggOrderByField>,
+    pub order_by: Vec<ColumnOrder>,
 }
 
 struct PlanWindowFunctionDisplay<'a> {
@@ -81,9 +79,9 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 write!(
                     f,
                     "{delim}ORDER BY {}",
-                    window_function.order_by.iter().format_with(", ", |e, f| {
-                        f(&PlanAggOrderByFieldDisplay {
-                            plan_agg_order_by_field: e,
+                    window_function.order_by.iter().format_with(", ", |o, f| {
+                        f(&ColumnOrderDisplay {
+                            column_order: o,
                             input_schema: self.input_schema,
                         })
                     })
@@ -99,7 +97,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
 /// `LogicalOverAgg` performs `OVER` window aggregates ([`WindowFunction`]) to its input.
 ///
 /// The output schema is the input schema plus the window functions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalOverAgg {
     pub base: PlanBase,
     pub window_function: PlanWindowFunction,
@@ -194,11 +192,7 @@ impl LogicalOverAgg {
             .sort_exprs
             .into_iter()
             .map(|e| match e.expr.as_input_ref() {
-                Some(i) => Ok(PlanAggOrderByField {
-                    input: *i.clone(),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                }),
+                Some(i) => Ok(ColumnOrder::new(i.index(), e.order_type)),
                 None => Err(ErrorCode::NotImplemented(
                     "ORDER BY expression in window function".to_string(),
                     None.into(),

@@ -14,7 +14,6 @@
 
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::data_chunk_iter::RowRef;
 use risingwave_common::array::{Array, DataChunk};
 use risingwave_common::buffer::BitmapBuilder;
@@ -23,6 +22,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::row::{repeat_n, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression,
 };
@@ -277,7 +277,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(matched.finish().iter())
+            .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
@@ -317,7 +317,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(matched.finish().iter())
+            .zip_eq_debug(matched.finish().iter())
             .filter(|(_, matched)| if ANTI_JOIN { !*matched } else { *matched })
         {
             if let Some(chunk) = chunk_builder.append_one_row(left_row) {
@@ -356,7 +356,7 @@ impl NestedLoopJoinExecutor {
             }
             for (right_row, _) in right_chunk
                 .rows()
-                .zip_eq(matched.iter())
+                .zip_eq_debug(matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
@@ -436,7 +436,7 @@ impl NestedLoopJoinExecutor {
             // Yield unmatched rows in the right table
             for (right_row, _) in right_chunk
                 .rows()
-                .zip_eq(right_matched.iter())
+                .zip_eq_debug(right_matched.iter())
                 .filter(|(_, matched)| !*matched)
             {
                 let row = repeat_n(Datum::None, left_data_types.len()).chain(right_row);
@@ -449,7 +449,7 @@ impl NestedLoopJoinExecutor {
         for (left_row, _) in left
             .iter()
             .flat_map(|chunk| chunk.rows())
-            .zip_eq(left_matched.finish().iter())
+            .zip_eq_debug(left_matched.finish().iter())
             .filter(|(_, matched)| !*matched)
         {
             let row = left_row.chain(repeat_n(Datum::None, right_data_types.len()));
@@ -464,8 +464,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::expr_binary_nonnull::new_binary_expr;
-    use risingwave_expr::expr::InputRefExpression;
+    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;

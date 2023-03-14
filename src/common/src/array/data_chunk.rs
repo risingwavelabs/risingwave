@@ -31,7 +31,8 @@ use crate::types::struct_type::StructType;
 use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
-use crate::util::value_encoding::serialize_datum_into;
+use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
+use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -70,7 +71,7 @@ impl DataChunk {
             .collect::<Vec<_>>();
 
         for row in rows {
-            for (datum, builder) in row.iter().zip_eq(array_builders.iter_mut()) {
+            for (datum, builder) in row.iter().zip_eq_debug(array_builders.iter_mut()) {
                 builder.append_datum(datum);
             }
         }
@@ -241,7 +242,7 @@ impl DataChunk {
             let end_row_idx = start_row_idx + actual_acquire - 1;
             array_builders
                 .iter_mut()
-                .zip_eq(chunks[chunk_idx].columns())
+                .zip_eq_fast(chunks[chunk_idx].columns())
                 .for_each(|(builder, column)| {
                     let mut array_builder = column
                         .array_ref()
@@ -365,7 +366,7 @@ impl DataChunk {
             .map(|col| col.array_ref().create_builder(indexes.len()))
             .collect();
         for &i in indexes {
-            for (builder, col) in array_builders.iter_mut().zip_eq(&self.columns) {
+            for (builder, col) in array_builders.iter_mut().zip_eq_fast(&self.columns) {
                 builder.append_datum(col.array_ref().value_at(i));
             }
         }
@@ -376,12 +377,14 @@ impl DataChunk {
         DataChunk::new(columns, indexes.len())
     }
 
-    /// Serialize each rows into value encoding bytes.
+    /// Serialize each row into value encoding bytes.
     ///
-    /// the returned vector's size is self.capacity() and for the invisible row will give a empty
-    /// vec<u8>
+    /// The returned vector's size is `self.capacity()` and for the invisible row will give a empty
+    /// bytes.
+    // Note(bugen): should we exclude the invisible rows in the output so that the caller won't need
+    // to handle visibility again?
     pub fn serialize(&self) -> Vec<Bytes> {
-        match &self.vis2 {
+        let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
@@ -397,7 +400,7 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers.into_iter().map(BytesMut::freeze).collect_vec()
+                buffers
             }
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
@@ -411,9 +414,27 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers.into_iter().map(BytesMut::freeze).collect_vec()
+                buffers
             }
+        };
+
+        buffers.into_iter().map(BytesMut::freeze).collect_vec()
+    }
+
+    /// Serialize each row into bytes with given serializer.
+    ///
+    /// This is similar to `serialize` but it uses a custom serializer. Prefer `serialize` if
+    /// possible since it might be more efficient due to columnar operations.
+    pub fn serialize_with(&self, serializer: &impl ValueRowSerializer) -> Vec<Bytes> {
+        let mut results = Vec::with_capacity(self.capacity());
+        for row in self.rows_with_holes() {
+            results.push(if let Some(row) = row {
+                serializer.serialize(row).into()
+            } else {
+                Bytes::new()
+            });
         }
+        results
     }
 }
 
@@ -548,7 +569,7 @@ impl DataChunkTestExt for DataChunk {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
                                 .split(',')
-                                .zip_eq(&builder.children_array)
+                                .zip_eq_debug(&builder.children_array)
                                 .map(|(s, builder)| parse_datum(s, builder))
                                 .collect_vec();
                             ScalarImpl::Struct(StructValue::new(fields))

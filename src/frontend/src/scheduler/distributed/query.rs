@@ -14,10 +14,14 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::fmt::{Debug, Formatter};
 use std::mem;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::executor::block_on;
+use petgraph::dot::{Config, Dot};
+use petgraph::Graph;
 use pgwire::pg_server::SessionId;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as TaskIdProst, TaskOutputId as TaskOutputIdProst};
@@ -27,7 +31,7 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 use tokio::sync::{oneshot, RwLock};
 use tracing::{debug, error, info, warn};
 
-use super::{QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
+use super::{DistributedQueryMetrics, QueryExecutionInfoRef, QueryResultFetcher, StageEvent};
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::distributed::query::QueryMessage::Stage;
 use crate::scheduler::distributed::stage::StageEvent::ScheduledRoot;
@@ -87,6 +91,8 @@ struct QueryRunner {
 
     // Used for cleaning up `QueryExecution` after execution.
     query_execution_info: QueryExecutionInfoRef,
+
+    query_metrics: Arc<DistributedQueryMetrics>,
 }
 
 impl QueryExecution {
@@ -110,6 +116,7 @@ impl QueryExecution {
     /// Note the two shutdown channel sender and receivers are not dual.
     /// One is used for propagate error to `QueryResultFetcher`, one is used for listening on
     /// cancel request (from ctrl-c, cli, ui etc).
+    #[allow(clippy::too_many_arguments)]
     pub async fn start(
         &self,
         context: ExecutionContextRef,
@@ -118,6 +125,7 @@ impl QueryExecution {
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
+        query_metrics: Arc<DistributedQueryMetrics>,
     ) -> SchedulerResult<QueryResultFetcher> {
         let mut state = self.state.write().await;
         let cur_state = mem::replace(&mut *state, QueryState::Failed);
@@ -149,7 +157,10 @@ impl QueryExecution {
                     scheduled_stages_count: 0,
                     compute_client_pool,
                     query_execution_info,
+                    query_metrics,
                 };
+
+                tracing::trace!("Starting query: {:?}", self.query.query_id);
 
                 // Not trace the error here, it will be processed in scheduler.
                 tokio::spawn(async move { runner.run(pinned_snapshot).await });
@@ -164,6 +175,7 @@ impl QueryExecution {
                     self.query.query_id
                 );
 
+                tracing::trace!("Query {:?} started.", self.query.query_id);
                 Ok(root_stage)
             }
             _ => {
@@ -222,8 +234,42 @@ impl QueryExecution {
     }
 }
 
+impl Drop for QueryRunner {
+    fn drop(&mut self) {
+        self.query_metrics.running_query_num.dec();
+    }
+}
+
+impl Debug for QueryRunner {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let mut graph = Graph::<String, String>::new();
+        let mut stage_id_to_node_id = HashMap::new();
+        for stage in &self.stage_executions {
+            let node_id = graph.add_node(format!("{} {}", stage.0, block_on(stage.1.state())));
+            stage_id_to_node_id.insert(stage.0, node_id);
+        }
+
+        for stage in &self.stage_executions {
+            let stage_id = stage.0;
+            if let Some(child_stages) = self.query.stage_graph.get_child_stages(stage_id) {
+                for child_stage in child_stages {
+                    graph.add_edge(
+                        *stage_id_to_node_id.get(stage_id).unwrap(),
+                        *stage_id_to_node_id.get(child_stage).unwrap(),
+                        "".to_string(),
+                    );
+                }
+            }
+        }
+
+        // Visit https://dreampuf.github.io/GraphvizOnline/ to display the result
+        writeln!(f, "{}", Dot::with_config(&graph, &[Config::EdgeNoLabel]))
+    }
+}
+
 impl QueryRunner {
     async fn run(mut self, pinned_snapshot: PinnedHummockSnapshot) {
+        self.query_metrics.running_query_num.inc();
         // Start leaf stages.
         let leaf_stages = self.query.leaf_stages();
         for stage_id in &leaf_stages {
@@ -238,6 +284,8 @@ impl QueryRunner {
         let has_lookup_join_stage = self.query.has_lookup_join_stage();
         // To convince the compiler that `pinned_snapshot` will only be dropped once.
         let mut pinned_snapshot_to_drop = Some(pinned_snapshot);
+
+        let mut finished_stage_cnt = 0usize;
         while let Some(msg_inner) = self.msg_receiver.recv().await {
             match msg_inner {
                 Stage(Scheduled(stage_id)) => {
@@ -280,18 +328,28 @@ impl QueryRunner {
                         self.query.query_id, id, reason
                     );
 
-                    self.handle_cancel_or_failed_stage(reason).await;
+                    self.clean_all_stages(Some(reason)).await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
                 }
+                Stage(StageEvent::Completed(_)) => {
+                    finished_stage_cnt += 1;
+                    assert!(finished_stage_cnt <= self.stage_executions.len());
+                    if finished_stage_cnt == self.stage_executions.len() {
+                        tracing::trace!(
+                            "Query {:?} completed, starting to clean stage tasks.",
+                            &self.query.query_id
+                        );
+                        // Now all stages completed, we should remove all
+                        self.clean_all_stages(None).await;
+                        break;
+                    }
+                }
                 QueryMessage::CancelQuery => {
-                    self.handle_cancel_or_failed_stage(SchedulerError::QueryCancelError)
+                    self.clean_all_stages(Some(SchedulerError::QueryCancelError))
                         .await;
                     // One stage failed, not necessary to execute schedule stages.
                     break;
-                }
-                rest => {
-                    unimplemented!("unsupported message \"{:?}\" for QueryRunner.run", rest);
                 }
             }
         }
@@ -346,30 +404,33 @@ impl QueryRunner {
 
     /// Handle ctrl-c query or failed execution. Should stop all executions and send error to query
     /// result fetcher.
-    async fn handle_cancel_or_failed_stage(mut self, reason: SchedulerError) {
-        let err_str = reason.to_string();
-        // Consume sender here and send error to root stage.
-        let root_stage_sender = mem::take(&mut self.root_stage_sender);
-        // It's possible we receive stage failed event message multi times and the
-        // sender has been consumed in first failed event.
-        if let Some(sender) = root_stage_sender {
-            if let Err(e) = sender.send(Err(reason)) {
-                warn!("Query execution dropped: {:?}", e);
-            } else {
-                debug!(
-                    "Root stage failure event for {:?} sent.",
-                    self.query.query_id
-                );
+    async fn clean_all_stages(&mut self, error: Option<SchedulerError>) {
+        let error_msg = error.as_ref().map(|e| e.to_string());
+        if let Some(reason) = error {
+            // Consume sender here and send error to root stage.
+            let root_stage_sender = mem::take(&mut self.root_stage_sender);
+            // It's possible we receive stage failed event message multi times and the
+            // sender has been consumed in first failed event.
+            if let Some(sender) = root_stage_sender {
+                if let Err(e) = sender.send(Err(reason)) {
+                    warn!("Query execution dropped: {:?}", e);
+                } else {
+                    debug!(
+                        "Root stage failure event for {:?} sent.",
+                        self.query.query_id
+                    );
+                }
             }
+
+            // If root stage has been taken (None), then root stage is responsible for send error to
+            // Query Result Fetcher.
         }
 
-        // If root stage has been taken (None), then root stage is responsible for send error to
-        // Query Result Fetcher.
-
+        tracing::trace!("Cleaning stages in query [{:?}]", self.query.query_id);
         // Stop all running stages.
         for stage_execution in self.stage_executions.values() {
             // The stop is return immediately so no need to spawn tasks.
-            stage_execution.stop(err_str.clone()).await;
+            stage_execution.stop(error_msg.clone()).await;
         }
     }
 }
@@ -380,6 +441,7 @@ pub(crate) mod tests {
     use std::rc::Rc;
     use std::sync::{Arc, RwLock};
 
+    use fixedbitset::FixedBitSet;
     use risingwave_common::catalog::{ColumnDesc, TableDesc};
     use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
     use risingwave_common::hash::ParallelUnitMapping;
@@ -401,7 +463,8 @@ pub(crate) mod tests {
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::worker_node_manager::WorkerNodeManager;
     use crate::scheduler::{
-        ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot, QueryExecutionInfo,
+        DistributedQueryMetrics, ExecutionContext, HummockSnapshotManager, PinnedHummockSnapshot,
+        QueryExecutionInfo,
     };
     use crate::session::SessionImpl;
     use crate::test_utils::MockFrontendMetaClient;
@@ -432,6 +495,7 @@ pub(crate) mod tests {
                 compute_client_pool,
                 catalog_reader,
                 query_execution_info,
+                Arc::new(DistributedQueryMetrics::for_test()),
             )
             .await
             .is_err());
@@ -482,9 +546,12 @@ pub(crate) mod tests {
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],
                 read_prefix_len_hint: 0,
+                watermark_columns: FixedBitSet::with_capacity(3),
+                versioned: false,
             }),
             vec![],
             ctx,
+            false,
         )
         .to_batch()
         .unwrap()

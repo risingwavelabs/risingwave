@@ -1,0 +1,88 @@
+{
+  "name": "test_student",
+  "type": "record",
+  "fields": [
+    {
+      "name": "id",
+      "type": "int",
+      "default": 0
+    },
+    {
+      "name": "age",
+      "type": ["null", "int"]
+    },
+    {
+      "name": "sequence_id",
+      "type": ["null", "long"]
+    },
+    {
+      "name": "name",
+      "type": ["null", "string"],
+      "default": null
+    },
+    {
+      "name": "score",
+      "type": [ "float", "null" ],
+      "default": 1.0
+    },
+    {
+      "name": "avg_score",
+      "type": ["null", "double"]
+    },
+    {
+      "name": "is_lasted",
+      "type": ["null", "boolean"]
+    },
+    {
+      "name": "entrance_date",
+      "type": [
+        "null",
+        {
+          "type": "int",
+          "logicalType": "date",
+          "arg.properties": {
+            "range": {
+              "min": 1,
+              "max": 19374
+            }
+          }
+        }
+      ],
+      "default": null
+    },
+    {
+      "name": "birthday",
+      "type": [
+        "null",
+          {
+            "type": "long",
+            "logicalType": "timestamp-millis",
+            "arg.properties": {
+              "range": {
+                "min": 1,
+                "max": 1673970376213
+              }
+            }
+          }
+      ],
+      "default": null
+    },
+    {
+      "name": "anniversary",
+      "type": [
+        "null",
+        {
+          "type" : "long",
+          "logicalType": "timestamp-micros",
+          "arg.properties": {
+            "range": {
+              "min": 1,
+              "max": 1673970376213000
+            }
+          }
+        }
+      ],
+      "default": null
+    }
+  ]
+}

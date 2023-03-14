@@ -29,13 +29,13 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::group_top_n::GroupTopNCache;
@@ -47,7 +47,7 @@ use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::managed_state::top_n::ManagedTopNState;
-use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices};
+use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Watermark};
 use crate::task::AtomicU64Ref;
 
 /// If the input contains only append, `AppendOnlyGroupTopNExecutor` does not need
@@ -63,9 +63,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -119,9 +119,9 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -144,7 +144,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager),
             cache_key_serde,
@@ -166,7 +166,7 @@ where
         let data_types = self.schema().data_types();
         let row_deserializer = RowDeserializer::new(data_types);
 
-        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq(keys.iter()) {
+        for ((op, row_ref), group_cache_key) in chunk.rows().zip_eq_debug(keys.iter()) {
             // The pk without group by
             let pk_row = row_ref.project(&self.storage_key_indices[self.group_by.len()..]);
             let cache_key = serialize_pk_to_cache_key(pk_row, &self.cache_key_serde);
@@ -224,5 +224,16 @@ where
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         self.managed_state.state_table.init_epoch(epoch);
         Ok(())
+    }
+
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
+        if watermark.col_idx == self.group_by[0] {
+            self.managed_state
+                .state_table
+                .update_watermark(watermark.val.clone());
+            Some(watermark)
+        } else {
+            None
+        }
     }
 }

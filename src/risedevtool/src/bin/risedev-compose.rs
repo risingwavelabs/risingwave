@@ -203,6 +203,7 @@ fn main() -> Result<()> {
             ServiceConfig::ZooKeeper(_) => {
                 return Err(anyhow!("not supported, please use redpanda instead"))
             }
+            ServiceConfig::OpenDal(_) => continue,
             ServiceConfig::AwsS3(_) => continue,
             ServiceConfig::RedPanda(c) => {
                 if opts.deploy {

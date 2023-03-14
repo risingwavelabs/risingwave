@@ -19,13 +19,13 @@ use std::ops::Bound;
 use futures::stream::select_all;
 use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::for_await;
-use gen_iter::GenIter;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::VirtualNode;
+use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, PkIndices, StreamExecutorResult};
@@ -58,12 +58,29 @@ pub struct SortBuffer<S: StateStore> {
 
     chunk_size: usize,
 
-    last_watermark: Option<ScalarImpl>,
+    last_output: Option<ScalarImpl>,
+
+    watermark: Option<ScalarImpl>,
 
     buffer: BTreeMap<SortBufferKey, SortBufferValue>,
 }
 
 impl<S: StateStore> SortBuffer<S> {
+    /// Update the watermark value.
+    pub fn set_watermark(&mut self, watermark: ScalarImpl) {
+        assert!(
+            {
+                if let Some(ref last_watermark) = self.watermark {
+                    &watermark >= last_watermark
+                } else {
+                    true
+                }
+            },
+            "watermark should always increase"
+        );
+        self.watermark = Some(watermark);
+    }
+
     pub async fn recover(
         schema: Schema,
         pk_indices: PkIndices,
@@ -77,10 +94,13 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
             Bound::<row::Empty>::Unbounded,
         );
-        let streams = stream::iter(vnodes.iter_ones())
+        let streams = stream::iter(vnodes.iter_vnodes())
             .map(|vnode| {
-                let vnode = VirtualNode::from_index(vnode);
-                state_table.iter_with_pk_range(&pk_range, vnode)
+                state_table.iter_with_pk_range(
+                    &pk_range,
+                    vnode,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
             })
             .buffer_unordered(10)
             .try_collect::<Vec<_>>()
@@ -104,7 +124,8 @@ impl<S: StateStore> SortBuffer<S> {
             sort_column_index,
             state_table,
             chunk_size: 1024,
-            last_watermark: None,
+            last_output: None,
+            watermark: None,
             buffer,
         })
     }
@@ -129,46 +150,52 @@ impl<S: StateStore> SortBuffer<S> {
     }
 
     /// Output a stream that is ordered by the sort key.
-    pub fn iter_until<'a, 'b: 'a>(
-        &'a mut self,
-        watermark_val: &'b ScalarImpl,
-    ) -> impl Iterator<Item = DataChunk> + 'a {
-        let last_watermark = self.last_watermark.replace(watermark_val.clone());
-        let g = move || {
-            let mut data_chunk_builder =
-                DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-            // Only records with timestamp greater than the last watermark will be output, so
-            // records will only be emitted exactly once unless recovery.
-            let start_bound = if let Some(last_watermark) = last_watermark.clone() {
-                Bound::Excluded((
-                    // TODO: unsupported type or watermark overflow. Do we have better ways instead
-                    // of unwrap?
-                    last_watermark.successor().unwrap(),
-                    OwnedRow::empty().into(),
-                ))
-            } else {
-                Bound::Unbounded
-            };
-            let end_bound = Bound::Excluded((
-                (watermark_val.successor().unwrap()),
-                OwnedRow::empty().into(),
-            ));
+    ///
+    /// The output stream will not output the same record except during failover and recovery.
+    /// However, if you want to delete one record permanently, you should call
+    /// [`SortBuffer::delete`] manually.
+    pub fn consume(&mut self) -> impl Iterator<Item = DataChunk> + '_ {
+        if let Some(watermark) = self.watermark.clone() {
+            let last_output = self.last_output.replace(watermark);
+            let g = move || {
+                let watermark = self.watermark.as_ref().unwrap();
+                let mut data_chunk_builder =
+                    DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
+                // Only records with timestamp greater than the last watermark will be output, so
+                // records will only be emitted exactly once unless recovery.
+                let start_bound = if let Some(last_output) = last_output.clone() {
+                    Bound::Excluded((
+                        // TODO: unsupported type or watermark overflow. Do we have better ways
+                        // instead of unwrap?
+                        last_output.successor().unwrap(),
+                        OwnedRow::empty().into(),
+                    ))
+                } else {
+                    Bound::Unbounded
+                };
+                let end_bound =
+                    Bound::Excluded(((watermark.successor().unwrap()), OwnedRow::empty().into()));
 
-            for (_, (row, _)) in self.buffer.range((start_bound, end_bound)) {
-                if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
-                    // When the chunk size reaches its maximum, we construct a data chunk and
-                    // send it to downstream.
+                for (_, (row, _)) in self.buffer.range((start_bound, end_bound)) {
+                    if let Some(data_chunk) = data_chunk_builder.append_one_row(row) {
+                        // When the chunk size reaches its maximum, we construct a data chunk and
+                        // send it to downstream.
+                        yield data_chunk;
+                    }
+                }
+
+                // Construct and send a data chunk message. Rows in this message are
+                // always ordered by timestamp.
+                if let Some(data_chunk) = data_chunk_builder.consume_all() {
                     yield data_chunk;
                 }
-            }
-
-            // Construct and send a data chunk message. Rows in this message are
-            // always ordered by timestamp.
-            if let Some(data_chunk) = data_chunk_builder.consume_all() {
-                yield data_chunk;
-            }
-        };
-        GenIter::from(g)
+            };
+            Some(std::iter::from_generator(g))
+        } else {
+            None
+        }
+        .into_iter()
+        .flatten()
     }
 
     /// Delete a record from the buffer.
@@ -260,7 +287,7 @@ mod tests {
 
         let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&tys, s);
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let mut state_table = StateTable::new_without_distribution(
             state_store.clone(),
             table_id,
@@ -297,11 +324,13 @@ mod tests {
         let watermark2 = 7i64.into();
         let barrier1 = Barrier::new_test_barrier(3);
         sort_buffer.insert(&chunk1);
-        let output = sort_buffer.iter_until(&watermark1);
+        sort_buffer.set_watermark(watermark1);
+        let output = sort_buffer.consume();
         let rows1 = chunks_to_rows(output);
         assert_eq!(rows1, vec![row_pretty("1 1"), row_pretty("2 2")]);
         sort_buffer.insert(&chunk2);
-        let output = sort_buffer.iter_until(&watermark2);
+        sort_buffer.set_watermark(watermark2);
+        let output = sort_buffer.consume();
         let rows2 = chunks_to_rows(output);
         assert_eq!(
             rows2,
@@ -343,7 +372,8 @@ mod tests {
 
         let watermark3 = 8i64.into();
 
-        let output = sort_buffer.iter_until(&watermark3);
+        sort_buffer.set_watermark(watermark3);
+        let output = sort_buffer.consume();
         let rows3 = chunks_to_rows(output);
         assert_eq!(
             rows3,
@@ -357,7 +387,8 @@ mod tests {
         );
 
         let watermark4 = 9i64.into();
-        let output = sort_buffer.iter_until(&watermark4);
+        sort_buffer.set_watermark(watermark4);
+        let output = sort_buffer.consume();
         let rows4 = chunks_to_rows(output);
         assert_eq!(rows4, vec![row_pretty("13 9")]);
     }

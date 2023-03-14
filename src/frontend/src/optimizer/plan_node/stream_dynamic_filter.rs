@@ -16,13 +16,13 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
-use super::generic;
 use super::utils::IndicesDisplay;
+use super::{generic, ExprRewritable};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNodeBinary, StreamNode};
@@ -30,7 +30,7 @@ use crate::optimizer::PlanRef;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ConditionDisplay;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDynamicFilter {
     pub base: PlanBase,
     core: generic::DynamicFilter<PlanRef>,
@@ -97,6 +97,18 @@ impl fmt::Display for StreamDynamicFilter {
             },
         );
 
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
+
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.
             builder.field(
@@ -150,3 +162,5 @@ impl StreamNode for StreamDynamicFilter {
         })
     }
 }
+
+impl ExprRewritable for StreamDynamicFilter {}

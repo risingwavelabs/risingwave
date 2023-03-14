@@ -16,6 +16,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_pb::hummock::CompactTask;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -37,17 +38,22 @@ pub type NotificationVersion = u64;
 pub enum LocalNotification {
     WorkerNodeIsDeleted(WorkerNode),
     CompactionTaskNeedCancel(CompactTask),
+    SystemParamsChange(SystemParamsReader),
 }
 
 #[derive(Debug)]
-enum Target {
-    SubscribeType(SubscribeType),
-    WorkerKey(WorkerKey),
+struct Target {
+    subscribe_type: SubscribeType,
+    // `None` indicates sending to all subscribers of `subscribe_type`.
+    worker_key: Option<WorkerKey>,
 }
 
 impl From<SubscribeType> for Target {
     fn from(value: SubscribeType) -> Self {
-        Self::SubscribeType(value)
+        Self {
+            subscribe_type: value,
+            worker_key: None,
+        }
     }
 }
 
@@ -88,15 +94,7 @@ where
                     version: task.version.unwrap_or_default(),
                 };
 
-                let mut guard = core.lock().await;
-                match task.target {
-                    Target::SubscribeType(subscribe_type) => {
-                        guard.notify(subscribe_type, response);
-                    }
-                    Target::WorkerKey(worker_key) => {
-                        guard.notify_with_worker_key(worker_key, response);
-                    }
-                }
+                core.lock().await.notify(task.target, response);
             }
         });
 
@@ -106,6 +104,12 @@ where
             current_version: Mutex::new(Version::new(&*meta_store).await),
             meta_store,
         }
+    }
+
+    pub async fn abort_all(&self) {
+        let mut guard = self.core.lock().await;
+        *guard = NotificationManagerCore::new();
+        guard.exiting = true;
     }
 
     #[inline(always)]
@@ -145,9 +149,17 @@ where
         self.notify(target, operation, info, None);
     }
 
-    pub fn notify_snapshot(&self, worker_key: WorkerKey, meta_snapshot: MetaSnapshot) {
+    pub fn notify_snapshot(
+        &self,
+        worker_key: WorkerKey,
+        subscribe_type: SubscribeType,
+        meta_snapshot: MetaSnapshot,
+    ) {
         self.notify_without_version(
-            Target::WorkerKey(worker_key),
+            Target {
+                subscribe_type,
+                worker_key: Some(worker_key),
+            },
             Operation::Snapshot,
             Info::Snapshot(meta_snapshot),
         )
@@ -165,6 +177,11 @@ where
 
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
+            .await
+    }
+
+    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
+        self.notify_with_version(SubscribeType::Compute.into(), operation, info)
             .await
     }
 
@@ -210,18 +227,21 @@ where
         sender: UnboundedSender<Notification>,
     ) {
         let mut core_guard = self.core.lock().await;
-        let senders = match subscribe_type {
-            SubscribeType::Frontend => &mut core_guard.frontend_senders,
-            SubscribeType::Hummock => &mut core_guard.hummock_senders,
-            SubscribeType::Compactor => &mut core_guard.compactor_senders,
-            SubscribeType::Unspecified => unreachable!(),
-        };
+        if core_guard.exiting {
+            tracing::warn!("notification manager exiting.");
+            return;
+        }
+        let senders = core_guard.senders_of(subscribe_type);
 
         senders.insert(worker_key, sender);
     }
 
     pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
         let mut core_guard = self.core.lock().await;
+        if core_guard.exiting {
+            tracing::warn!("notification manager exiting.");
+            return;
+        }
         core_guard.local_senders.push(sender);
     }
 
@@ -231,15 +251,20 @@ where
     }
 }
 
+type SenderMap = HashMap<WorkerKey, UnboundedSender<Notification>>;
+
 struct NotificationManagerCore {
     /// The notification sender to frontends.
-    frontend_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    frontend_senders: SenderMap,
     /// The notification sender to nodes that subscribes the hummock.
-    hummock_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    hummock_senders: SenderMap,
     /// The notification sender to compactor nodes.
-    compactor_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
+    compactor_senders: SenderMap,
+    /// The notification sender to compute nodes.
+    compute_senders: HashMap<WorkerKey, UnboundedSender<Notification>>,
     /// The notification sender to local subscribers.
     local_senders: Vec<UnboundedSender<LocalNotification>>,
+    exiting: bool,
 }
 
 impl NotificationManagerCore {
@@ -248,50 +273,101 @@ impl NotificationManagerCore {
             frontend_senders: HashMap::new(),
             hummock_senders: HashMap::new(),
             compactor_senders: HashMap::new(),
+            compute_senders: HashMap::new(),
             local_senders: vec![],
+            exiting: false,
         }
     }
 
-    fn notify_with_worker_key(&mut self, worker_key: WorkerKey, response: SubscribeResponse) {
-        for senders in [
-            &mut self.frontend_senders,
-            &mut self.hummock_senders,
-            &mut self.compactor_senders,
-        ] {
+    fn notify(&mut self, target: Target, response: SubscribeResponse) {
+        macro_rules! warn_send_failure {
+            ($subscribe_type:expr, $worker_key:expr, $err:expr) => {
+                tracing::warn!(
+                    "Failed to notify {:?} {:?}: {}",
+                    $subscribe_type,
+                    $worker_key,
+                    $err
+                );
+            };
+        }
+
+        let senders = self.senders_of(target.subscribe_type);
+
+        if let Some(worker_key) = target.worker_key {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
-                    entry.get().send(Ok(response)).unwrap_or_else(|_| {
+                    let _ = entry.get().send(Ok(response)).inspect_err(|err| {
+                        warn_send_failure!(target.subscribe_type, &worker_key, err);
                         entry.remove_entry();
                     });
-                    return;
                 }
-                Entry::Vacant(_) => continue,
+                Entry::Vacant(_) => {
+                    tracing::warn!("Failed to find notification sender of {:?}", worker_key)
+                }
             }
+        } else {
+            senders.retain(|worker_key, sender| {
+                sender
+                    .send(Ok(response.clone()))
+                    .inspect_err(|err| {
+                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                    })
+                    .is_ok()
+            });
         }
-
-        tracing::warn!("Failed to find notification sender of {:?}", worker_key);
     }
 
-    fn notify(&mut self, subscribe_type: SubscribeType, response: SubscribeResponse) {
-        let senders = match subscribe_type {
+    fn senders_of(&mut self, subscribe_type: SubscribeType) -> &mut SenderMap {
+        match subscribe_type {
             SubscribeType::Frontend => &mut self.frontend_senders,
             SubscribeType::Hummock => &mut self.hummock_senders,
             SubscribeType::Compactor => &mut self.compactor_senders,
+            SubscribeType::Compute => &mut self.compute_senders,
             SubscribeType::Unspecified => unreachable!(),
-        };
+        }
+    }
+}
 
-        senders.retain(|worker_key, sender| {
-            sender
-                .send(Ok(response.clone()))
-                .inspect_err(|err| {
-                    tracing::warn!(
-                        "Failed to notify {:?} {:?}: {}",
-                        subscribe_type,
-                        worker_key,
-                        err
-                    )
-                })
-                .is_ok()
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::common::HostAddress;
+
+    use super::*;
+    use crate::storage::MemStore;
+
+    #[tokio::test]
+    async fn test_multiple_subscribers_one_worker() {
+        let mgr = NotificationManager::new(MemStore::new().into()).await;
+        let worker_key1 = WorkerKey(HostAddress {
+            host: "a".to_string(),
+            port: 1,
         });
+        let worker_key2 = WorkerKey(HostAddress {
+            host: "a".to_string(),
+            port: 2,
+        });
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
+        let (tx3, mut rx3) = mpsc::unbounded_channel();
+        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1)
+            .await;
+        mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2)
+            .await;
+        mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3)
+            .await;
+        mgr.notify_snapshot(
+            worker_key1.clone(),
+            SubscribeType::Hummock,
+            MetaSnapshot::default(),
+        );
+        assert!(rx1.recv().await.is_some());
+        assert!(rx2.try_recv().is_err());
+        assert!(rx3.try_recv().is_err());
+
+        mgr.notify_frontend(Operation::Add, Info::Database(Default::default()))
+            .await;
+        assert!(rx1.try_recv().is_err());
+        assert!(rx2.recv().await.is_some());
+        assert!(rx3.recv().await.is_some());
     }
 }

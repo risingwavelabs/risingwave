@@ -15,25 +15,26 @@
 use std::cmp::Ordering;
 use std::ops::Bound;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message, PkIndicesRef};
-use crate::executor::PkIndices;
+use crate::executor::{PkIndices, Watermark};
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// An implementation of the RFC: Use Backfill To Let Mv On Mv Stream Again.(https://github.com/risingwavelabs/rfcs/pull/13)
@@ -136,11 +137,11 @@ where
 
         if !to_backfill {
             // Forward messages directly to the downstream.
-            let upstream = upstream
-                .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
             #[for_await]
             for message in upstream {
-                yield message?;
+                if let Some(message) = Self::mapping_message(message?, &upstream_indices) {
+                    yield message;
+                }
             }
 
             return Ok(());
@@ -152,6 +153,9 @@ where
         // Current position of the table storage primary key.
         // `None` means it starts from the beginning.
         let mut current_pos: Option<OwnedRow> = None;
+
+        // Keep track of rows from the upstream and snapshot.
+        let mut processed_rows: u64 = 0;
 
         // Backfill Algorithm:
         //
@@ -220,10 +224,13 @@ where
                                 // Update snapshot read epoch.
                                 snapshot_read_epoch = barrier.epoch.prev;
 
-                                yield Message::Barrier(barrier);
+                                self.progress.update(
+                                    barrier.epoch.curr,
+                                    snapshot_read_epoch,
+                                    processed_rows,
+                                );
 
-                                self.progress
-                                    .update(snapshot_read_epoch, snapshot_read_epoch);
+                                yield Message::Barrier(barrier);
                                 // Break the for loop and start a new snapshot read stream.
                                 break;
                             }
@@ -232,7 +239,7 @@ where
                                 upstream_chunk_buffer.push(chunk.compact());
                             }
                             Message::Watermark(_) => {
-                                todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                                // Ignore watermark during backfill.
                             }
                         }
                     }
@@ -245,6 +252,7 @@ where
                                 // in the buffer. Here we choose to never mark the chunk.
                                 // Consume with the renaming stream buffer chunk without mark.
                                 for chunk in upstream_chunk_buffer.drain(..) {
+                                    processed_rows += chunk.cardinality() as u64;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
                                         &upstream_indices,
@@ -267,7 +275,7 @@ where
                                         .project(table_pk_indices)
                                         .into_owned_row(),
                                 );
-
+                                processed_rows += chunk.cardinality() as u64;
                                 yield Message::Chunk(Self::mapping_chunk(chunk, &upstream_indices));
                             }
                         }
@@ -283,19 +291,17 @@ where
 
         // Backfill has already finished.
         // Forward messages directly to the downstream.
-        let upstream = upstream
-            .map(move |result| result.map(|msg| Self::mapping_message(msg, &upstream_indices)));
         #[for_await]
         for msg in upstream {
-            let msg: Message = msg?;
-            if let Some(barrier) = msg.as_barrier() {
-                self.progress.finish(barrier.epoch.curr);
+            if let Some(msg) = Self::mapping_message(msg?, &upstream_indices) {
+                if let Some(barrier) = msg.as_barrier() {
+                    self.progress.finish(barrier.epoch.curr);
+                }
+                yield msg;
             }
-            yield msg;
         }
     }
 
-    #[expect(clippy::needless_lifetimes, reason = "code generated by try_stream")]
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
     async fn snapshot_read(
         table: &StorageTable<S>,
@@ -306,6 +312,15 @@ where
         // `current_pos` is None means it needs to scan from the beginning, so we use Unbounded to
         // scan. Otherwise, use Excluded.
         let range_bounds = if let Some(current_pos) = current_pos {
+            // If `current_pos` is an empty row which means upstream mv contains only one row and it
+            // has been consumed. The iter interface doesn't support
+            // `Excluded(empty_row)` range bound, so we can simply return `None`.
+            if current_pos.is_empty() {
+                assert!(table.pk_indices().is_empty());
+                yield None;
+                return Ok(());
+            }
+
             (Bound::Excluded(current_pos), Bound::Unbounded)
         } else {
             (Bound::Unbounded, Bound::Unbounded)
@@ -318,6 +333,7 @@ where
                 row::empty(),
                 range_bounds,
                 ordered,
+                PrefetchOptions::new_for_exhaust_iter(),
             )
             .await?;
 
@@ -325,7 +341,7 @@ where
 
         while let Some(data_chunk) = iter
             .collect_data_chunk(table.schema(), Some(CHUNK_SIZE))
-            .stack_trace("backfill_snapshot_read")
+            .instrument_await("backfill_snapshot_read")
             .await?
         {
             if data_chunk.cardinality() != 0 {
@@ -355,10 +371,12 @@ where
             match row
                 .project(table_pk_indices)
                 .iter()
-                .zip_eq(pk_order.iter())
-                .cmp_by(current_pos.iter(), |(x, order), y| match order {
-                    OrderType::Ascending => x.cmp(&y),
-                    OrderType::Descending => y.cmp(&x),
+                .zip_eq_fast(pk_order.iter())
+                .cmp_by(current_pos.iter(), |(x, order), y| {
+                    match order.direction() {
+                        Direction::Ascending => x.cmp(&y),
+                        Direction::Descending => y.cmp(&x),
+                    }
                 }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
@@ -379,10 +397,19 @@ where
         StreamChunk::new(ops, mapped_columns, visibility)
     }
 
-    fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Message {
+    fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
+        watermark.transform_with_indices(upstream_indices)
+    }
+
+    fn mapping_message(msg: Message, upstream_indices: &[usize]) -> Option<Message> {
         match msg {
-            Message::Barrier(_) | Message::Watermark(_) => msg,
-            Message::Chunk(chunk) => Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)),
+            Message::Barrier(_) => Some(msg),
+            Message::Watermark(watermark) => {
+                Self::mapping_watermark(watermark, upstream_indices).map(Message::Watermark)
+            }
+            Message::Chunk(chunk) => {
+                Some(Message::Chunk(Self::mapping_chunk(chunk, upstream_indices)))
+            }
         }
     }
 }

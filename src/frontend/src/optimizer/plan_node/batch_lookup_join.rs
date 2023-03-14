@@ -29,8 +29,9 @@ use crate::optimizer::plan_node::{
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
+use crate::utils::ColIndexMappingRewriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchLookupJoin {
     pub base: PlanBase,
     logical: LogicalJoin,
@@ -65,6 +66,7 @@ impl BatchLookupJoin {
         // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
         // lookup.
         assert!(eq_join_predicate.has_eq());
+        assert!(eq_join_predicate.eq_keys_are_type_aligned());
         let ctx = logical.base.ctx.clone();
         let dist = Self::derive_dist(logical.left().distribution(), &logical);
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
@@ -199,12 +201,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()
@@ -239,12 +236,7 @@ impl ToBatchProst for BatchLookupJoin {
                     .eq_join_predicate
                     .other_cond()
                     .as_expr_unless_true()
-                    .map(|x| {
-                        self.base
-                            .ctx()
-                            .expr_with_session_timezone(x)
-                            .to_expr_proto()
-                    }),
+                    .map(|x| x.to_expr_proto()),
                 outer_side_key: self
                     .eq_join_predicate
                     .left_eq_indexes()

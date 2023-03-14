@@ -80,8 +80,10 @@ impl CompactorService {
 
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        let provide_opendal = config.provide_opendal.as_ref().unwrap();
         add_storage_backend(
             &config.id,
+            provide_opendal,
             provide_minio,
             provide_aws_s3,
             hummock_in_memory_strategy,
@@ -116,7 +118,7 @@ impl Task for CompactorService {
             // See https://linux.die.net/man/3/jemalloc for the descriptions of profiling options
             cmd.env(
                 "_RJEM_MALLOC_CONF",
-                "prof:true,lg_prof_interval:34,lg_prof_sample:19,prof_prefix:compactor",
+                "prof:true,lg_prof_interval:38,lg_prof_sample:19,prof_prefix:compactor",
             );
         }
 

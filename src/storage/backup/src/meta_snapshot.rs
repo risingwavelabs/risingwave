@@ -13,12 +13,14 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::fmt::{Display, Formatter};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use risingwave_pb::catalog::{Database, Index, Schema, Sink, Source, Table, View};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
 use risingwave_pb::hummock::{CompactionGroup, HummockVersion, HummockVersionStats};
-use risingwave_pb::meta::TableFragments;
+use risingwave_pb::meta::{SystemParams, TableFragments};
 use risingwave_pb::user::UserInfo;
 
 use crate::error::{BackupError, BackupResult};
@@ -26,6 +28,7 @@ use crate::{xxhash64_checksum, xxhash64_verify, MetaSnapshotId};
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct MetaSnapshot {
+    pub format_version: u32,
     pub id: MetaSnapshotId,
     /// Snapshot of meta store.
     pub metadata: ClusterMetadata,
@@ -34,6 +37,7 @@ pub struct MetaSnapshot {
 impl MetaSnapshot {
     pub fn encode(&self) -> Vec<u8> {
         let mut buf = vec![];
+        buf.put_u32_le(self.format_version);
         buf.put_u64_le(self.id);
         self.metadata.encode_to(&mut buf);
         let checksum = xxhash64_checksum(&buf);
@@ -44,25 +48,68 @@ impl MetaSnapshot {
     pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
         let checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], checksum)?;
+        let format_version = buf.get_u32_le();
         let id = buf.get_u64_le();
         let metadata = ClusterMetadata::decode(buf)?;
-        Ok(Self { id, metadata })
+        Ok(Self {
+            format_version,
+            id,
+            metadata,
+        })
     }
 }
 
+impl Display for MetaSnapshot {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "format_version: {}", self.format_version)?;
+        writeln!(f, "id: {}", self.id)?;
+        writeln!(f, "default_cf:")?;
+        for (k, v) in &self.metadata.default_cf {
+            let key = String::from_utf8(k.clone()).unwrap();
+            writeln!(f, "{} {:x?}", key, v)?;
+        }
+        writeln!(f, "hummock_version:")?;
+        writeln!(f, "{:#?}", self.metadata.hummock_version)?;
+        writeln!(f, "version_stats:")?;
+        writeln!(f, "{:#?}", self.metadata.version_stats)?;
+        writeln!(f, "compaction_groups:")?;
+        writeln!(f, "{:#?}", self.metadata.compaction_groups)?;
+        writeln!(f, "database:")?;
+        writeln!(f, "{:#?}", self.metadata.database)?;
+        writeln!(f, "schema:")?;
+        writeln!(f, "{:#?}", self.metadata.schema)?;
+        writeln!(f, "table:")?;
+        writeln!(f, "{:#?}", self.metadata.table)?;
+        writeln!(f, "index:")?;
+        writeln!(f, "{:#?}", self.metadata.index)?;
+        writeln!(f, "sink:")?;
+        writeln!(f, "{:#?}", self.metadata.sink)?;
+        writeln!(f, "source:")?;
+        writeln!(f, "{:#?}", self.metadata.source)?;
+        writeln!(f, "view:")?;
+        writeln!(f, "{:#?}", self.metadata.view)?;
+        writeln!(f, "table_fragments:")?;
+        writeln!(f, "{:#?}", self.metadata.table_fragments)?;
+        writeln!(f, "user_info:")?;
+        writeln!(f, "{:#?}", self.metadata.user_info)?;
+        writeln!(f, "function:")?;
+        writeln!(f, "{:#?}", self.metadata.function)?;
+        writeln!(f, "system_param:")?;
+        writeln!(f, "{:#?}", self.metadata.system_param)?;
+        Ok(())
+    }
+}
+
+/// For backward compatibility, never remove fields and only append new field.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ClusterMetadata {
     /// Unlike other metadata that has implemented `MetadataModel`,
     /// DEFAULT_COLUMN_FAMILY stores various single row metadata, e.g. id offset and epoch offset.
     /// So we use `default_cf` stores raw KVs for them.
     pub default_cf: HashMap<Vec<u8>, Vec<u8>>,
-
-    /// Hummock metadata
     pub hummock_version: HummockVersion,
     pub version_stats: HummockVersionStats,
     pub compaction_groups: Vec<CompactionGroup>,
-
-    /// Catalog metadata
     pub database: Vec<Database>,
     pub schema: Vec<Schema>,
     pub table: Vec<Table>,
@@ -70,9 +117,10 @@ pub struct ClusterMetadata {
     pub sink: Vec<Sink>,
     pub source: Vec<Source>,
     pub view: Vec<View>,
-
     pub table_fragments: Vec<TableFragments>,
     pub user_info: Vec<UserInfo>,
+    pub function: Vec<Function>,
+    pub system_param: SystemParams,
 }
 
 impl ClusterMetadata {
@@ -93,6 +141,8 @@ impl ClusterMetadata {
         Self::encode_prost_message_list(&self.sink.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.source.iter().collect_vec(), buf);
         Self::encode_prost_message_list(&self.view.iter().collect_vec(), buf);
+        Self::encode_prost_message_list(&self.function.iter().collect_vec(), buf);
+        Self::encode_prost_message(&self.system_param, buf);
     }
 
     pub fn decode(mut buf: &[u8]) -> BackupResult<Self> {
@@ -100,7 +150,7 @@ impl ClusterMetadata {
         let default_cf_values: Vec<Vec<u8>> = Self::decode_prost_message_list(&mut buf)?;
         let default_cf = default_cf_keys
             .into_iter()
-            .zip_eq(default_cf_values.into_iter())
+            .zip_eq_fast(default_cf_values.into_iter())
             .collect();
         let hummock_version = Self::decode_prost_message(&mut buf)?;
         let version_stats = Self::decode_prost_message(&mut buf)?;
@@ -114,6 +164,8 @@ impl ClusterMetadata {
         let sink: Vec<Sink> = Self::decode_prost_message_list(&mut buf)?;
         let source: Vec<Source> = Self::decode_prost_message_list(&mut buf)?;
         let view: Vec<View> = Self::decode_prost_message_list(&mut buf)?;
+        let function: Vec<Function> = Self::decode_prost_message_list(&mut buf)?;
+        let system_param: SystemParams = Self::decode_prost_message(&mut buf)?;
 
         Ok(Self {
             default_cf,
@@ -129,6 +181,8 @@ impl ClusterMetadata {
             view,
             table_fragments,
             user_info,
+            function,
+            system_param,
         })
     }
 
@@ -179,7 +233,11 @@ mod tests {
     fn test_snapshot_encoding_decoding() {
         let mut metadata = ClusterMetadata::default();
         metadata.hummock_version.id = 321;
-        let raw = MetaSnapshot { id: 123, metadata };
+        let raw = MetaSnapshot {
+            format_version: 0,
+            id: 123,
+            metadata,
+        };
         let encoded = raw.encode();
         let decoded = MetaSnapshot::decode(&encoded).unwrap();
         assert_eq!(raw, decoded);

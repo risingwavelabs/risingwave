@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::future::Future;
+use std::sync::Arc;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistributionMode;
 use risingwave_pb::batch_plan::ExchangeInfo;
 
-use crate::error::Result as BatchResult;
+use crate::error::{BatchError, BatchSharedResult, Result as BatchResult};
 use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
 use crate::task::consistent_hash_shuffle_channel::{
     new_consistent_shuffle_channel, ConsistentHashShuffleReceiver, ConsistentHashShuffleSender,
@@ -31,13 +31,16 @@ use crate::task::hash_shuffle_channel::{
 };
 
 pub(super) trait ChanSender: Send {
-    type SendFuture<'a>: Future<Output = BatchResult<()>> + Send
-    where
-        Self: 'a;
     /// This function will block until there's enough resource to process the chunk.
     /// Currently, it will only be called from single thread.
     /// `None` is sent as a mark of the ending of channel.
-    fn send(&mut self, chunk: Option<DataChunk>) -> Self::SendFuture<'_>;
+    async fn send(&mut self, chunk: DataChunk) -> BatchResult<()>;
+
+    /// Close this data channel.
+    ///
+    /// If finished correctly, we should pass `None`, otherwise we should pass `BatchError`. In
+    /// either case we should stop sending more data.
+    async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()>;
 }
 
 #[derive(Debug, Clone)]
@@ -49,7 +52,7 @@ pub enum ChanSenderImpl {
 }
 
 impl ChanSenderImpl {
-    pub(super) async fn send(&mut self, chunk: Option<DataChunk>) -> BatchResult<()> {
+    pub(super) async fn send(&mut self, chunk: DataChunk) -> BatchResult<()> {
         match self {
             Self::HashShuffle(sender) => sender.send(chunk).await,
             Self::ConsistentHashShuffle(sender) => sender.send(chunk).await,
@@ -57,15 +60,21 @@ impl ChanSenderImpl {
             Self::Broadcast(sender) => sender.send(chunk).await,
         }
     }
+
+    pub(super) async fn close(self, error: Option<Arc<BatchError>>) -> BatchResult<()> {
+        match self {
+            Self::HashShuffle(sender) => sender.close(error).await,
+            Self::ConsistentHashShuffle(sender) => sender.close(error).await,
+            Self::Fifo(sender) => sender.close(error).await,
+            Self::Broadcast(sender) => sender.close(error).await,
+        }
+    }
 }
 
 pub(super) trait ChanReceiver: Send {
-    type RecvFuture<'a>: Future<Output = Result<Option<DataChunkInChannel>>> + Send
-    where
-        Self: 'a;
     /// Returns `None` if there's no more data to read.
     /// Otherwise it will wait until there's data.
-    fn recv(&mut self) -> Self::RecvFuture<'_>;
+    async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>>;
 }
 
 pub enum ChanReceiverImpl {
@@ -76,7 +85,7 @@ pub enum ChanReceiverImpl {
 }
 
 impl ChanReceiverImpl {
-    pub(super) async fn recv(&mut self) -> Result<Option<DataChunkInChannel>> {
+    pub(super) async fn recv(&mut self) -> BatchSharedResult<Option<DataChunkInChannel>> {
         match self {
             Self::HashShuffle(receiver) => receiver.recv().await,
             Self::ConsistentHashShuffle(receiver) => receiver.recv().await,

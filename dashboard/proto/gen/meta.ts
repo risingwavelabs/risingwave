@@ -11,7 +11,7 @@ import {
   workerTypeFromJSON,
   workerTypeToJSON,
 } from "./common";
-import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
+import { HummockSnapshot, HummockVersion, HummockVersionDeltas, WriteLimits } from "./hummock";
 import { ConnectorSplits } from "./source";
 import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
@@ -23,6 +23,7 @@ export const SubscribeType = {
   FRONTEND: "FRONTEND",
   HUMMOCK: "HUMMOCK",
   COMPACTOR: "COMPACTOR",
+  COMPUTE: "COMPUTE",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -42,6 +43,9 @@ export function subscribeTypeFromJSON(object: any): SubscribeType {
     case 3:
     case "COMPACTOR":
       return SubscribeType.COMPACTOR;
+    case 4:
+    case "COMPUTE":
+      return SubscribeType.COMPUTE;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -59,6 +63,8 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
       return "HUMMOCK";
     case SubscribeType.COMPACTOR:
       return "COMPACTOR";
+    case SubscribeType.COMPUTE:
+      return "COMPUTE";
     case SubscribeType.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -300,6 +306,20 @@ export interface FlushResponse {
   snapshot: HummockSnapshot | undefined;
 }
 
+export interface CreatingJobInfo {
+  databaseId: number;
+  schemaId: number;
+  name: string;
+}
+
+export interface CancelCreatingJobsRequest {
+  infos: CreatingJobInfo[];
+}
+
+export interface CancelCreatingJobsResponse {
+  status: Status | undefined;
+}
+
 export interface ListTableFragmentsRequest {
   tableIds: number[];
 }
@@ -388,8 +408,9 @@ export interface MetaSnapshot {
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
-  version: MetaSnapshot_SnapshotVersion | undefined;
   metaBackupManifestId: MetaBackupManifestId | undefined;
+  hummockWriteLimits: WriteLimits | undefined;
+  version: MetaSnapshot_SnapshotVersion | undefined;
 }
 
 export interface MetaSnapshot_SnapshotVersion {
@@ -417,7 +438,9 @@ export interface SubscribeResponse {
     | { $case: "hummockSnapshot"; hummockSnapshot: HummockSnapshot }
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
     | { $case: "snapshot"; snapshot: MetaSnapshot }
-    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId };
+    | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId }
+    | { $case: "systemParams"; systemParams: SystemParams }
+    | { $case: "hummockWriteLimits"; hummockWriteLimits: WriteLimits };
 }
 
 export const SubscribeResponse_Operation = {
@@ -534,6 +557,41 @@ export interface MetaMember {
 
 export interface MembersResponse {
   members: MetaMember[];
+}
+
+/**
+ * The schema for persisted system parameters.
+ * Note on backward compatibility:
+ * - Do not remove deprecated fields. Mark them as deprecated both after the field definition and in `system_params/mod.rs` instead.
+ * - Do not rename existing fields, since each field is stored separately in the meta store with the field name as the key.
+ * - To modify (rename, change the type or semantic of) a field, introduce a new field suffixed by the version.
+ */
+export interface SystemParams {
+  barrierIntervalMs?: number | undefined;
+  checkpointFrequency?: number | undefined;
+  sstableSizeMb?: number | undefined;
+  blockSizeKb?: number | undefined;
+  bloomFalsePositive?: number | undefined;
+  stateStore?: string | undefined;
+  dataDirectory?: string | undefined;
+  backupStorageUrl?: string | undefined;
+  backupStorageDirectory?: string | undefined;
+}
+
+export interface GetSystemParamsRequest {
+}
+
+export interface GetSystemParamsResponse {
+  params: SystemParams | undefined;
+}
+
+export interface SetSystemParamRequest {
+  param: string;
+  /** None means set to default value. */
+  value?: string | undefined;
+}
+
+export interface SetSystemParamResponse {
 }
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
@@ -1042,6 +1100,86 @@ export const FlushResponse = {
   },
 };
 
+function createBaseCreatingJobInfo(): CreatingJobInfo {
+  return { databaseId: 0, schemaId: 0, name: "" };
+}
+
+export const CreatingJobInfo = {
+  fromJSON(object: any): CreatingJobInfo {
+    return {
+      databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
+      schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+    };
+  },
+
+  toJSON(message: CreatingJobInfo): unknown {
+    const obj: any = {};
+    message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
+    message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
+    message.name !== undefined && (obj.name = message.name);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CreatingJobInfo>, I>>(object: I): CreatingJobInfo {
+    const message = createBaseCreatingJobInfo();
+    message.databaseId = object.databaseId ?? 0;
+    message.schemaId = object.schemaId ?? 0;
+    message.name = object.name ?? "";
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsRequest(): CancelCreatingJobsRequest {
+  return { infos: [] };
+}
+
+export const CancelCreatingJobsRequest = {
+  fromJSON(object: any): CancelCreatingJobsRequest {
+    return { infos: Array.isArray(object?.infos) ? object.infos.map((e: any) => CreatingJobInfo.fromJSON(e)) : [] };
+  },
+
+  toJSON(message: CancelCreatingJobsRequest): unknown {
+    const obj: any = {};
+    if (message.infos) {
+      obj.infos = message.infos.map((e) => e ? CreatingJobInfo.toJSON(e) : undefined);
+    } else {
+      obj.infos = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsRequest>, I>>(object: I): CancelCreatingJobsRequest {
+    const message = createBaseCancelCreatingJobsRequest();
+    message.infos = object.infos?.map((e) => CreatingJobInfo.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseCancelCreatingJobsResponse(): CancelCreatingJobsResponse {
+  return { status: undefined };
+}
+
+export const CancelCreatingJobsResponse = {
+  fromJSON(object: any): CancelCreatingJobsResponse {
+    return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
+  },
+
+  toJSON(message: CancelCreatingJobsResponse): unknown {
+    const obj: any = {};
+    message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CancelCreatingJobsResponse>, I>>(object: I): CancelCreatingJobsResponse {
+    const message = createBaseCancelCreatingJobsResponse();
+    message.status = (object.status !== undefined && object.status !== null)
+      ? Status.fromPartial(object.status)
+      : undefined;
+    return message;
+  },
+};
+
 function createBaseListTableFragmentsRequest(): ListTableFragmentsRequest {
   return { tableIds: [] };
 }
@@ -1523,8 +1661,9 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     nodes: [],
     hummockSnapshot: undefined,
     hummockVersion: undefined,
-    version: undefined,
     metaBackupManifestId: undefined,
+    hummockWriteLimits: undefined,
+    version: undefined,
   };
 }
 
@@ -1548,10 +1687,13 @@ export const MetaSnapshot = {
         : [],
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
       hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
-      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
       metaBackupManifestId: isSet(object.metaBackupManifestId)
         ? MetaBackupManifestId.fromJSON(object.metaBackupManifestId)
         : undefined,
+      hummockWriteLimits: isSet(object.hummockWriteLimits)
+        ? WriteLimits.fromJSON(object.hummockWriteLimits)
+        : undefined,
+      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -1618,11 +1760,15 @@ export const MetaSnapshot = {
       (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
     message.hummockVersion !== undefined &&
       (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
-    message.version !== undefined &&
-      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
     message.metaBackupManifestId !== undefined && (obj.metaBackupManifestId = message.metaBackupManifestId
       ? MetaBackupManifestId.toJSON(message.metaBackupManifestId)
       : undefined);
+    message.hummockWriteLimits !== undefined &&
+      (obj.hummockWriteLimits = message.hummockWriteLimits
+        ? WriteLimits.toJSON(message.hummockWriteLimits)
+        : undefined);
+    message.version !== undefined &&
+      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -1646,11 +1792,14 @@ export const MetaSnapshot = {
     message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
       ? HummockVersion.fromPartial(object.hummockVersion)
       : undefined;
-    message.version = (object.version !== undefined && object.version !== null)
-      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
-      : undefined;
     message.metaBackupManifestId = (object.metaBackupManifestId !== undefined && object.metaBackupManifestId !== null)
       ? MetaBackupManifestId.fromPartial(object.metaBackupManifestId)
+      : undefined;
+    message.hummockWriteLimits = (object.hummockWriteLimits !== undefined && object.hummockWriteLimits !== null)
+      ? WriteLimits.fromPartial(object.hummockWriteLimits)
+      : undefined;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
       : undefined;
     return message;
   },
@@ -1740,6 +1889,10 @@ export const SubscribeResponse = {
           $case: "metaBackupManifestId",
           metaBackupManifestId: MetaBackupManifestId.fromJSON(object.metaBackupManifestId),
         }
+        : isSet(object.systemParams)
+        ? { $case: "systemParams", systemParams: SystemParams.fromJSON(object.systemParams) }
+        : isSet(object.hummockWriteLimits)
+        ? { $case: "hummockWriteLimits", hummockWriteLimits: WriteLimits.fromJSON(object.hummockWriteLimits) }
         : undefined,
     };
   },
@@ -1779,6 +1932,11 @@ export const SubscribeResponse = {
       (obj.snapshot = message.info?.snapshot ? MetaSnapshot.toJSON(message.info?.snapshot) : undefined);
     message.info?.$case === "metaBackupManifestId" && (obj.metaBackupManifestId = message.info?.metaBackupManifestId
       ? MetaBackupManifestId.toJSON(message.info?.metaBackupManifestId)
+      : undefined);
+    message.info?.$case === "systemParams" &&
+      (obj.systemParams = message.info?.systemParams ? SystemParams.toJSON(message.info?.systemParams) : undefined);
+    message.info?.$case === "hummockWriteLimits" && (obj.hummockWriteLimits = message.info?.hummockWriteLimits
+      ? WriteLimits.toJSON(message.info?.hummockWriteLimits)
       : undefined);
     return obj;
   },
@@ -1861,6 +2019,23 @@ export const SubscribeResponse = {
       message.info = {
         $case: "metaBackupManifestId",
         metaBackupManifestId: MetaBackupManifestId.fromPartial(object.info.metaBackupManifestId),
+      };
+    }
+    if (
+      object.info?.$case === "systemParams" &&
+      object.info?.systemParams !== undefined &&
+      object.info?.systemParams !== null
+    ) {
+      message.info = { $case: "systemParams", systemParams: SystemParams.fromPartial(object.info.systemParams) };
+    }
+    if (
+      object.info?.$case === "hummockWriteLimits" &&
+      object.info?.hummockWriteLimits !== undefined &&
+      object.info?.hummockWriteLimits !== null
+    ) {
+      message.info = {
+        $case: "hummockWriteLimits",
+        hummockWriteLimits: WriteLimits.fromPartial(object.info.hummockWriteLimits),
       };
     }
     return message;
@@ -2316,6 +2491,155 @@ export const MembersResponse = {
   fromPartial<I extends Exact<DeepPartial<MembersResponse>, I>>(object: I): MembersResponse {
     const message = createBaseMembersResponse();
     message.members = object.members?.map((e) => MetaMember.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseSystemParams(): SystemParams {
+  return {
+    barrierIntervalMs: undefined,
+    checkpointFrequency: undefined,
+    sstableSizeMb: undefined,
+    blockSizeKb: undefined,
+    bloomFalsePositive: undefined,
+    stateStore: undefined,
+    dataDirectory: undefined,
+    backupStorageUrl: undefined,
+    backupStorageDirectory: undefined,
+  };
+}
+
+export const SystemParams = {
+  fromJSON(object: any): SystemParams {
+    return {
+      barrierIntervalMs: isSet(object.barrierIntervalMs) ? Number(object.barrierIntervalMs) : undefined,
+      checkpointFrequency: isSet(object.checkpointFrequency) ? Number(object.checkpointFrequency) : undefined,
+      sstableSizeMb: isSet(object.sstableSizeMb) ? Number(object.sstableSizeMb) : undefined,
+      blockSizeKb: isSet(object.blockSizeKb) ? Number(object.blockSizeKb) : undefined,
+      bloomFalsePositive: isSet(object.bloomFalsePositive) ? Number(object.bloomFalsePositive) : undefined,
+      stateStore: isSet(object.stateStore) ? String(object.stateStore) : undefined,
+      dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
+      backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
+      backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+    };
+  },
+
+  toJSON(message: SystemParams): unknown {
+    const obj: any = {};
+    message.barrierIntervalMs !== undefined && (obj.barrierIntervalMs = Math.round(message.barrierIntervalMs));
+    message.checkpointFrequency !== undefined && (obj.checkpointFrequency = Math.round(message.checkpointFrequency));
+    message.sstableSizeMb !== undefined && (obj.sstableSizeMb = Math.round(message.sstableSizeMb));
+    message.blockSizeKb !== undefined && (obj.blockSizeKb = Math.round(message.blockSizeKb));
+    message.bloomFalsePositive !== undefined && (obj.bloomFalsePositive = message.bloomFalsePositive);
+    message.stateStore !== undefined && (obj.stateStore = message.stateStore);
+    message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
+    message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
+    message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SystemParams>, I>>(object: I): SystemParams {
+    const message = createBaseSystemParams();
+    message.barrierIntervalMs = object.barrierIntervalMs ?? undefined;
+    message.checkpointFrequency = object.checkpointFrequency ?? undefined;
+    message.sstableSizeMb = object.sstableSizeMb ?? undefined;
+    message.blockSizeKb = object.blockSizeKb ?? undefined;
+    message.bloomFalsePositive = object.bloomFalsePositive ?? undefined;
+    message.stateStore = object.stateStore ?? undefined;
+    message.dataDirectory = object.dataDirectory ?? undefined;
+    message.backupStorageUrl = object.backupStorageUrl ?? undefined;
+    message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsRequest(): GetSystemParamsRequest {
+  return {};
+}
+
+export const GetSystemParamsRequest = {
+  fromJSON(_: any): GetSystemParamsRequest {
+    return {};
+  },
+
+  toJSON(_: GetSystemParamsRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsRequest>, I>>(_: I): GetSystemParamsRequest {
+    const message = createBaseGetSystemParamsRequest();
+    return message;
+  },
+};
+
+function createBaseGetSystemParamsResponse(): GetSystemParamsResponse {
+  return { params: undefined };
+}
+
+export const GetSystemParamsResponse = {
+  fromJSON(object: any): GetSystemParamsResponse {
+    return { params: isSet(object.params) ? SystemParams.fromJSON(object.params) : undefined };
+  },
+
+  toJSON(message: GetSystemParamsResponse): unknown {
+    const obj: any = {};
+    message.params !== undefined && (obj.params = message.params ? SystemParams.toJSON(message.params) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetSystemParamsResponse>, I>>(object: I): GetSystemParamsResponse {
+    const message = createBaseGetSystemParamsResponse();
+    message.params = (object.params !== undefined && object.params !== null)
+      ? SystemParams.fromPartial(object.params)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamRequest(): SetSystemParamRequest {
+  return { param: "", value: undefined };
+}
+
+export const SetSystemParamRequest = {
+  fromJSON(object: any): SetSystemParamRequest {
+    return {
+      param: isSet(object.param) ? String(object.param) : "",
+      value: isSet(object.value) ? String(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: SetSystemParamRequest): unknown {
+    const obj: any = {};
+    message.param !== undefined && (obj.param = message.param);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamRequest>, I>>(object: I): SetSystemParamRequest {
+    const message = createBaseSetSystemParamRequest();
+    message.param = object.param ?? "";
+    message.value = object.value ?? undefined;
+    return message;
+  },
+};
+
+function createBaseSetSystemParamResponse(): SetSystemParamResponse {
+  return {};
+}
+
+export const SetSystemParamResponse = {
+  fromJSON(_: any): SetSystemParamResponse {
+    return {};
+  },
+
+  toJSON(_: SetSystemParamResponse): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<SetSystemParamResponse>, I>>(_: I): SetSystemParamResponse {
+    const message = createBaseSetSystemParamResponse();
     return message;
   },
 };

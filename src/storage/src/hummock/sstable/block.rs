@@ -17,10 +17,11 @@ use std::io::{Read, Write};
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
-use super::utils::{bytes_diff, xxhash64_verify, CompressionAlgorithm};
+use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
 use crate::hummock::sstable::utils::xxhash64_checksum;
 use crate::hummock::{HummockError, HummockResult};
 
@@ -150,13 +151,21 @@ pub struct KeyPrefix {
 impl KeyPrefix {
     pub fn encode(&self, buf: &mut impl BufMut) {
         buf.put_u16(self.overlap as u16);
-        buf.put_u16(self.diff as u16);
+        if self.diff >= MAX_KEY_LEN {
+            buf.put_u16(MAX_KEY_LEN as u16);
+            buf.put_u32(self.diff as u32);
+        } else {
+            buf.put_u16(self.diff as u16);
+        }
         buf.put_u32(self.value as u32);
     }
 
     pub fn decode(buf: &mut impl Buf, offset: usize) -> Self {
         let overlap = buf.get_u16() as usize;
-        let diff = buf.get_u16() as usize;
+        let mut diff = buf.get_u16() as usize;
+        if diff == MAX_KEY_LEN {
+            diff = buf.get_u32() as usize;
+        }
         let value = buf.get_u32() as usize;
         Self {
             overlap,
@@ -168,7 +177,11 @@ impl KeyPrefix {
 
     /// Encoded length.
     fn len(&self) -> usize {
-        2 + 2 + 4
+        if self.diff >= MAX_KEY_LEN {
+            12 // 2 + 2 + 4 + 4
+        } else {
+            8 // 2 + 2 + 4
+        }
     }
 
     /// Gets overlap len.
@@ -249,26 +262,31 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
+    /// For diff len < MAX_KEY_LEN (65536)
+    ///    entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
+    /// For diff len >= MAX_KEY_LEN (65536)
+    ///    entry (kv pair): | overlap len (2B) | MAX_KEY_LEN (2B) | diff len (4B) | value len(4B) | diff key | value |
     /// ```
     ///
     /// # Panics
     ///
     /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, key: &[u8], value: &[u8]) {
+    pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        let mut key: BytesMut = Default::default();
+        full_key.encode_into(&mut key);
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key),
                 Ordering::Less
             );
         }
         // Update restart point if needed and calculate diff key.
         let diff_key = if self.entry_count % self.restart_count == 0 {
             self.restart_points.push(self.buf.len() as u32);
-            key
+            key.as_ref()
         } else {
-            bytes_diff(&self.last_key, key)
+            bytes_diff_below_max_key_length(&self.last_key, &key)
         };
 
         let prefix = KeyPrefix {
@@ -283,7 +301,7 @@ impl BlockBuilder {
         self.buf.put_slice(value);
 
         self.last_key.clear();
-        self.last_key.extend_from_slice(key);
+        self.last_key.extend_from_slice(&key);
         self.entry_count += 1;
     }
 
@@ -372,7 +390,8 @@ impl BlockBuilder {
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::FullKey;
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
@@ -381,10 +400,10 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
+        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
@@ -392,22 +411,22 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
@@ -426,10 +445,10 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
+        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
         let capcitiy = builder.uncompressed_block_size();
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());
@@ -437,32 +456,75 @@ mod tests {
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
         assert!(!bi.is_valid());
     }
 
-    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
-        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
-        buf.put_slice(user_key);
-        buf.put_u64(!epoch);
-        buf.freeze()
+    // pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
+    //     let mut buf = BytesMut::with_capacity(user_key.len() + 8);
+    //     buf.put_slice(user_key);
+    //     buf.put_u64(!epoch);
+    //     buf.freeze()
+    // }
+
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
+    }
+
+    #[test]
+    fn test_block_enc_large_key() {
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
+        let medium_key = vec![b'a'; MAX_KEY_LEN - 500];
+        let large_key = vec![b'b'; MAX_KEY_LEN];
+        let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
+
+        builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
+        builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
+        builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+        let capacity = builder.uncompressed_block_size();
+        let buf = builder.build().to_vec();
+        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+        let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
+
+        bi.seek_to_first();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+        assert_eq!(b"v1", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+        assert_eq!(b"v2", bi.value());
+
+        bi.next();
+        assert!(bi.is_valid());
+        assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+        assert_eq!(b"v3", bi.value());
+
+        bi.next();
+        assert!(!bi.is_valid());
     }
 }

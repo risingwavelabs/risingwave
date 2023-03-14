@@ -18,14 +18,10 @@ use bytes::Bytes;
 use risingwave_hummock_sdk::key::{FullKey, UserKey, UserKeyRange};
 use risingwave_hummock_sdk::HummockEpoch;
 
-use crate::hummock::iterator::merge_inner::UnorderedMergeIteratorInner;
-use crate::hummock::iterator::{
-    DirectedUserIterator, DirectedUserIteratorBuilder, Forward, ForwardMergeRangeIterator,
-    ForwardUserIteratorType, HummockIterator, UserIteratorPayloadType,
-};
+use crate::hummock::iterator::{Forward, ForwardMergeRangeIterator, HummockIterator};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{DeleteRangeAggregator, HummockResult, SstableIterator};
+use crate::hummock::{DeleteRangeAggregator, HummockResult};
 use crate::monitor::StoreLocalStatistic;
 
 /// [`UserIterator`] can be used by user directly.
@@ -232,9 +228,9 @@ impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
 }
 
 #[cfg(test)]
-impl UserIterator<ForwardUserIteratorType> {
+impl<I: HummockIterator<Direction = Forward>> UserIterator<I> {
     /// Create [`UserIterator`] with maximum epoch.
-    pub(crate) fn for_test(iterator: ForwardUserIteratorType, key_range: UserKeyRange) -> Self {
+    pub(crate) fn for_test(iterator: I, key_range: UserKeyRange) -> Self {
         Self::new(
             iterator,
             key_range,
@@ -246,7 +242,7 @@ impl UserIterator<ForwardUserIteratorType> {
     }
 
     pub(crate) fn for_test_with_epoch(
-        iterator: ForwardUserIteratorType,
+        iterator: I,
         key_range: UserKeyRange,
         read_epoch: u64,
         min_epoch: u64,
@@ -262,31 +258,6 @@ impl UserIterator<ForwardUserIteratorType> {
     }
 }
 
-impl DirectedUserIteratorBuilder for UserIterator<ForwardUserIteratorType> {
-    type Direction = Forward;
-    type SstableIteratorType = SstableIterator;
-
-    fn create(
-        iterator_iter: Vec<UserIteratorPayloadType<Forward, SstableIterator>>,
-        key_range: UserKeyRange,
-        read_epoch: u64,
-        min_epoch: u64,
-        version: Option<PinnedVersion>,
-        // TODO: replace it with direction.
-        delete_range_iter: DeleteRangeAggregator<ForwardMergeRangeIterator>,
-    ) -> DirectedUserIterator {
-        let iterator = UnorderedMergeIteratorInner::new(iterator_iter.into_iter());
-        DirectedUserIterator::Forward(Self::new(
-            iterator,
-            key_range,
-            read_epoch,
-            min_epoch,
-            version,
-            delete_range_iter,
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::ops::Bound::*;
@@ -297,10 +268,10 @@ mod tests {
         default_builder_opt_for_test, gen_iterator_test_sstable_base,
         gen_iterator_test_sstable_from_kv_pair, gen_iterator_test_sstable_with_incr_epoch,
         gen_iterator_test_sstable_with_range_tombstones, iterator_test_bytes_key_of,
-        iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of,
-        iterator_test_user_key_of, iterator_test_value_of, mock_sstable_store, TEST_KEYS_COUNT,
+        iterator_test_bytes_key_of_epoch, iterator_test_bytes_user_key_of, iterator_test_value_of,
+        mock_sstable_store, TEST_KEYS_COUNT,
     };
-    use crate::hummock::iterator::HummockIteratorUnion;
+    use crate::hummock::iterator::UnorderedMergeIteratorInner;
     use crate::hummock::sstable::{
         SstableIterator, SstableIteratorReadOptions, SstableIteratorType,
     };
@@ -339,21 +310,21 @@ mod tests {
         .await;
         let cache = create_small_table_cache();
         let iters = vec![
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            SstableIterator::create(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
-            )),
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            ),
+            SstableIterator::create(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
                 read_options.clone(),
-            )),
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            ),
+            SstableIterator::create(
                 cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
                 read_options.clone(),
-            )),
+            ),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -406,21 +377,21 @@ mod tests {
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let cache = create_small_table_cache();
         let iters = vec![
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            SstableIterator::create(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
-            )),
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            ),
+            SstableIterator::create(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
                 read_options.clone(),
-            )),
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            ),
+            SstableIterator::create(
                 cache.insert(table2.id, table2.id, 1, Box::new(table2)),
                 sstable_store,
                 read_options,
-            )),
+            ),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -483,16 +454,16 @@ mod tests {
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let cache = create_small_table_cache();
         let iters = vec![
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            SstableIterator::create(
                 cache.insert(table0.id, table0.id, 1, Box::new(table0)),
                 sstable_store.clone(),
                 read_options.clone(),
-            )),
-            HummockIteratorUnion::Fourth(SstableIterator::create(
+            ),
+            SstableIterator::create(
                 cache.insert(table1.id, table1.id, 1, Box::new(table1)),
                 sstable_store.clone(),
                 read_options,
-            )),
+            ),
         ];
 
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -547,15 +518,15 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
             read_options,
-        ))];
+        )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Included(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
@@ -630,15 +601,15 @@ mod tests {
             gen_iterator_test_sstable_from_kv_pair(0, kv_pairs, sstable_store.clone()).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
             read_options,
-        ))];
+        )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
-        let begin_key = Included(iterator_test_user_key_of(2));
-        let end_key = Excluded(iterator_test_user_key_of(7));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
+        let end_key = Excluded(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, end_key));
 
@@ -698,13 +669,13 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
             read_options,
-        ))];
+        )];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let end_key = Included(iterator_test_user_key_of(7));
+        let end_key = Included(iterator_test_bytes_user_key_of(7));
 
         let mut ui = UserIterator::for_test(mi, (Unbounded, end_key));
 
@@ -767,13 +738,13 @@ mod tests {
         let table = generate_test_data(sstable_store.clone(), vec![]).await;
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store,
             read_options,
-        ))];
+        )];
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let begin_key = Included(iterator_test_user_key_of(2));
+        let begin_key = Included(iterator_test_bytes_user_key_of(2));
 
         let mut ui = UserIterator::for_test(mi, (begin_key, Unbounded));
 
@@ -846,11 +817,11 @@ mod tests {
         )
         .await;
         let cache = create_small_table_cache();
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table0.id, table0.id, 1, Box::new(table0)),
             sstable_store.clone(),
             read_options.clone(),
-        ))];
+        )];
 
         let min_epoch = (TEST_KEYS_COUNT / 5) as u64;
         let mi = UnorderedMergeIteratorInner::new(iters);
@@ -884,11 +855,11 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table_id = table.id;
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.insert(table.id, table.id, 1, Box::new(table)),
             sstable_store.clone(),
             read_options.clone(),
-        ))];
+        )];
         let mi = UnorderedMergeIteratorInner::new(iters);
 
         let mut del_iter = ForwardMergeRangeIterator::default();
@@ -896,7 +867,7 @@ mod tests {
             cache.lookup(table_id, &table_id).unwrap(),
         ));
         let del_agg = DeleteRangeAggregator::new(del_iter, 150);
-        let mut ui: UserIterator<ForwardUserIteratorType> =
+        let mut ui: UserIterator<_> =
             UserIterator::new(mi, (Unbounded, Unbounded), 150, 0, None, del_agg);
 
         // ----- basic iterate -----
@@ -916,18 +887,18 @@ mod tests {
         ui.next().await.unwrap();
         assert!(!ui.is_valid());
 
-        let iters = vec![HummockIteratorUnion::Fourth(SstableIterator::create(
+        let iters = vec![SstableIterator::create(
             cache.lookup(table_id, &table_id).unwrap(),
             sstable_store,
             read_options,
-        ))];
+        )];
         let mut del_iter = ForwardMergeRangeIterator::default();
         del_iter.add_sst_iter(SstableDeleteRangeIterator::new(
             cache.lookup(table_id, &table_id).unwrap(),
         ));
         let del_agg = DeleteRangeAggregator::new(del_iter, 300);
         let mi = UnorderedMergeIteratorInner::new(iters);
-        let mut ui: UserIterator<ForwardUserIteratorType> =
+        let mut ui: UserIterator<_> =
             UserIterator::new(mi, (Unbounded, Unbounded), 300, 0, None, del_agg);
         ui.rewind().await.unwrap();
         assert!(ui.is_valid());

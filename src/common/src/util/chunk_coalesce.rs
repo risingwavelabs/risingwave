@@ -15,8 +15,7 @@
 use std::iter::FusedIterator;
 use std::mem::swap;
 
-use itertools::Itertools;
-
+use super::iter_util::ZipEqDebug;
 use crate::array::column::Column;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, DataChunk};
 use crate::row::Row;
@@ -149,7 +148,7 @@ impl DataChunkBuilder {
     }
 
     fn do_append_one_row_from_datums(&mut self, datums: impl Iterator<Item = impl ToDatumRef>) {
-        for (array_builder, datum) in self.array_builders.iter_mut().zip_eq(datums) {
+        for (array_builder, datum) in self.array_builders.iter_mut().zip_eq_debug(datums) {
             array_builder.append_datum(datum);
         }
         self.buffered_count += 1;
@@ -187,7 +186,7 @@ impl DataChunkBuilder {
         assert!(self.buffered_count < self.batch_size);
         self.ensure_builders();
 
-        for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq(
+        for (array_builder, (array, row_id)) in self.array_builders.iter_mut().zip_eq_debug(
             left_arrays
                 .map(|array| (array, left_row_id))
                 .chain(right_arrays.map(|array| (array, right_row_id))),
@@ -230,6 +229,18 @@ impl DataChunkBuilder {
     }
 }
 
+impl Drop for DataChunkBuilder {
+    fn drop(&mut self) {
+        // Possible to fail when async task gets cancelled.
+        if self.buffered_count != 0 {
+            tracing::warn!(
+                remaining = self.buffered_count,
+                "dropping non-empty data chunk builder"
+            );
+        }
+    }
+}
+
 /// The iterator that yields data chunks during appending a data chunk to a [`DataChunkBuilder`].
 pub struct AppendDataChunk<'a> {
     builder: &'a mut DataChunkBuilder,
@@ -250,6 +261,7 @@ impl FusedIterator for AppendDataChunk<'_> {}
 
 impl Drop for AppendDataChunk<'_> {
     fn drop(&mut self) {
+        // Possible to fail when async task gets cancelled.
         if self.remaining.is_some() {
             tracing::warn!("dropping `AppendDataChunk` without exhausting it");
         }

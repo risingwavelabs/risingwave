@@ -1,40 +1,48 @@
 create source auction (
-    id INTEGER,
-    item_name VARCHAR,
+    id BIGINT,
+    "item_name" VARCHAR,
     description VARCHAR,
-    initial_bid INTEGER,
-    reserve INTEGER,
-    date_time TIMESTAMP,
+    "initial_bid" BIGINT,
+    reserve BIGINT,
+    "date_time" TIMESTAMP,
     expires TIMESTAMP,
-    seller INTEGER,
-    category INTEGER)
+    seller BIGINT,
+    category BIGINT,
+    "extra" VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Auction'
     {extra_args}
-) row format JSON;
+);
 
 create source bid (
-    auction INTEGER,
-    bidder INTEGER,
-    price INTEGER,
-    "date_time" TIMESTAMP)
+    auction BIGINT,
+    bidder BIGINT,
+    price BIGINT,
+    "channel" VARCHAR,
+    "url" VARCHAR,
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Bid'
     {extra_args}
-) row format JSON;
+);
 
 create source person (
-    id INTEGER,
+    id BIGINT,
     name VARCHAR,
-    email_address VARCHAR,
-    credit_card VARCHAR,
+    "email_address" VARCHAR,
+    "credit_card" VARCHAR,
     city VARCHAR,
     state VARCHAR,
-    date_time TIMESTAMP)
+    "date_time" TIMESTAMP,
+    "extra" VARCHAR
+    {watermark_column})
 with (
     connector = 'nexmark',
     nexmark.table.type = 'Person'
     {extra_args}
-) row format JSON;
+);

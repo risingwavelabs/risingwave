@@ -53,8 +53,14 @@ pub struct CompactorOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
+
+    /// Of the form `hummock+{object_store}` where `object_store`
+    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
+    /// `memory` or `memory-shared`.
+    #[clap(long, env = "RW_STATE_STORE")]
+    pub state_store: Option<String>,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -72,13 +78,6 @@ pub struct CompactorOpts {
 /// Command-line arguments for compactor-node that overrides the config file.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
 struct OverrideConfigOpts {
-    /// Of the form `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    #[clap(long, env = "RW_STATE_STORE")]
-    #[override_opts(path = storage.state_store)]
-    pub state_store: Option<String>,
-
     /// Used for control the metrics level, similar to log level.
     /// 0 = close metrics
     /// >0 = open metrics
@@ -100,6 +99,7 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compactor node options: {:?}", opts);
+        warn_future_deprecate_options(&opts);
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -120,6 +120,12 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
             compactor_serve(listen_addr, advertise_addr, opts).await;
 
         join_handle.await.unwrap();
-        observer_join_handle.await.unwrap();
+        observer_join_handle.abort();
     })
+}
+
+fn warn_future_deprecate_options(opts: &CompactorOpts) {
+    if opts.state_store.is_some() {
+        tracing::warn!("`--state-store` will not be accepted by compactor node in the next release. Please consider moving this argument to the meta node.");
+    }
 }

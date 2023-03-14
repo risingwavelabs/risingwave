@@ -54,7 +54,7 @@ use core::str::FromStr;
 pub use num_traits::Float;
 use num_traits::{
     AsPrimitive, Bounded, CheckedAdd, CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub,
-    FromPrimitive, Num, NumCast, One, Signed, ToPrimitive, Zero,
+    FromPrimitive, Num, NumCast, One, Pow, Signed, ToPrimitive, Zero,
 };
 
 // masks for the parts of the IEEE 754 float
@@ -388,6 +388,17 @@ impl_ordered_float_binop! {Sub, sub, SubAssign, sub_assign}
 impl_ordered_float_binop! {Mul, mul, MulAssign, mul_assign}
 impl_ordered_float_binop! {Div, div, DivAssign, div_assign}
 impl_ordered_float_binop! {Rem, rem, RemAssign, rem_assign}
+
+impl<T> Pow<OrderedFloat<T>> for OrderedFloat<T>
+where
+    T: Float,
+{
+    type Output = OrderedFloat<T>;
+
+    fn pow(self, rhs: Self) -> Self::Output {
+        OrderedFloat(self.0.powf(rhs.0))
+    }
+}
 
 impl<T> CheckedAdd for OrderedFloat<T>
 where

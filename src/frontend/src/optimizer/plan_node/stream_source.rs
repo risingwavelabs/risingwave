@@ -16,16 +16,15 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_pb::catalog::ColumnIndex;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{SourceNode, StreamSource as ProstStreamSource};
 
-use super::{LogicalSource, PlanBase, StreamNode};
+use super::{ExprRewritable, LogicalSource, PlanBase, StreamNode};
 use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamSource {
     pub base: PlanBase,
     logical: LogicalSource,
@@ -33,6 +32,14 @@ pub struct StreamSource {
 
 impl StreamSource {
     pub fn new(logical: LogicalSource) -> Self {
+        let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
+        if let Some(catalog) = logical.source_catalog() {
+            catalog
+                .watermark_descs
+                .iter()
+                .for_each(|desc| watermark_columns.insert(desc.watermark_idx as usize))
+        }
+
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
@@ -44,7 +51,7 @@ impl StreamSource {
                 .catalog
                 .as_ref()
                 .map_or(true, |s| s.append_only),
-            FixedBitSet::with_capacity(logical.schema().len()),
+            watermark_columns,
         );
         Self { base, logical }
     }
@@ -85,9 +92,7 @@ impl StreamNode for StreamSource {
                     .to_internal_table_prost(),
             ),
             info: Some(source_catalog.info.clone()),
-            row_id_index: source_catalog
-                .row_id_index
-                .map(|index| ColumnIndex { index: index as _ }),
+            row_id_index: source_catalog.row_id_index.map(|index| index as _),
             columns: source_catalog
                 .columns
                 .iter()
@@ -98,8 +103,10 @@ impl StreamNode for StreamSource {
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
-            properties: source_catalog.properties.clone(),
+            properties: source_catalog.properties.clone().into_iter().collect(),
         });
         ProstStreamNode::Source(SourceNode { source_inner })
     }
 }
+
+impl ExprRewritable for StreamSource {}

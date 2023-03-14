@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use itertools::Itertools;
+use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
@@ -28,6 +30,37 @@ pub struct UserDefinedFunction {
 impl UserDefinedFunction {
     pub fn new(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
         Self { args, catalog }
+    }
+
+    pub(super) fn from_expr_proto(
+        udf: &risingwave_pb::expr::UserDefinedFunction,
+        ret_type: DataType,
+    ) -> risingwave_common::error::Result<Self> {
+        let args: Vec<_> = udf
+            .get_children()
+            .iter()
+            .map(ExprImpl::from_expr_proto)
+            .try_collect()?;
+
+        // function catalog
+        let arg_types = udf.get_arg_types().iter().map_into().collect_vec();
+        let catalog = FunctionCatalog {
+            // FIXME(yuhao): function id is not in udf proto.
+            id: FunctionId::placeholder(),
+            name: udf.get_name().clone(),
+            // FIXME(yuhao): owner is not in udf proto.
+            owner: u32::MAX - 1,
+            arg_types,
+            return_type: ret_type,
+            language: udf.get_language().clone(),
+            identifier: udf.get_identifier().clone(),
+            link: udf.get_link().clone(),
+        };
+
+        Ok(Self {
+            args,
+            catalog: Arc::new(catalog),
+        })
     }
 }
 
@@ -52,7 +85,8 @@ impl Expr for UserDefinedFunction {
                     .map(|t| t.to_protobuf())
                     .collect(),
                 language: self.catalog.language.clone(),
-                path: self.catalog.path.clone(),
+                identifier: self.catalog.identifier.clone(),
+                link: self.catalog.link.clone(),
             })),
         }
     }

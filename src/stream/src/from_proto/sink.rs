@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_connector::sink::catalog::SinkType;
 use risingwave_connector::sink::SinkConfig;
 use risingwave_pb::stream_plan::SinkNode;
 
@@ -33,13 +33,15 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     ) -> StreamResult<BoxedExecutor> {
         let [materialize_executor]: [_; 1] = params.input.try_into().unwrap();
 
-        let mut properties = node.get_properties().clone();
-        let pk_indices = node
-            .sink_pk
+        let sink_desc = node.sink_desc.as_ref().unwrap();
+        let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+        let mut properties = sink_desc.get_properties().clone();
+        let pk_indices = sink_desc
+            .pk
             .iter()
-            .map(|idx| *idx as usize)
+            .map(|pk| pk.column_index as usize)
             .collect::<Vec<_>>();
-        let schema = node.fields.iter().map(Field::from).collect();
+        let schema = sink_desc.columns.iter().map(Into::into).collect();
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors
         properties.insert(
@@ -56,6 +58,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             params.env.connector_params(),
             schema,
             pk_indices,
+            sink_type,
         )))
     }
 }

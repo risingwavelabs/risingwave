@@ -18,19 +18,17 @@
 //! structs. It is accessed via [`catalog_service::CatalogReader`] and
 //! [`catalog_service::CatalogWriter`], which is held by [`crate::session::FrontendEnv`].
 
-use risingwave_common::catalog::{ColumnDesc, PG_CATALOG_SCHEMA_NAME};
+use risingwave_common::catalog::{is_row_id_column_name, PG_CATALOG_SCHEMA_NAME, ROWID_PREFIX};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::types::DataType;
+use risingwave_connector::sink::catalog::SinkCatalog;
 use thiserror::Error;
 pub(crate) mod catalog_service;
 
-pub(crate) mod column_catalog;
 pub(crate) mod database_catalog;
 pub(crate) mod function_catalog;
 pub(crate) mod index_catalog;
 pub(crate) mod root_catalog;
 pub(crate) mod schema_catalog;
-pub(crate) mod sink_catalog;
 pub(crate) mod source_catalog;
 pub(crate) mod system_catalog;
 pub(crate) mod table_catalog;
@@ -49,6 +47,7 @@ pub(crate) type SchemaId = u32;
 pub(crate) type TableId = risingwave_common::catalog::TableId;
 pub(crate) type ColumnId = risingwave_common::catalog::ColumnId;
 pub(crate) type FragmentId = u32;
+pub(crate) type ConflictBehaviorType = i32;
 
 /// Check if the column name does not conflict with the internally reserved column name.
 pub fn check_valid_column_name(column_name: &str) -> Result<()> {
@@ -72,35 +71,6 @@ pub fn check_schema_writable(schema: &str) -> Result<()> {
         )).into())
     } else {
         Ok(())
-    }
-}
-
-const ROWID_PREFIX: &str = "_row_id";
-
-pub fn row_id_column_name() -> String {
-    ROWID_PREFIX.to_string()
-}
-
-pub fn is_row_id_column_name(name: &str) -> bool {
-    name.starts_with(ROWID_PREFIX)
-}
-
-/// The column ID preserved for the row ID column.
-pub const ROW_ID_COLUMN_ID: ColumnId = ColumnId::new(0);
-
-/// The column ID offset for user-defined columns.
-///
-/// All IDs of user-defined columns must be greater or equal to this value.
-pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
-
-/// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
-pub fn row_id_column_desc() -> ColumnDesc {
-    ColumnDesc {
-        data_type: DataType::Int64,
-        column_id: ROW_ID_COLUMN_ID,
-        name: row_id_column_name(),
-        field_descs: vec![],
-        type_name: "".to_string(),
     }
 }
 
@@ -128,4 +98,10 @@ impl From<CatalogError> for RwError {
 pub trait RelationCatalog {
     /// Returns the owner of the relation.
     fn owner(&self) -> UserId;
+}
+
+impl RelationCatalog for SinkCatalog {
+    fn owner(&self) -> UserId {
+        self.owner.user_id
+    }
 }

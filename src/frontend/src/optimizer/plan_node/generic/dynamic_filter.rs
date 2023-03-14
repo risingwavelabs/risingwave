@@ -22,7 +22,7 @@ use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::utils::Condition;
 use crate::TableCatalog;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DynamicFilter<PlanRef> {
     /// The predicate (formed with exactly one of < , <=, >, >=)
     pub comparator: ExprType,
@@ -77,7 +77,7 @@ pub fn infer_left_internal_table_catalog(
     });
 
     pk_indices.iter().for_each(|idx| {
-        internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
     });
 
     internal_table_catalog_builder.build(dist_keys)

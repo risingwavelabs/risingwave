@@ -17,10 +17,12 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::collections::HashMap;
 use std::fs;
 
-use clap::ArgEnum;
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -31,9 +33,35 @@ pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
 
-/// A workaround for a bug in clap where the attribute `from_flag` on `Option<bool>` results in
-/// compilation error.
-pub type Flag = Option<bool>;
+macro_rules! for_all_config_sections {
+    ($macro:ident) => {
+        $macro! {
+            { server },
+            { meta },
+            { batch },
+            { streaming },
+            { storage },
+            { storage.file_cache },
+        }
+    };
+}
+
+macro_rules! impl_warn_unrecognized_fields {
+    ($({ $($field_path:ident).+ },)*) => {
+        fn warn_unrecognized_fields(config: &RwConfig) {
+            if !config.unrecognized.is_empty() {
+                tracing::warn!("unrecognized fields in config: {:?}", config.unrecognized.keys());
+            }
+            $(
+                if !config.$($field_path).+.unrecognized.is_empty() {
+                    tracing::warn!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
+                }
+            )*
+        }
+    };
+}
+
+for_all_config_sections!(impl_warn_unrecognized_fields);
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -49,16 +77,8 @@ where
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
+    warn_unrecognized_fields(&config);
     config
-}
-
-/// Map command line flag to `Flag`. Should only be used in `#[derive(OverrideConfig)]`.
-pub fn true_if_present(b: bool) -> Flag {
-    if b {
-        Some(true)
-    } else {
-        None
-    }
 }
 
 pub trait OverrideConfig {
@@ -94,9 +114,12 @@ pub struct RwConfig {
 
     #[serde(default)]
     pub backup: BackupConfig,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
-#[derive(Copy, Clone, Debug, Default, ArgEnum, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
 pub enum MetaBackend {
     #[default]
     Mem,
@@ -105,7 +128,6 @@ pub enum MetaBackend {
 
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
@@ -154,6 +176,17 @@ pub struct MetaConfig {
 
     #[serde(default = "default::meta::backend")]
     pub backend: MetaBackend,
+
+    /// Schedule space_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_space_reclaim_compaction_interval_sec")]
+    pub periodic_space_reclaim_compaction_interval_sec: u64,
+
+    /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
+    pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for MetaConfig {
@@ -164,7 +197,6 @@ impl Default for MetaConfig {
 
 /// The section `[server]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
@@ -182,6 +214,9 @@ pub struct ServerConfig {
     /// 0 = close metrics
     /// >0 = open metrics
     pub metrics_level: u32,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for ServerConfig {
@@ -192,7 +227,6 @@ impl Default for ServerConfig {
 
 /// The section `[batch]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -201,6 +235,12 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    #[serde(default)]
+    pub distributed_query_limit: Option<u64>,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for BatchConfig {
@@ -211,7 +251,6 @@ impl Default for BatchConfig {
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
     /// The interval of periodic barrier.
     #[serde(default = "default::streaming::barrier_interval_ms")]
@@ -234,12 +273,19 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::enable_jaegar_tracing")]
     pub enable_jaeger_tracing: bool,
 
-    /// Enable async stack tracing for risectl.
+    /// Enable async stack tracing through `await-tree` for risectl.
     #[serde(default = "default::streaming::async_stack_trace")]
     pub async_stack_trace: AsyncStackTraceOption,
 
     #[serde(default)]
     pub developer: DeveloperConfig,
+
+    /// Max unique user stream errors per actor
+    #[serde(default = "default::streaming::unique_user_stream_errors")]
+    pub unique_user_stream_errors: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for StreamingConfig {
@@ -250,16 +296,21 @@ impl Default for StreamingConfig {
 
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Target size of the Sstable.
     #[serde(default = "default::storage::sst_size_mb")]
     pub sstable_size_mb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Size of each block in bytes in SST.
     #[serde(default = "default::storage::block_size_kb")]
     pub block_size_kb: u32,
 
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// False positive probability of bloom filter.
     #[serde(default = "default::storage::bloom_false_positive")]
     pub bloom_false_positive: f64,
@@ -278,10 +329,8 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
 
-    /// State store url.
-    #[serde(default = "default::storage::state_store")]
-    pub state_store: String,
-
+    // TODO(zhidong): Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing data and metadata objects.
     #[serde(default = "default::storage::data_directory")]
     pub data_directory: String,
@@ -331,15 +380,11 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::max_sub_compaction")]
     pub max_sub_compaction: u32,
 
-    #[serde(default = "default::storage::object_store_use_batch_delete")]
-    pub object_store_use_batch_delete: bool,
-
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
 
-    /// Whether to enable state_store_v1 for hummock
-    #[serde(default = "default::storage::enable_state_store_v1")]
-    pub enable_state_store_v1: bool,
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for StorageConfig {
@@ -348,37 +393,10 @@ impl Default for StorageConfig {
     }
 }
 
-impl StorageConfig {
-    /// Checks whether an embedded compactor starts with a compute node.
-    #[inline(always)]
-    pub fn embedded_compactor_enabled(&self) -> bool {
-        // We treat `hummock+memory-shared` as a shared storage, so we won't start the compactor
-        // along with the compute node.
-        self.state_store == "hummock+memory"
-            || self.state_store.starts_with("hummock+disk")
-            || self.disable_remote_compactor
-    }
-
-    /// The maximal memory that storage components may use based on the configurations. Note that
-    /// this is the total storage memory for one compute node instead of the whole cluster.
-    pub fn total_storage_memory_limit_mb(&self) -> usize {
-        let total_memory = self.block_cache_capacity_mb
-            + self.meta_cache_capacity_mb
-            + self.shared_buffer_capacity_mb
-            + self.file_cache.total_buffer_capacity_mb;
-        if self.embedded_compactor_enabled() {
-            total_memory + self.compactor_memory_limit_mb
-        } else {
-            total_memory
-        }
-    }
-}
-
 /// The subsection `[storage.file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
@@ -397,6 +415,9 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
     pub cache_file_max_write_size_mb: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for FileCacheConfig {
@@ -405,7 +426,7 @@ impl Default for FileCacheConfig {
     }
 }
 
-#[derive(Debug, Default, Clone, ArgEnum, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, ValueEnum, Serialize, Deserialize)]
 pub enum AsyncStackTraceOption {
     Off,
     #[default]
@@ -417,7 +438,6 @@ pub enum AsyncStackTraceOption {
 ///
 /// It is put at [`BatchConfig::developer`] and [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct DeveloperConfig {
     /// The size of the channel used for output to exchange/shuffle.
     #[serde(default = "default::developer::batch_output_channel_size")]
@@ -455,6 +475,9 @@ pub struct DeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub stream_exchange_batched_permits: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for DeveloperConfig {
@@ -465,14 +488,20 @@ impl Default for DeveloperConfig {
 
 /// Configs for meta node backup
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BackupConfig {
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote storage url for storing snapshots.
     #[serde(default = "default::backup::storage_url")]
     pub storage_url: String,
+    // TODO: Remove in 0.1.18 release
+    // NOTE: It is now a system parameter and should not be used directly.
     /// Remote directory for storing snapshots.
     #[serde(default = "default::backup::storage_directory")]
     pub storage_directory: String,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for BackupConfig {
@@ -515,6 +544,14 @@ mod default {
 
         pub fn backend() -> MetaBackend {
             MetaBackend::Mem
+        }
+
+        pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
+            3600 // 60min
+        }
+
+        pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
+            1800 // 30mi
         }
     }
 
@@ -561,12 +598,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn state_store() -> String {
-            // May be problematic for multi-node deployment, but since we override it with CLI and
-            // it will be removed soon, it won't be a problem.
-            "hummock+memory".to_string()
         }
 
         pub fn data_directory() -> String {
@@ -618,16 +649,8 @@ mod default {
             4
         }
 
-        pub fn object_store_use_batch_delete() -> bool {
-            true
-        }
-
         pub fn max_concurrent_compaction_task_number() -> u64 {
             16
-        }
-
-        pub fn enable_state_store_v1() -> bool {
-            false
         }
     }
 
@@ -654,6 +677,10 @@ mod default {
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {
             AsyncStackTraceOption::On
+        }
+
+        pub fn unique_user_stream_errors() -> usize {
+            10
         }
     }
 

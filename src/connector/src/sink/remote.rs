@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
@@ -22,56 +21,57 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
-use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
+use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
-    Request as SinkRequest, StartEpoch, StartSink, SyncBatch, WriteBatch,
+    Request as SinkRequest, StartEpoch, SyncBatch, WriteBatch,
 };
 use risingwave_pb::connector_service::table_schema::Column;
-use risingwave_pb::connector_service::{SinkConfig, SinkResponse, SinkStreamRequest, TableSchema};
+use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest, TableSchema};
+use risingwave_rpc_client::ConnectorClient;
 use serde_json::Value;
 use serde_json::Value::Number;
-use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio_stream::wrappers::UnboundedReceiverStream;
 use tokio_stream::StreamExt;
-use tonic::transport::{Channel, Endpoint};
-use tonic::{Request, Status, Streaming};
+use tonic::{Status, Streaming};
 
+use super::catalog::SinkCatalog;
 use crate::sink::{Result, Sink, SinkError};
 use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
 
-pub fn is_valid_remote_sink(sink_type: &str) -> bool {
-    VALID_REMOTE_SINKS.contains(&sink_type)
+pub fn is_valid_remote_sink(connector_type: &str) -> bool {
+    VALID_REMOTE_SINKS.contains(&connector_type)
 }
 
 #[derive(Clone, Debug)]
 pub struct RemoteConfig {
-    pub sink_type: String,
+    pub connector_type: String,
     pub properties: HashMap<String, String>,
 }
 
 impl RemoteConfig {
     pub fn from_hashmap(values: HashMap<String, String>) -> Result<Self> {
-        let sink_type = values
+        let connector_type = values
             .get("connector")
             .expect("sink type must be specified")
             .to_string();
 
-        if !is_valid_remote_sink(sink_type.as_str()) {
-            return Err(SinkError::Config(anyhow!("invalid sink type: {sink_type}")));
+        if !is_valid_remote_sink(connector_type.as_str()) {
+            return Err(SinkError::Config(anyhow!(
+                "invalid connector type: {connector_type}"
+            )));
         }
 
         Ok(RemoteConfig {
-            sink_type,
+            connector_type,
             properties: values,
         })
     }
@@ -101,90 +101,58 @@ impl ResponseStreamImpl {
 }
 
 #[derive(Debug)]
-pub struct RemoteSink {
-    pub sink_type: String,
+pub struct RemoteSink<const APPEND_ONLY: bool> {
+    pub connector_type: String,
     properties: HashMap<String, String>,
     epoch: Option<u64>,
     batch_id: u64,
     schema: Schema,
-    _client: Option<ConnectorServiceClient<Channel>>,
+    _client: Option<ConnectorClient>,
     request_sender: Option<UnboundedSender<SinkStreamRequest>>,
     response_stream: ResponseStreamImpl,
 }
 
-impl RemoteSink {
+impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
     pub async fn new(
         config: RemoteConfig,
         schema: Schema,
         pk_indices: Vec<usize>,
         connector_params: ConnectorParams,
     ) -> Result<Self> {
-        let address = format!(
-            "http://{}",
-            connector_params
-                .connector_rpc_endpoint
-                .ok_or_else(|| SinkError::Remote(
-                    "connector sink endpoint not specified".parse().unwrap()
-                ))?
-        );
-        let channel = Endpoint::from_shared(address.clone())
-            .map_err(|e| {
-                SinkError::Remote(format!(
-                    "invalid connector endpoint `{}`: {:?}",
-                    &address, e
-                ))
-            })?
-            .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
-            .initial_stream_window_size(STREAM_WINDOW_SIZE)
-            .tcp_nodelay(true)
-            .connect_timeout(Duration::from_secs(5))
-            .connect()
+        let address = connector_params.connector_rpc_endpoint.ok_or_else(|| {
+            SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
+        })?;
+        let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
+        let client = ConnectorClient::new(host_addr).await.map_err(|err| {
+            SinkError::Remote(format!(
+                "failed to connect to connector endpoint `{}`: {:?}",
+                &address, err
+            ))
+        })?;
+
+        let table_schema = Some(TableSchema {
+            columns: schema
+                .fields()
+                .iter()
+                .map(|c| Column {
+                    name: c.name.clone(),
+                    data_type: c.data_type().to_protobuf().type_name,
+                })
+                .collect(),
+            pk_indices: pk_indices.iter().map(|i| *i as u32).collect(),
+        });
+        let (request_sender, mut response) = client
+            .start_sink_stream(
+                config.connector_type.clone(),
+                config.properties.clone(),
+                table_schema,
+            )
             .await
-            .map_err(|e| {
-                SinkError::Remote(format!(
-                    "failed to connect to connector endpoint `{}`: {:?}",
-                    &address, e
-                ))
-            })?; // create client and start sink
-        let mut client = ConnectorServiceClient::new(channel);
-
-        let (request_sender, request_receiver) = mpsc::unbounded_channel::<SinkStreamRequest>();
-
-        // send initial request in case of the blocking receive call from creating streaming request
-        request_sender
-            .send(SinkStreamRequest {
-                request: Some(SinkRequest::Start(StartSink {
-                    sink_config: Some(SinkConfig {
-                        sink_type: config.sink_type.clone(),
-                        properties: config.properties.clone(),
-                        table_schema: Some(TableSchema {
-                            columns: schema
-                                .fields()
-                                .iter()
-                                .map(|c| Column {
-                                    name: c.name.clone(),
-                                    data_type: c.data_type().to_protobuf().type_name,
-                                })
-                                .collect(),
-                            pk_indices: pk_indices.iter().map(|i| *i as u32).collect(),
-                        }),
-                    }),
-                })),
-            })
-            .map_err(|e| SinkError::Remote(e.to_string()))?;
-
-        let mut response = tokio::time::timeout(
-            Duration::from_secs(3),
-            client.sink_stream(Request::new(UnboundedReceiverStream::new(request_receiver))),
-        )
-        .await
-        .map_err(|e| SinkError::Remote(format!("failed to start sink: {:?}", e)))?
-        .map_err(|e| SinkError::Remote(format!("{:?}", e)))?
-        .into_inner();
+            .map_err(SinkError::from)?;
         let _ = response.next().await.unwrap();
 
         Ok(RemoteSink {
-            sink_type: config.sink_type,
+            connector_type: config.connector_type,
             properties: config.properties,
             epoch: None,
             batch_id: 0,
@@ -193,6 +161,45 @@ impl RemoteSink {
             request_sender: Some(request_sender),
             response_stream: ResponseStreamImpl::Grpc(response),
         })
+    }
+
+    pub async fn validate(
+        config: RemoteConfig,
+        sink_catalog: SinkCatalog,
+        connector_rpc_endpoint: Option<String>,
+    ) -> Result<()> {
+        let address = connector_rpc_endpoint.ok_or_else(|| {
+            SinkError::Remote("connector sink endpoint not specified".parse().unwrap())
+        })?;
+        let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
+        let client = ConnectorClient::new(host_addr).await.map_err(|err| {
+            SinkError::Remote(format!(
+                "failed to connect to connector endpoint `{}`: {:?}",
+                &address, err
+            ))
+        })?;
+
+        let columns = sink_catalog
+            .columns
+            .iter()
+            .map(|column| Column {
+                name: column.column_desc.name.clone(),
+                data_type: column.column_desc.data_type.to_protobuf().type_name,
+            })
+            .collect_vec();
+        let table_schema = TableSchema {
+            columns,
+            pk_indices: sink_catalog
+                .pk_indices()
+                .iter()
+                .map(|i| *i as _)
+                .collect_vec(),
+        };
+
+        client
+            .validate_sink_properties(config.connector_type, config.properties, Some(table_schema))
+            .await
+            .map_err(SinkError::from)
     }
 
     fn on_sender_alive(&mut self) -> Result<&UnboundedSender<SinkStreamRequest>> {
@@ -206,7 +213,7 @@ impl RemoteSink {
         response_receiver: UnboundedReceiver<SinkResponse>,
         request_sender: UnboundedSender<SinkStreamRequest>,
     ) -> Self {
-        let properties = HashMap::from([("output_path".to_string(), "/tmp/rw".to_string())]);
+        let properties = HashMap::from([("output.path".to_string(), "/tmp/rw".to_string())]);
 
         let schema = Schema::new(vec![
             Field {
@@ -224,7 +231,7 @@ impl RemoteSink {
         ]);
 
         Self {
-            sink_type: "file".to_string(),
+            connector_type: "file".to_string(),
             properties,
             epoch: None,
             batch_id: 0,
@@ -237,14 +244,14 @@ impl RemoteSink {
 }
 
 #[async_trait]
-impl Sink for RemoteSink {
+impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut row_ops = vec![];
         for (op, row_ref) in chunk.rows() {
             let mut map = serde_json::Map::new();
             row_ref
                 .iter()
-                .zip_eq(self.schema.fields.iter())
+                .zip_eq_fast(self.schema.fields.iter())
                 .for_each(|(v, f)| {
                     map.insert(f.name.clone(), parse_datum(v));
                 });
@@ -360,7 +367,7 @@ mod test {
         let (request_sender, mut request_recv) = mpsc::unbounded_channel();
         let (_, resp_recv) = mpsc::unbounded_channel();
 
-        let mut sink = RemoteSink::for_test(resp_recv, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(resp_recv, request_sender);
         let chunk = StreamChunk::new(
             vec![Op::Insert],
             vec![
@@ -403,7 +410,7 @@ mod test {
     async fn test_remote_sink() {
         let (request_sender, mut request_receiver) = mpsc::unbounded_channel();
         let (response_sender, response_receiver) = mpsc::unbounded_channel();
-        let mut sink = RemoteSink::for_test(response_receiver, request_sender);
+        let mut sink = RemoteSink::<true>::for_test(response_receiver, request_sender);
 
         let chunk_a = StreamChunk::new(
             vec![Op::Insert, Op::Insert, Op::Insert],

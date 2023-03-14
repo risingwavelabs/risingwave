@@ -29,6 +29,7 @@ use risingwave_common::catalog::{ColumnDesc, Field};
 use risingwave_common::error::{ErrorCode, Result as RwResult};
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::timestamptz::timestamptz_to_string;
 
 use crate::session::SessionImpl;
@@ -153,8 +154,8 @@ fn to_pg_rows(
                 .map_err(ErrorCode::InternalError)?;
             let row = r
                 .iter()
-                .zip_eq(column_types)
-                .zip_eq(format_iter)
+                .zip_eq_fast(column_types)
+                .zip_eq_fast(format_iter)
                 .map(|((data, t), format)| match data {
                     Some(data) => Some(pg_value_format(t, data, format, session_data)).transpose(),
                     None => Ok(None),
@@ -207,7 +208,7 @@ mod tests {
         let field = Field::with_name(DataType::Int32, "v1");
         let pg_field = to_pg_field(&field);
         assert_eq!(pg_field.get_name(), "v1");
-        assert_eq!(pg_field.get_type_oid(), DataType::INT32.to_oid());
+        assert_eq!(pg_field.get_type_oid(), DataType::Int32.to_oid());
     }
 
     #[test]

@@ -3,7 +3,7 @@ description = "Generate the java binding C header file"
 script = '''
 #!/usr/bin/env bash
 set -ex
-cd src/java_binding/java
+cd java
 javac -h . -cp java-binding/src/main/java/ java-binding/src/main/java/com/risingwave/java/binding/Binding.java
 '''
 
@@ -20,20 +20,59 @@ description = "Build the java binding java code"
 script = '''
 #!/usr/bin/env bash
 set -ex
-cd src/java_binding/java
-mvn clean install
+cd java
+mvn clean install --pl java-binding-integration-test --am -DskipTests=true
+'''
+
+[tasks.start-java-binding-demo-cluster]
+description = "Start the RisingWave cluster for java binding demo"
+script = '''
+#!/usr/bin/env bash
+set -ex
+
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+
+echo 'start risingwave cluster'
+${RISINGWAVE_ROOT}/risedev d java-binding-demo
+'''
+
+[tasks.kill-java-binding-demo-cluster]
+description = "Kill the RisingWave cluster for java binding demo"
+script = '''
+#!/usr/bin/env bash
+set -ex
+
+export RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+
+echo 'kill risingwave cluster'
+${RISINGWAVE_ROOT}/risedev k > /dev/null
+'''
+
+[tasks.ingest-data-and-run-java-binding]
+description = "Ingest test data and run java binding demo"
+script = '''
+#!/usr/bin/env bash
+set -ex
+
+export RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+export RUST_JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
+export TABLE_NAME=java_binding_demo
+export DB_NAME=dev
+# Below variables are determined by risedev.
+# See the `java-binding-demo` section in risedev.yml.
+export OBJECT_STORE=minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001
+export META_ADDR=127.0.0.1:5690
+export DATA_DIR=hummock_001
+
+bash ${RUST_JAVA_BINDING_ROOT}/run_demo.sh
 '''
 
 [tasks.run-java-binding-demo]
 description = "Run the java binding demo"
 dependencies = [
     "build-java-binding-rust",
-    "build-java-binding-java"
+    "build-java-binding-java",
+    "start-java-binding-demo-cluster",
+    "ingest-data-and-run-java-binding",
+    "kill-java-binding-demo-cluster"
 ]
-script = '''
-#!/usr/bin/env bash
-set -ex
-RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
-JAVA_BINDING_ROOT=${RISINGWAVE_ROOT}/src/java_binding
-source ${JAVA_BINDING_ROOT}/run_demo.sh
-'''

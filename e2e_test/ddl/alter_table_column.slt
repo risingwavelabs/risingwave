@@ -1,8 +1,14 @@
 statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
 create table t (v int);
 
 statement ok
 create materialized view mv as select * from t;
+
+statement ok
+insert into t values (1);
 
 # Errors
 statement error column .* already exists
@@ -14,16 +20,26 @@ alter table t add column v1 int primary key;
 statement error is not a table or cannot be altered
 alter table mv add column v1 int;
 
+statement error not exist
+alter table t drop column v1;
+
 statement ok
-drop materialized view mv;
+alter table t drop column if exists v1;
+
+statement error not yet implemented
+alter table t drop column v cascade;
 
 # Add column
 statement ok
 alter table t add column r real;
 
-query IR
+statement ok
+create materialized view mv2 as select * from t;
+
+query IR rowsort
 select v, r from t;
 ----
+1 NULL
 
 query TT
 show create table t;
@@ -31,16 +47,152 @@ show create table t;
 public.t CREATE TABLE t (v INT, r REAL)
 
 statement ok
+insert into t values (2, 2.2);
+
+query IR rowsort
+select v, r from t;
+----
+1 NULL
+2 2.2
+
+statement ok
 alter table t add column s varchar;
 
-query IRT
+statement ok
+create materialized view mv3 as select * from t;
+
+query IRT rowsort
 select v, r, s from t;
 ----
+1 NULL NULL
+2 2.2 NULL
 
 query TT
 show create table t;
 ----
 public.t CREATE TABLE t (v INT, r REAL, s CHARACTER VARYING)
+
+statement ok
+insert into t values (3, 3.3, '3-3');
+
+query IRT rowsort
+select v, r, s from t;
+----
+1 NULL NULL
+2 2.2 NULL
+3 3.3 3-3
+
+# All materialized views should keep the schema when it's created.
+query I rowsort
+select * from mv;
+----
+1
+2
+3
+
+query IR rowsort
+select * from mv2;
+----
+1 NULL
+2 2.2
+3 3.3
+
+query IRT rowsort
+select * from mv3;
+----
+1 NULL NULL
+2 2.2 NULL
+3 3.3 3-3
+
+statement ok
+update t set r = 1.1, s = '1-1' where v = 1;
+
+query IRT rowsort
+select v, r, s from t where v = 1;
+----
+1 1.1 1-1
+
+query IR rowsort
+select * from mv2;
+----
+1 1.1
+2 2.2
+3 3.3
+
+query IRT rowsort
+select * from mv3;
+----
+1 1.1 1-1
+2 2.2 NULL
+3 3.3 3-3
+
+# Drop column
+# TODO(#4529): create mview on partial columns and test whether dropping the unrefereced column works.
+statement error being referenced
+alter table t drop column s;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop materialized view mv3;
+
+statement ok
+alter table t drop column r;
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, s CHARACTER VARYING)
+
+query IR rowsort
+select v, s from t;
+----
+1 1-1
+2 NULL
+3 3-3
+
+# Add column after dropping column, to test that the column ID is not reused.
+statement ok
+alter table t add column r real;
+
+query TT
+show create table t;
+----
+public.t CREATE TABLE t (v INT, s CHARACTER VARYING, r REAL)
+
+query ITR rowsort
+select v, s, r from t;
+----
+1 1-1 NULL
+2 NULL NULL
+3 3-3 NULL
+
+statement ok
+insert into t values (4, '4-4', 4.4);
+
+query ITR rowsort
+select v, s, r from t;
+----
+1 1-1 NULL
+2 NULL NULL
+3 3-3 NULL
+4 4-4 4.4
+
+statement ok
+update t set r = 2.2 where v = 2;
+
+query ITR rowsort
+select v, s, r from t;
+----
+1 1-1 NULL
+2 NULL 2.2
+3 3-3 NULL
+4 4-4 4.4
+
+# Clean up
+statement ok
+drop materialized view mv;
 
 statement ok
 drop table t;

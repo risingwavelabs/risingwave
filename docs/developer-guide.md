@@ -38,6 +38,7 @@ http://ecotrust-canada.github.io/markdown-toc/
   * [Planner tests](#planner-tests)
   * [End-to-end tests](#end-to-end-tests)
   * [End-to-end tests on CI](#end-to-end-tests-on-ci)
+  * [Fuzzing tests](#fuzzing-tests)
   * [DocSlt tests](#docslt-tests)
   * [Deterministic simulation tests](#deterministic-simulation-tests)
 - [Miscellaneous checks](#miscellaneous-checks)
@@ -67,10 +68,10 @@ RiseDev is the development mode of RisingWave. To develop RisingWave, you need t
 
 * Rust toolchain
 * CMake
-* protobuf
+* protobuf (>= 3.12.0)
 * OpenSSL
 * PostgreSQL (psql) (>= 14.1)
-* Tmux
+* Tmux (>= v3.2a)
 * LLVM 15 (To workaround some bugs in macOS toolchain, see https://github.com/risingwavelabs/risingwave/issues/6205).
 
 To install the dependencies on macOS, run:
@@ -296,6 +297,11 @@ If you want to see the coverage report, run this command:
 ./risedev test-cov
 ```
 
+Some unit tests will not work if the `/tmp` directory is on a TmpFS file system: these unit tests will fail with this
+error message: `Attempting to create cache file on a TmpFS file system. TmpFS cannot be used because it does not support Direct IO.`. 
+If this happens you can override the use of `/tmp` by setting the  environment variable `RISINGWAVE_TEST_DIR` to a 
+directory that is on a non-TmpFS filesystem, the unit tests will then place temporary files under your specified path.
+
 ### Planner tests
 
 RisingWave's SQL frontend has SQL planner tests. For more information, see [Planner Test Guide](../src/frontend/planner_test/README.md).
@@ -358,6 +364,12 @@ Basically, CI is using the following two configurations to run the full e2e test
 ```
 
 You can adjust the environment variable to enable some specific code to make all e2e tests pass. Refer to GitHub Action workflow for more information.
+
+### Fuzzing tests
+
+#### SqlSmith
+
+Currently, SqlSmith supports for e2e and frontend fuzzing. Take a look at [Fuzzing tests](../src/tests/sqlsmith/README.md) for more details on running it locally.
 
 ### DocSlt tests
 
@@ -455,15 +467,14 @@ license-eye -c .licenserc.yaml header fix
 
 ## Add new dependencies
 
-To avoid rebuild some common dependencies across different crates in workspace, use
+`./risedev check-hakari`: To avoid rebuild some common dependencies across different crates in workspace, use
 [cargo-hakari](https://docs.rs/cargo-hakari/latest/cargo_hakari/) to ensure all dependencies
 are built with the same feature set across workspace. You'll need to run `cargo hakari generate`
 after deps get updated.
 
-Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in
-workspace.
+`./risedev check-udeps`: Use [cargo-udeps](https://github.com/est31/cargo-udeps) to find unused dependencies in workspace.
 
-And use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
+`./risedev check-dep-sort`: Use [cargo-sort](https://crates.io/crates/cargo-sort) to ensure all deps are get sorted.
 
 ## Submit PRs
 

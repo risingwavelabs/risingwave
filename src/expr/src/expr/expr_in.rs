@@ -16,10 +16,10 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
-use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, ensure};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -28,7 +28,7 @@ use crate::expr::{build_from_prost, BoxedExpression, Expression};
 use crate::{ExprError, Result};
 
 #[derive(Debug)]
-pub(crate) struct InExpression {
+pub struct InExpression {
     left: BoxedExpression,
     set: HashSet<Datum>,
     return_type: DataType,
@@ -74,7 +74,7 @@ impl Expression for InExpression {
     fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let input_array = self.left.eval_checked(input)?;
         let mut output_array = BoolArrayBuilder::new(input_array.len());
-        for (data, vis) in input_array.iter().zip_eq(input.vis().iter()) {
+        for (data, vis) in input_array.iter().zip_eq_fast(input.vis().iter()) {
             if vis {
                 let ret = self.exists(&data.to_owned_datum());
                 output_array.append(ret);
@@ -129,21 +129,20 @@ mod tests {
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall, InputRefExpr};
+    use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use crate::expr::expr_in::InExpression;
     use crate::expr::{Expression, InputRefExpression};
 
     #[test]
     fn test_in_expr() {
-        let input_ref = InputRefExpr { column_idx: 0 };
         let input_ref_expr_node = ExprNode {
             expr_type: Type::InputRef as i32,
             return_type: Some(ProstDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::InputRef(input_ref)),
+            rex_node: Some(RexNode::InputRef(0)),
         };
         let constant_values = vec![
             ExprNode {

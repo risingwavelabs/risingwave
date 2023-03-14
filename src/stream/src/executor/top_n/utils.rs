@@ -26,13 +26,13 @@ use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::ordered::OrderedRowSerde;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use super::top_n_cache::CacheKey;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor,
-    ExecutorInfo, Message, PkIndicesRef,
+    ExecutorInfo, Message, PkIndicesRef, Watermark,
 };
 
 #[async_trait]
@@ -68,6 +68,9 @@ pub trait TopNExecutorBase: Send + 'static {
 
     fn evict(&mut self) {}
     async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()>;
+
+    /// Handle incoming watermarks
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark>;
 }
 
 /// The struct wraps a [`TopNExecutorBase`]
@@ -122,8 +125,10 @@ where
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
+                Message::Watermark(watermark) => {
+                    if let Some(output_watermark) = self.inner.handle_watermark(watermark).await {
+                        yield Message::Watermark(output_watermark);
+                    }
                 }
                 Message::Chunk(chunk) => yield Message::Chunk(self.inner.apply_chunk(chunk).await?),
                 Message::Barrier(barrier) => {
@@ -186,16 +191,16 @@ pub fn serialize_pk_to_cache_key(pk: impl Row, cache_key_serde: &CacheKeySerde) 
 pub type CacheKeySerde = (OrderedRowSerde, OrderedRowSerde, usize);
 
 pub fn create_cache_key_serde(
-    storage_key: &[OrderPair],
+    storage_key: &[ColumnOrder],
     pk_indices: PkIndicesRef<'_>,
     schema: &Schema,
-    order_by: &[OrderPair],
+    order_by: &[ColumnOrder],
     group_by: &[usize],
 ) -> CacheKeySerde {
     {
         // validate storage_key = group_by + order_by + additional_pk
         for i in 0..group_by.len() {
-            assert_eq!(storage_key[i].column_idx, group_by[i]);
+            assert_eq!(storage_key[i].column_index, group_by[i]);
         }
         for i in group_by.len()..(group_by.len() + order_by.len()) {
             assert_eq!(storage_key[i], order_by[i - group_by.len()]);
@@ -203,7 +208,7 @@ pub fn create_cache_key_serde(
         let pk_indices = pk_indices.iter().copied().collect::<HashSet<_>>();
         for i in (group_by.len() + order_by.len())..storage_key.len() {
             assert!(
-                pk_indices.contains(&storage_key[i].column_idx),
+                pk_indices.contains(&storage_key[i].column_index),
                 "storage_key = {:?}, pk_indices = {:?}",
                 storage_key,
                 pk_indices
@@ -214,7 +219,7 @@ pub fn create_cache_key_serde(
     let (cache_key_data_types, cache_key_order_types): (Vec<_>, Vec<_>) = storage_key
         [group_by.len()..]
         .iter()
-        .map(|o| (schema[o.column_idx].data_type(), o.order_type))
+        .map(|o| (schema[o.column_index].data_type(), o.order_type))
         .unzip();
 
     let order_by_len = order_by.len();
