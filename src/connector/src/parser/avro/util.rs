@@ -310,8 +310,8 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
             let days = u32::from(duration.days()) as i32;
-            let millis = u32::from(duration.millis()) as i64;
-            ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
+            let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+            ScalarImpl::Interval(IntervalUnit::from_month_day_usec(months, days, usecs))
         }
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {

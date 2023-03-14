@@ -173,9 +173,7 @@ impl SchemaFilterKeyExtractor {
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| {
-                OrderType::from_protobuf(&col_order.get_order_type().unwrap().direction())
-            })
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect();
 
         Self {
@@ -361,6 +359,10 @@ mod tests {
     };
     use crate::key::TABLE_PREFIX_LEN;
 
+    const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
+        VirtualNode::from_index(233).to_be_bytes()
+    }
+
     #[test]
     fn test_default_filter_key_extractor() {
         let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
@@ -478,7 +480,7 @@ mod tests {
         let prost_table = build_table_with_prefix_column_num(1);
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
-        let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = OwnedRow::new(vec![
@@ -494,8 +496,7 @@ mod tests {
             buf.to_vec()
         };
 
-        let vnode_prefix = "v".as_bytes();
-        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+        let vnode_prefix = &dummy_vnode()[..];
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
@@ -513,7 +514,7 @@ mod tests {
                 1,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -529,14 +530,13 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64];
-            let order_types = vec![OrderType::Ascending];
+            let order_types = vec![OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
@@ -551,7 +551,7 @@ mod tests {
                 2,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -567,14 +567,13 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
-            let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types = vec![OrderType::ascending(), OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();

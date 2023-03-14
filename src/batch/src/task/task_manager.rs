@@ -108,7 +108,7 @@ impl BatchManager {
             ))
             .into())
         };
-        task.async_execute(state_reporter).await?;
+        task.async_execute(Some(state_reporter)).await?;
         ret
     }
 

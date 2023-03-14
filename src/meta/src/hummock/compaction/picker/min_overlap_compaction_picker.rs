@@ -26,6 +26,7 @@ pub struct MinOverlappingPicker {
     max_select_bytes: u64,
     level: usize,
     target_level: usize,
+    split_by_table: bool,
     overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
@@ -34,12 +35,14 @@ impl MinOverlappingPicker {
         level: usize,
         target_level: usize,
         max_select_bytes: u64,
+        split_by_table: bool,
         overlap_strategy: Arc<dyn OverlapStrategy>,
     ) -> MinOverlappingPicker {
         MinOverlappingPicker {
             max_select_bytes,
             level,
             target_level,
+            split_by_table,
             overlap_strategy,
         }
     }
@@ -59,6 +62,9 @@ impl MinOverlappingPicker {
             let mut select_file_size = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
                 if level_handlers[self.level].is_pending_compact(&table.id) {
+                    break;
+                }
+                if self.split_by_table && table.table_ids != select_tables[left].table_ids {
                     break;
                 }
                 if select_file_size > self.max_select_bytes {
@@ -85,7 +91,14 @@ impl MinOverlappingPicker {
         if scores.is_empty() {
             return (vec![], vec![]);
         }
-        let (_, (left, right)) = scores.iter().min_by(|x, y| x.0.cmp(&y.0)).unwrap();
+        let (_, (left, right)) = scores
+            .iter()
+            .min_by(|(score1, x), (score2, y)| {
+                score1
+                    .cmp(score2)
+                    .then_with(|| (y.1 - y.0).cmp(&(x.1 - x.0)))
+            })
+            .unwrap();
         let select_input_ssts = select_tables[*left..(right + 1)].to_vec();
         let target_input_ssts = self
             .overlap_strategy
@@ -142,8 +155,13 @@ pub mod tests {
 
     #[test]
     fn test_compact_l1() {
-        let mut picker =
-            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = MinOverlappingPicker::new(
+            1,
+            2,
+            10000,
+            false,
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         let levels = vec![
             Level {
                 level_idx: 1,
@@ -201,28 +219,25 @@ pub mod tests {
             .unwrap();
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 1);
+        assert_eq!(ret.input_levels[0].table_infos.len(), 2);
+        assert_eq!(ret.input_levels[1].table_infos.len(), 3);
         assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
         assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
         ret.add_pending_task(1, &mut level_handlers);
 
-        let ret = picker
-            .pick_compaction(&levels, &level_handlers, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels[0].level_idx, 1);
-        assert_eq!(ret.target_level, 2);
-        assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[1].table_infos[1].id, 6);
+        let ret = picker.pick_compaction(&levels, &level_handlers, &mut local_stats);
+        assert!(ret.is_none());
     }
 
     #[test]
     fn test_expand_l1_files() {
-        let mut picker =
-            MinOverlappingPicker::new(1, 2, 10000, Arc::new(RangeOverlapStrategy::default()));
+        let mut picker = MinOverlappingPicker::new(
+            1,
+            2,
+            10000,
+            false,
+            Arc::new(RangeOverlapStrategy::default()),
+        );
         let levels = vec![
             Level {
                 level_idx: 1,

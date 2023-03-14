@@ -313,6 +313,13 @@ impl RequiredDist {
         }
     }
 
+    pub fn no_shuffle(plan: PlanRef) -> PlanRef {
+        match plan.convention() {
+            Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
+            Convention::Logical | Convention::Batch => unreachable!(),
+        }
+    }
+
     #[allow(dead_code)]
     pub fn enforce_stream_if_not_satisfies(
         &self,

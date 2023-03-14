@@ -87,6 +87,7 @@ mod sort_buffer;
 pub mod source;
 mod stream_reader;
 pub mod subtask;
+mod temporal_join;
 mod top_n;
 mod union;
 mod watermark;
@@ -127,6 +128,7 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 pub use sink::SinkExecutor;
 pub use sort::SortExecutor;
 pub use source::*;
+pub use temporal_join::*;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
 };
@@ -609,6 +611,15 @@ impl Watermark {
             data_type,
             val,
         })
+    }
+
+    /// Transform the watermark with the given output indices. If this watermark is not in the
+    /// output, return `None`.
+    pub fn transform_with_indices(self, output_indices: &[usize]) -> Option<Self> {
+        output_indices
+            .iter()
+            .position(|p| *p == self.col_idx)
+            .map(|new_col_idx| self.with_idx(new_col_idx))
     }
 
     pub fn to_protobuf(&self) -> ProstWatermark {

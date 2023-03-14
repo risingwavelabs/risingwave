@@ -266,12 +266,6 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
             .into_iter()
             .try_collect()?;
 
-        if !(watermarks.iter().all(|watermark| watermark.is_none())
-            || watermarks.iter().all(|watermark| watermark.is_some()))
-        {
-            bail!("Watermark for vnodes should be either all None or all Some()");
-        }
-
         // Return the minimal value if the remote max watermark is Null.
         let watermark = watermarks
             .into_iter()
@@ -344,7 +338,9 @@ mod tests {
             InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
             LiteralExpression::new(
                 interval_type,
-                Some(ScalarImpl::Interval(IntervalUnit::new(0, 1, 0))),
+                Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                    0, 1, 0,
+                ))),
             )
             .boxed(),
         )
@@ -353,7 +349,7 @@ mod tests {
         let table = create_in_memory_state_table(
             mem_state,
             &[DataType::Int16, WATERMARK_TYPE],
-            &[OrderType::Ascending],
+            &[OrderType::ascending()],
             &[0],
             &[1],
             0,

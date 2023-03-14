@@ -180,6 +180,7 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
 
     use super::*;

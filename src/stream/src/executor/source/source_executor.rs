@@ -496,7 +496,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
@@ -663,7 +663,7 @@ mod tests {
             Box::new(executor),
             mem_state_store.clone(),
             TableId::from(0x2333),
-            vec![OrderPair::new(0, OrderType::Ascending)],
+            vec![ColumnOrder::new(0, OrderType::ascending())],
             column_ids,
             2,
             Arc::new(AtomicU64::new(0)),

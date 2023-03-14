@@ -225,9 +225,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                             .get_table_ids()
                             .iter()
                             .all(|table_id| member_table_ids.contains(table_id));
-                        if !is_trivial {
-                            sst_info.divide_version += 1;
-                        }
+                        sst_info.divide_version += 1;
                         split_id_vers.push((
                             sst_info.get_id(),
                             sst_info.get_divide_version(),

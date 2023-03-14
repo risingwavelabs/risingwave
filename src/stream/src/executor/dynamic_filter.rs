@@ -506,7 +506,7 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
@@ -514,7 +514,7 @@ mod tests {
             mem_state,
             TableId::new(1),
             vec![column_descs],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
