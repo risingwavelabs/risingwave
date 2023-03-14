@@ -232,7 +232,7 @@ impl AccessOutput for Utf8ArrayBuilder {
 
 /// Create a new jsonb expression.
 pub fn build_jsonb_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, ret_type) = get_children_and_return_type(prost)?;
+    let (children, _) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
     let l = build_from_prost(&children[0])?;
     let r = build_from_prost(&children[1])?;

@@ -198,8 +198,12 @@ mod tests {
 
         let col1 = BoolArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            kind,
+            TypeName::Boolean,
+            vec![make_input_ref(0, TypeName::Boolean)],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -237,8 +241,12 @@ mod tests {
 
         let col1 = NaiveDateArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let expr = make_expression(kind, &[TypeName::Date], &[0]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            kind,
+            TypeName::Timestamp,
+            vec![make_input_ref(0, TypeName::Date)],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

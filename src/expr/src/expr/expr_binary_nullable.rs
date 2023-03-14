@@ -139,7 +139,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use crate::expr::build_from_prost;
-    use crate::expr::test_utils::make_expression;
+    use crate::expr::test_utils::{make_expression, make_input_ref};
 
     #[test]
     fn test_and() {
@@ -177,8 +177,15 @@ mod tests {
             None,
         ];
 
-        let expr = make_expression(Type::And, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            Type::And,
+            TypeName::Boolean,
+            vec![
+                make_input_ref(0, TypeName::Boolean),
+                make_input_ref(1, TypeName::Boolean),
+            ],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
@@ -227,8 +234,15 @@ mod tests {
             None,
         ];
 
-        let expr = make_expression(Type::Or, &[TypeName::Boolean, TypeName::Boolean], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            Type::Or,
+            TypeName::Boolean,
+            vec![
+                make_input_ref(0, TypeName::Boolean),
+                make_input_ref(1, TypeName::Boolean),
+            ],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
@@ -247,12 +261,15 @@ mod tests {
         let rhs = vec![None, Some(1), None, Some(2), Some(4)];
         let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
 
-        let expr = make_expression(
+        let prost = make_expression(
             Type::IsDistinctFrom,
-            &[TypeName::Int32, TypeName::Int32],
-            &[0, 1],
+            TypeName::Boolean,
+            vec![
+                make_input_ref(0, TypeName::Int32),
+                make_input_ref(1, TypeName::Int32),
+            ],
         );
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&prost).unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
@@ -277,12 +294,15 @@ mod tests {
             Some(false),
         ];
 
-        let expr = make_expression(
+        let prost = make_expression(
             Type::IsNotDistinctFrom,
-            &[TypeName::Int32, TypeName::Int32],
-            &[0, 1],
+            TypeName::Boolean,
+            vec![
+                make_input_ref(0, TypeName::Int32),
+                make_input_ref(1, TypeName::Int32),
+            ],
         );
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&prost).unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
@@ -305,12 +325,15 @@ mod tests {
             Some("???".into()),
             None,
         ];
-        let expr = make_expression(
+        let prost = make_expression(
             Type::FormatType,
-            &[TypeName::Int32, TypeName::Int32],
-            &[0, 1],
+            TypeName::Varchar,
+            vec![
+                make_input_ref(0, TypeName::Int32),
+                make_input_ref(1, TypeName::Int32),
+            ],
         );
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let vec_executor = build_from_prost(&prost).unwrap();
 
         for i in 0..l.len() {
             let row = OwnedRow::new(vec![

@@ -20,7 +20,8 @@ use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
-use risingwave_pb::data::DataType as ProstDataType;
+use risingwave_pb::data::data_type::PbTypeName;
+use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
@@ -35,7 +36,6 @@ use std::fmt::Debug;
 use std::str::{FromStr, Utf8Error};
 
 pub use native_type::*;
-use risingwave_pb::data::data_type::TypeName;
 pub use scalar_impl::*;
 pub use successor::*;
 pub mod chrono_wrapper;
@@ -202,34 +202,58 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
     }
 }
 
-impl From<&ProstDataType> for DataType {
-    fn from(proto: &ProstDataType) -> DataType {
+impl From<&PbDataType> for DataType {
+    fn from(proto: &PbDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
-            TypeName::Int16 => DataType::Int16,
-            TypeName::Int32 => DataType::Int32,
-            TypeName::Int64 => DataType::Int64,
-            TypeName::Float => DataType::Float32,
-            TypeName::Double => DataType::Float64,
-            TypeName::Boolean => DataType::Boolean,
-            TypeName::Varchar => DataType::Varchar,
-            TypeName::Date => DataType::Date,
-            TypeName::Time => DataType::Time,
-            TypeName::Timestamp => DataType::Timestamp,
-            TypeName::Timestamptz => DataType::Timestamptz,
-            TypeName::Decimal => DataType::Decimal,
-            TypeName::Interval => DataType::Interval,
-            TypeName::Bytea => DataType::Bytea,
-            TypeName::Jsonb => DataType::Jsonb,
-            TypeName::Struct => {
+            PbTypeName::Int16 => DataType::Int16,
+            PbTypeName::Int32 => DataType::Int32,
+            PbTypeName::Int64 => DataType::Int64,
+            PbTypeName::Float => DataType::Float32,
+            PbTypeName::Double => DataType::Float64,
+            PbTypeName::Boolean => DataType::Boolean,
+            PbTypeName::Varchar => DataType::Varchar,
+            PbTypeName::Date => DataType::Date,
+            PbTypeName::Time => DataType::Time,
+            PbTypeName::Timestamp => DataType::Timestamp,
+            PbTypeName::Timestamptz => DataType::Timestamptz,
+            PbTypeName::Decimal => DataType::Decimal,
+            PbTypeName::Interval => DataType::Interval,
+            PbTypeName::Bytea => DataType::Bytea,
+            PbTypeName::Jsonb => DataType::Jsonb,
+            PbTypeName::Struct => {
                 let fields: Vec<DataType> = proto.field_type.iter().map(|f| f.into()).collect_vec();
                 let field_names: Vec<String> = proto.field_names.iter().cloned().collect_vec();
                 DataType::new_struct(fields, field_names)
             }
-            TypeName::List => DataType::List {
+            PbTypeName::List => DataType::List {
                 // The first (and only) item is the list element type.
                 datatype: Box::new((&proto.field_type[0]).into()),
             },
-            TypeName::TypeUnspecified => unreachable!(),
+            PbTypeName::TypeUnspecified => unreachable!(),
+        }
+    }
+}
+
+impl From<DataTypeName> for PbTypeName {
+    fn from(type_name: DataTypeName) -> Self {
+        match type_name {
+            DataTypeName::Boolean => PbTypeName::Boolean,
+            DataTypeName::Int16 => PbTypeName::Int16,
+            DataTypeName::Int32 => PbTypeName::Int32,
+            DataTypeName::Int64 => PbTypeName::Int64,
+            DataTypeName::Float32 => PbTypeName::Float,
+            DataTypeName::Float64 => PbTypeName::Double,
+            DataTypeName::Varchar => PbTypeName::Varchar,
+            DataTypeName::Date => PbTypeName::Date,
+            DataTypeName::Timestamp => PbTypeName::Timestamp,
+            DataTypeName::Timestamptz => PbTypeName::Timestamptz,
+            DataTypeName::Time => PbTypeName::Time,
+            DataTypeName::Interval => PbTypeName::Interval,
+            DataTypeName::Decimal => PbTypeName::Decimal,
+            DataTypeName::Bytea => PbTypeName::Bytea,
+            DataTypeName::Jsonb => PbTypeName::Jsonb,
+            DataTypeName::Struct => PbTypeName::Struct,
+            DataTypeName::List => PbTypeName::List,
         }
     }
 }
@@ -266,30 +290,30 @@ impl DataType {
         }
     }
 
-    pub fn prost_type_name(&self) -> TypeName {
+    pub fn prost_type_name(&self) -> PbTypeName {
         match self {
-            DataType::Int16 => TypeName::Int16,
-            DataType::Int32 => TypeName::Int32,
-            DataType::Int64 => TypeName::Int64,
-            DataType::Float32 => TypeName::Float,
-            DataType::Float64 => TypeName::Double,
-            DataType::Boolean => TypeName::Boolean,
-            DataType::Varchar => TypeName::Varchar,
-            DataType::Date => TypeName::Date,
-            DataType::Time => TypeName::Time,
-            DataType::Timestamp => TypeName::Timestamp,
-            DataType::Timestamptz => TypeName::Timestamptz,
-            DataType::Decimal => TypeName::Decimal,
-            DataType::Interval => TypeName::Interval,
-            DataType::Jsonb => TypeName::Jsonb,
-            DataType::Struct { .. } => TypeName::Struct,
-            DataType::List { .. } => TypeName::List,
-            DataType::Bytea => TypeName::Bytea,
+            DataType::Int16 => PbTypeName::Int16,
+            DataType::Int32 => PbTypeName::Int32,
+            DataType::Int64 => PbTypeName::Int64,
+            DataType::Float32 => PbTypeName::Float,
+            DataType::Float64 => PbTypeName::Double,
+            DataType::Boolean => PbTypeName::Boolean,
+            DataType::Varchar => PbTypeName::Varchar,
+            DataType::Date => PbTypeName::Date,
+            DataType::Time => PbTypeName::Time,
+            DataType::Timestamp => PbTypeName::Timestamp,
+            DataType::Timestamptz => PbTypeName::Timestamptz,
+            DataType::Decimal => PbTypeName::Decimal,
+            DataType::Interval => PbTypeName::Interval,
+            DataType::Jsonb => PbTypeName::Jsonb,
+            DataType::Struct { .. } => PbTypeName::Struct,
+            DataType::List { .. } => PbTypeName::List,
+            DataType::Bytea => PbTypeName::Bytea,
         }
     }
 
-    pub fn to_protobuf(&self) -> ProstDataType {
-        let mut pb = ProstDataType {
+    pub fn to_protobuf(&self) -> PbDataType {
+        let mut pb = PbDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
             ..Default::default()
@@ -380,7 +404,7 @@ impl DataType {
     }
 }
 
-impl From<DataType> for ProstDataType {
+impl From<DataType> for PbDataType {
     fn from(data_type: DataType) -> Self {
         data_type.to_protobuf()
     }

@@ -22,7 +22,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
-    use crate::expr::test_utils::make_expression;
+    use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[test]
@@ -90,8 +90,18 @@ mod tests {
         let col1 = I32Array::from_iter(&lhs).into();
         let col2 = I32Array::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            kind,
+            match kind {
+                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => TypeName::Int32,
+                _ => TypeName::Boolean,
+            },
+            vec![
+                make_input_ref(0, TypeName::Int32),
+                make_input_ref(1, TypeName::Int32),
+            ],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -138,8 +148,15 @@ mod tests {
         let col1 = NaiveDateArray::from_iter(&lhs).into();
         let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            kind,
+            TypeName::Timestamp,
+            vec![
+                make_input_ref(0, TypeName::Date),
+                make_input_ref(1, TypeName::Interval),
+            ],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
@@ -191,8 +208,18 @@ mod tests {
         let col1 = DecimalArray::from_iter(&lhs).into();
         let col2 = DecimalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
-        let vec_executor = build_from_prost(&expr).unwrap();
+        let prost = make_expression(
+            kind,
+            match kind {
+                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => TypeName::Decimal,
+                _ => TypeName::Boolean,
+            },
+            vec![
+                make_input_ref(0, TypeName::Decimal),
+                make_input_ref(1, TypeName::Decimal),
+            ],
+        );
+        let vec_executor = build_from_prost(&prost).unwrap();
         let res = vec_executor.eval(&data_chunk).unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

@@ -26,7 +26,7 @@ use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
-use risingwave_expr::expr::test_utils::{make_expression, make_string_literal};
+use risingwave_expr::expr::test_utils::{make_expression, make_input_ref, make_string_literal};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::cast::cast_sigs;
@@ -173,11 +173,12 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
     ];
-    let inputref_for_type = |ty: DataType| {
+    let input_index_for_type = |ty: DataType| {
         inputrefs
             .iter()
             .find(|r| r.return_type() == ty)
             .expect("expression not found")
+            .index()
     };
     const TIMEZONE: usize = 14;
     const TIME_FIELD: usize = 15;
@@ -217,25 +218,25 @@ fn bench_expr(c: &mut Criterion) {
 
         let mut prost = make_expression(
             sig.ty,
-            &sig.args
-                .iter()
-                .map(|t| DataType::from(*t).prost_type_name())
-                .collect_vec(),
-            &sig.args
+            sig.ret.into(),
+            sig.args
                 .iter()
                 .enumerate()
-                .map(|(idx, t)| match (sig.ty, idx) {
-                    (ExprType::AtTimeZone, 1) => TIMEZONE,
-                    (ExprType::DateTrunc, 0) => TIME_FIELD,
-                    (ExprType::DateTrunc, 2) => TIMEZONE,
-                    (ExprType::Extract, 0) => match sig.args[1] {
-                        DataTypeName::Date => EXTRACT_FIELD_DATE,
-                        DataTypeName::Time => EXTRACT_FIELD_TIME,
-                        DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
-                        DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
-                        t => panic!("unexpected type: {t:?}"),
-                    },
-                    _ => inputref_for_type((*t).into()).index(),
+                .map(|(i, t)| {
+                    let idx = match (sig.ty, i) {
+                        (ExprType::AtTimeZone, 1) => TIMEZONE,
+                        (ExprType::DateTrunc, 0) => TIME_FIELD,
+                        (ExprType::DateTrunc, 2) => TIMEZONE,
+                        (ExprType::Extract, 0) => match sig.args[1] {
+                            DataTypeName::Date => EXTRACT_FIELD_DATE,
+                            DataTypeName::Time => EXTRACT_FIELD_TIME,
+                            DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
+                            DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                            t => panic!("unexpected type: {t:?}"),
+                        },
+                        _ => input_index_for_type((*t).into()),
+                    };
+                    make_input_ref(idx, DataType::from(*t).prost_type_name())
                 })
                 .collect_vec(),
         );
@@ -262,7 +263,7 @@ fn bench_expr(c: &mut Criterion) {
         }
         let mut agg = match create_agg_state_unary(
             sig.inputs_type[0].into(),
-            inputref_for_type(sig.inputs_type[0].into()).index(),
+            input_index_for_type(sig.inputs_type[0].into()),
             sig.func,
             sig.ret_type.into(),
             false,
@@ -279,12 +280,10 @@ fn bench_expr(c: &mut Criterion) {
     }
 
     for sig in cast_sigs() {
-        let expr = match new_unary_expr(
-            ExprType::Cast,
-            sig.to_type.into(),
-            if matches!(sig.from_type, DataTypeName::Varchar) {
+        let prost = make_expression(ExprType::Cast, sig.to_type.into(), {
+            let idx = if matches!(sig.from_type, DataTypeName::Varchar) {
                 use DataTypeName::*;
-                let idx = match sig.to_type {
+                match sig.to_type {
                     Boolean => BOOL_STRING,
                     Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
                     Date => DATE_STRING,
@@ -297,12 +296,13 @@ fn bench_expr(c: &mut Criterion) {
                         println!("todo: {}", sig.to_string_no_return());
                         continue;
                     }
-                };
-                InputRefExpression::new(DataType::Varchar, idx).boxed()
+                }
             } else {
-                inputref_for_type(sig.from_type.into()).clone().boxed()
-            },
-        ) {
+                input_index_for_type(sig.from_type.into())
+            };
+            vec![make_input_ref(idx, sig.from_type.into())]
+        });
+        let expr = match build_from_prost(&prost) {
             Ok(expr) => expr,
             Err(e) => {
                 println!("error: {e}");
