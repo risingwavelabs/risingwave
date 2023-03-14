@@ -84,6 +84,8 @@ public class PostgresSourceConfig implements SourceConfig {
         props.setProperty("table.include.list", tableFilter);
         props.setProperty("database.server.name", DB_SERVER_NAME_PREFIX + tableFilter);
 
+        props.setProperty("publication.autocreate.mode", "filtered");
+
         // host:port:database.schema.table
         sourceName =
                 userProps.getNonNull(ConnectorConfig.HOST)
