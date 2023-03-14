@@ -31,7 +31,7 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
     let pretty = StreamGraphFormatter::new(is_verbose).explain_graph(graph);
     let mut config = PrettyConfig {
         need_boundaries: false,
-        width: 120,
+        width: 80,
         ..Default::default()
     };
     config.unicode(&mut output, &pretty);
