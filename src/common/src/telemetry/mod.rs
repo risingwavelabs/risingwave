@@ -25,9 +25,7 @@ use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{total_memory_available_bytes, total_memory_used_bytes};
 
 /// Url of telemetry backend
-/// It is hard-coded since we don't want users to config this url
-/// use prd url when prd is ready, !!! must be done before merge
-pub const TELEMETRY_REPORT_URL: &str = "http://localhost:8080/api/v1/report";
+pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
 
 /// Telemetry reporting interval in seconds, 24h
 pub const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
