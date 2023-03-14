@@ -172,6 +172,7 @@ impl StreamGraphFormatter {
                     inner
                         .get_distinct_dedup_tables()
                         .iter()
+                        .sorted_by_key(|(i, _)| *i)
                         .map(|(i, table)| format!(
                             "(distinct key: {}, table_id: {})",
                             in_fields[*i as usize].name,
@@ -199,6 +200,7 @@ impl StreamGraphFormatter {
                     inner
                         .get_distinct_dedup_tables()
                         .iter()
+                        .sorted_by_key(|(i, _)| *i)
                         .map(|(i, table)| format!(
                             "(distinct key: {}, table_id: {})",
                             in_fields[*i as usize].name,
