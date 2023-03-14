@@ -142,13 +142,25 @@ check_failed_to_generate_queries() {
   fi
 }
 
+# sync step
+# Some queries maybe be added
+sync_queries() {
+  set +x
+  pushd $OUTDIR
+  git checkout main
+  git pull
+  set +e
+  git branch -D stage
+  set -e
+  git checkout -b stage
+  popd
+  set -x
+}
+
 # Upload step
 upload_queries() {
   set +x
   pushd "$OUTDIR"
-  git checkout main
-  git pull
-  git checkout -b stage
   git add .
   git commit -m 'update queries'
   git push -f origin stage
@@ -211,6 +223,11 @@ validate() {
   echo_err "[INFO] Passed checks"
 }
 
+sync() {
+  sync_queries
+  echo_err "[INFO] Synced"
+}
+
 upload() {
   upload_queries
   echo_err "[INFO] Uploaded"
@@ -225,6 +242,7 @@ main() {
   setup
 
   build
+  sync
   generate
   validate
   upload
