@@ -110,8 +110,8 @@ impl From<u8> for KeyPrefixLenType {
             1 => KeyPrefixLenType::u8,
             2 => KeyPrefixLenType::u16,
             3 => KeyPrefixLenType::u32,
-            x => {
-                panic!("unexpected type {}", x)
+            _ => {
+                panic!("unexpected type {}", value)
             }
         }
     }
@@ -119,15 +119,15 @@ impl From<u8> for KeyPrefixLenType {
 
 impl KeyPrefixLenType {
     fn new(len: usize) -> Self {
-        const U8_MAX: usize = u8::MAX as usize;
-        const U16_MAX: usize = u16::MAX as usize;
-        const U32_MAX: usize = u32::MAX as usize;
+        const U8_MAX: usize = u8::MAX as usize + 1;
+        const U16_MAX: usize = u16::MAX as usize + 1;
+        const U32_MAX: usize = u32::MAX as usize + 1;
 
         match len {
-            0..=U8_MAX => KeyPrefixLenType::u8,
-            0..=U16_MAX => KeyPrefixLenType::u16,
-            0..=U32_MAX => KeyPrefixLenType::u32,
-            x => unreachable!("unexpected KeyPrefixLenType {}", x),
+            0..U8_MAX => KeyPrefixLenType::u8,
+            U8_MAX..U16_MAX => KeyPrefixLenType::u16,
+            U16_MAX..U32_MAX => KeyPrefixLenType::u32,
+            _ => unreachable!("unexpected KeyPrefixLenType {}", len),
         }
     }
 
