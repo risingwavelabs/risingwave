@@ -508,7 +508,7 @@ profile:
       - use: opendal
         engine: fs
         bucket: ""
-        root: "risingwave"
+        root: /tmp/rw_ci
       - use: compute-node
         port: 5687
         exporter-port: 1222
