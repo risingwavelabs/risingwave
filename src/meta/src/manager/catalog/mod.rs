@@ -919,7 +919,7 @@ where
         let core = &mut self.core.lock().await.connection;
         core.get_connection_by_name(name)
             .cloned()
-            .ok_or_else(|| anyhow!(format!("unknown service connection")).into())
+            .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
     }
 
     pub async fn finish_create_source_procedure(
