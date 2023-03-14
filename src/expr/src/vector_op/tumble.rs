@@ -44,7 +44,7 @@ pub fn tumble_start_timestamptz(
 ) -> Result<i64> {
     let timestamp_micro_second = timestamp_micro_second;
     let window_size = window_size;
-    Ok(get_window_start(timestamp_micro_second, window_size)?)
+    get_window_start(timestamp_micro_second, window_size)
 }
 
 /// The common part of PostgreSQL function `timestamp_bin` and `timestamptz_bin`.
@@ -70,7 +70,7 @@ fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> R
 mod tests {
     use chrono::{Datelike, Timelike};
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+    use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
     use crate::vector_op::tumble::{get_window_start, tumble_start_date_time};
 
@@ -107,7 +107,7 @@ mod tests {
 
             if timestamp_micro_second < default_window_start {
                 // which is wrong
-                wrong_cnt = wrong_cnt + 1;
+                wrong_cnt += 1;
             }
 
             assert!(timestamp_micro_second >= window_start)

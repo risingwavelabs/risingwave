@@ -314,18 +314,14 @@ mod tests {
         }
         for offset in 1..window_size {
             assert_ne!(
-                test_window_offset_helper(IntervalUnit::from_minutes(1 * window_size + offset))
-                    .await,
-                test_window_offset_helper(IntervalUnit::from_minutes(-1 * window_size + offset))
-                    .await
+                test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
+                test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
             );
         }
         for offset in -window_size + 1..0 {
             assert_ne!(
-                test_window_offset_helper(IntervalUnit::from_minutes(1 * window_size + offset))
-                    .await,
-                test_window_offset_helper(IntervalUnit::from_minutes(-1 * window_size + offset))
-                    .await
+                test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
+                test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
             );
         }
 
