@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -20,8 +20,8 @@ use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
-    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockLevelsExt,
-    HummockVersionExt, HummockVersionUpdateExt,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
+    HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::CompactionGroupId;
@@ -485,7 +485,10 @@ impl<S: MetaStore> HummockManager<S> {
             .env
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(
-                parent_group.count_ssts() as u64 * 2,
+                versioning.current_version.count_new_ssts_in_group_split(
+                    parent_group_id,
+                    &HashSet::from_iter(table_ids.iter().cloned()),
+                ),
             )
             .await?;
         let group_deltas = &mut new_version_delta

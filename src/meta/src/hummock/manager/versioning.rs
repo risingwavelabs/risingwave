@@ -79,7 +79,7 @@ pub struct Versioning {
     /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
     ///   `extend_objects_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
-    /// SST which is referenced more than once
+    /// SST whose `object_id` != `sst_id`
     pub branched_ssts: BTreeMap<
         // SST object id
         HummockSstableObjectId,
