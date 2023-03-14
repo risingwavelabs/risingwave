@@ -22,9 +22,7 @@ use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
-use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, ProjectBuilder,
-};
+use super::generic::{self, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -39,7 +37,7 @@ use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.

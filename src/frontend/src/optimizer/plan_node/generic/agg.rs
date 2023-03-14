@@ -103,7 +103,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let output_len = self.output_len();
-        let input_len = self.input.schema().len();
+        let _input_len = self.input.schema().len();
         let mut fd_set =
             FunctionalDependencySet::with_key(output_len, &(0..self.group_key.len()).collect_vec());
         // take group keys from input_columns, then grow the target size to column_cnt

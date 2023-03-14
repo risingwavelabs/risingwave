@@ -113,7 +113,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
         let i2o = self.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(self.functional_dependency().clone())
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 

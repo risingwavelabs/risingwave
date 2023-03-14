@@ -53,7 +53,7 @@ pub trait GenericPlanRef {
 }
 
 pub trait GenericPlanNode {
-    /// return (schema, logical_pk, fds)
+    /// return (schema, `logical_pk`, fds)
     fn logical_properties(&self) -> (Schema, Option<Vec<usize>>, FunctionalDependencySet) {
         (
             self.schema(),

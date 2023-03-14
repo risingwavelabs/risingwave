@@ -85,7 +85,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
             .functional_dependency()
             .as_dependencies()
             .iter()
-            .map(|input_fd| {})
+            .map(|_input_fd| {})
             .collect_vec();
 
         let mut current_fd = FunctionalDependencySet::new(output_len);

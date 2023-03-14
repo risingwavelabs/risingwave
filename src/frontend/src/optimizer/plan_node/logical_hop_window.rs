@@ -16,9 +16,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::types::IntervalUnit;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -60,8 +59,8 @@ impl LogicalHopWindow {
             output_indices,
         };
 
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
+        let _schema = core.schema();
+        let _pk_indices = core.logical_pk();
         let ctx = core.ctx();
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream

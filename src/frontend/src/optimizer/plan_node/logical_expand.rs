@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::error::Result;
 
-use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchExpand, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamExpand, ToBatch, ToStream,
@@ -26,7 +25,6 @@ use super::{
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// [`LogicalExpand`] expands one row multiple times according to `column_subsets` and also keeps

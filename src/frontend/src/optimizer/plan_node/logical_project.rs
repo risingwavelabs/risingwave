@@ -18,9 +18,8 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
 
-use super::generic::{self, GenericPlanNode, Project};
 use super::{
-    gen_filter_and_pushdown, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
+    gen_filter_and_pushdown, generic, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamProject, ToBatch, ToStream,
 };
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef};
@@ -29,7 +28,7 @@ use crate::optimizer::plan_node::{
     CollectInputRef, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalProject` computes a set of expressions from its input relation.

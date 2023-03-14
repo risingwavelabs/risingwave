@@ -20,9 +20,8 @@ use risingwave_common::bail;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 
-use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
 use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
@@ -44,7 +43,7 @@ pub struct LogicalFilter {
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
-        let ctx = input.ctx();
+        let _ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
         }

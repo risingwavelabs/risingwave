@@ -20,13 +20,13 @@ use risingwave_common::types::{DataType, Scalar};
 
 use super::{ColPrunable, ExprRewritable, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream};
 use crate::expr::{ExprImpl, InputRef, Literal};
-use crate::optimizer::plan_node::generic::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::stream_union::StreamUnion;
 use crate::optimizer::plan_node::{
     generic, BatchHashAgg, BatchUnion, ColumnPruningContext, LogicalAgg, LogicalProject,
     PlanTreeNode, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalUnion` returns the union of the rows of its inputs.
