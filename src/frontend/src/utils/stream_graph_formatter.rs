@@ -247,7 +247,12 @@ impl StreamGraphFormatter {
         if self.verbose {
             fields.push((
                 "output",
-                Pretty::list_of_strings(&node.fields.iter().map(|f| f.get_name()).collect()),
+                Pretty::Array(
+                    node.fields
+                        .iter()
+                        .map(|f| Pretty::debug(f.get_name()))
+                        .collect(),
+                ),
             ));
             // writeln!(
             //     f,
@@ -261,11 +266,10 @@ impl StreamGraphFormatter {
             // )?;
             fields.push((
                 "stream key",
-                Pretty::list_of_strings(
-                    &node
-                        .stream_key
+                Pretty::Array(
+                    node.stream_key
                         .iter()
-                        .map(|i| node.fields[*i as usize].get_name())
+                        .map(|i| Pretty::debug(node.fields[*i as usize].get_name()))
                         .collect(),
                 ),
             ));
