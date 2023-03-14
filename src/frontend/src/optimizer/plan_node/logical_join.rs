@@ -23,7 +23,6 @@ use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::ChainType;
 
-use super::generic::GenericPlanNode;
 use super::{
     generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamProject, ToBatch, ToStream,
@@ -40,7 +39,7 @@ use crate::optimizer::plan_node::{
     StreamDynamicFilter, StreamFilter, StreamTableScan, StreamTemporalJoin, ToStreamContext,
 };
 use crate::optimizer::plan_visitor::{MaxOneRowVisitor, PlanVisitor};
-use crate::optimizer::property::{Distribution, FunctionalDependencySet, Order, RequiredDist};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
 /// `LogicalJoin` combines two relations according to some condition.
@@ -125,28 +124,7 @@ impl LogicalJoin {
     }
 
     pub fn with_core(core: generic::Join<PlanRef>) -> Self {
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        // NOTE(st1page) over
-        let functional_dependency = Self::derive_fd(&core);
-
-        // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
-        // key.
-        // let pk_indices = match pk_indices {
-        //     Some(pk_indices) if functional_dependency.is_key(&pk_indices) => {
-        //         functional_dependency.minimize_key(&pk_indices)
-        //     }
-        //     _ => pk_indices.unwrap_or_default(),
-        // };
-
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalJoin { base, core }
     }
 
@@ -183,62 +161,6 @@ impl LogicalJoin {
         // If output_indices = [0, 0, 1], we should use it as `o2i_col_mapping` directly.
         // If we use `self.i2o_col_mapping().inverse()`, we will lose the first 0.
         ColIndexMapping::new(self.output_indices().iter().map(|x| Some(*x)).collect())
-    }
-
-    fn derive_fd(core: &generic::Join<PlanRef>) -> FunctionalDependencySet {
-        let left_len = core.left.schema().len();
-        let right_len = core.right.schema().len();
-        let left_fd_set = core.left.functional_dependency().clone();
-        let right_fd_set = core.right.functional_dependency().clone();
-
-        let full_out_col_num = core.internal_column_num();
-
-        let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
-            ColIndexMapping::with_shift_offset(left_len, 0)
-                .composite(&ColIndexMapping::identity(full_out_col_num))
-                .rewrite_functional_dependency_set(left_fd_set)
-        };
-        let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
-            ColIndexMapping::with_shift_offset(right_len, left_len.try_into().unwrap())
-                .rewrite_functional_dependency_set(right_fd_set)
-        };
-        let fd_set: FunctionalDependencySet = match core.join_type {
-            JoinType::Inner => {
-                let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
-                for i in &core.on.conjunctions {
-                    if let Some((col, _)) = i.as_eq_const() {
-                        fd_set.add_constant_columns(&[col.index()])
-                    } else if let Some((left, right)) = i.as_eq_cond() {
-                        fd_set.add_functional_dependency_by_column_indices(
-                            &[left.index()],
-                            &[right.index()],
-                        );
-                        fd_set.add_functional_dependency_by_column_indices(
-                            &[right.index()],
-                            &[left.index()],
-                        );
-                    }
-                }
-                get_new_left_fd_set(left_fd_set)
-                    .into_dependencies()
-                    .into_iter()
-                    .chain(
-                        get_new_right_fd_set(right_fd_set)
-                            .into_dependencies()
-                            .into_iter(),
-                    )
-                    .for_each(|fd| fd_set.add_functional_dependency(fd));
-                fd_set
-            }
-            JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
-            JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
-            JoinType::FullOuter => FunctionalDependencySet::new(full_out_col_num),
-            JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
-            JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
-            JoinType::Unspecified => unreachable!(),
-        };
-        ColIndexMapping::with_remaining_columns(&core.output_indices, full_out_col_num)
-            .rewrite_functional_dependency_set(fd_set)
     }
 
     /// Get a reference to the logical join's on.
@@ -407,20 +329,10 @@ impl LogicalJoin {
             result_plan = Some(lookup_join);
         }
 
-        let required_col_idx = logical_scan.required_col_idx();
         let indexes = logical_scan.indexes();
         for index in indexes {
-            let p2s_mapping = index.primary_to_secondary_mapping();
-            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
-                // Covering index selection
-                let index_scan: PlanRef = logical_scan
-                    .to_index_scan(
-                        &index.name,
-                        index.index_table.table_desc().into(),
-                        p2s_mapping,
-                    )
-                    .into();
-
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                let index_scan: PlanRef = index_scan.into();
                 let that = self.clone_with_left_right(self.left(), index_scan.clone());
                 let new_logical_join = logical_join.clone_with_left_right(
                     logical_join.left(),
@@ -1054,7 +966,15 @@ impl LogicalJoin {
         }
     }
 
-    #[allow(dead_code)]
+    fn should_be_temporal_join(&self) -> bool {
+        let right = self.right();
+        if let Some(logical_scan) = right.as_logical_scan() {
+            logical_scan.for_system_time_as_of_now()
+        } else {
+            false
+        }
+    }
+
     fn to_stream_temporal_join(
         &self,
         predicate: EqJoinPredicate,
@@ -1069,7 +989,7 @@ impl LogicalJoin {
 
         if !left.append_only() {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join needs a append-only left input".into(),
+                "Temporal join requires a append-only left input".into(),
                 "Please ensure your left input is append-only".into(),
             )));
         }
@@ -1077,10 +997,17 @@ impl LogicalJoin {
         let right = self.right();
         let Some(logical_scan) = right.as_logical_scan() else {
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join needs a table scan as its lookup table".into(),
+                "Temporal join requires a table scan as its lookup table".into(),
                 "Please provide a table scan".into(),
             )));
         };
+
+        if !logical_scan.for_system_time_as_of_now() {
+            return Err(RwError::from(ErrorCode::NotSupported(
+                "Temporal join requires a table defined as temporal table".into(),
+                "Please use FOR SYSTEM_TIME AS OF NOW() syntax".into(),
+            )));
+        }
 
         let table_desc = logical_scan.table_desc();
 
@@ -1364,7 +1291,12 @@ impl ToStream for LogicalJoin {
                 ))
                 .into());
             }
-            self.to_stream_hash_join(predicate, ctx)
+
+            if self.should_be_temporal_join() {
+                self.to_stream_temporal_join(predicate, ctx)
+            } else {
+                self.to_stream_hash_join(predicate, ctx)
+            }
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {
@@ -1460,8 +1392,37 @@ impl ToStream for LogicalJoin {
         }
 
         let join_with_pk = join.clone_with_output_indices(new_output_indices);
+
+        let plan = if join_with_pk.join_type() == JoinType::FullOuter {
+            // ignore the all NULL to maintain the stream key's uniqueness, see https://github.com/risingwavelabs/risingwave/issues/8084 for more information
+
+            let l2o = join_with_pk
+                .l2i_col_mapping()
+                .composite(&join_with_pk.i2o_col_mapping());
+            let r2o = join_with_pk
+                .r2i_col_mapping()
+                .composite(&join_with_pk.i2o_col_mapping());
+            let left_right_stream_keys = join_with_pk
+                .left()
+                .logical_pk()
+                .iter()
+                .map(|i| l2o.map(*i))
+                .chain(
+                    join_with_pk
+                        .right()
+                        .logical_pk()
+                        .iter()
+                        .map(|i| r2o.map(*i)),
+                )
+                .collect_vec();
+            let plan: PlanRef = join_with_pk.into();
+            LogicalFilter::filter_if_keys_all_null(plan, &left_right_stream_keys)
+        } else {
+            join_with_pk.into()
+        };
+
         // the added columns is at the end, so it will not change the exists column index
-        Ok((join_with_pk.into(), out_col_change))
+        Ok((plan, out_col_change))
     }
 }
 

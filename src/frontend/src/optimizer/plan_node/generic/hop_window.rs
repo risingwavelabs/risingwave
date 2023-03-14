@@ -26,6 +26,8 @@ use super::super::utils::IndicesDisplay;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, InputRefDisplay, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::ColIndexMappingRewriteExt;
 
 /// [`HopWindow`] implements Hop Table Function.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -96,6 +98,24 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for HopWindow<PlanRef> {
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let mut fd_set = self
+            .i2o_col_mapping()
+            .rewrite_functional_dependency_set(self.input.functional_dependency().clone());
+        let (start_idx_in_output, end_idx_in_output) = {
+            let internal2output = self.internal2output_col_mapping();
+            (
+                internal2output.try_map(self.internal_window_start_col_idx()),
+                internal2output.try_map(self.internal_window_end_col_idx()),
+            )
+        };
+        if let Some(start_idx) = start_idx_in_output && let Some(end_idx) = end_idx_in_output {
+            fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
+            fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
+        }
+        fd_set
+    }
 }
 
 impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
@@ -124,7 +144,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn internal_window_end_col_idx(&self) -> usize {
-        self.internal_window_start_col_idx() + 1
+        self.input.schema().len() + 1
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
@@ -138,7 +158,7 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn internal_column_num(&self) -> usize {
-        self.internal_window_start_col_idx() + 2
+        self.input.schema().len() + 2
     }
 
     pub fn output2internal_col_mapping(&self) -> ColIndexMapping {
@@ -150,17 +170,11 @@ impl<PlanRef: GenericPlanRef> HopWindow<PlanRef> {
     }
 
     pub fn input2internal_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::identity_or_none(
-            self.internal_window_start_col_idx(),
-            self.internal_column_num(),
-        )
+        ColIndexMapping::identity_or_none(self.input.schema().len(), self.internal_column_num())
     }
 
     pub fn internal2input_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::identity_or_none(
-            self.internal_column_num(),
-            self.internal_window_start_col_idx(),
-        )
+        ColIndexMapping::identity_or_none(self.internal_column_num(), self.input.schema().len())
     }
 
     pub fn derive_window_start_and_end_exprs(&self) -> Result<(Vec<ExprImpl>, Vec<ExprImpl>)> {

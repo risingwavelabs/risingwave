@@ -14,10 +14,11 @@
 
 use std::cmp::Ordering;
 use std::io::{Read, Write};
+use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use risingwave_hummock_sdk::key::MAX_KEY_LEN;
+use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
 
@@ -29,14 +30,120 @@ pub const DEFAULT_BLOCK_SIZE: usize = 4 * 1024;
 pub const DEFAULT_RESTART_INTERVAL: usize = 16;
 pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + epoch(u64)
 
+#[allow(non_camel_case_types)]
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum LenType {
+    u8 = 1,
+    u16 = 2,
+    u32 = 3,
+}
+
+macro_rules! put_fn {
+    ($name:ident, $($value:ident: $type:ty),*) => {
+        fn $name<T: BufMut>(&self, buf: &mut T, $($value: $type),*) {
+            match *self {
+                LenType::u8 => {
+                    $(buf.put_u8($value as u8);)*
+                },
+
+                LenType::u16 => {
+                    $(buf.put_u16($value as u16);)*
+                },
+
+                LenType::u32 => {
+                    $(buf.put_u32($value as u32);)*
+                },
+            }
+        }
+    };
+}
+
+macro_rules! get_fn {
+    ($name:ident, $($type:ty),*) => {
+        #[allow(unused_parens)]
+        fn $name<T: Buf>(&self, buf: &mut T) -> ($($type), *) {
+            match *self {
+                LenType::u8 => {
+                    ($(buf.get_u8() as $type),*)
+                }
+                LenType::u16 => {
+                    ($(buf.get_u16() as $type),*)
+                }
+                LenType::u32 => {
+                    ($(buf.get_u32() as $type),*)
+                }
+            }
+        }
+    };
+}
+
+impl From<u8> for LenType {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => LenType::u8,
+            2 => LenType::u16,
+            3 => LenType::u32,
+            _ => {
+                panic!("unexpected type {}", value)
+            }
+        }
+    }
+}
+
+impl LenType {
+    put_fn!(put, v1: usize);
+
+    put_fn!(put2, v1: usize, v2: usize);
+
+    get_fn!(get, usize);
+
+    get_fn!(get2, usize, usize);
+
+    fn new(len: usize) -> Self {
+        const U8_MAX: usize = u8::MAX as usize + 1;
+        const U16_MAX: usize = u16::MAX as usize + 1;
+        const U32_MAX: usize = u32::MAX as usize + 1;
+
+        match len {
+            0..U8_MAX => LenType::u8,
+            U8_MAX..U16_MAX => LenType::u16,
+            U16_MAX..U32_MAX => LenType::u32,
+            _ => unreachable!("unexpected LenType {}", len),
+        }
+    }
+
+    fn len(&self) -> usize {
+        match *self {
+            Self::u8 => size_of::<u8>(),
+            Self::u16 => size_of::<u16>(),
+            Self::u32 => size_of::<u32>(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RestartPoint {
+    pub offset: u32,
+    pub key_len_type: LenType,
+    pub value_len_type: LenType,
+}
+
+impl RestartPoint {
+    fn size_of() -> usize {
+        // store key_len_type and value_len_type in u8 related to `BlockBuidler::build`
+        // encoding_value = (key_len_type << 4) | value_len_type
+        std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
+    }
+}
+
 #[derive(Clone)]
 pub struct Block {
     /// Uncompressed entries data, with restart encoded restart points info.
-    data: Bytes,
+    pub data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
     /// Restart points.
-    restart_points: Vec<u32>,
+    restart_points: Vec<RestartPoint>,
 }
 
 impl Block {
@@ -48,6 +155,7 @@ impl Block {
         // Decompress.
         let compression = CompressionAlgorithm::decode(&mut &buf[buf.len() - 9..buf.len() - 8])?;
         let compressed_data = &buf[..buf.len() - 9];
+
         let buf = match compression {
             CompressionAlgorithm::None => buf.slice(0..(buf.len() - 9)),
             CompressionAlgorithm::Lz4 => {
@@ -76,13 +184,48 @@ impl Block {
     }
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
+        // decode restart_points_type_index
+        let n_index = ((&buf[buf.len() - 4..]).get_u32_le()) as usize;
+        let index_data_len = size_of::<u32>() + n_index * RestartPoint::size_of();
+        let data_len = buf.len() - index_data_len;
+        let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 4];
+
+        let mut index_key_vec = Vec::with_capacity(n_index);
+        for _ in 0..n_index {
+            let offset = restart_points_type_index_buf.get_u32_le();
+            let value = restart_points_type_index_buf.get_u8();
+            let key_len_type = LenType::from(value >> 4);
+            let value_len_type = LenType::from(value & 0x0F);
+
+            index_key_vec.push(RestartPoint {
+                offset,
+                key_len_type,
+                value_len_type,
+            });
+        }
+
         // Decode restart points.
-        let n_restarts = (&buf[buf.len() - 4..]).get_u32_le();
-        let data_len = buf.len() - 4 - n_restarts as usize * 4;
-        let mut restart_points = Vec::with_capacity(n_restarts as usize);
-        let mut restart_points_buf = &buf[data_len..buf.len() - 4];
+        let n_restarts = ((&buf[data_len - 4..]).get_u32_le()) as usize;
+        let restart_points_len = size_of::<u32>() + n_restarts * (size_of::<u32>());
+        let restarts_end = data_len - 4;
+        let data_len = data_len - restart_points_len;
+        let mut restart_points = Vec::with_capacity(n_restarts);
+        let mut restart_points_buf = &buf[data_len..restarts_end];
+
+        let mut type_index: usize = 0;
         for _ in 0..n_restarts {
-            restart_points.push(restart_points_buf.get_u32_le());
+            let offset = restart_points_buf.get_u32_le();
+            if type_index < index_key_vec.len() - 1
+                && offset >= index_key_vec[type_index + 1].offset
+            {
+                type_index += 1;
+            }
+
+            restart_points.push(RestartPoint {
+                offset,
+                key_len_type: index_key_vec[type_index].key_len_type,
+                value_len_type: index_key_vec[type_index].value_len_type,
+            });
         }
 
         Block {
@@ -104,7 +247,7 @@ impl Block {
     }
 
     /// Gets restart point by index.
-    pub fn restart_point(&self, index: usize) -> u32 {
+    pub fn restart_point(&self, index: usize) -> RestartPoint {
         self.restart_points[index]
     }
 
@@ -113,18 +256,10 @@ impl Block {
         self.restart_points.len()
     }
 
-    /// Searches the index of the restart point that the given `offset` belongs to.
-    pub fn search_restart_point(&self, offset: usize) -> usize {
-        // Find the largest restart point that equals or less than the given offset.
-        self.restart_points
-            .partition_point(|&position| position <= offset as u32)
-            .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
-    }
-
     /// Searches the index of the restart point by partition point.
     pub fn search_restart_partition_point<P>(&self, pred: P) -> usize
     where
-        P: FnMut(&u32) -> bool,
+        P: FnMut(&RestartPoint) -> bool,
     {
         self.restart_points.partition_point(pred)
     }
@@ -146,42 +281,53 @@ pub struct KeyPrefix {
     value: usize,
     /// Used for calculating range, won't be encoded.
     offset: usize,
+
+    len: usize,
 }
 
 impl KeyPrefix {
-    pub fn encode(&self, buf: &mut impl BufMut) {
-        buf.put_u16(self.overlap as u16);
-        if self.diff >= MAX_KEY_LEN {
-            buf.put_u16(MAX_KEY_LEN as u16);
-            buf.put_u32(self.diff as u32);
-        } else {
-            buf.put_u16(self.diff as u16);
+    // This function is used in BlockBuilder::add to provide a wrapper for encode since the
+    // KeyPrefix len field is only useful in the decode phase
+    pub fn new_without_len(overlap: usize, diff: usize, value: usize, offset: usize) -> Self {
+        KeyPrefix {
+            overlap,
+            diff,
+            value,
+            offset,
+            len: 0, // not used when encode
         }
-        buf.put_u32(self.value as u32);
+    }
+}
+
+impl KeyPrefix {
+    pub fn encode(&self, buf: &mut impl BufMut, key_len_type: LenType, value_len_type: LenType) {
+        key_len_type.put2(buf, self.overlap, self.diff);
+        value_len_type.put(buf, self.value);
     }
 
-    pub fn decode(buf: &mut impl Buf, offset: usize) -> Self {
-        let overlap = buf.get_u16() as usize;
-        let mut diff = buf.get_u16() as usize;
-        if diff == MAX_KEY_LEN {
-            diff = buf.get_u32() as usize;
-        }
-        let value = buf.get_u32() as usize;
+    pub fn decode(
+        buf: &mut impl Buf,
+        offset: usize,
+        key_len_type: LenType,
+        value_len_type: LenType,
+    ) -> Self {
+        let (overlap, diff) = key_len_type.get2(buf);
+        let value = value_len_type.get(buf);
+
+        let len = key_len_type.len() * 2 + value_len_type.len();
+
         Self {
             overlap,
             diff,
             value,
             offset,
+            len,
         }
     }
 
     /// Encoded length.
     fn len(&self) -> usize {
-        if self.diff >= MAX_KEY_LEN {
-            12 // 2 + 2 + 4 + 4
-        } else {
-            8 // 2 + 2 + 4
-        }
+        self.len
     }
 
     /// Gets overlap len.
@@ -238,6 +384,10 @@ pub struct BlockBuilder {
     entry_count: usize,
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
+
+    // restart_points_type_index stores only the restart_point corresponding to each type change,
+    // as an index, in order to reduce space usage
+    restart_points_type_index: Vec<RestartPoint>,
 }
 
 impl BlockBuilder {
@@ -252,6 +402,7 @@ impl BlockBuilder {
             last_key: vec![],
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
+            restart_points_type_index: Vec::default(),
         }
     }
 
@@ -262,44 +413,71 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// For diff len < MAX_KEY_LEN (65536)
-    ///    entry (kv pair): | overlap len (2B) | diff len (2B) | value len(4B) | diff key | value |
-    /// For diff len >= MAX_KEY_LEN (65536)
-    ///    entry (kv pair): | overlap len (2B) | MAX_KEY_LEN (2B) | diff len (4B) | value len(4B) | diff key | value |
+    /// entry (kv pair): | overlap len (len_type) | diff len (len_type) | value len(len_type) | diff key | value |
     /// ```
     ///
     /// # Panics
     ///
     /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, key: &[u8], value: &[u8]) {
+    pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        #[cfg(debug_assertions)]
+        self.debug_valid();
+
+        let mut key: BytesMut = Default::default();
+        full_key.encode_into(&mut key);
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key),
                 Ordering::Less
             );
         }
         // Update restart point if needed and calculate diff key.
-        let diff_key = if self.entry_count % self.restart_count == 0 {
-            self.restart_points.push(self.buf.len() as u32);
-            key
+        let k_type = LenType::new(key.len());
+        let v_type = LenType::new(value.len());
+
+        let type_mismatch = if let Some(RestartPoint {
+            offset: _,
+            key_len_type: last_key_len_type,
+            value_len_type: last_value_len_type,
+        }) = self.restart_points_type_index.last()
+        {
+            k_type != *last_key_len_type || v_type != *last_value_len_type
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, key)
+            true
         };
 
-        let prefix = KeyPrefix {
-            overlap: key.len() - diff_key.len(),
-            diff: diff_key.len(),
-            value: value.len(),
-            offset: self.buf.len(),
+        let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
+            let offset = self.buf.len() as u32;
+
+            self.restart_points.push(offset);
+
+            if type_mismatch {
+                self.restart_points_type_index.push(RestartPoint {
+                    offset,
+                    key_len_type: k_type,
+                    value_len_type: v_type,
+                });
+            }
+
+            key.as_ref()
+        } else {
+            bytes_diff_below_max_key_length(&self.last_key, &key)
         };
 
-        prefix.encode(&mut self.buf);
+        let prefix = KeyPrefix::new_without_len(
+            key.len() - diff_key.len(),
+            diff_key.len(),
+            value.len(),
+            self.buf.len(),
+        );
+
+        prefix.encode(&mut self.buf, k_type, v_type);
         self.buf.put_slice(diff_key);
         self.buf.put_slice(value);
 
         self.last_key.clear();
-        self.last_key.extend_from_slice(key);
+        self.last_key.extend_from_slice(&key);
         self.entry_count += 1;
     }
 
@@ -314,13 +492,18 @@ impl BlockBuilder {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.restart_points.clear();
+        self.restart_points_type_index.clear();
         self.last_key.clear();
         self.entry_count = 0;
     }
 
     /// Calculate block size without compression.
     pub fn uncompressed_block_size(&mut self) -> usize {
-        self.buf.len() + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
+        self.buf.len()
+            + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
+            + (RestartPoint::size_of()) // (offset + len_type(u8)) * len
+                * self.restart_points_type_index.len()
+            + std::mem::size_of::<u32>() // restart_points_type_index len
     }
 
     /// Finishes building block.
@@ -328,7 +511,7 @@ impl BlockBuilder {
     /// # Format
     ///
     /// ```plain
-    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) |
+    /// compressed: | entries | restart point 0 (4B) | ... | restart point N-1 (4B) | N (4B) | restart point index 0 (5B)| ... | restart point index N-1 (5B) | N (4B)
     /// uncompressed: | compression method (1B) | crc32sum (4B) |
     /// ```
     ///
@@ -337,10 +520,31 @@ impl BlockBuilder {
     /// Panic if there is compression error.
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
+
         for restart_point in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
         }
+
         self.buf.put_u32_le(self.restart_points.len() as u32);
+        for RestartPoint {
+            offset,
+            key_len_type,
+            value_len_type,
+        } in &self.restart_points_type_index
+        {
+            self.buf.put_u32_le(*offset);
+
+            let mut value: u8 = 0;
+            value |= *key_len_type as u8;
+            value <<= 4;
+            value |= *value_len_type as u8;
+
+            self.buf.put_u8(value);
+        }
+
+        self.buf
+            .put_u32_le(self.restart_points_type_index.len() as u32);
+
         match self.compression_algorithm {
             CompressionAlgorithm::None => (),
             CompressionAlgorithm::Lz4 => {
@@ -373,6 +577,7 @@ impl BlockBuilder {
                 self.buf = writer.into_inner();
             }
         };
+
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
@@ -381,14 +586,31 @@ impl BlockBuilder {
 
     /// Approximate block len (uncompressed).
     pub fn approximate_len(&self) -> usize {
-        // block + restart_points + restart_points.len + compression_algorithm + checksum
-        self.buf.len() + 4 * self.restart_points.len() + 4 + 1 + 8
+        // block + restart_points + restart_points.len + restart_points_type_indices +
+        // restart_points_type_indics.len compression_algorithm + checksum
+        self.buf.len()
+            + std::mem::size_of::<u32>() * self.restart_points.len() // restart_points
+            + std::mem::size_of::<u32>() // restart_points.len
+            + RestartPoint::size_of() * self.restart_points_type_index.len() // restart_points_type_indics
+            + std::mem::size_of::<u32>() // restart_points_type_indics.len
+            + std::mem::size_of::<CompressionAlgorithm>() // compression_algorithm
+            + std::mem::size_of::<u64>() // checksum
+    }
+
+    pub fn debug_valid(&self) {
+        if self.entry_count == 0 {
+            debug_assert!(self.buf.is_empty());
+            debug_assert!(self.restart_points.is_empty());
+            debug_assert!(self.restart_points_type_index.is_empty());
+            debug_assert!(self.last_key.is_empty());
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN};
 
     use super::*;
     use crate::hummock::{BlockHolder, BlockIterator};
@@ -397,33 +619,34 @@ mod tests {
     fn test_block_enc_dec() {
         let options = BlockBuilderOptions::default();
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
+        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
         let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
@@ -442,44 +665,46 @@ mod tests {
             ..Default::default()
         };
         let mut builder = BlockBuilder::new(options);
-        builder.add(&full_key(b"k1", 1), b"v01");
-        builder.add(&full_key(b"k2", 2), b"v02");
-        builder.add(&full_key(b"k3", 3), b"v03");
-        builder.add(&full_key(b"k4", 4), b"v04");
-        let capcitiy = builder.uncompressed_block_size();
+        builder.add(construct_full_key_struct(0, b"k1", 1), b"v01");
+        builder.add(construct_full_key_struct(0, b"k2", 2), b"v02");
+        builder.add(construct_full_key_struct(0, b"k3", 3), b"v03");
+        builder.add(construct_full_key_struct(0, b"k4", 4), b"v04");
+        let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
-        let block = Box::new(Block::decode(buf.into(), capcitiy).unwrap());
+        let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k1", 1)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k1", 1), bi.key());
         assert_eq!(b"v01", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k2", 2)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k2", 2), bi.key());
         assert_eq!(b"v02", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k3", 3)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k3", 3), bi.key());
         assert_eq!(b"v03", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(b"k4", 4)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, b"k4", 4), bi.key());
         assert_eq!(b"v04", bi.value());
 
         bi.next();
         assert!(!bi.is_valid());
     }
 
-    pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
-        let mut buf = BytesMut::with_capacity(user_key.len() + 8);
-        buf.put_slice(user_key);
-        buf.put_u64(!epoch);
-        buf.freeze()
+    pub fn construct_full_key_struct(
+        table_id: u32,
+        table_key: &[u8],
+        epoch: u64,
+    ) -> FullKey<&[u8]> {
+        FullKey::for_test(TableId::new(table_id), table_key, epoch)
     }
 
     #[test]
@@ -490,30 +715,86 @@ mod tests {
         let large_key = vec![b'b'; MAX_KEY_LEN];
         let xlarge_key = vec![b'c'; MAX_KEY_LEN + 500];
 
-        builder.add(&full_key(&medium_key, 1), b"v1");
-        builder.add(&full_key(&large_key, 2), b"v2");
-        builder.add(&full_key(&xlarge_key, 3), b"v3");
+        builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
+        builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
+        builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
         let capacity = builder.uncompressed_block_size();
+        assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
         bi.seek_to_first();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(&medium_key, 1)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
         assert_eq!(b"v1", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(&large_key, 2)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
         assert_eq!(b"v2", bi.value());
 
         bi.next();
         assert!(bi.is_valid());
-        assert_eq!(&full_key(&xlarge_key, 3)[..], bi.key());
+        assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
         assert_eq!(b"v3", bi.value());
 
         bi.next();
         assert!(!bi.is_valid());
+    }
+
+    #[test]
+    fn test_block_restart_point() {
+        let options = BlockBuilderOptions::default();
+        let mut builder = BlockBuilder::new(options);
+
+        const KEY_COUNT: u8 = 100;
+        const BUILDER_COUNT: u8 = 5;
+
+        for _ in 0..BUILDER_COUNT {
+            for index in 0..KEY_COUNT {
+                if index < 50 {
+                    let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
+                    medium_key.push(index);
+                    builder.add(construct_full_key_struct(0, &medium_key, 1), b"v1");
+                } else if index < 80 {
+                    let mut large_key = vec![b'B'; MAX_KEY_LEN];
+                    large_key.push(index);
+                    builder.add(construct_full_key_struct(0, &large_key, 2), b"v2");
+                } else {
+                    let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
+                    xlarge_key.push(index);
+                    builder.add(construct_full_key_struct(0, &xlarge_key, 3), b"v3");
+                }
+            }
+
+            let capacity = builder.uncompressed_block_size();
+            assert_eq!(capacity, builder.approximate_len() - 9);
+            let buf = builder.build().to_vec();
+            let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
+            let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
+            bi.seek_to_first();
+            assert!(bi.is_valid());
+
+            for index in 0..KEY_COUNT {
+                if index < 50 {
+                    let mut medium_key = vec![b'A'; MAX_KEY_LEN - 500];
+                    medium_key.push(index);
+                    assert_eq!(construct_full_key_struct(0, &medium_key, 1), bi.key());
+                } else if index < 80 {
+                    let mut large_key = vec![b'B'; MAX_KEY_LEN];
+                    large_key.push(index);
+                    assert_eq!(construct_full_key_struct(0, &large_key, 2), bi.key());
+                } else {
+                    let mut xlarge_key = vec![b'C'; MAX_KEY_LEN + 500];
+                    xlarge_key.push(index);
+                    assert_eq!(construct_full_key_struct(0, &xlarge_key, 3), bi.key());
+                }
+                bi.next();
+            }
+
+            assert!(!bi.is_valid());
+            builder.clear();
+        }
     }
 }

@@ -1151,29 +1151,50 @@ impl ScalarImpl {
     }
 }
 
+/// `for_all_type_pairs` is a macro that records all logical type (`DataType`) variants and their
+/// corresponding physical type (`ScalarImpl`, `ArrayImpl`, or `ArrayBuilderImpl`) variants.
+///
+/// This is useful for checking whether a physical type is compatible with a logical type.
+#[macro_export]
+macro_rules! for_all_type_pairs {
+    ($macro:ident) => {
+        $macro! {
+            { Boolean,     Bool },
+            { Int16,       Int16 },
+            { Int32,       Int32 },
+            { Int64,       Int64 },
+            { Float32,     Float32 },
+            { Float64,     Float64 },
+            { Varchar,     Utf8 },
+            { Bytea,       Bytea },
+            { Date,        NaiveDate },
+            { Time,        NaiveTime },
+            { Timestamp,   NaiveDateTime },
+            { Timestamptz, Int64 },
+            { Interval,    Interval },
+            { Decimal,     Decimal },
+            { Jsonb,       Jsonb },
+            { List,        List },
+            { Struct,      Struct }
+        }
+    };
+}
+
+/// Returns whether the `literal` matches the `data_type`.
 pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) -> bool {
     match literal {
-        Some(datum) => {
-            matches!(
-                (data_type, datum),
-                (DataType::Boolean, ScalarImpl::Bool(_))
-                    | (DataType::Int16, ScalarImpl::Int16(_))
-                    | (DataType::Int32, ScalarImpl::Int32(_))
-                    | (DataType::Int64, ScalarImpl::Int64(_))
-                    | (DataType::Float32, ScalarImpl::Float32(_))
-                    | (DataType::Float64, ScalarImpl::Float64(_))
-                    | (DataType::Varchar, ScalarImpl::Utf8(_))
-                    | (DataType::Bytea, ScalarImpl::Bytea(_))
-                    | (DataType::Date, ScalarImpl::NaiveDate(_))
-                    | (DataType::Time, ScalarImpl::NaiveTime(_))
-                    | (DataType::Timestamp, ScalarImpl::NaiveDateTime(_))
-                    | (DataType::Timestamptz, ScalarImpl::Int64(_))
-                    | (DataType::Decimal, ScalarImpl::Decimal(_))
-                    | (DataType::Interval, ScalarImpl::Interval(_))
-                    | (DataType::Jsonb, ScalarImpl::Jsonb(_))
-                    | (DataType::Struct { .. }, ScalarImpl::Struct(_))
-                    | (DataType::List { .. }, ScalarImpl::List(_))
-            )
+        Some(scalar) => {
+            macro_rules! matches {
+                ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                    match (data_type, scalar) {
+                        $(
+                            (DataType::$DataType { .. }, ScalarImpl::$PhysicalType(_)) => true,
+                            (DataType::$DataType { .. }, _) => false, // so that we won't forget to match a new logical type
+                        )*
+                    }
+                }
+            }
+            for_all_type_pairs! { matches }
         }
         None => true,
     }
@@ -1369,7 +1390,7 @@ mod tests {
                 ),
                 DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
-                    ScalarImpl::Interval(IntervalUnit::new(2, 3, 3333)),
+                    ScalarImpl::Interval(IntervalUnit::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
                 DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),

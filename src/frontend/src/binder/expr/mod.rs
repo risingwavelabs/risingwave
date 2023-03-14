@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -123,6 +123,7 @@ impl Binder {
                 start,
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
+            Expr::Parameter { index } => self.bind_parameter(index),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -295,6 +296,10 @@ impl Binder {
             args.push(self.bind_expr(*count)?);
         }
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
+    }
+
+    fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
+        Ok(Parameter::new(index, self.param_types.clone()).into())
     }
 
     /// Bind `expr (not) between low and high`

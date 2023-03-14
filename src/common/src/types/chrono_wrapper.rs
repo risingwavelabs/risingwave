@@ -565,7 +565,7 @@ impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
         }
         let mut datetime = NaiveDateTime::new(date, self.0.time());
         datetime = datetime.checked_add_signed(Duration::days(rhs.get_days().into()))?;
-        datetime = datetime.checked_add_signed(Duration::milliseconds(rhs.get_ms()))?;
+        datetime = datetime.checked_add_signed(Duration::microseconds(rhs.get_usecs()))?;
 
         Some(NaiveDateTimeWrapper::new(datetime))
     }
