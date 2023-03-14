@@ -41,13 +41,13 @@ pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
 mod filter;
-mod sstable_id_manager;
+mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
@@ -55,7 +55,7 @@ pub use delete_range_aggregator::{
     RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
-pub use sstable_id_manager::*;
+pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
@@ -125,7 +125,7 @@ impl DeleteRangeTombstone {
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
-    pub id: HummockSstableId,
+    pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     pub filter_reader: XorFilterReader,
 }
@@ -140,7 +140,7 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
         Self {
@@ -196,7 +196,8 @@ impl Sstable {
     #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
         SstableInfo {
-            id: self.id,
+            object_id: self.id,
+            sst_id: self.id,
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
@@ -207,7 +208,6 @@ impl Sstable {
             meta_offset: self.meta.meta_offset,
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
-            divide_version: 0,
             uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,

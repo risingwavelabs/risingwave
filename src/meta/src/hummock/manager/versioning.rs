@@ -20,7 +20,7 @@ use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -68,19 +68,23 @@ pub struct Versioning {
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    /// These SSTs should be deleted from object store.
-    /// Mapping from a SST to the version that has marked it stale. See `ack_deleted_ssts`.
-    pub ssts_to_delete: BTreeMap<HummockSstableId, HummockVersionId>,
+    /// These SST objects should be deleted from object store.
+    /// Mapping from a SST object to the version that has marked it stale. See
+    /// `ack_deleted_objects`.
+    pub objects_to_delete: BTreeMap<HummockSstableObjectId, HummockVersionId>,
     /// These deltas should be deleted from meta store.
     /// A delta can be deleted if
     /// - Its version id <= checkpoint version id. Currently we only make checkpoint for version id
     ///   <= min_pinned_version_id.
     /// - AND It either contains no SST to delete, or all these SSTs has been deleted. See
-    ///   `extend_ssts_to_delete_from_deltas`.
+    ///   `extend_objects_to_delete_from_deltas`.
     pub deltas_to_delete: Vec<HummockVersionId>,
     /// SST which is referenced more than once
-    pub branched_ssts:
-        BTreeMap<HummockSstableId, HashMap<CompactionGroupId, /* divide version */ u64>>,
+    pub branched_ssts: BTreeMap<
+        // SST object id
+        HummockSstableObjectId,
+        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
+    >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
     pub version_safe_points: Vec<HummockVersionId>,
@@ -112,18 +116,18 @@ impl Versioning {
         min_pinned_version_id
     }
 
-    pub fn extend_ssts_to_delete_from_deltas(
+    pub fn extend_objects_to_delete_from_deltas(
         &mut self,
         delta_range: impl RangeBounds<HummockVersionId>,
         metric: &MetaMetrics,
     ) {
-        self.extend_ssts_to_delete_from_deltas_impl(delta_range);
-        trigger_stale_ssts_stat(metric, self.ssts_to_delete.len());
+        self.extend_objects_to_delete_from_deltas_impl(delta_range);
+        trigger_stale_ssts_stat(metric, self.objects_to_delete.len());
     }
 
-    /// Extends `ssts_to_delete` according to given deltas.
+    /// Extends `objects_to_delete` according to given deltas.
     /// Possibly extends `deltas_to_delete`.
-    fn extend_ssts_to_delete_from_deltas_impl(
+    fn extend_objects_to_delete_from_deltas_impl(
         &mut self,
         delta_range: impl RangeBounds<HummockVersionId>,
     ) {
@@ -132,13 +136,13 @@ impl Versioning {
                 self.deltas_to_delete.push(delta.id);
                 continue;
             }
-            let removed_sst_ids = delta.get_gc_sst_ids().clone();
-            for sst_id in &removed_sst_ids {
-                let duplicate_insert = self.ssts_to_delete.insert(*sst_id, delta.id);
+            let removed_object_ids = delta.get_gc_object_ids().clone();
+            for object_id in &removed_object_ids {
+                let duplicate_insert = self.objects_to_delete.insert(*object_id, delta.id);
                 debug_assert!(duplicate_insert.is_none());
             }
             // If no_sst_to_delete, the delta is qualified for deletion now.
-            if removed_sst_ids.is_empty() {
+            if removed_object_ids.is_empty() {
                 self.deltas_to_delete.push(delta.id);
             }
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
@@ -311,7 +315,7 @@ mod tests {
     use crate::hummock::model::CompactionGroup;
 
     #[tokio::test]
-    async fn test_extend_ssts_to_delete_from_deltas_trivial_move() {
+    async fn test_extend_objects_to_delete_from_deltas_trivial_move() {
         let mut versioning = Versioning::default();
         // trivial_move
         versioning.hummock_version_deltas.insert(
@@ -324,7 +328,7 @@ mod tests {
             },
         );
         assert_eq!(versioning.deltas_to_delete.len(), 0);
-        versioning.extend_ssts_to_delete_from_deltas_impl(1..=2);
+        versioning.extend_objects_to_delete_from_deltas_impl(1..=2);
         assert_eq!(versioning.deltas_to_delete.len(), 1);
     }
 
