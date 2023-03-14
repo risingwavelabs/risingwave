@@ -199,8 +199,8 @@ async fn test_read_version_basic() {
         // test clear related batch after update sst
 
         // after update sst
-        // imm(0, 1, 2) => sst{sst_id: 1}
-        // staging => {imm(3, 4, 5), sst[{sst_id: 1}, {sst_id: 2}]}
+        // imm(0, 1, 2) => sst{sst_object_id: 1}
+        // staging => {imm(3, 4, 5), sst[{sst_object_id: 1}, {sst_object_id: 2}]}
         let staging = read_version.staging();
         assert_eq!(3, read_version.staging().imm.len());
         assert_eq!(1, read_version.staging().sst.len());

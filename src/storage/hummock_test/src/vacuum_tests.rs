@@ -34,10 +34,10 @@ async fn test_vacuum() {
     // Put some SSTs to object store
     let object_ids = (1..10).collect_vec();
     let mut sstables = vec![];
-    for sstable_id in &object_ids {
+    for sstable_object_id in &object_ids {
         let sstable = gen_default_test_sstable(
             default_builder_opt_for_test(),
-            *sstable_id,
+            *sstable_object_id,
             sstable_store.clone(),
         )
         .await;
@@ -48,7 +48,7 @@ async fn test_vacuum() {
     // OK.
     let nonexistent_id = 11u64;
     let vacuum_task = VacuumTask {
-        sstable_ids: object_ids
+        sstable_object_ids: object_ids
             .into_iter()
             .chain(iter::once(nonexistent_id))
             .collect_vec(),

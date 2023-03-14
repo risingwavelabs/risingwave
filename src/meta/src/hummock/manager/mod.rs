@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
-    HummockEpoch, HummockSstableId, HummockVersionId, SstIdRange, FIRST_VERSION_ID,
+    HummockEpoch, HummockSstableId, HummockVersionId, SstObjectIdRange, FIRST_VERSION_ID,
     INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -469,10 +469,10 @@ where
             .collect();
 
         let checkpoint_id = versioning_guard.checkpoint_version.id;
-        versioning_guard.ssts_to_delete.clear();
-        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
+        versioning_guard.objects_to_delete.clear();
+        versioning_guard.extend_objects_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
         let preserved_deltas: HashSet<HummockVersionId> =
-            HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
+            HashSet::from_iter(versioning_guard.objects_to_delete.values().cloned());
         versioning_guard.deltas_to_delete = versioning_guard
             .hummock_version_deltas
             .keys()
@@ -1568,13 +1568,13 @@ where
         }
     }
 
-    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let start_id = self
             .env
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(number as u64)
             .await?;
-        Ok(SstIdRange::new(start_id, start_id + number as u64))
+        Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
     }
 
     /// Tries to checkpoint at min_pinned_version_id
@@ -1603,7 +1603,7 @@ where
             return Ok(0);
         }
         commit_multi_var!(self, None, Transaction::default(), checkpoint)?;
-        versioning.extend_ssts_to_delete_from_deltas(
+        versioning.extend_objects_to_delete_from_deltas(
             (Excluded(old_checkpoint_id), Included(new_checkpoint_id)),
             &self.metrics,
         );

@@ -318,7 +318,7 @@ export const CompactTask_TaskStatus = {
   INVALID_GROUP_CANCELED: "INVALID_GROUP_CANCELED",
   EXECUTE_FAILED: "EXECUTE_FAILED",
   JOIN_HANDLE_FAILED: "JOIN_HANDLE_FAILED",
-  TRACK_SST_ID_FAILED: "TRACK_SST_ID_FAILED",
+  TRACK_SST_OBJECT_ID_FAILED: "TRACK_SST_OBJECT_ID_FAILED",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -360,8 +360,8 @@ export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskSta
     case "JOIN_HANDLE_FAILED":
       return CompactTask_TaskStatus.JOIN_HANDLE_FAILED;
     case 11:
-    case "TRACK_SST_ID_FAILED":
-      return CompactTask_TaskStatus.TRACK_SST_ID_FAILED;
+    case "TRACK_SST_OBJECT_ID_FAILED":
+      return CompactTask_TaskStatus.TRACK_SST_OBJECT_ID_FAILED;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -393,8 +393,8 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
       return "EXECUTE_FAILED";
     case CompactTask_TaskStatus.JOIN_HANDLE_FAILED:
       return "JOIN_HANDLE_FAILED";
-    case CompactTask_TaskStatus.TRACK_SST_ID_FAILED:
-      return "TRACK_SST_ID_FAILED";
+    case CompactTask_TaskStatus.TRACK_SST_OBJECT_ID_FAILED:
+      return "TRACK_SST_OBJECT_ID_FAILED";
     case CompactTask_TaskStatus.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -598,7 +598,7 @@ export interface SubscribeCompactTasksResponse {
 
 /** Delete SSTs in object store */
 export interface VacuumTask {
-  sstableIds: number[];
+  sstableObjectIds: number[];
 }
 
 /** Scan object store to get candidate orphan SSTs. */
@@ -3073,27 +3073,31 @@ export const SubscribeCompactTasksResponse = {
 };
 
 function createBaseVacuumTask(): VacuumTask {
-  return { sstableIds: [] };
+  return { sstableObjectIds: [] };
 }
 
 export const VacuumTask = {
   fromJSON(object: any): VacuumTask {
-    return { sstableIds: Array.isArray(object?.sstableIds) ? object.sstableIds.map((e: any) => Number(e)) : [] };
+    return {
+      sstableObjectIds: Array.isArray(object?.sstableObjectIds)
+        ? object.sstableObjectIds.map((e: any) => Number(e))
+        : [],
+    };
   },
 
   toJSON(message: VacuumTask): unknown {
     const obj: any = {};
-    if (message.sstableIds) {
-      obj.sstableIds = message.sstableIds.map((e) => Math.round(e));
+    if (message.sstableObjectIds) {
+      obj.sstableObjectIds = message.sstableObjectIds.map((e) => Math.round(e));
     } else {
-      obj.sstableIds = [];
+      obj.sstableObjectIds = [];
     }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<VacuumTask>, I>>(object: I): VacuumTask {
     const message = createBaseVacuumTask();
-    message.sstableIds = object.sstableIds?.map((e) => e) || [];
+    message.sstableObjectIds = object.sstableObjectIds?.map((e) => e) || [];
     return message;
   },
 };

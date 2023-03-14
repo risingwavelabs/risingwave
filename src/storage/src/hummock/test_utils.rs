@@ -156,14 +156,16 @@ pub async fn gen_test_sstable_data(
 
 /// Write the data and meta to `sstable_store`.
 pub async fn put_sst(
-    sst_id: HummockSstableId,
+    sst_object_id: HummockSstableId,
     data: Bytes,
     mut meta: SstableMeta,
     sstable_store: SstableStoreRef,
     mut options: SstableWriterOptions,
 ) -> HummockResult<SstableInfo> {
     options.policy = CachePolicy::NotFill;
-    let mut writer = sstable_store.clone().create_sst_writer(sst_id, options);
+    let mut writer = sstable_store
+        .clone()
+        .create_sst_writer(sst_object_id, options);
     for block_meta in &meta.block_metas {
         let offset = block_meta.offset as usize;
         let end_offset = offset + block_meta.len as usize;
@@ -173,8 +175,8 @@ pub async fn put_sst(
     }
     meta.meta_offset = writer.data_len() as u64;
     let sst = SstableInfo {
-        object_id: sst_id,
-        sst_id,
+        object_id: sst_object_id,
+        sst_id: sst_object_id,
         key_range: Some(KeyRange {
             left: meta.smallest_key.clone(),
             right: meta.largest_key.clone(),

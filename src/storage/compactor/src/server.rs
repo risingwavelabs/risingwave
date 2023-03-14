@@ -32,7 +32,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorMemoryCollector, MemoryLimiter, SstableIdManager, SstableStore,
+    CompactorMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
@@ -128,7 +128,7 @@ pub async fn compactor_serve(
         Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
     ));
     monitor_cache(memory_collector, &registry).unwrap();
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
+    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
@@ -143,7 +143,7 @@ pub async fn compactor_serve(
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
-        sstable_id_manager: sstable_id_manager.clone(),
+        sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number,
@@ -154,7 +154,7 @@ pub async fn compactor_serve(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
             Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
-            vec![sstable_id_manager],
+            vec![sstable_object_id_manager],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             compactor_context.clone(),

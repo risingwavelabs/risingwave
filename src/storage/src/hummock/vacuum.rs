@@ -35,7 +35,7 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> bool {
-        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::info!("Try to vacuum SSTs {:?}", vacuum_task.sstable_object_ids);
         match Vacuum::vacuum_inner(
             vacuum_task,
             sstable_store.clone(),
@@ -59,11 +59,11 @@ impl Vacuum {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
     ) -> HummockResult<()> {
-        let object_ids = vacuum_task.sstable_ids;
+        let object_ids = vacuum_task.sstable_object_ids;
         sstable_store.delete_list(&object_ids).await?;
         hummock_meta_client
             .report_vacuum_task(VacuumTask {
-                sstable_ids: object_ids,
+                sstable_object_ids: object_ids,
             })
             .await
             .map_err(|e| {

@@ -21,7 +21,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::Mutex;
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstIdRange};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId, SstObjectIdRange};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 use risingwave_rpc_client::{ExtraInfoSource, HummockMetaClient};
 use sync_point::sync_point;
@@ -29,58 +29,60 @@ use tokio::sync::oneshot;
 
 use crate::hummock::{HummockError, HummockResult};
 
-pub type SstableIdManagerRef = Arc<SstableIdManager>;
+pub type SstableObjectIdManagerRef = Arc<SstableObjectIdManager>;
 
-/// 1. Caches SST ids fetched from meta.
-/// 2. Maintains GC watermark SST id.
+/// 1. Caches SST object ids fetched from meta.
+/// 2. Maintains GC watermark SST object id.
 ///
-/// During full GC, SST in object store with id >= watermark SST id will be excluded from orphan SST
-/// candidate and thus won't be deleted.
-pub struct SstableIdManager {
-    // Lock order: `wait_queue` before `available_sst_ids`.
+/// During full GC, SST in object store with object id >= watermark SST object id will be excluded
+/// from orphan SST object candidate and thus won't be deleted.
+pub struct SstableObjectIdManager {
+    // Lock order: `wait_queue` before `available_sst_object_ids`.
     wait_queue: Mutex<Option<Vec<oneshot::Sender<bool>>>>,
-    available_sst_ids: Mutex<SstIdRange>,
+    available_sst_object_ids: Mutex<SstObjectIdRange>,
     remote_fetch_number: u32,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
-    object_id_tracker: SstIdTracker,
+    object_id_tracker: SstObjectIdTracker,
 }
 
-impl SstableIdManager {
+impl SstableObjectIdManager {
     pub fn new(hummock_meta_client: Arc<dyn HummockMetaClient>, remote_fetch_number: u32) -> Self {
         Self {
             wait_queue: Default::default(),
-            available_sst_ids: Mutex::new(SstIdRange::new(
+            available_sst_object_ids: Mutex::new(SstObjectIdRange::new(
                 HummockSstableId::MIN,
                 HummockSstableId::MIN,
             )),
             remote_fetch_number,
             hummock_meta_client,
-            object_id_tracker: SstIdTracker::new(),
+            object_id_tracker: SstObjectIdTracker::new(),
         }
     }
 
     /// Returns a new SST id.
     /// The id is guaranteed to be monotonic increasing.
-    pub async fn get_new_sst_id(self: &Arc<Self>) -> HummockResult<HummockSstableId> {
-        self.map_next_sst_id(|available_sst_ids| available_sst_ids.get_next_sst_id())
-            .await
+    pub async fn get_new_sst_object_id(self: &Arc<Self>) -> HummockResult<HummockSstableId> {
+        self.map_next_sst_object_id(|available_sst_object_ids| {
+            available_sst_object_ids.get_next_sst_object_id()
+        })
+        .await
     }
 
     /// Executes `f` with next SST id.
     /// May fetch new SST ids via RPC.
-    async fn map_next_sst_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockSstableId>
+    async fn map_next_sst_object_id<F>(self: &Arc<Self>, f: F) -> HummockResult<HummockSstableId>
     where
-        F: Fn(&mut SstIdRange) -> Option<HummockSstableId>,
+        F: Fn(&mut SstObjectIdRange) -> Option<HummockSstableId>,
     {
         loop {
             // 1. Try to get
-            if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
+            if let Some(new_id) = f(self.available_sst_object_ids.lock().deref_mut()) {
                 return Ok(new_id);
             }
             // 2. Otherwise either fetch new ids, or wait for previous fetch if any.
             let waiter = {
                 let mut guard = self.wait_queue.lock();
-                if let Some(new_id) = f(self.available_sst_ids.lock().deref_mut()) {
+                if let Some(new_id) = f(self.available_sst_object_ids.lock().deref_mut()) {
                     return Ok(new_id);
                 }
                 let wait_queue = guard.deref_mut();
@@ -95,13 +97,13 @@ impl SstableIdManager {
             };
             if let Some(waiter) = waiter {
                 // Wait for previous fetch
-                sync_point!("MAP_NEXT_SST_ID.AS_FOLLOWER");
+                sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_FOLLOWER");
                 let _ = waiter.await;
                 continue;
             }
             // Fetch new ids.
-            sync_point!("MAP_NEXT_SST_ID.AS_LEADER");
-            sync_point!("MAP_NEXT_SST_ID.BEFORE_FETCH");
+            sync_point!("MAP_NEXT_SST_OBJECT_ID.AS_LEADER");
+            sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH");
             let this = self.clone();
             tokio::spawn(async move {
                 let new_sst_ids = match this
@@ -116,19 +118,19 @@ impl SstableIdManager {
                         return Err(err);
                     }
                 };
-                sync_point!("MAP_NEXT_SST_ID.AFTER_FETCH");
-                sync_point!("MAP_NEXT_SST_ID.BEFORE_FILL_CACHE");
+                sync_point!("MAP_NEXT_SST_OBJECT_ID.AFTER_FETCH");
+                sync_point!("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE");
                 // Update local cache.
                 let result = {
-                    let mut guard = this.available_sst_ids.lock();
-                    let available_sst_ids = guard.deref_mut();
-                    if new_sst_ids.start_id < available_sst_ids.end_id {
+                    let mut guard = this.available_sst_object_ids.lock();
+                    let available_sst_object_ids = guard.deref_mut();
+                    if new_sst_ids.start_id < available_sst_object_ids.end_id {
                         Err(HummockError::meta_error(format!(
                             "SST id moves backwards. new {} < old {}",
-                            new_sst_ids.start_id, available_sst_ids.end_id
+                            new_sst_ids.start_id, available_sst_object_ids.end_id
                         )))
                     } else {
-                        *available_sst_ids = new_sst_ids;
+                        *available_sst_object_ids = new_sst_ids;
                         Ok(())
                     }
                 };
@@ -152,10 +154,13 @@ impl SstableIdManager {
             None => self.object_id_tracker.get_next_auto_tracker_id(),
             Some(epoch) => TrackerId::Epoch(epoch),
         };
-        let next_sst_id = self
-            .map_next_sst_id(|available_sst_ids| available_sst_ids.peek_next_sst_id())
+        let next_sst_object_id = self
+            .map_next_sst_object_id(|available_sst_object_ids| {
+                available_sst_object_ids.peek_next_sst_object_id()
+            })
             .await?;
-        self.object_id_tracker.add_tracker(tracker_id, next_sst_id);
+        self.object_id_tracker
+            .add_tracker(tracker_id, next_sst_object_id);
         Ok(tracker_id)
     }
 
@@ -184,7 +189,7 @@ impl SstableIdManager {
 }
 
 #[async_trait::async_trait]
-impl ExtraInfoSource for SstableIdManager {
+impl ExtraInfoSource for SstableObjectIdManager {
     async fn get_extra_info(&self) -> Option<Info> {
         Some(Info::HummockGcWatermark(self.global_watermark_object_id()))
     }
@@ -198,17 +203,18 @@ pub enum TrackerId {
     Epoch(HummockEpoch),
 }
 
-/// `SstIdTracker` tracks a min(SST id) for various caller, identified by a `TrackerId`.
-pub struct SstIdTracker {
+/// `SstObjectIdTracker` tracks a min(SST object id) for various caller, identified by a
+/// `TrackerId`.
+pub struct SstObjectIdTracker {
     auto_id: AtomicU64,
-    inner: parking_lot::RwLock<SstIdTrackerInner>,
+    inner: parking_lot::RwLock<SstObjectIdTrackerInner>,
 }
 
-impl SstIdTracker {
+impl SstObjectIdTracker {
     fn new() -> Self {
         Self {
             auto_id: Default::default(),
-            inner: parking_lot::RwLock::new(SstIdTrackerInner::new()),
+            inner: parking_lot::RwLock::new(SstObjectIdTrackerInner::new()),
         }
     }
 
@@ -232,11 +238,11 @@ impl SstIdTracker {
     }
 }
 
-struct SstIdTrackerInner {
+struct SstObjectIdTrackerInner {
     tracking_object_ids: HashMap<TrackerId, HummockSstableId>,
 }
 
-impl SstIdTrackerInner {
+impl SstObjectIdTrackerInner {
     fn new() -> Self {
         Self {
             tracking_object_ids: Default::default(),
@@ -276,12 +282,12 @@ mod test {
 
     use risingwave_common::try_match_expand;
 
-    use crate::hummock::sstable::sstable_id_manager::AutoTrackerId;
-    use crate::hummock::{SstIdTracker, TrackerId};
+    use crate::hummock::sstable::sstable_object_id_manager::AutoTrackerId;
+    use crate::hummock::{SstObjectIdTracker, TrackerId};
 
     #[tokio::test]
     async fn test_object_id_tracker_basic() {
-        let object_id_tacker = SstIdTracker::new();
+        let object_id_tacker = SstObjectIdTracker::new();
         assert!(object_id_tacker.tracking_object_ids().is_empty());
         let auto_id =
             try_match_expand!(object_id_tacker.get_next_auto_tracker_id(), TrackerId::Auto)

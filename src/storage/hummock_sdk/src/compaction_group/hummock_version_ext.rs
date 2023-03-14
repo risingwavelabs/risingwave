@@ -738,7 +738,7 @@ mod tests {
     };
 
     #[test]
-    fn test_get_sst_ids() {
+    fn test_get_sst_object_ids() {
         let mut version = HummockVersion {
             id: 0,
             levels: HashMap::from_iter([(

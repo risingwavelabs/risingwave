@@ -17,7 +17,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
     CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion, VacuumTask,
 };
@@ -88,7 +88,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();
         let res = self.meta_client.get_new_sst_ids(number).await;

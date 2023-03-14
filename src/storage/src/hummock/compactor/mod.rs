@@ -91,21 +91,21 @@ impl Compactor {
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
         let tracker_id = match context
-            .sstable_id_manager
+            .sstable_object_id_manager
             .add_watermark_object_id(None)
             .await
         {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
-                tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::TrackSstIdFailed;
+                tracing::warn!("Failed to track pending SST object id. {:#?}", err);
+                return TaskStatus::TrackSstObjectIdFailed;
             }
         };
-        let sstable_id_manager_clone = context.sstable_id_manager.clone();
+        let sstable_object_id_manager_clone = context.sstable_object_id_manager.clone();
         let _guard = scopeguard::guard(
-            (tracker_id, sstable_id_manager_clone),
-            |(tracker_id, sstable_id_manager)| {
-                sstable_id_manager.remove_watermark_object_id(tracker_id);
+            (tracker_id, sstable_object_id_manager_clone),
+            |(tracker_id, sstable_object_id_manager)| {
+                sstable_object_id_manager.remove_watermark_object_id(tracker_id);
             },
         );
         let group_label = compact_task.compaction_group_id.to_string();
@@ -736,7 +736,7 @@ impl Compactor {
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
-            sstable_id_manager: self.context.sstable_id_manager.clone(),
+            sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,

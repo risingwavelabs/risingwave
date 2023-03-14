@@ -32,12 +32,12 @@ impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    /// Gets SSTs that is safe to be deleted from object store.
+    /// Gets SST objects that is safe to be deleted from object store.
     #[named]
-    pub async fn get_ssts_to_delete(&self) -> Vec<HummockSstableId> {
+    pub async fn get_objects_to_delete(&self) -> Vec<HummockSstableId> {
         read_lock!(self, versioning)
             .await
-            .ssts_to_delete
+            .objects_to_delete
             .keys()
             .cloned()
             .collect_vec()
@@ -47,20 +47,20 @@ where
     ///
     /// Possibly extends deltas_to_delete.
     #[named]
-    pub async fn ack_deleted_ssts(&self, object_ids: &[HummockSstableId]) -> Result<()> {
+    pub async fn ack_deleted_objects(&self, object_ids: &[HummockSstableId]) -> Result<()> {
         let mut deltas_to_delete = HashSet::new();
         let mut versioning_guard = write_lock!(self, versioning).await;
         for object_id in object_ids {
-            if let Some(version_id) = versioning_guard.ssts_to_delete.remove(object_id) && version_id != INVALID_VERSION_ID{
+            if let Some(version_id) = versioning_guard.objects_to_delete.remove(object_id) && version_id != INVALID_VERSION_ID{
                 // Orphan SST is mapped to INVALID_VERSION_ID
                 deltas_to_delete.insert(version_id);
             }
         }
         let remain_deltas: HashSet<HummockVersionId> =
-            HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
+            HashSet::from_iter(versioning_guard.objects_to_delete.values().cloned());
         deltas_to_delete.retain(|id| !remain_deltas.contains(id));
         versioning_guard.deltas_to_delete.extend(deltas_to_delete);
-        trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
+        trigger_stale_ssts_stat(&self.metrics, versioning_guard.objects_to_delete.len());
         Ok(())
     }
 
@@ -91,12 +91,15 @@ where
         Ok((deleted, remain))
     }
 
-    /// Extends `ssts_to_delete` according to object store full scan result.
-    /// Caller should ensure `object_ids` doesn't include any SSTs belong to a on-going version
-    /// write. That's to say, these object_ids won't appear in either `commit_epoch` or
+    /// Extends `objects_to_delete` according to object store full scan result.
+    /// Caller should ensure `object_ids` doesn't include any SST objects belong to a on-going
+    /// version write. That's to say, these object_ids won't appear in either `commit_epoch` or
     /// `report_compact_task`.
     #[named]
-    pub async fn extend_ssts_to_delete_from_scan(&self, object_ids: &[HummockSstableId]) -> usize {
+    pub async fn extend_objects_to_delete_from_scan(
+        &self,
+        object_ids: &[HummockSstableId],
+    ) -> usize {
         let tracked_object_ids: HashSet<HummockSstableId> = {
             let versioning_guard = read_lock!(self, versioning).await;
             let mut tracked_object_ids =
@@ -111,12 +114,12 @@ where
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
-        versioning_guard.ssts_to_delete.extend(
+        versioning_guard.objects_to_delete.extend(
             to_delete
                 .iter()
                 .map(|object_id| (**object_id, INVALID_VERSION_ID)),
         );
-        trigger_stale_ssts_stat(&self.metrics, versioning_guard.ssts_to_delete.len());
+        trigger_stale_ssts_stat(&self.metrics, versioning_guard.objects_to_delete.len());
         to_delete.len()
     }
 }

@@ -549,8 +549,8 @@ async fn test_hummock_manager_basic() {
         );
     }
 
-    // ssts_to_delete is always empty because no compaction is ever invoked.
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    // objects_to_delete is always empty because no compaction is ever invoked.
+    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -562,7 +562,7 @@ async fn test_hummock_manager_basic() {
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
         commit_log_count + register_log_count - 2
     );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -579,7 +579,7 @@ async fn test_hummock_manager_basic() {
         hummock_manager.get_min_pinned_version_id().await,
         init_version_id + commit_log_count + register_log_count
     );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -591,7 +591,7 @@ async fn test_hummock_manager_basic() {
         hummock_manager.proceed_version_checkpoint().await.unwrap(),
         2
     );
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
             .delete_version_deltas(usize::MAX)
@@ -1133,7 +1133,7 @@ async fn test_hummock_compaction_task_heartbeat_removal_on_node_removal() {
 }
 
 #[tokio::test]
-async fn test_extend_ssts_to_delete() {
+async fn test_extend_objects_to_delete() {
     let (_env, hummock_manager, _cluster_manager, worker_node) = setup_compute_env(80).await;
     let context_id = worker_node.id;
     let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
@@ -1154,15 +1154,15 @@ async fn test_extend_ssts_to_delete() {
         .map(|s| s.get_object_id())
         .chain(max_committed_object_id + 1..=max_committed_object_id + orphan_sst_num)
         .collect_vec();
-    assert!(hummock_manager.get_ssts_to_delete().await.is_empty());
+    assert!(hummock_manager.get_objects_to_delete().await.is_empty());
     assert_eq!(
         hummock_manager
-            .extend_ssts_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&orphan_object_ids)
             .await,
         orphan_sst_num as usize
     );
     assert_eq!(
-        hummock_manager.get_ssts_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().await.len(),
         orphan_sst_num as usize
     );
 
@@ -1173,12 +1173,12 @@ async fn test_extend_ssts_to_delete() {
     );
     assert_eq!(
         hummock_manager
-            .extend_ssts_to_delete_from_scan(&orphan_object_ids)
+            .extend_objects_to_delete_from_scan(&orphan_object_ids)
             .await,
         orphan_sst_num as usize
     );
     assert_eq!(
-        hummock_manager.get_ssts_to_delete().await.len(),
+        hummock_manager.get_objects_to_delete().await.len(),
         orphan_sst_num as usize + 3
     );
 }

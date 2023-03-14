@@ -812,10 +812,10 @@ mod tests {
     ) -> Vec<LocalSstableInfo> {
         let start_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), start_epoch);
         let end_full_key = FullKey::new(TEST_TABLE_ID, TableKey(dummy_table_key()), end_epoch);
-        let gen_sst_id = (start_epoch << 8) + end_epoch;
+        let gen_sst_object_id = (start_epoch << 8) + end_epoch;
         vec![LocalSstableInfo::for_test(SstableInfo {
-            object_id: gen_sst_id,
-            sst_id: gen_sst_id,
+            object_id: gen_sst_object_id,
+            sst_id: gen_sst_object_id,
             key_range: Some(KeyRange {
                 left: start_full_key.encode(),
                 right: end_full_key.encode(),

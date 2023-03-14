@@ -83,40 +83,41 @@ where
         Ok(total_deleted)
     }
 
-    /// Schedules deletion of SSTs from object store
+    /// Schedules deletion of SST objects from object store
     ///
-    /// Returns SSTs scheduled in worker node.
+    /// Returns SST objects scheduled in worker node.
     pub async fn vacuum_sst_data(&self) -> MetaResult<Vec<HummockSstableId>> {
-        // Select SSTs to delete.
-        let ssts_to_delete = {
-            // 1. Retry the pending SSTs first.
-            // It is possible some vacuum workers have been asked to vacuum these SSTs previously,
-            // but they don't report the results yet due to either latency or failure.
-            // This is OK since trying to delete the same SST multiple times is safe.
+        // Select SST objects to delete.
+        let objects_to_delete = {
+            // 1. Retry the pending SST objects first.
+            // It is possible some vacuum workers have been asked to vacuum these SST objects
+            // previously, but they don't report the results yet due to either latency
+            // or failure. This is OK since trying to delete the same SST object
+            // multiple times is safe.
             let pending_object_ids = self.pending_object_ids.read().iter().cloned().collect_vec();
             if !pending_object_ids.is_empty() {
                 pending_object_ids
             } else {
-                // 2. If no pending SSTs, then fetch new ones.
-                let mut ssts_to_delete = self.hummock_manager.get_ssts_to_delete().await;
-                self.filter_out_pinned_ssts(&mut ssts_to_delete).await?;
-                if ssts_to_delete.is_empty() {
+                // 2. If no pending SST objects, then fetch new ones.
+                let mut objects_to_delete = self.hummock_manager.get_objects_to_delete().await;
+                self.filter_out_pinned_ssts(&mut objects_to_delete).await?;
+                if objects_to_delete.is_empty() {
                     return Ok(vec![]);
                 }
-                // Track these SST ids, so that we can remove them from metadata later.
+                // Track these SST object ids, so that we can remove them from metadata later.
                 self.pending_object_ids
                     .write()
-                    .extend(ssts_to_delete.clone());
-                ssts_to_delete
+                    .extend(objects_to_delete.clone());
+                objects_to_delete
             }
         };
 
         // Dispatch the vacuum task
         let mut batch_idx = 0;
         let batch_size = 500usize;
-        let mut sent_batch = Vec::with_capacity(ssts_to_delete.len());
-        while batch_idx < ssts_to_delete.len() {
-            let delete_batch = ssts_to_delete
+        let mut sent_batch = Vec::with_capacity(objects_to_delete.len());
+        while batch_idx < objects_to_delete.len() {
+            let delete_batch = objects_to_delete
                 .iter()
                 .skip(batch_idx)
                 .take(batch_size)
@@ -136,7 +137,7 @@ where
                 .send_task(Task::VacuumTask(VacuumTask {
                     // The SST id doesn't necessarily have a counterpart SST file in S3, but
                     // it's OK trying to delete it.
-                    sstable_ids: delete_batch.clone(),
+                    sstable_object_ids: delete_batch.clone(),
                 }))
                 .await
             {
@@ -165,13 +166,13 @@ where
 
     async fn filter_out_pinned_ssts(
         &self,
-        ssts_to_delete: &mut Vec<HummockSstableId>,
+        objects_to_delete: &mut Vec<HummockSstableId>,
     ) -> MetaResult<()> {
         let reject: HashSet<HummockSstableId> =
             self.backup_manager.list_pinned_ssts().into_iter().collect();
         // Ack these pinned SSTs directly. Otherwise delta log containing them cannot be GCed.
         // These SSTs will be GCed during full GC when they are no longer pinned.
-        let to_ack = ssts_to_delete
+        let to_ack = objects_to_delete
             .iter()
             .filter(|s| reject.contains(s))
             .cloned()
@@ -179,8 +180,8 @@ where
         if to_ack.is_empty() {
             return Ok(());
         }
-        self.hummock_manager.ack_deleted_ssts(&to_ack).await?;
-        ssts_to_delete.retain(|s| !reject.contains(s));
+        self.hummock_manager.ack_deleted_objects(&to_ack).await?;
+        objects_to_delete.retain(|s| !reject.contains(s));
         Ok(())
     }
 
@@ -190,18 +191,18 @@ where
             .pending_object_ids
             .read()
             .iter()
-            .filter(|p| vacuum_task.sstable_ids.contains(p))
+            .filter(|p| vacuum_task.sstable_object_ids.contains(p))
             .cloned()
             .collect_vec();
         if !deleted_object_ids.is_empty() {
             self.hummock_manager
-                .ack_deleted_ssts(&deleted_object_ids)
+                .ack_deleted_objects(&deleted_object_ids)
                 .await?;
             self.pending_object_ids
                 .write()
                 .retain(|p| !deleted_object_ids.contains(p));
         }
-        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_ids);
+        tracing::info!("Finish vacuuming SSTs {:?}", vacuum_task.sstable_object_ids);
         Ok(())
     }
 
@@ -261,7 +262,7 @@ where
         // 2. filter by version
         let number = self
             .hummock_manager
-            .extend_ssts_to_delete_from_scan(&object_ids)
+            .extend_objects_to_delete_from_scan(&object_ids)
             .await;
         tracing::info!("GC watermark is {}. SST full scan returns {} SSTs. {} remains after filtered by GC watermark. {} remains after filtered by hummock version.",
             watermark, sst_number, object_ids.len(), number);
@@ -381,7 +382,7 @@ mod tests {
         // v3: [test_tables_2, test_tables_3]}
 
         // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
-        // Delta of v1->v2 cannot be deleted yet because it's used by ssts_to_delete.
+        // Delta of v1->v2 cannot be deleted yet because it's used by objects_to_delete.
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 5);
         // No SST deletion is scheduled because no available worker.
         assert_eq!(
@@ -405,7 +406,7 @@ mod tests {
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
-                sstable_ids: sst_infos
+                sstable_object_ids: sst_infos
                     .first()
                     .unwrap()
                     .iter()
@@ -416,7 +417,7 @@ mod tests {
             .unwrap();
         // The delta can be deleted now.
         assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 1);
-        // No ssts_to_delete.
+        // No objects_to_delete.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0

@@ -34,7 +34,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -869,12 +869,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let resp = self
             .inner
             .get_new_sst_ids(GetNewSstIdsRequest { number })
             .await?;
-        Ok(SstIdRange::new(resp.start_id, resp.end_id))
+        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(

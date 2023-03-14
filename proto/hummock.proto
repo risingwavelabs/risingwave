@@ -232,7 +232,7 @@ message CompactTask {
     INVALID_GROUP_CANCELED = 8;
     EXECUTE_FAILED = 9;
     JOIN_HANDLE_FAILED = 10;
-    TRACK_SST_ID_FAILED = 11;
+    TRACK_SST_OBJECT_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -390,7 +390,7 @@ message SubscribeCompactTasksResponse {
 
 // Delete SSTs in object store
 message VacuumTask {
-  repeated uint64 sstable_ids = 1;
+  repeated uint64 sstable_object_ids = 1;
 }
 
 // Scan object store to get candidate orphan SSTs.

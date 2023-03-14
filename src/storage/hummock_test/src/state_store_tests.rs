@@ -1295,7 +1295,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         HummockSstableId::MAX
     );
@@ -1317,7 +1317,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         HummockSstableId::MAX
     );
@@ -1331,7 +1331,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         HummockSstableId::MAX
     );
@@ -1348,7 +1348,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     let min_object_id_epoch1 = min_object_id(&sync_result1);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         min_object_id_epoch1,
     );
@@ -1356,7 +1356,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     let min_object_id_epoch2 = min_object_id(&sync_result2);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         min_object_id_epoch1,
     );
@@ -1371,7 +1371,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         min_object_id_epoch2,
     );
@@ -1386,7 +1386,7 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
+            .sstable_object_id_manager()
             .global_watermark_object_id(),
         HummockSstableId::MAX
     );

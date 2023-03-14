@@ -47,7 +47,7 @@ use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
 mod filter;
-mod sstable_id_manager;
+mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
@@ -55,7 +55,7 @@ pub use delete_range_aggregator::{
     RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
-pub use sstable_id_manager::*;
+pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};

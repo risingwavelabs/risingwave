@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
     HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -121,7 +121,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
             "failpoint get_new_sst_ids_err"
         )
