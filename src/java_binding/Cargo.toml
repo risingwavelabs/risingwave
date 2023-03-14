@@ -34,3 +34,8 @@ tracing = "0.1"
 
 [lib]
 crate_type = ["cdylib"]
+
+[[bin]]
+name = "data-chunk-payload-generator"
+test = false
+bench = false

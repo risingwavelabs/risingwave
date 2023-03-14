@@ -17,26 +17,26 @@ JNIEXPORT jint JNICALL Java_com_risingwave_java_binding_Binding_vnodeCount
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    iteratorNew
+ * Method:    hummockIteratorNew
  * Signature: ([B)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNew
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorNew
   (JNIEnv *, jclass, jbyteArray);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    iteratorNext
+ * Method:    hummockIteratorNext
  * Signature: (J)J
  */
-JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_iteratorNext
+JNIEXPORT jlong JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorNext
   (JNIEnv *, jclass, jlong);
 
 /*
  * Class:     com_risingwave_java_binding_Binding
- * Method:    iteratorClose
+ * Method:    hummockIteratorClose
  * Signature: (J)V
  */
-JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_iteratorClose
+JNIEXPORT void JNICALL Java_com_risingwave_java_binding_Binding_hummockIteratorClose
   (JNIEnv *, jclass, jlong);
 
 /*
