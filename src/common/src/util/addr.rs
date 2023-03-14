@@ -15,9 +15,8 @@
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+use anyhow::anyhow;
 use risingwave_pb::common::HostAddress as ProstHostAddress;
-
-use crate::error::{internal_error, Result};
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -41,33 +40,33 @@ impl From<SocketAddr> for HostAddr {
 }
 
 impl TryFrom<&str> for HostAddr {
-    type Error = crate::error::RwError;
+    type Error = anyhow::Error;
 
-    fn try_from(s: &str) -> Result<Self> {
-        let addr = url::Url::parse(&format!("http://{}", s))
-            .map_err(|e| internal_error(format!("{}: {}", e, s)))?;
+    fn try_from(s: &str) -> Result<Self, Self::Error> {
+        let addr =
+            url::Url::parse(&format!("http://{}", s)).map_err(|e| anyhow!("{}: {}", e, s))?;
         Ok(HostAddr {
             host: addr
                 .host()
-                .ok_or_else(|| internal_error("invalid host"))?
+                .ok_or_else(|| anyhow!("invalid host"))?
                 .to_string(),
-            port: addr.port().ok_or_else(|| internal_error("invalid port"))?,
+            port: addr.port().ok_or_else(|| anyhow!("invalid port"))?,
         })
     }
 }
 
 impl TryFrom<&String> for HostAddr {
-    type Error = crate::error::RwError;
+    type Error = anyhow::Error;
 
-    fn try_from(s: &String) -> Result<Self> {
+    fn try_from(s: &String) -> Result<Self, Self::Error> {
         Self::try_from(s.as_str())
     }
 }
 
 impl FromStr for HostAddr {
-    type Err = crate::error::RwError;
+    type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self> {
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::try_from(s)
     }
 }

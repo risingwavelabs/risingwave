@@ -170,6 +170,13 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    // Initialize observer manager.
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
+    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
+    observer_manager.start().await;
+
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
         extra_info_sources.push(storage.sstable_id_manager().clone());
@@ -206,6 +213,12 @@ pub async fn compute_node_serve(
             memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
+        let backup_reader = storage.backup_reader();
+        tokio::spawn(async move {
+            backup_reader
+                .watch_config_change(system_params_manager.watch_params())
+                .await;
+        });
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(
@@ -252,13 +265,6 @@ pub async fn compute_node_serve(
     // Set back watermark epoch to stream mgr. Executor will read epoch from stream manager instead
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
-
-    // Initialize observer manager.
-    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
-    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
-    let observer_manager =
-        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
-    observer_manager.start().await;
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
