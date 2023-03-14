@@ -6558,7 +6558,6 @@ dependencies = [
  "moka",
  "nix 0.25.1",
  "parking_lot 0.12.1",
- "paste",
  "prometheus",
  "prost 0.11.8",
  "rand 0.8.5",

@@ -19,7 +19,7 @@ use bytes::BytesMut;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 
-use super::{KeyPrefix, KeyPrefixLenType, RestartPoint};
+use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
@@ -37,8 +37,8 @@ pub struct BlockIterator {
     /// Current entry len.
     entry_len: usize,
 
-    last_key_len_type: KeyPrefixLenType,
-    last_value_len_type: KeyPrefixLenType,
+    last_key_len_type: LenType,
+    last_value_len_type: LenType,
 }
 
 impl BlockIterator {
@@ -50,8 +50,8 @@ impl BlockIterator {
             key: BytesMut::default(),
             value_range: 0..0,
             entry_len: 0,
-            last_key_len_type: KeyPrefixLenType::u8,
-            last_value_len_type: KeyPrefixLenType::u8,
+            last_key_len_type: LenType::u8,
+            last_value_len_type: LenType::u8,
         }
     }
 
@@ -228,8 +228,8 @@ impl BlockIterator {
     fn decode_prefix_at(
         &self,
         offset: usize,
-        key_len_type: KeyPrefixLenType,
-        value_len_type: KeyPrefixLenType,
+        key_len_type: LenType,
+        value_len_type: LenType,
     ) -> KeyPrefix {
         KeyPrefix::decode(
             &mut &self.block.data()[offset..],

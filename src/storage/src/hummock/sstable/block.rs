@@ -18,7 +18,6 @@ use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use paste::paste;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -33,83 +32,57 @@ pub const DEFAULT_ENTRY_SIZE: usize = 24; // table_id(u64) + primary_key(u64) + 
 
 #[allow(non_camel_case_types)]
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum KeyPrefixLenType {
+pub enum LenType {
     u8 = 1,
     u16 = 2,
     u32 = 3,
 }
 
-#[macro_export]
-macro_rules! for_all_type {
-    ([$($arg:ident, )*], $macro:ident) => {
-        $macro! {
-            $($arg, ) *
-            {u8, u8},
-            {u8, u16},
-            {u8, u32},
-            {u16, u8},
-            {u16, u16},
-            {u16, u32},
-            {u32, u8},
-            {u32, u16},
-            {u32, u32}
+macro_rules! put_fn {
+    ($name:ident, $($value:ident: $type:ty),*) => {
+        fn $name<T: BufMut>(&self, buf: &mut T, $($value: $type),*) {
+            match *self {
+                LenType::u8 => {
+                    $(buf.put_u8($value as u8);)*
+                },
 
+                LenType::u16 => {
+                    $(buf.put_u16($value as u16);)*
+                },
+
+                LenType::u32 => {
+                    $(buf.put_u32($value as u32);)*
+                },
+            }
         }
     };
 }
 
-macro_rules! impl_put_fn {
-    (
-        $self:ident,
-        $buf:ident,
-        $match_key_len_type:ident,
-        $match_value_len_type:ident,
-        $({$key_len_type:ident, $value_len_type:ident}),*
-    ) => {
-        match ($match_key_len_type, $match_value_len_type) {
-            $(
-                (KeyPrefixLenType::$key_len_type, KeyPrefixLenType::$value_len_type) => {
-                    paste! {
-                        $buf.[<put_ $key_len_type>]($self.overlap as $key_len_type);
-                        $buf.[<put_ $key_len_type>]($self.diff as $key_len_type);
-                        $buf.[<put_ $value_len_type>]($self.value as $value_len_type);
-                    }
-                },
-            )*
+macro_rules! get_fn {
+    ($name:ident, $($type:ty),*) => {
+        #[allow(unused_parens)]
+        fn $name<T: Buf>(&self, buf: &mut T) -> ($($type), *) {
+            match *self {
+                LenType::u8 => {
+                    ($(buf.get_u8() as $type),*)
+                }
+                LenType::u16 => {
+                    ($(buf.get_u16() as $type),*)
+                }
+                LenType::u32 => {
+                    ($(buf.get_u32() as $type),*)
+                }
+            }
         }
-    }
+    };
 }
 
-macro_rules! impl_get_fn {
-    (
-        $self: ident,
-        $buf:ident,
-        $match_key_len_type:ident,
-        $match_value_len_type:ident,
-        $({$key_len_type:ident, $value_len_type:ident}),*
-    ) => {
-        match ($match_key_len_type, $match_value_len_type) {
-            $(
-                (KeyPrefixLenType::$key_len_type, KeyPrefixLenType::$value_len_type) => {
-                    paste! {
-                        (
-                            $buf.[<get_ $key_len_type>]() as usize,
-                            $buf.[<get_ $key_len_type>]() as usize,
-                            $buf.[<get_ $value_len_type>]() as usize,
-                        )
-                    }
-                },
-            )*
-        }
-    }
-}
-
-impl From<u8> for KeyPrefixLenType {
+impl From<u8> for LenType {
     fn from(value: u8) -> Self {
         match value {
-            1 => KeyPrefixLenType::u8,
-            2 => KeyPrefixLenType::u16,
-            3 => KeyPrefixLenType::u32,
+            1 => LenType::u8,
+            2 => LenType::u16,
+            3 => LenType::u32,
             _ => {
                 panic!("unexpected type {}", value)
             }
@@ -117,17 +90,25 @@ impl From<u8> for KeyPrefixLenType {
     }
 }
 
-impl KeyPrefixLenType {
+impl LenType {
+    put_fn!(put, v1: usize);
+
+    put_fn!(put2, v1: usize, v2: usize);
+
+    get_fn!(get, usize);
+
+    get_fn!(get2, usize, usize);
+
     fn new(len: usize) -> Self {
         const U8_MAX: usize = u8::MAX as usize + 1;
         const U16_MAX: usize = u16::MAX as usize + 1;
         const U32_MAX: usize = u32::MAX as usize + 1;
 
         match len {
-            0..U8_MAX => KeyPrefixLenType::u8,
-            U8_MAX..U16_MAX => KeyPrefixLenType::u16,
-            U16_MAX..U32_MAX => KeyPrefixLenType::u32,
-            _ => unreachable!("unexpected KeyPrefixLenType {}", len),
+            0..U8_MAX => LenType::u8,
+            U8_MAX..U16_MAX => LenType::u16,
+            U16_MAX..U32_MAX => LenType::u32,
+            _ => unreachable!("unexpected LenType {}", len),
         }
     }
 
@@ -143,15 +124,15 @@ impl KeyPrefixLenType {
 #[derive(Clone, Copy, Debug)]
 pub struct RestartPoint {
     pub offset: u32,
-    pub key_len_type: KeyPrefixLenType,
-    pub value_len_type: KeyPrefixLenType,
+    pub key_len_type: LenType,
+    pub value_len_type: LenType,
 }
 
 impl RestartPoint {
     fn size_of() -> usize {
         // store key_len_type and value_len_type in u8 related to `BlockBuidler::build`
         // encoding_value = (key_len_type << 4) | value_len_type
-        std::mem::size_of::<u32>() + std::mem::size_of::<KeyPrefixLenType>()
+        std::mem::size_of::<u32>() + std::mem::size_of::<LenType>()
     }
 }
 
@@ -213,8 +194,8 @@ impl Block {
         for _ in 0..n_index {
             let offset = restart_points_type_index_buf.get_u32_le();
             let value = restart_points_type_index_buf.get_u8();
-            let key_len_type = KeyPrefixLenType::from(value >> 4);
-            let value_len_type = KeyPrefixLenType::from(value & 0x0F);
+            let key_len_type = LenType::from(value >> 4);
+            let value_len_type = LenType::from(value & 0x0F);
 
             index_key_vec.push(RestartPoint {
                 offset,
@@ -319,23 +300,20 @@ impl KeyPrefix {
 }
 
 impl KeyPrefix {
-    pub fn encode(
-        &self,
-        buf: &mut impl BufMut,
-        key_len_type: KeyPrefixLenType,
-        value_len_type: KeyPrefixLenType,
-    ) {
-        for_all_type!([self, buf, key_len_type, value_len_type,], impl_put_fn)
+    pub fn encode(&self, buf: &mut impl BufMut, key_len_type: LenType, value_len_type: LenType) {
+        key_len_type.put2(buf, self.overlap, self.diff);
+        value_len_type.put(buf, self.value);
     }
 
     pub fn decode(
         buf: &mut impl Buf,
         offset: usize,
-        key_len_type: KeyPrefixLenType,
-        value_len_type: KeyPrefixLenType,
+        key_len_type: LenType,
+        value_len_type: LenType,
     ) -> Self {
-        let (overlap, diff, value) =
-            for_all_type!([self, buf, key_len_type, value_len_type,], impl_get_fn);
+        let (overlap, diff) = key_len_type.get2(buf);
+        let value = value_len_type.get(buf);
+
         let len = key_len_type.len() * 2 + value_len_type.len();
 
         Self {
@@ -454,8 +432,8 @@ impl BlockBuilder {
             );
         }
         // Update restart point if needed and calculate diff key.
-        let k_type = KeyPrefixLenType::new(key.len());
-        let v_type = KeyPrefixLenType::new(value.len());
+        let k_type = LenType::new(key.len());
+        let v_type = LenType::new(value.len());
 
         let type_mismatch = if let Some(RestartPoint {
             offset: _,
