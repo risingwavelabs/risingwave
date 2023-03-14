@@ -282,7 +282,7 @@ impl Scheduler {
         // Building fragments and Singletons
         for (&id, fragment) in graph.building_fragments() {
             facts.push(Fact::Fragment(id));
-            if fragment.is_singleton {
+            if fragment.requires_singleton {
                 facts.push(Fact::SingletonReq(id));
             }
         }

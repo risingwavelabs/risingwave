@@ -223,7 +223,7 @@ pub(self) fn build_and_add_fragment(
 }
 
 /// Build new fragment and link dependencies by visiting children recursively, update
-/// `is_singleton` and `fragment_type` properties for current fragment.
+/// `requires_singleton` and `fragment_type` properties for current fragment.
 fn build_fragment(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
@@ -246,7 +246,7 @@ fn build_fragment(
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
-        NodeBody::TopN(_) => current_fragment.is_singleton = true,
+        NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
         // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
@@ -260,7 +260,7 @@ fn build_fragment(
 
         NodeBody::Now(_) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
-            current_fragment.is_singleton = true;
+            current_fragment.requires_singleton = true;
         }
 
         _ => {}

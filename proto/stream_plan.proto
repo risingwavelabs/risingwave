@@ -643,7 +643,9 @@ message StreamFragmentGraph {
     // Bitwise-OR of FragmentTypeFlags
     uint32 fragment_type_mask = 3;
     // Mark whether this fragment requires exactly one actor.
-    bool is_singleton = 4;
+    // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
+    // One should check `meta.Fragment.distribution_type` for the final result.
+    bool requires_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
     // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.
