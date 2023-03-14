@@ -485,6 +485,47 @@ impl std::fmt::Debug for IntervalUnitDisplay<'_> {
     }
 }
 
+/// <https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L2384>
+///
+/// Do NOT make this `pub` as the assumption of 1 month = 30 days and 1 day = 24 hours does not
+/// always hold in other places.
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
+struct IntervalCmpValue(i128);
+
+impl From<IntervalUnit> for IntervalCmpValue {
+    fn from(value: IntervalUnit) -> Self {
+        let days = (value.days as i64) + 30i64 * (value.months as i64);
+        let usecs = (value.usecs as i128) + (USECS_PER_DAY as i128) * (days as i128);
+        Self(usecs)
+    }
+}
+
+impl Ord for IntervalUnit {
+    fn cmp(&self, other: &Self) -> Ordering {
+        IntervalCmpValue::from(*self).cmp(&(*other).into())
+    }
+}
+
+impl PartialOrd for IntervalUnit {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for IntervalUnit {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other).is_eq()
+    }
+}
+
+impl Eq for IntervalUnit {}
+
+impl Hash for IntervalUnit {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        IntervalCmpValue::from(*self).hash(state);
+    }
+}
+
 /// Loss of information during the process due to `justify`. Only intended for memcomparable
 /// encoding.
 impl Serialize for IntervalUnit {
@@ -562,43 +603,6 @@ impl Add for IntervalUnit {
             days,
             usecs,
         }
-    }
-}
-
-impl PartialOrd for IntervalUnit {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        if self.eq(other) {
-            Some(Ordering::Equal)
-        } else {
-            let diff = *self - *other;
-            let days = diff.months as i64 * 30 + diff.days as i64;
-            Some((days * USECS_PER_DAY + diff.usecs).cmp(&0))
-        }
-    }
-}
-
-impl Hash for IntervalUnit {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        let interval = self.justified();
-        interval.months.hash(state);
-        interval.usecs.hash(state);
-        interval.days.hash(state);
-    }
-}
-
-impl PartialEq for IntervalUnit {
-    fn eq(&self, other: &Self) -> bool {
-        let interval = self.justified();
-        let other = other.justified();
-        interval.days == other.days && interval.usecs == other.usecs
-    }
-}
-
-impl Eq for IntervalUnit {}
-
-impl Ord for IntervalUnit {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.partial_cmp(other).unwrap()
     }
 }
 
