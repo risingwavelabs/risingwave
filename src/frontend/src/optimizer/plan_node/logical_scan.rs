@@ -664,12 +664,11 @@ impl ToBatch for LogicalScan {
             if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
+                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order.enforce_if_not_satisfies(
-                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
-                    );
+                    return required_order
+                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
                 } else {
                     unreachable!();
                 }
