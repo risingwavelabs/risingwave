@@ -17,9 +17,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
+use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{
+    HummockStorage, SstableStore, TieredCache, TieredCacheMetricsBuilder,
+};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -31,6 +34,7 @@ use tokio::task::JoinHandle;
 
 pub struct HummockServiceOpts {
     pub hummock_url: String,
+    pub data_dir: Option<String>,
 
     heartbeat_handle: Option<JoinHandle<()>>,
     heartbeat_shutdown_sender: Option<Sender<()>>,
@@ -51,9 +55,14 @@ impl HummockServiceOpts {
     /// Currently, we will read these variables for meta:
     ///
     /// * `RW_HUMMOCK_URL`: hummock store address
-    pub fn from_env() -> Result<Self> {
+    pub fn from_env(data_dir: Option<String>) -> Result<Self> {
         let hummock_url = match env::var("RW_HUMMOCK_URL") {
             Ok(url) => {
+                if !url.starts_with("hummock+") {
+                    return Err(anyhow!(
+                        "only url starting with 'hummock+' is supported in risectl"
+                    ));
+                }
                 tracing::info!("using Hummock URL from `RW_HUMMOCK_URL`: {}", url);
                 url
             }
@@ -74,9 +83,23 @@ For `./risedev apply-compose-deploy` users,
         };
         Ok(Self {
             hummock_url,
+            data_dir,
             heartbeat_handle: None,
             heartbeat_shutdown_sender: None,
         })
+    }
+
+    fn get_storage_opts(&self) -> StorageOpts {
+        let mut opts = StorageOpts {
+            share_buffer_compaction_worker_threads_number: 0,
+            ..Default::default()
+        };
+
+        if let Some(dir) = &self.data_dir {
+            opts.data_directory = dir.clone();
+        }
+
+        opts
     }
 
     pub async fn create_hummock_store_with_metrics(
@@ -93,10 +116,7 @@ For `./risedev apply-compose-deploy` users,
         self.heartbeat_shutdown_sender = Some(heartbeat_shutdown_sender);
 
         // FIXME: allow specify custom config
-        let opts = StorageOpts {
-            share_buffer_compaction_worker_threads_number: 0,
-            ..Default::default()
-        };
+        let opts = self.get_storage_opts();
 
         tracing::info!("using StorageOpts: {:#?}", opts);
 
@@ -134,5 +154,24 @@ For `./risedev apply-compose-deploy` users,
         } else {
             Err(anyhow!("only Hummock state store is supported in risectl"))
         }
+    }
+
+    pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
+        let object_store = parse_remote_object_store(
+            &self.hummock_url.strip_prefix("hummock+").unwrap(),
+            Arc::new(ObjectStoreMetrics::unused()),
+            "Hummock",
+        )
+        .await;
+
+        let opts = self.get_storage_opts();
+
+        Ok(Arc::new(SstableStore::new(
+            Arc::new(object_store),
+            opts.data_directory,
+            opts.block_cache_capacity_mb * (1 << 20),
+            opts.meta_cache_capacity_mb * (1 << 20),
+            TieredCache::none(),
+        )))
     }
 }

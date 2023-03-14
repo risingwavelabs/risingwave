@@ -6576,6 +6576,7 @@ dependencies = [
  "fiemap",
  "futures",
  "futures-async-stream",
+ "hex",
  "itertools",
  "libc",
  "lz4",

@@ -95,6 +95,9 @@ enum HummockCommands {
 
         #[clap(short, long = "table-id")]
         table_id: u32,
+        
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
@@ -158,11 +161,15 @@ enum TableCommands {
     Scan {
         /// name of the materialized view to operate on
         mv_name: String,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>
     },
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
         table_id: u32,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>
     },
     /// list all state tables
     List,
@@ -229,8 +236,8 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            cmd_impl::hummock::list_kv(context, epoch, table_id).await?;
+        Commands::Hummock(HummockCommands::ListKv { epoch, table_id, data_dir }) => {
+            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {
             cmd_impl::hummock::sst_dump(context, args).await.unwrap()
@@ -296,11 +303,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => {
-            cmd_impl::table::scan(context, mv_name).await?
+        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
-        Commands::Table(TableCommands::ScanById { table_id }) => {
-            cmd_impl::table::scan_id(context, table_id).await?
+        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir).await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
