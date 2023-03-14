@@ -1392,4 +1392,92 @@ mod tests {
             assert_eq!(lhs.cmp(&rhs), order)
         }
     }
+
+    #[test]
+    fn test_justify() {
+        let cases = [
+            (
+                (0, 0, USECS_PER_MONTH * 2 + USECS_PER_DAY * 3 + 4),
+                Some((2, 3, 4i64, "2 mons 3 days 00:00:00.000004")),
+            ),
+            ((i32::MIN, i32::MIN, i64::MIN), None),
+            ((i32::MAX, i32::MAX, i64::MAX), None),
+            (
+                (0, i32::MIN, i64::MIN),
+                Some((
+                    -75141187,
+                    -29,
+                    -14454775808,
+                    "-6261765 years -7 mons -29 days -04:00:54.775808",
+                )),
+            ),
+            (
+                (i32::MIN, -60, i64::MAX),
+                Some((
+                    -2143925250,
+                    -8,
+                    -71945224193,
+                    "-178660437 years -6 mons -8 days -19:59:05.224193",
+                )),
+            ),
+        ];
+        for ((lhs_months, lhs_days, lhs_usecs), rhs) in cases {
+            let input = IntervalUnit::from_month_day_usec(lhs_months, lhs_days, lhs_usecs);
+            let actual = input.justify_interval();
+            let actual_deserialize = IntervalCmpValue::from(input).as_justified();
+
+            match rhs {
+                None => {
+                    assert_eq!(actual, None);
+                    assert_eq!(actual_deserialize, None);
+                }
+                Some((rhs_months, rhs_days, rhs_usecs, rhs_str)) => {
+                    // We should test individual fields rather than using custom `Eq`
+                    assert_eq!(actual.unwrap().get_months(), rhs_months);
+                    assert_eq!(actual.unwrap().get_days(), rhs_days);
+                    assert_eq!(actual.unwrap().get_usecs(), rhs_usecs);
+                    assert_eq!(actual_deserialize.unwrap().get_months(), rhs_months);
+                    assert_eq!(actual_deserialize.unwrap().get_days(), rhs_days);
+                    assert_eq!(actual_deserialize.unwrap().get_usecs(), rhs_usecs);
+                    assert_eq!(actual.unwrap().to_string(), rhs_str);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_deserialize_alternate() {
+        let cases = [
+            (0, 0, USECS_PER_MONTH * 2 + USECS_PER_DAY * 3 + 4),
+            (i32::MIN, i32::MIN, i64::MIN),
+            (i32::MAX, i32::MAX, i64::MAX),
+            (0, i32::MIN, i64::MIN),
+            (i32::MIN, -60, i64::MAX),
+        ];
+        for (months, days, usecs) in cases {
+            let input = IntervalUnit::from_month_day_usec(months, days, usecs);
+
+            let mut serializer = memcomparable::Serializer::new(vec![]);
+            input.serialize(&mut serializer).unwrap();
+            let buf = serializer.into_inner();
+            let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+            let actual = IntervalUnit::deserialize(&mut deserializer).unwrap();
+
+            // The IntervalUnit we get back can be a different one, but they should be equal.
+            assert_eq!(actual, input);
+        }
+
+        // Decoding invalid value
+        let mut serializer = memcomparable::Serializer::new(vec![]);
+        (i64::MAX, u64::MAX).serialize(&mut serializer).unwrap();
+        let buf = serializer.into_inner();
+        let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
+        assert!(IntervalUnit::deserialize(&mut deserializer).is_err());
+
+        let buf = i128::MIN.to_ne_bytes();
+        std::panic::catch_unwind(|| {
+            <IntervalUnit as crate::hash::HashKeySerDe>::deserialize(&mut &buf[..])
+        })
+        .unwrap_err();
+    }
 }
