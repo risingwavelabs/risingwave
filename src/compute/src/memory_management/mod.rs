@@ -53,43 +53,42 @@ pub trait MemoryControl: Send + Sync {
     fn describe(&self, total_compute_memory_bytes: usize) -> String;
 }
 
-#[cfg_attr(not(target_os = "linux"), expect(unused_variables))]
+#[cfg(target_os = "linux")]
 pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
-    #[cfg(target_os = "linux")]
-    {
-        use anyhow::anyhow;
+    use anyhow::anyhow;
 
-        use self::policy::{FixedProportionPolicy, StreamingOnlyPolicy};
+    use self::policy::{FixedProportionPolicy, StreamingOnlyPolicy};
 
-        let input_policy = &opts.memory_control_policy;
-        if input_policy == FixedProportionPolicy::CONFIG_STR {
-            Ok(Box::new(FixedProportionPolicy::new(
-                opts.streaming_memory_proportion,
-            )?))
-        } else if input_policy == StreamingOnlyPolicy::CONFIG_STR {
-            Ok(Box::new(StreamingOnlyPolicy))
-        } else {
-            let valid_values = [
-                FixedProportionPolicy::CONFIG_STR,
-                StreamingOnlyPolicy::CONFIG_STR,
-            ];
-            Err(anyhow!(format!(
-                "invalid memory control policy in configuration: {}, valid values: {:?}",
-                input_policy, valid_values,
-            ))
-            .into())
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        // We disable memory control on operating systems other than Linux now because jemalloc
-        // stats do not work well.
-        tracing::warn!("memory control is only enabled on Linux now");
-        Ok(Box::new(DummyPolicy))
+    let input_policy = &opts.memory_control_policy;
+    if input_policy == FixedProportionPolicy::CONFIG_STR {
+        Ok(Box::new(FixedProportionPolicy::new(
+            opts.streaming_memory_proportion,
+        )?))
+    } else if input_policy == StreamingOnlyPolicy::CONFIG_STR {
+        Ok(Box::new(StreamingOnlyPolicy))
+    } else {
+        let valid_values = [
+            FixedProportionPolicy::CONFIG_STR,
+            StreamingOnlyPolicy::CONFIG_STR,
+        ];
+        Err(anyhow!(format!(
+            "invalid memory control policy in configuration: {}, valid values: {:?}",
+            input_policy, valid_values,
+        ))
+        .into())
     }
 }
 
+#[cfg(not(target_os = "linux"))]
+pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
+    // We disable memory control on operating systems other than Linux now because jemalloc
+    // stats do not work well.
+    tracing::warn!("memory control is only enabled on Linux now");
+    Ok(Box::new(DummyPolicy))
+}
+
+// `DummyPolicy` is used for operarting systems other than Linux. It does nothing as memory control
+// is disabled on non-Linux OS.
 pub struct DummyPolicy;
 
 impl MemoryControl for DummyPolicy {
