@@ -29,7 +29,9 @@ use rand::thread_rng;
 use risingwave_common::bail;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::common::{ActorInfo, ParallelUnit};
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
+use risingwave_pb::meta::table_fragments::fragment::{
+    FragmentDistributionType, PbFragmentDistributionType,
+};
 use risingwave_pb::stream_plan::DispatcherType::{self, *};
 
 use crate::manager::{WorkerId, WorkerLocations};
@@ -168,6 +170,14 @@ impl Distribution {
                 Distribution::Singleton(parallel_unit)
             }
             FragmentDistributionType::Hash => Distribution::Hash(mapping),
+        }
+    }
+
+    /// Convert the distribution to [`PbFragmentDistributionType`].
+    pub fn to_distribution_type(&self) -> PbFragmentDistributionType {
+        match self {
+            Distribution::Singleton(_) => PbFragmentDistributionType::Single,
+            Distribution::Hash(_) => PbFragmentDistributionType::Hash,
         }
     }
 }

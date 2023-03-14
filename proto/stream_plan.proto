@@ -383,9 +383,6 @@ enum ChainType {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  reserved 5;
-  reserved "same_worker_node";
-
   uint32 table_id = 1;
   // The schema of input stream, which will be used to build a MergeNode
   repeated plan_common.Field upstream_fields = 2;
@@ -396,10 +393,6 @@ message ChainNode {
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
-  // Whether the upstream materialize is and this chain should be a singleton.
-  // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
-  // fragment in the downstream mview. Remove this when we refactor the fragmenter.
-  bool is_singleton = 6;
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
@@ -649,7 +642,7 @@ message StreamFragmentGraph {
     StreamNode node = 2;
     // Bitwise-OR of FragmentTypeFlags
     uint32 fragment_type_mask = 3;
-    // mark whether this fragment should only have one actor.
+    // Mark whether this fragment requires exactly one actor.
     bool is_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;

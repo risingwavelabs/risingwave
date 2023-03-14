@@ -195,7 +195,6 @@ impl StreamIndexScan {
                     .iter()
                     .map(|&i| i as _)
                     .collect(),
-                is_singleton: false,
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,
