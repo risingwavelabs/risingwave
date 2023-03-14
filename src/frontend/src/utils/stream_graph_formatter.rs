@@ -29,9 +29,11 @@ use crate::TableCatalog;
 pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> String {
     let mut output = String::with_capacity(2048);
     let pretty = StreamGraphFormatter::new(is_verbose).explain_graph(graph);
-    let mut config = PrettyConfig::default();
-    config.need_boundaries = false;
-    config.width = 120;
+    let mut config = PrettyConfig {
+        need_boundaries: false,
+        width: 120,
+        ..Default::default()
+    };
     config.unicode(&mut output, &pretty);
     output
 }
@@ -81,19 +83,19 @@ impl StreamGraphFormatter {
 
     fn explain_table<'a>(&self, tb: &Table) -> Pretty<'a> {
         let tb = TableCatalog::from(tb.clone());
-        let columns = Pretty::Array(
-            tb.columns
-                .iter()
-                .map(|c| {
-                    let s = if self.verbose {
-                        format!("{}: {}", c.name(), c.data_type())
-                    } else {
-                        c.name().to_string()
-                    };
-                    Pretty::Text(s.into())
-                })
-                .collect::<Vec<_>>(),
-        );
+        let columns = tb
+            .columns
+            .iter()
+            .map(|c| {
+                let s = if self.verbose {
+                    format!("{}: {}", c.name(), c.data_type())
+                } else {
+                    c.name().to_string()
+                };
+                Pretty::Text(s.into())
+            })
+            .collect();
+        let columns = Pretty::Array(columns);
         let name = format!("Table {}", tb.id);
         let mut fields = Vec::with_capacity(5);
         fields.push(("columns", columns));
