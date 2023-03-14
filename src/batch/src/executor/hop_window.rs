@@ -36,7 +36,6 @@ pub struct HopWindowExecutor {
     time_col_idx: usize,
     window_slide: IntervalUnit,
     window_size: IntervalUnit,
-    window_offset: IntervalUnit,
     window_start_exprs: Vec<BoxedExpression>,
     window_end_exprs: Vec<BoxedExpression>,
     output_indices: Vec<usize>,
@@ -57,7 +56,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
         let time_col = hop_window_node.get_time_col() as usize;
         let window_slide = hop_window_node.get_window_slide()?.into();
         let window_size = hop_window_node.get_window_size()?.into();
-        let window_offset = hop_window_node.get_window_offset()?.into();
         let output_indices = hop_window_node
             .get_output_indices()
             .iter()
@@ -99,7 +97,6 @@ impl BoxedExecutorBuilder for HopWindowExecutor {
             time_col,
             window_slide,
             window_size,
-            window_offset,
             source.plan_node().get_identity().clone(),
             window_start_exprs,
             window_end_exprs,
@@ -116,7 +113,6 @@ impl HopWindowExecutor {
         time_col_idx: usize,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
-        window_offset: IntervalUnit,
         identity: String,
         window_start_exprs: Vec<BoxedExpression>,
         window_end_exprs: Vec<BoxedExpression>,
@@ -129,7 +125,6 @@ impl HopWindowExecutor {
             time_col_idx,
             window_slide,
             window_size,
-            window_offset,
             window_start_exprs,
             window_end_exprs,
             output_indices,
@@ -264,7 +259,6 @@ mod tests {
             2,
             window_slide,
             window_size,
-            window_offset,
             "test".to_string(),
             window_start_exprs,
             window_end_exprs,

@@ -17,6 +17,7 @@ use std::rc::Rc;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
+use risingwave_sqlparser::keywords::NO;
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -193,8 +194,34 @@ impl Planner {
         let mut args = args.into_iter();
         let col_data_types: Vec<_> = Self::collect_col_data_types_for_tumble_window(&input)?;
 
-        match (args.next(), args.next()) {
-            (Some(window_size @ ExprImpl::Literal(_)), None) => {
+        match (args.next(), args.next(), args.next()) {
+            (Some(window_size @ ExprImpl::Literal(_)), None, None) => {
+                let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
+                for (idx, col_dt) in col_data_types.iter().enumerate() {
+                    exprs.push(InputRef::new(idx, col_dt.clone()).into());
+                }
+                let window_start: ExprImpl = FunctionCall::new(
+                    ExprType::TumbleStart,
+                    vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                )?
+                .into();
+                // TODO: `window_end` may be optimized to avoid double calculation of
+                // `tumble_start`, or we can depends on common expression
+                // optimization.
+                let window_end =
+                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
+                        .into();
+                exprs.push(window_start);
+                exprs.push(window_end);
+                let base = self.plan_relation(input)?;
+                let project = LogicalProject::create(base, exprs);
+                Ok(project)
+            }
+            (
+                Some(window_size @ ExprImpl::Literal(_)),
+                Some(window_offset @ ExprImpl::Literal(_)),
+                None,
+            ) => {
                 let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
