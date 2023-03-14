@@ -209,25 +209,53 @@ impl SstableStore {
     }
 
     pub fn prefetch(
-        &self,
+        self: &Arc<Self>,
         sst: &Sstable,
-        block_index: u64,
+        start_block_index: usize,
+        end_block_index: usize,
     ) -> Option<JoinHandle<HummockResult<()>>> {
-        let block_meta = &sst.meta.block_metas[block_index as usize];
-        let block_loc = BlockLocation {
+        if self
+            .block_cache
+            .exists_block(sst.id, start_block_index as u64)
+        {
+            return None;
+        }
+        let block_meta = &sst.meta.block_metas[start_block_index];
+        let mut block_loc = BlockLocation {
             offset: block_meta.offset as usize,
-            size: block_meta.len as usize,
+            size: 0,
         };
-        let uncompressed_capacity = block_meta.uncompressed_size as usize;
-        self.block_cache.prefetch_block(sst.id, block_index, || {
-            let data_path = self.get_sst_data_path(sst.id);
-            let store = self.store.clone();
-            async move {
-                let block_data = store.read(&data_path, Some(block_loc)).await?;
-                let block = Block::decode(block_data, uncompressed_capacity)?;
-                Ok(Box::new(block))
+        let mut blocks_info = vec![];
+        for block_idx in start_block_index..end_block_index {
+            let size = sst.meta.block_metas[block_idx].len as usize;
+            blocks_info.push((
+                block_idx,
+                size,
+                sst.meta.block_metas[block_idx].uncompressed_size as usize,
+            ));
+            block_loc.size += size;
+        }
+        let sst_id = sst.id;
+        let data_path = self.get_sst_data_path(sst.id);
+        let sstable_store = self.clone();
+        Some(tokio::spawn(async move {
+            let block_data = sstable_store
+                .store
+                .read(&data_path, Some(block_loc))
+                .await?;
+            let mut last_offset = 0;
+            for (block_idx, size, uncompressed_capacity) in blocks_info {
+                let block = Block::decode(
+                    block_data.slice(last_offset..(last_offset + size)),
+                    uncompressed_capacity,
+                )?;
+                last_offset += size;
+                sstable_store
+                    .block_cache
+                    .insert(sst_id, block_idx as u64, Box::new(block));
             }
-        })
+            Ok(())
+        }))
     }
 
     pub async fn get_block_response(
@@ -361,8 +389,10 @@ impl SstableStore {
         self.meta_cache.lookup(sst_id, &sst_id)
     }
 
-    pub fn exists_block(&self, sst_id: u64, block_index: u64) -> bool {
-        self.block_cache.exists_block(sst_id, block_index)
+    pub fn is_hot_block(&self, sst_id: u64, block_index: u64) -> bool {
+        self.block_cache
+            .get_block_request_count(sst_id, block_index)
+            > 2
     }
 
     pub async fn sstable_syncable(

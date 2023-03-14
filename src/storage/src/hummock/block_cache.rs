@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 128 * 1024 * 1024;
 
 type CachedBlockEntry = CacheableEntry<(HummockSstableId, u64), Box<Block>>;
 
@@ -159,6 +159,11 @@ impl BlockCache {
     pub fn exists_block(&self, sst_id: HummockSstableId, block_idx: u64) -> bool {
         self.inner
             .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+    }
+
+    pub fn get_block_request_count(&self, sst_id: HummockSstableId, block_idx: u64) -> u64 {
+        self.inner
+            .get_request_count(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
     }
 
     pub fn insert(

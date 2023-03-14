@@ -93,6 +93,7 @@ pub struct LruHandle<K: LruKey, T: LruValue> {
     /// when `refs == 0`, the handle must either be in LRU cache or has been recycled.
     refs: u32,
     flags: u8,
+    req: u64,
 }
 
 impl<K: LruKey, T: LruValue> Default for LruHandle<K, T> {
@@ -106,6 +107,7 @@ impl<K: LruKey, T: LruValue> Default for LruHandle<K, T> {
             charge: 0,
             refs: 0,
             flags: 0,
+            req: 0,
         }
     }
 }
@@ -126,6 +128,7 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
         self.charge = charge;
         self.flags = 0;
         self.refs = 0;
+        self.req = 0;
     }
 
     /// Set the `in_cache` bit in the flag
@@ -390,6 +393,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         (*e).prev = self.lru.prev;
         (*(*e).prev).next = e;
         (*(*e).next).prev = e;
+
         self.lru_usage.fetch_add((*e).charge, Ordering::Relaxed);
     }
 
@@ -503,6 +507,7 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         if !e.is_null() {
             // If the handle previously has not ref, it must exist in the lru. And therefore we are
             // safe to remove it from lru.
+            (*e).req += 1;
             if !(*e).has_refs() {
                 self.lru_remove(e);
             }
@@ -630,6 +635,17 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         unsafe {
             let ptr = shard.lookup(hash, key);
             !ptr.is_null()
+        }
+    }
+
+    pub fn get_request_count(self: &Arc<Self>, hash: u64, key: &K) -> u64 {
+        let mut shard = self.shards[self.shard(hash)].lock();
+        unsafe {
+            let ptr = shard.lookup(hash, key);
+            if ptr.is_null() {
+                return 0;
+            }
+            (*ptr).req
         }
     }
 

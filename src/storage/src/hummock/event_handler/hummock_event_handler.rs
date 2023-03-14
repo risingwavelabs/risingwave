@@ -29,7 +29,6 @@ use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 use tracing::{error, info};
 
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
@@ -49,7 +48,7 @@ use crate::hummock::{
     HummockError, HummockResult, MemoryLimiter, Sstable, SstableBlockIterator, SstableIdManagerRef,
     TrackerId,
 };
-use crate::monitor::StoreLocalStatistic;
+use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -116,6 +115,7 @@ pub struct HummockEventHandler {
 
     sstable_id_manager: SstableIdManagerRef,
     sstable_store: SstableStoreRef,
+    metrics: Arc<CompactorMetrics>,
     cache_refill_io_count_limit: usize,
 }
 
@@ -155,6 +155,7 @@ impl HummockEventHandler {
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_id_manager = compactor_context.sstable_id_manager.clone();
         let sstable_store = compactor_context.sstable_store.clone();
+        let metrics = compactor_context.compactor_metrics.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -176,6 +177,7 @@ impl HummockEventHandler {
             sstable_id_manager,
             sstable_store,
             cache_refill_io_count_limit,
+            metrics,
         }
     }
 
@@ -384,57 +386,139 @@ impl HummockEventHandler {
 
     async fn fill_cache(&mut self, delta: &HummockVersionDelta) -> HummockResult<()> {
         let stats = StoreLocalStatistic::default();
-        let mut prefetch_requests = vec![];
-        for group_delta in delta.group_deltas.values() {
+        let mut prefetch_blocks = vec![];
+        for (group_id, group_delta) in &delta.group_deltas {
+            let mut min_removed_level_idx = u32::MAX;
+            let mut flatten_reqs = vec![];
+            let mut removed_table_ids = vec![];
             for d in &group_delta.group_deltas {
-                let mut flatten_reqs = vec![];
                 if let Some(group_delta::DeltaType::IntraLevel(level_delta)) = d.delta_type.as_ref()
                 {
                     for sst in &level_delta.inserted_table_infos {
                         flatten_reqs.push(self.sstable_store.sstable_syncable(sst, &stats));
                     }
-
-                    let flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
-                    if prefetch_requests.len() >= self.cache_refill_io_count_limit {
-                        return Ok(());
+                    if !level_delta.removed_table_ids.is_empty() {
+                        min_removed_level_idx =
+                            std::cmp::min(min_removed_level_idx, level_delta.level_idx);
                     }
-                    let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
-                    for (sst, _) in flatten_resp {
-                        sstables.push(sst);
+                    removed_table_ids.extend(level_delta.removed_table_ids.clone());
+                }
+            }
+            if flatten_reqs.is_empty()
+                || min_removed_level_idx != 0
+                || self.cache_refill_io_count_limit == 0
+            {
+                continue;
+            }
+            let flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
+            let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
+            let mut trivial_move = false;
+            for (sst, cache_miss) in flatten_resp {
+                if cache_miss == 0 {
+                    trivial_move = true;
+                }
+                sstables.push(sst);
+            }
+            if trivial_move {
+                continue;
+            }
+            sstables.sort_by(|a, b| {
+                KeyComparator::compare_encoded_full_key(
+                    &a.value().meta.smallest_key,
+                    &b.value().meta.smallest_key,
+                )
+            });
+            for idx in 1..sstables.len() {
+                if !KeyComparator::encoded_full_key_less_than(
+                    &sstables[idx - 1].value().meta.largest_key,
+                    &sstables[idx].value().meta.smallest_key,
+                ) {
+                    return Ok(());
+                }
+            }
+            let mut group_blocks = vec![];
+            for remove_sst_id in &removed_table_ids {
+                if sstables.iter().any(|sst| sst.value().id == *remove_sst_id) {
+                    continue;
+                }
+                if let Some(sst) = self.sstable_store.lookup_sstable(*remove_sst_id) {
+                    group_blocks.extend(self.refill_sstable(sst.value(), &sstables));
+                }
+            }
+            if !group_blocks.is_empty() {
+                info!(
+                    "group-id: {}, replace {} blocks for {} files. removed {} files",
+                    *group_id,
+                    group_blocks.len(),
+                    sstables.len(),
+                    removed_table_ids.len()
+                );
+                prefetch_blocks.extend(group_blocks);
+            }
+        }
+        if prefetch_blocks.is_empty() {
+            return Ok(());
+        }
+        prefetch_blocks.sort();
+        prefetch_blocks.dedup();
+        let mut last_sst_id = 0;
+        let mut start_block_idx = 0;
+        let mut end_block_idx = 0;
+        let mut prefetch_requests = vec![];
+        let mut last_table: Option<TableHolder> = None;
+        let mut total_preload_block = 0;
+        for (sst_id, block_idx) in prefetch_blocks {
+            if total_preload_block > self.cache_refill_io_count_limit {
+                break;
+            }
+            if sst_id != last_sst_id || block_idx > end_block_idx {
+                if end_block_idx > start_block_idx {
+                    if !last_table
+                        .as_ref()
+                        .map(|sst| sst.value().id == last_sst_id)
+                        .unwrap_or(false)
+                    {
+                        last_table = self.sstable_store.lookup_sstable(last_sst_id);
                     }
-                    sstables.sort_by(|a, b| {
-                        KeyComparator::compare_encoded_full_key(
-                            &a.value().meta.smallest_key,
-                            &b.value().meta.smallest_key,
-                        )
-                    });
-                    for idx in 1..sstables.len() {
-                        if KeyComparator::compare_encoded_full_key(
-                            &sstables[idx].value().meta.smallest_key,
-                            &sstables[idx - 1].value().meta.largest_key,
-                        ) != std::cmp::Ordering::Greater
+                    if let Some(sst) = last_table.as_ref() {
+                        if let Some(handle) =
+                            self.sstable_store
+                                .prefetch(sst.value(), start_block_idx, end_block_idx)
                         {
-                            return Ok(());
-                        }
-                    }
-                    for remove_sst_id in &level_delta.removed_table_ids {
-                        if let Some(sst) = self.sstable_store.lookup_sstable(*remove_sst_id) {
-                            prefetch_requests.extend(self.refill_sstable(sst.value(), &sstables));
+                            total_preload_block += end_block_idx - start_block_idx;
+                            prefetch_requests.push(handle);
                         }
                     }
                 }
+                last_sst_id = sst_id;
+                start_block_idx = block_idx;
+            }
+            end_block_idx = block_idx + 1;
+        }
+        if end_block_idx > start_block_idx && total_preload_block < self.cache_refill_io_count_limit
+        {
+            if let Some(sst) = self.sstable_store.lookup_sstable(last_sst_id) {
+                if let Some(handle) =
+                    self.sstable_store
+                        .prefetch(sst.value(), start_block_idx, end_block_idx)
+                {
+                    total_preload_block += end_block_idx - start_block_idx;
+                    prefetch_requests.push(handle);
+                }
             }
         }
-        let _ =
-            tokio::time::timeout(Duration::from_millis(100), try_join_all(prefetch_requests)).await;
+        self.metrics
+            .preload_io_count
+            .inc_by(total_preload_block as u64);
+        if !prefetch_requests.is_empty() {
+            let _ =
+                tokio::time::timeout(Duration::from_millis(100), try_join_all(prefetch_requests))
+                    .await;
+        }
         Ok(())
     }
 
-    fn refill_sstable(
-        &self,
-        remove_sst: &Sstable,
-        sstables: &[TableHolder],
-    ) -> Vec<JoinHandle<HummockResult<()>>> {
+    fn refill_sstable(&self, remove_sst: &Sstable, sstables: &[TableHolder]) -> Vec<(u64, usize)> {
         let mut start_idx = sstables.partition_point(|sst| {
             KeyComparator::compare_encoded_full_key(
                 &sst.value().meta.largest_key,
@@ -456,7 +540,7 @@ impl HummockEventHandler {
         }
         let mut remove_block_iter = SstableBlockIterator::new(remove_sst);
         while remove_block_iter.is_valid() {
-            if self.sstable_store.exists_block(
+            if self.sstable_store.is_hot_block(
                 remove_block_iter.sstable.id,
                 remove_block_iter.current_block_id as u64,
             ) {
@@ -467,7 +551,8 @@ impl HummockEventHandler {
         if !remove_block_iter.is_valid() {
             return requests;
         }
-
+        let mut add_per_delete = 0;
+        const MEMORY_AMPLIFICATION: usize = 5;
         while start_idx < end_idx {
             let mut insert_block_iter =
                 SstableBlockIterator::new(sstables[start_idx].value().as_ref());
@@ -486,15 +571,17 @@ impl HummockEventHandler {
                         insert_block_iter.current_block_smallest(),
                         remove_block_iter.current_block_largest(),
                     ) && exist_in_cache
+                        && add_per_delete < MEMORY_AMPLIFICATION
                     {
                         break;
                     }
                     remove_block_iter.next();
                     if remove_block_iter.is_valid() {
-                        exist_in_cache = self.sstable_store.exists_block(
+                        exist_in_cache = self.sstable_store.is_hot_block(
                             remove_block_iter.sstable.id,
                             remove_block_iter.current_block_id as u64,
                         );
+                        add_per_delete = 0;
                     } else {
                         return requests;
                     }
@@ -505,15 +592,12 @@ impl HummockEventHandler {
                     remove_block_iter.current_block_smallest(),
                     insert_block_iter.current_block_largest(),
                 ) {
-                    if let Some(handle) = self.sstable_store.prefetch(
-                        insert_block_iter.sstable,
-                        insert_block_iter.current_block_id as u64,
-                    ) {
-                        requests.push(handle);
-                        if requests.len() >= self.cache_refill_io_count_limit {
-                            return requests;
-                        }
-                    }
+                    assert!(insert_block_iter.is_valid());
+                    requests.push((
+                        insert_block_iter.sstable.id,
+                        insert_block_iter.current_block_id,
+                    ));
+                    add_per_delete += 1;
                 }
                 insert_block_iter.next();
             }
@@ -531,9 +615,7 @@ impl HummockEventHandler {
                 let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
-                    if version_to_apply.max_committed_epoch < version_delta.max_committed_epoch {
-                        let _ = self.fill_cache(version_delta).await;
-                    }
+                    let _ = self.fill_cache(version_delta).await;
                     version_to_apply.apply_version_delta(version_delta);
                 }
                 version_to_apply

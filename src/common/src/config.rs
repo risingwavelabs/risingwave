@@ -657,7 +657,7 @@ mod default {
         }
 
         pub fn cache_refill_max_io_count() -> usize {
-            64
+            32
         }
     }
 
