@@ -520,7 +520,7 @@ impl LogicalMultiJoin {
             .clone()
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
-        for ((src, dst), _) in eq_join_conditions.clone() {
+        for ((src, dst), _) in eq_join_conditions {
             nodes.get_mut(&src).unwrap().relations.insert(dst);
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }

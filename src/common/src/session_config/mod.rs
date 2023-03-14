@@ -80,7 +80,6 @@ const RW_ENABLE_SHARE_PLAN: usize = 18;
 const INTERVAL_STYLE: usize = 19;
 const STREAMING_ENABLE_BUSHY_JOIN: usize = 20;
 
-
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
 }
