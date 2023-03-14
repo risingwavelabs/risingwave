@@ -117,6 +117,11 @@ pub fn add_storage_backend(
                 .arg(format!("hummock+webhdfs://{}@{}", opendal.namenode, opendal.root));
                 true
             }
+            else if opendal.engine == "memory"{
+                cmd.arg("--state-store")
+                .arg("hummock+memory");
+                true
+            }
             else{
                 unimplemented!()
             }

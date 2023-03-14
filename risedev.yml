@@ -499,6 +499,38 @@ profile:
         exporter-port: 2224
         health-check-port: 6788
 
+  ci-3cn-3fe-opendal-in-memory-backend:
+    config-path: src/config/ci.toml
+    steps:
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: opendal
+        engine: memory
+        bucket: ""
+        root: "risingwave"
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+      - use: frontend
+        port: 4565
+        exporter-port: 2222
+        health-check-port: 6786
+      - use: frontend
+        port: 4566
+        exporter-port: 2223
+        health-check-port: 6787
+      - use: frontend
+        port: 4567
+        exporter-port: 2224
+        health-check-port: 6788
+
   ci-pubsub:
     config-path: src/config/ci.toml
     steps:

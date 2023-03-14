@@ -857,6 +857,11 @@ pub async fn parse_remote_object_store(
                     .monitored(metrics),
             )
         }
+        memory if memory.starts_with("memory") => ObjectStoreImpl::Opendal(
+            OpendalObjectStore::new_memory_engine()
+                .unwrap()
+                .monitored(metrics),
+        ),
         s3_compatible if s3_compatible.starts_with("s3-compatible://") => {
             ObjectStoreImpl::S3Compatible(
                 S3ObjectStore::new_s3_compatible(
