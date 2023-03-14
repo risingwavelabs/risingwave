@@ -33,16 +33,16 @@ import org.apache.kafka.connect.storage.ConverterType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class CdcEventConsumer
+public class DbzCdcEventConsumer
         implements DebeziumEngine.ChangeConsumer<ChangeEvent<SourceRecord, SourceRecord>> {
-    static final Logger LOG = LoggerFactory.getLogger(CdcEventConsumer.class);
+    static final Logger LOG = LoggerFactory.getLogger(DbzCdcEventConsumer.class);
 
     private final BlockingQueue<GetEventStreamResponse> outputChannel;
     private final long sourceId;
     private final JsonConverter converter;
     private final String heartbeatTopicPrefix;
 
-    CdcEventConsumer(
+    DbzCdcEventConsumer(
             long sourceId,
             String heartbeatTopicPrefix,
             BlockingQueue<GetEventStreamResponse> store) {
