@@ -244,15 +244,6 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
-                compactor_scaling_cpu_busy_threshold: config
-                    .meta
-                    .compactor_scaling_cpu_busy_threshold,
-                compactor_scaling_busy_threshold_sec: config
-                    .meta
-                    .compactor_scaling_busy_threshold_sec,
-                compactor_scaling_idle_threshold_sec: config
-                    .meta
-                    .compactor_scaling_idle_threshold_sec,
             },
             SystemParams {
                 barrier_interval_ms: Some(config.streaming.barrier_interval_ms),

@@ -31,7 +31,6 @@ use risingwave_pb::hummock::{
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use super::compaction_schedule_policy::{CompactionSchedulePolicy, RoundRobinPolicy, ScoredPolicy};
-use crate::hummock::compaction_schedule_policy::ScalePolicy;
 use crate::hummock::error::Result;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModel;
@@ -157,9 +156,6 @@ impl CompactorManager {
         let manager = Self {
             policy: RwLock::new(Box::new(ScoredPolicy::with_task_assignment(
                 &task_assignment,
-                env.opts.compactor_scaling_busy_threshold_sec,
-                env.opts.compactor_scaling_idle_threshold_sec,
-                env.opts.compactor_scaling_cpu_busy_threshold,
             ))),
             task_expiry_seconds,
             task_heartbeats: Default::default(),
@@ -418,10 +414,6 @@ impl CompactorManager {
         self.policy.read().max_concurrent_task_num()
     }
 
-    pub fn suggest_scale_policy(&self) -> ScalePolicy {
-        self.policy.read().suggest_scale_policy()
-    }
-
     /// Update compactor state based on its workload.
     pub fn update_compactor_state(
         &self,
@@ -431,8 +423,6 @@ impl CompactorManager {
         if let Some(compactor) = self.policy.read().get_compactor(context_id) {
             compactor.cpu_ratio.store(workload.cpu, Ordering::Release);
         }
-
-        self.policy.write().refresh_state();
     }
 
     pub fn total_cpu_core_num(&self) -> u32 {

@@ -15,7 +15,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Instant;
 
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -27,13 +26,6 @@ use crate::hummock::error::{Error, Result};
 use crate::MetaResult;
 
 const STREAM_BUFFER_SIZE: usize = 4;
-
-#[derive(Debug)]
-pub enum ScalePolicy {
-    ScaleOut,
-    ScaleIn(u64),
-    NoChange,
-}
 
 /// The implementation of compaction task scheduling policy.
 pub trait CompactionSchedulePolicy: Send + Sync {
@@ -86,15 +78,11 @@ pub trait CompactionSchedulePolicy: Send + Sync {
 
     fn compactor_num(&self) -> usize;
 
-    fn suggest_scale_policy(&self) -> ScalePolicy;
-
     fn max_concurrent_task_num(&self) -> usize;
 
     fn total_cpu_core_num(&self) -> u32;
 
     fn total_running_cpu_core_num(&self) -> u32;
-
-    fn refresh_state(&mut self);
 }
 
 // This strategy is retained just for reference, it is not used.
@@ -207,18 +195,12 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
         self.compactors.len()
     }
 
-    fn suggest_scale_policy(&self) -> ScalePolicy {
-        ScalePolicy::NoChange
-    }
-
     fn max_concurrent_task_num(&self) -> usize {
         self.compactor_map
             .values()
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
     }
-
-    fn refresh_state(&mut self) {}
 
     fn total_cpu_core_num(&self) -> u32 {
         self.compactor_map.values().map(|c| c.total_cpu_core).sum()
@@ -237,18 +219,6 @@ impl CompactionSchedulePolicy for RoundRobinPolicy {
 /// Currently the score >= 0, but we use signed type because the score delta might be < 0.
 type Score = i64;
 
-/// `CompactorState` describe the state of `Compactor` and `CompactorPolicy`
-/// Set the `Compactor` state to Busy when the `Compactor` workload exceeds the limit
-/// `CompactorPolicy` will check the state of all `Compactors` and calculate a new state based on
-/// the state and duration, see the `refresh_state` function.
-/// `CompactorState` will determine the `ScalePolicy`, refer to the `suggest_scale_policy` function.
-#[derive(PartialEq, Eq, Debug, Clone)]
-pub enum CompactorState {
-    Burst(Instant),
-    Idle(Instant),
-    Busy(Instant),
-}
-
 /// Give priority to compactors with the least score. Currently the score is composed only of
 /// pending bytes compaction tasks.
 pub struct ScoredPolicy {
@@ -262,21 +232,11 @@ pub struct ScoredPolicy {
     // That is to say `score_to_compactor` should be a subset of `context_id_to_score`.
     score_to_compactor: BTreeMap<(Score, HummockContextId), Arc<Compactor>>,
     context_id_to_score: HashMap<HummockContextId, Score>,
-    state: CompactorState,
-
-    compactor_scaling_busy_threshold_sec: u64,
-    compactor_scaling_idle_threshold_sec: u64,
-    compactor_scaling_cpu_busy_threshold: u32,
 }
 
 impl ScoredPolicy {
     /// Initialize policy with already assigned tasks.
-    pub fn with_task_assignment(
-        task_assignment: &[CompactTaskAssignment],
-        compactor_scaling_busy_threshold_sec: u64,
-        compactor_scaling_idle_threshold_sec: u64,
-        compactor_scaling_cpu_busy_threshold: u32,
-    ) -> Self {
+    pub fn with_task_assignment(task_assignment: &[CompactTaskAssignment]) -> Self {
         let mut compactor_to_score = HashMap::new();
         task_assignment.iter().for_each(|assignment| {
             let score_delta =
@@ -290,10 +250,6 @@ impl ScoredPolicy {
         Self {
             score_to_compactor: BTreeMap::new(),
             context_id_to_score: compactor_to_score,
-            state: CompactorState::Idle(Instant::now()),
-            compactor_scaling_busy_threshold_sec,
-            compactor_scaling_idle_threshold_sec,
-            compactor_scaling_cpu_busy_threshold,
         }
     }
 
@@ -302,10 +258,6 @@ impl ScoredPolicy {
         Self {
             score_to_compactor: BTreeMap::default(),
             context_id_to_score: HashMap::default(),
-            state: CompactorState::Idle(Instant::now()),
-            compactor_scaling_busy_threshold_sec: 60,
-            compactor_scaling_idle_threshold_sec: 600,
-            compactor_scaling_cpu_busy_threshold: 80,
         }
     }
 
@@ -447,88 +399,11 @@ impl CompactionSchedulePolicy for ScoredPolicy {
         self.score_to_compactor.len()
     }
 
-    fn suggest_scale_policy(&self) -> ScalePolicy {
-        match &self.state {
-            CompactorState::Busy(_) => return ScalePolicy::ScaleOut,
-            CompactorState::Burst(_) => (),
-            CompactorState::Idle(last_idle_time) => {
-                if last_idle_time.elapsed().as_secs() > self.compactor_scaling_idle_threshold_sec
-                    && self.score_to_compactor.len() > 1
-                {
-                    let decrease_core = self
-                        .score_to_compactor
-                        .values()
-                        .map(|compactor| compactor.total_cpu_core as u64)
-                        .min()
-                        .unwrap_or(0);
-                    return ScalePolicy::ScaleIn(decrease_core);
-                }
-            }
-        }
-        ScalePolicy::NoChange
-    }
-
     fn max_concurrent_task_num(&self) -> usize {
         self.score_to_compactor
             .values()
             .map(|c| c.max_concurrent_task_number() as usize)
             .sum()
-    }
-
-    /// `refresh_state` check the state of all `Compactors` and calculate a new state based on the
-    /// state and duration
-    /// The state of `CompactorPolicy` must maintain `MIN_LAST_STATE_TIME` before it will change, to
-    /// ensure that the state changes do not jitter frequently.
-    fn refresh_state(&mut self) {
-        let idle_count = self
-            .score_to_compactor
-            .values()
-            .filter(|compactor| !compactor.is_busy(self.compactor_scaling_cpu_busy_threshold))
-            .count();
-
-        let old_state = self.state.clone();
-
-        if idle_count == 0 {
-            match self.state {
-                CompactorState::Idle(last_update) => {
-                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
-                        self.state = CompactorState::Burst(Instant::now());
-                    }
-                }
-                CompactorState::Burst(last_update) => {
-                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
-                        self.state = CompactorState::Busy(Instant::now());
-                    }
-                }
-                CompactorState::Busy(_) => {}
-            }
-        } else {
-            match self.state {
-                CompactorState::Idle(_) => {}
-
-                CompactorState::Burst(last_update) => {
-                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
-                        self.state = CompactorState::Idle(Instant::now());
-                    }
-                }
-
-                CompactorState::Busy(last_update) => {
-                    if last_update.elapsed().as_secs() > self.compactor_scaling_busy_threshold_sec {
-                        self.state = CompactorState::Burst(Instant::now());
-                    }
-                }
-            }
-        }
-
-        if self.state != old_state {
-            tracing::info!(
-                "refresh_state idle_count {} total {} state {:?} suggest_scale_policy {:?}",
-                idle_count,
-                self.score_to_compactor.len(),
-                self.state,
-                self.suggest_scale_policy(),
-            );
-        }
     }
 
     fn total_cpu_core_num(&self) -> u32 {
@@ -761,7 +636,7 @@ mod tests {
                 });
             });
 
-        let mut policy = ScoredPolicy::with_task_assignment(&existing_assignments, 60, 600, 80);
+        let mut policy = ScoredPolicy::with_task_assignment(&existing_assignments);
         assert_eq!(policy.score_to_compactor.len(), 0);
         assert_eq!(policy.context_id_to_score.len(), existing_tasks.len());
 

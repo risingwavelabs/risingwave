@@ -185,15 +185,6 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
-    #[serde(default = "default::meta::compactor_scaling_cpu_busy_threshold")]
-    pub compactor_scaling_cpu_busy_threshold: u32,
-
-    #[serde(default = "default::meta::compactor_scaling_busy_threshold_sec")]
-    pub compactor_scaling_busy_threshold_sec: u64,
-
-    #[serde(default = "default::meta::compactor_scaling_idle_threshold_sec")]
-    pub compactor_scaling_idle_threshold_sec: u64,
-
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -561,18 +552,6 @@ mod default {
 
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
             1800 // 30mi
-        }
-
-        pub fn compactor_scaling_cpu_busy_threshold() -> u32 {
-            80
-        }
-
-        pub fn compactor_scaling_busy_threshold_sec() -> u64 {
-            60
-        }
-
-        pub fn compactor_scaling_idle_threshold_sec() -> u64 {
-            600
         }
     }
 
