@@ -150,19 +150,19 @@ where
     l.into() < r.into()
 }
 
-// #[function("is_distinct_from(*number, *number) -> boolean")]
-// #[function("is_distinct_from(date, date) -> boolean")]
-// #[function("is_distinct_from(time, time) -> boolean")]
-// #[function("is_distinct_from(interval, interval) -> boolean")]
-// #[function("is_distinct_from(timestamp, timestamp) -> boolean")]
-// #[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
-// #[function("is_distinct_from(date, timestamp) -> boolean")]
-// #[function("is_distinct_from(timestamp, date) -> boolean")]
-// #[function("is_distinct_from(time, interval) -> boolean")]
-// #[function("is_distinct_from(interval, time) -> boolean")]
-// #[function("is_distinct_from(varchar, varchar) -> boolean")]
-// #[function("is_distinct_from(list, list) -> boolean")]
-// #[function("is_distinct_from(struct, struct) -> boolean")]
+#[function("is_distinct_from(*number, *number) -> boolean")]
+#[function("is_distinct_from(date, date) -> boolean")]
+#[function("is_distinct_from(time, time) -> boolean")]
+#[function("is_distinct_from(interval, interval) -> boolean")]
+#[function("is_distinct_from(timestamp, timestamp) -> boolean")]
+#[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_distinct_from(date, timestamp) -> boolean")]
+#[function("is_distinct_from(timestamp, date) -> boolean")]
+#[function("is_distinct_from(time, interval) -> boolean")]
+#[function("is_distinct_from(interval, time) -> boolean")]
+#[function("is_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_distinct_from(list, list) -> boolean")]
+#[function("is_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,
@@ -172,19 +172,19 @@ where
     l.map(Into::into) != r.map(Into::into)
 }
 
-// #[function("is_not_distinct_from(*number, *number) -> boolean")]
-// #[function("is_not_distinct_from(date, date) -> boolean")]
-// #[function("is_not_distinct_from(time, time) -> boolean")]
-// #[function("is_not_distinct_from(interval, interval) -> boolean")]
-// #[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
-// #[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
-// #[function("is_not_distinct_from(date, timestamp) -> boolean")]
-// #[function("is_not_distinct_from(timestamp, date) -> boolean")]
-// #[function("is_not_distinct_from(time, interval) -> boolean")]
-// #[function("is_not_distinct_from(interval, time) -> boolean")]
-// #[function("is_not_distinct_from(varchar, varchar) -> boolean")]
-// #[function("is_not_distinct_from(list, list) -> boolean")]
-// #[function("is_not_distinct_from(struct, struct) -> boolean")]
+#[function("is_not_distinct_from(*number, *number) -> boolean")]
+#[function("is_not_distinct_from(date, date) -> boolean")]
+#[function("is_not_distinct_from(time, time) -> boolean")]
+#[function("is_not_distinct_from(interval, interval) -> boolean")]
+#[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
+#[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_not_distinct_from(date, timestamp) -> boolean")]
+#[function("is_not_distinct_from(timestamp, date) -> boolean")]
+#[function("is_not_distinct_from(time, interval) -> boolean")]
+#[function("is_not_distinct_from(interval, time) -> boolean")]
+#[function("is_not_distinct_from(varchar, varchar) -> boolean")]
+#[function("is_not_distinct_from(list, list) -> boolean")]
+#[function("is_not_distinct_from(struct, struct) -> boolean")]
 pub fn general_is_not_distinct_from<T1, T2, T3>(l: Option<T1>, r: Option<T2>) -> bool
 where
     T1: Into<T3> + Debug,

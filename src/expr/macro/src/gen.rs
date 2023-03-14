@@ -219,12 +219,21 @@ impl FunctionAttr {
             };
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = if self.user_fn.return_result {
-                quote! { |#(#args),*| #fn_name(#(#args1),*) }
-            } else if self.user_fn.return_option {
-                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            let generic = if self.user_fn.generic == 3 {
+                // XXX: for generic compare functions, we need to specify the compatible type
+                let compatible_type = types::to_data_type(types::min_compatible_type(&self.args))
+                    .parse::<TokenStream2>()
+                    .unwrap();
+                quote! { ::<_, _, #compatible_type> }
             } else {
-                quote! { |#(#args),*| Ok(Some(#fn_name(#(#args1),*))) }
+                quote! {}
+            };
+            let func = if self.user_fn.return_result {
+                quote! { |#(#args),*| #fn_name #generic(#(#args1),*) }
+            } else if self.user_fn.return_option {
+                quote! { |#(#args),*| Ok(#fn_name #generic(#(#args1),*)) }
+            } else {
+                quote! { |#(#args),*| Ok(Some(#fn_name #generic(#(#args1),*))) }
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
