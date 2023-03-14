@@ -436,7 +436,7 @@ mod test {
             InputRef::new(0, DataType::Date),
             IntervalUnit::from_month_day_usec(0, 1, 0),
             IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();
@@ -492,7 +492,7 @@ mod test {
             InputRef::new(0, DataType::Date),
             IntervalUnit::from_month_day_usec(0, 1, 0),
             IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();
