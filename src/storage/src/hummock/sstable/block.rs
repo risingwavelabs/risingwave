@@ -284,9 +284,12 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        if self.table_id.is_none() {
-            self.table_id = Some(full_key.user_key.table_id.table_id());
+        let input_table_id = full_key.user_key.table_id.table_id();
+        match self.table_id {
+            Some(current_table_id) => debug_assert_eq!(current_table_id, input_table_id),
+            None => self.table_id = Some(input_table_id),
         }
+
         let mut key: BytesMut = Default::default();
         full_key.encode_into_without_table_id(&mut key);
         if self.entry_count > 0 {
@@ -498,13 +501,6 @@ mod tests {
         bi.next();
         assert!(!bi.is_valid());
     }
-
-    // pub fn full_key(user_key: &[u8], epoch: u64) -> Bytes {
-    //     let mut buf = BytesMut::with_capacity(user_key.len() + 8);
-    //     buf.put_slice(user_key);
-    //     buf.put_u64(!epoch);
-    //     buf.freeze()
-    // }
 
     pub fn construct_full_key_struct(
         table_id: u32,
