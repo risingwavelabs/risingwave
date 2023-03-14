@@ -61,7 +61,7 @@ public class IcebergSinkFactory implements SinkFactory {
         validate(tableSchema, tableProperties);
 
         String mode = tableProperties.get(SINK_MODE_PROP);
-        String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
+        String warehousePath = getWarehousePath(tableProperties);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
 
@@ -109,9 +109,9 @@ public class IcebergSinkFactory implements SinkFactory {
         }
 
         String mode = tableProperties.get(SINK_MODE_PROP);
-        String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
+        String warehousePath = getWarehousePath(tableProperties);
 
         String schema = parseWarehousePathScheme(warehousePath);
 
@@ -161,6 +161,15 @@ public class IcebergSinkFactory implements SinkFactory {
                         .asRuntimeException();
             }
         }
+    }
+
+    private static String getWarehousePath(Map<String, String> tableProperties) {
+        String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
+        // unify s3 and s3a
+        if (warehousePath.startsWith("s3://")) {
+            return warehousePath.replace("s3://", "s3a://");
+        }
+        return warehousePath;
     }
 
     private static String parseWarehousePathScheme(String warehousePath) {
