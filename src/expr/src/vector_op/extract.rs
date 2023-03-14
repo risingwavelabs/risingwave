@@ -17,11 +17,11 @@ use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, 
 
 use crate::{ExprError, Result};
 
-fn extract_time<T>(time: T, field: &str) -> Option<Decimal>
+fn extract_time<T>(time: T, unit: &str) -> Option<Decimal>
 where
     T: Timelike,
 {
-    Some(match field {
+    Some(match unit {
         "HOUR" => time.hour().into(),
         "MINUTE" => time.minute().into(),
         "SECOND" => time.second().into(),
@@ -29,11 +29,11 @@ where
     })
 }
 
-fn extract_date<T>(date: T, field: &str) -> Option<Decimal>
+fn extract_date<T>(date: T, unit: &str) -> Option<Decimal>
 where
     T: Datelike,
 {
-    Some(match field {
+    Some(match unit {
         "DAY" => date.day().into(),
         "MONTH" => date.month().into(),
         "YEAR" => date.year().into(),
@@ -51,28 +51,28 @@ fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
     }
 }
 
-pub fn extract_from_date(time_unit: &str, date: NaiveDateWrapper) -> Result<Decimal> {
-    extract_date(date.0, time_unit).ok_or_else(|| invalid_unit("date unit", time_unit))
+pub fn extract_from_date(unit: &str, date: NaiveDateWrapper) -> Result<Decimal> {
+    extract_date(date.0, unit).ok_or_else(|| invalid_unit("date unit", unit))
 }
 
-pub fn extract_from_timestamp(time_unit: &str, timestamp: NaiveDateTimeWrapper) -> Result<Decimal> {
+pub fn extract_from_timestamp(unit: &str, timestamp: NaiveDateTimeWrapper) -> Result<Decimal> {
     let time = timestamp.0;
 
-    extract_date(time, time_unit)
-        .or_else(|| extract_time(time, time_unit))
-        .ok_or_else(|| invalid_unit("timestamp unit", time_unit))
+    extract_date(time, unit)
+        .or_else(|| extract_time(time, unit))
+        .ok_or_else(|| invalid_unit("timestamp unit", unit))
 }
 
-pub fn extract_from_timestamptz(time_unit: &str, usecs: i64) -> Result<Decimal> {
-    match time_unit {
+pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
+    match unit {
         "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
         // TODO(#5826): all other units depend on implicit session TimeZone
-        _ => Err(invalid_unit("timestamp with time zone units", time_unit)),
+        _ => Err(invalid_unit("timestamp with time zone units", unit)),
     }
 }
 
-pub fn extract_from_time(time_unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
-    extract_time(time.0, time_unit).ok_or_else(|| invalid_unit("time unit", time_unit))
+pub fn extract_from_time(unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
+    extract_time(time.0, unit).ok_or_else(|| invalid_unit("time unit", unit))
 }
 
 #[cfg(test)]
