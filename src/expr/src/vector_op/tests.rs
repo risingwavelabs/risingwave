@@ -233,9 +233,9 @@ fn test_comparison() {
 
 #[test]
 fn test_conjunction() {
-    assert!(not(Some(false)).unwrap());
-    assert!(!and(Some(true), Some(false)).unwrap().unwrap());
-    assert!(or(Some(true), Some(false)).unwrap().unwrap());
+    assert!(not(false));
+    assert!(!and(Some(true), Some(false)).unwrap());
+    assert!(or(Some(true), Some(false)).unwrap());
 }
 #[test]
 fn test_cast() {

@@ -104,8 +104,8 @@ impl Expression for BinaryShortCircuitExpression {
         }
         let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
         match self.expr_type {
-            Type::Or => Ok(or(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
-            Type::And => Ok(and(ret_ia1, ret_ia2)?.map(|x| x.to_scalar_value())),
+            Type::Or => Ok(or(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
+            Type::And => Ok(and(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
             _ => unimplemented!(),
         }
     }
