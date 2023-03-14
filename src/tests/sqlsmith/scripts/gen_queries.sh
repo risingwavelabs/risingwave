@@ -146,6 +146,8 @@ check_failed_to_generate_queries() {
 upload_queries() {
   set +x
   pushd "$OUTDIR"
+  git checkout main
+  git pull
   git checkout -b stage
   git add .
   git commit -m 'update queries'
