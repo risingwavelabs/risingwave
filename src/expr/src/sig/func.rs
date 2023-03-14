@@ -59,9 +59,14 @@ impl FuncSigMap {
             .push(desc)
     }
 
-    pub fn get(&self, ty: ExprType, args: &[DataTypeName]) -> Option<&FunctionDescriptor> {
+    pub fn get(
+        &self,
+        ty: ExprType,
+        args: &[DataTypeName],
+        ret: DataTypeName,
+    ) -> Option<&FunctionDescriptor> {
         let v = self.0.get(&(ty, args.len()))?;
-        v.iter().find(|d| d.args == args)
+        v.iter().find(|d| d.args == args && d.ret == ret)
     }
 }
 

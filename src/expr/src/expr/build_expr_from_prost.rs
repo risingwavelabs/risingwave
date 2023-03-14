@@ -50,7 +50,8 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             .iter()
             .map(|c| DataType::from(c.get_return_type().unwrap()).into())
             .collect_vec();
-        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args) {
+        let ret = DataType::from(prost.get_return_type().unwrap()).into();
+        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args, ret) {
             return (desc.build_from_prost)(prost);
         }
     }
