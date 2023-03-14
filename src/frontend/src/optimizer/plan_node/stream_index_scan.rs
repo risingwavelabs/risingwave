@@ -125,6 +125,8 @@ impl StreamNode for StreamIndexScan {
 }
 
 impl StreamIndexScan {
+    // TODO: this method is almost the same as `StreamTableScan::adhoc_to_stream_prost`, we should
+    // avoid duplication.
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
         use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
@@ -140,6 +142,14 @@ impl StreamIndexScan {
         };
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
+
+        let upstream_column_ids = match self.chain_type {
+            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
+            ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
+                self.logical.output_column_ids()
+            }
+            ChainType::ChainUnspecified => unreachable!(),
+        };
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -195,6 +205,7 @@ impl StreamIndexScan {
                     .iter()
                     .map(|&i| i as _)
                     .collect(),
+                upstream_column_ids: upstream_column_ids.iter().map(|i| i.get_id()).collect(),
                 is_singleton: false,
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),

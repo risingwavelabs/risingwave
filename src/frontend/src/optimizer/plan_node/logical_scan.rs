@@ -201,6 +201,18 @@ impl LogicalScan {
             .collect()
     }
 
+    /// Get the ids of the output columns and primary key columns.
+    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
+        let mut ids = self.output_column_ids();
+        for column_order in self.primary_key() {
+            let id = self.table_desc().columns[column_order.column_index].column_id;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
     pub fn output_column_indices(&self) -> &[usize] {
         &self.core.output_col_idx
     }
