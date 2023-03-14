@@ -113,11 +113,7 @@ pub fn tumble_start_offset_timestamptz(
     window_size: IntervalUnit,
     offset: IntervalUnit,
 ) -> Result<i64> {
-    Ok(get_window_start_with_offset(
-        timestamp_micro_second,
-        window_size,
-        offset,
-    )?)
+    get_window_start_with_offset(timestamp_micro_second, window_size, offset)
 }
 
 #[cfg(test)]
@@ -201,21 +197,5 @@ mod tests {
             assert!(timestamp_micro_second >= window_start)
         }
         assert_ne!(wrong_cnt, 0);
-    }
-
-    #[test]
-    fn t() {
-        let timestamp = 100;
-        let offset = 20;
-        let windowSize = 30;
-        let mut ans;
-        let remainder = (timestamp - offset) % windowSize;
-        // handle both positive and negative cases
-        if (remainder < 0) {
-            ans = timestamp - (remainder + windowSize);
-        } else {
-            ans = timestamp - remainder;
-        }
-        println!("{}", ans)
     }
 }

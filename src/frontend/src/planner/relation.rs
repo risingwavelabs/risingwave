@@ -18,7 +18,6 @@ use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 
-
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
     BoundWindowTableFunction, Relation, WindowTableFunctionKind,
@@ -230,15 +229,21 @@ impl Planner {
                 }
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
-                    vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone(),window_offset.clone()],
+                    vec![
+                        ExprImpl::InputRef(Box::new(time_col)),
+                        window_size.clone(),
+                        window_offset.clone(),
+                    ],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
                 // optimization.
-                let window_end =
-                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size,window_offset])?
-                        .into();
+                let window_end = FunctionCall::new(
+                    ExprType::Add,
+                    vec![window_start.clone(), window_size, window_offset],
+                )?
+                .into();
                 exprs.push(window_start);
                 exprs.push(window_end);
                 let base = self.plan_relation(input)?;
