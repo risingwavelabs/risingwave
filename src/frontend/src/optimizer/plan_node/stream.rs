@@ -287,15 +287,12 @@ impl HashJoin {
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
         degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
 
         (
-            internal_table_catalog_builder.build(internal_table_dist_keys),
-            degree_table_catalog_builder.build(degree_table_dist_keys),
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
             deduped_input_pk_indices,
         )
     }
