@@ -160,7 +160,7 @@ public class JDBCSink extends SinkBase {
                                     .map(key -> getTableSchema().getFromRow(key, row))
                                     .toArray();
                 }
-                LOG.debug(
+                LOG.info(
                         "update delete condition: {} on values {}",
                         updateDeleteConditionBuffer,
                         updateDeleteValueBuffer);
@@ -215,7 +215,7 @@ public class JDBCSink extends SinkBase {
             }
             if (stmt != null) {
                 try {
-                    LOG.debug("Executing statement: " + stmt);
+                    LOG.info("Executing statement: " + stmt);
                     stmt.executeUpdate();
                 } catch (SQLException e) {
                     throw Status.INTERNAL.withCause(e).asRuntimeException();
@@ -230,6 +230,7 @@ public class JDBCSink extends SinkBase {
 
     @Override
     public void sync() {
+        LOG.info("doing sync");
         if (updateDeleteConditionBuffer != null || updateDeleteValueBuffer != null) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
@@ -238,6 +239,7 @@ public class JDBCSink extends SinkBase {
         }
         try {
             conn.commit();
+            LOG.info("sync success");
         } catch (SQLException e) {
             throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
         }
