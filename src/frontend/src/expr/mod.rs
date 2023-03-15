@@ -109,6 +109,12 @@ impl ExprImpl {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
     }
 
+    /// A literal float64 value.
+    #[inline(always)]
+    pub fn literal_f64(v: f64) -> Self {
+        Literal::new(Some(v.into()), DataType::Float64).into()
+    }
+
     /// A literal boolean value.
     #[inline(always)]
     pub fn literal_bool(v: bool) -> Self {
