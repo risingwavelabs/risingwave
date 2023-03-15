@@ -14,16 +14,16 @@
 
 //! Provides E2E Test runner functionality.
 
-use anyhow;
+use anyhow::anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
-use risingwave_common::error::anyhow_error;
 use tokio_postgres::error::Error as PgError;
 use tokio_postgres::Client;
 
+use crate::utils::read_file_contents;
 use crate::validation::is_permissible_error;
 use crate::{
     create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
@@ -260,7 +260,7 @@ async fn test_sqlsmith<R: Rng>(
 }
 
 async fn set_variable(client: &Client, variable: &str, value: &str) -> String {
-    let s = format!("SET {variable} TO {value};");
+    let s = format!("SET {variable} TO {value}");
     tracing::info!("[EXECUTING SET_VAR]: {}", s);
     client.simple_query(&s).await.unwrap();
     s
@@ -335,7 +335,7 @@ fn get_seed_table_sql(testdata: &str) -> String {
     let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>()
 }
 
@@ -345,7 +345,7 @@ async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table
     tracing::info!("Preparing tables...");
 
     let sql = get_seed_table_sql(testdata);
-    let statements = parse_sql(&sql);
+    let statements = parse_sql(sql);
     let mut mvs_and_base_tables = vec![];
     let base_tables = statements
         .iter()
@@ -409,7 +409,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>();
 
     for stmt in sql.lines() {
@@ -426,12 +426,12 @@ fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(&e.to_string())
             {
-                tracing::info!("[SKIPPED ERROR]: {:?}", e);
+                tracing::info!("[SKIPPED ERROR]: {:#?}", e);
                 return Ok(1);
             }
             // consolidate error reason for deterministic test
-            tracing::info!("[UNEXPECTED ERROR]: {}", e);
-            Err(anyhow_error!(e))
+            tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
+            Err(anyhow!("Encountered unexpected error: {e}"))
         }
     }
 }

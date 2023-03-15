@@ -150,7 +150,7 @@ impl HummockStorage {
         tracing: Arc<risingwave_tracing::RwTracingService>,
         compactor_metrics: Arc<CompactorMetrics>,
     ) -> HummockResult<Self> {
-        let sstable_id_manager = Arc::new(SstableIdManager::new(
+        let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
             hummock_meta_client.clone(),
             options.sstable_id_remote_fetch_number,
         ));
@@ -193,7 +193,7 @@ impl HummockStorage {
             sstable_store.clone(),
             hummock_meta_client.clone(),
             compactor_metrics.clone(),
-            sstable_id_manager.clone(),
+            sstable_object_id_manager.clone(),
             filter_key_extractor_manager.clone(),
             CompactorRuntimeConfig::default(),
         ));
@@ -259,8 +259,8 @@ impl HummockStorage {
         self.context.sstable_store.clone()
     }
 
-    pub fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        &self.context.sstable_id_manager
+    pub fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
+        &self.context.sstable_object_id_manager
     }
 
     pub fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef {

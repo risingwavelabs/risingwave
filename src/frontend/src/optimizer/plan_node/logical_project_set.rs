@@ -21,11 +21,10 @@ use super::{
     PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
-use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
@@ -50,13 +49,7 @@ impl LogicalProjectSet {
         );
 
         let core = generic::ProjectSet { select_list, input };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalProjectSet { base, core }
     }
@@ -94,6 +87,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -105,6 +99,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     }
                     .into()
                 } else {
@@ -172,14 +167,6 @@ impl LogicalProjectSet {
                 LogicalProject::new(inner, select_list).into()
             }
         }
-    }
-
-    fn derive_fd(
-        core: &generic::ProjectSet<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
     pub fn select_list(&self) -> &Vec<ExprImpl> {
