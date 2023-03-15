@@ -64,7 +64,7 @@ async fn validate_case(
         bound_tables,
     }: TestCase,
 ) -> anyhow::Result<()> {
-    info!(%name, "Validating");
+    info!(%name, "validating");
 
     for sql in init_sqls {
         client.simple_query(&sql).await?;
@@ -194,7 +194,7 @@ async fn main() -> anyhow::Result<()> {
                 .connect(NoTls)
                 .await?;
 
-            debug!(%test_name, %cur_db_name, "run test in new database");
+            info!(%test_name, %cur_db_name, "run test in new database");
 
             tokio::spawn(async move {
                 if let Err(e) = connection.await {
