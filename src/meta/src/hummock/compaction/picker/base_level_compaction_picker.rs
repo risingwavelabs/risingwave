@@ -162,13 +162,11 @@ impl LevelCompactionPicker {
             .iter()
             .filter(|sst| table_id.map(|id| sst.table_ids[0] == id).unwrap_or(true));
         let mut target_level_size = 0;
-        let mut target_file_count = 0;
         for sst in target_level_files.clone() {
             if level_handlers[self.target_level].is_pending_compact(&sst.sst_id) {
                 return None;
             }
             target_level_size += sst.file_size;
-            target_file_count += 1;
         }
 
         if target_level_size > l0_total_file_size {
