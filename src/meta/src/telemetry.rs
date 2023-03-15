@@ -22,7 +22,8 @@ use risingwave_common::telemetry::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::storage::MetaStore;
+use crate::model::{MetadataModelError, MetadataModelResult};
+use crate::storage::{MetaStore, Snapshot};
 
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
@@ -69,26 +70,26 @@ impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
 #[async_trait::async_trait]
 impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
     async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
-        let tracking_id = get_or_create_tracking_id(self.meta_store.clone())
-            .await
-            .map(|id| id.to_string())?;
+        let tracking_id = get_or_create_tracking_id(self.meta_store.clone()).await?;
 
         Ok(tracking_id)
     }
 }
 
 /// fetch or create a `tracking_id` from etcd
-async fn get_or_create_tracking_id(meta_store: Arc<impl MetaStore>) -> Result<Uuid, anyhow::Error> {
+async fn get_or_create_tracking_id(
+    meta_store: Arc<impl MetaStore>,
+) -> Result<String, anyhow::Error> {
     match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(id) => Uuid::from_slice_le(&id).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
+        Ok(bytes) => String::from_utf8(bytes).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
         Err(_) => {
-            let uuid = Uuid::new_v4();
+            let uuid = Uuid::new_v4().to_string();
             // put new uuid in meta store
             match meta_store
                 .put_cf(
                     TELEMETRY_CF,
                     TELEMETRY_KEY.to_vec(),
-                    uuid.to_bytes_le().to_vec(),
+                    uuid.clone().into_bytes(),
                 )
                 .await
             {
@@ -123,6 +124,14 @@ impl TelemetryReportCreator for MetaReportCreator {
     }
 }
 
+pub(crate) async fn get_tracking_id_at_snapshot<S: MetaStore>(
+    snapshot: &S::Snapshot,
+) -> MetadataModelResult<Option<String>> {
+    let bytes = snapshot.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
+    let tracking_id = String::from_utf8(bytes).map_err(MetadataModelError::internal)?;
+    Ok(Some(tracking_id))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -133,12 +142,12 @@ mod tests {
     #[tokio::test]
     async fn test_get_or_create_tracking_id_existing_id() {
         let meta_store = Arc::new(MemStore::new());
-        let uuid = Uuid::new_v4();
+        let uuid = Uuid::new_v4().to_string();
         meta_store
             .put_cf(
                 TELEMETRY_CF,
                 TELEMETRY_KEY.to_vec(),
-                uuid.to_bytes_le().to_vec(),
+                uuid.clone().into_bytes(),
             )
             .await
             .unwrap();
@@ -154,6 +163,6 @@ mod tests {
         let result = get_or_create_tracking_id(Arc::clone(&meta_store))
             .await
             .unwrap();
-        assert!(Uuid::from_slice_le(result.as_bytes()).is_ok());
+        assert!(String::from_utf8(result.into_bytes()).is_ok());
     }
 }

@@ -6555,7 +6555,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "tokio-postgres",
  "tokio-stream",
  "toml 0.4.10",
