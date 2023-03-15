@@ -40,8 +40,6 @@ pub struct RearrangedChainExecutor {
 
     upstream: BoxedExecutor,
 
-    upstream_indices: Arc<[usize]>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -115,7 +113,6 @@ impl RearrangedChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -128,7 +125,6 @@ impl RearrangedChainExecutor {
             },
             snapshot,
             upstream,
-            upstream_indices: upstream_indices.into(),
             actor_id: progress.actor_id(),
             progress,
         }
@@ -136,13 +132,7 @@ impl RearrangedChainExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // 0. Project the upstream with `upstream_indices`.
-        let upstream_indices = self.upstream_indices.clone();
-
-        let mut upstream = Box::pin(Self::mapping_stream(
-            self.upstream.execute(),
-            &upstream_indices,
-        ));
+        let mut upstream = Box::pin(self.upstream.execute());
 
         // 1. Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -321,17 +311,6 @@ impl RearrangedChainExecutor {
                 Either::Right((None, _)) => {
                     Err(StreamExecutorError::channel_closed("upstream"))?;
                 }
-            }
-        }
-    }
-
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn mapping_stream(stream: BoxedMessageStream, upstream_indices: &[usize]) {
-        #[for_await]
-        for msg in stream {
-            match mapping(upstream_indices, msg?) {
-                Some(msg) => yield msg,
-                None => continue,
             }
         }
     }

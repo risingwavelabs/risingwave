@@ -66,7 +66,7 @@ pub struct BackfillExecutor<S: StateStore> {
     upstream: BoxedExecutor,
 
     /// The column indices need to be forwarded to the downstream.
-    upstream_indices: Vec<usize>,
+    output_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
 
@@ -84,7 +84,7 @@ where
     pub fn new(
         table: StorageTable<S>,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
+        output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -97,7 +97,7 @@ where
             },
             table,
             upstream,
-            upstream_indices,
+            output_indices,
             actor_id: progress.actor_id(),
             progress,
         }
@@ -109,20 +109,20 @@ where
         let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
         let pk_order = self.table.pk_serializer().get_order_types();
 
-        // TODO: unify these two mappings if we make the upstream and table output the same.
-        // The columns to be forwarded to the downstream, in the upstream columns.
-        let downstream_in_upstream_indices = self.upstream_indices;
-        // The columns to be forwarded to the downstream, in the output columns of the table scan.
-        let downstream_in_output_indices = downstream_in_upstream_indices
-            .iter()
-            .map(|&i| {
-                self.table
-                    .output_indices()
-                    .iter()
-                    .position(|&j| i == j)
-                    .unwrap()
-            })
-            .collect_vec();
+        // // TODO: unify these two mappings if we make the upstream and table output the same.
+        // // The columns to be forwarded to the downstream, in the upstream columns.
+        // let downstream_in_upstream_indices = self.output_indices;
+        // // The columns to be forwarded to the downstream, in the output columns of the table
+        // scan. let downstream_in_output_indices = downstream_in_upstream_indices
+        //     .iter()
+        //     .map(|&i| {
+        //         self.table
+        //             .output_indices()
+        //             .iter()
+        //             .position(|&j| i == j)
+        //             .unwrap()
+        //     })
+        //     .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -154,9 +154,7 @@ where
             // Forward messages directly to the downstream.
             #[for_await]
             for message in upstream {
-                if let Some(message) =
-                    Self::mapping_message(message?, &downstream_in_upstream_indices)
-                {
+                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
                     yield message;
                 }
             }
@@ -233,7 +231,7 @@ where
                                                 &pk_in_output_indices,
                                                 pk_order,
                                             ),
-                                            &downstream_in_upstream_indices,
+                                            &self.output_indices,
                                         ));
                                     }
                                 }
@@ -272,7 +270,7 @@ where
                                     processed_rows += chunk.cardinality() as u64;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
-                                        &downstream_in_upstream_indices,
+                                        &self.output_indices,
                                     ));
                                 }
 
@@ -295,7 +293,7 @@ where
                                 processed_rows += chunk.cardinality() as u64;
                                 yield Message::Chunk(Self::mapping_chunk(
                                     chunk,
-                                    &downstream_in_output_indices,
+                                    &self.output_indices,
                                 ));
                             }
                         }
@@ -313,7 +311,7 @@ where
         // Forward messages directly to the downstream.
         #[for_await]
         for msg in upstream {
-            if let Some(msg) = Self::mapping_message(msg?, &downstream_in_upstream_indices) {
+            if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
                 if let Some(barrier) = msg.as_barrier() {
                     self.progress.finish(barrier.epoch.curr);
                 }

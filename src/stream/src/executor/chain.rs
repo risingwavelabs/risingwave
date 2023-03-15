@@ -31,8 +31,6 @@ pub struct ChainExecutor {
 
     upstream: BoxedExecutor,
 
-    upstream_indices: Vec<usize>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -60,7 +58,6 @@ impl ChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -74,7 +71,6 @@ impl ChainExecutor {
             },
             snapshot,
             upstream,
-            upstream_indices,
             actor_id: progress.actor_id(),
             progress,
             upstream_only,
@@ -117,21 +113,11 @@ impl ChainExecutor {
         // first barrier.
         #[for_await]
         for msg in upstream {
-            match msg? {
-                Message::Watermark(watermark) => {
-                    match mapping_watermark(watermark, &self.upstream_indices) {
-                        Some(mapped_watermark) => yield Message::Watermark(mapped_watermark),
-                        None => continue,
-                    }
-                }
-                Message::Chunk(chunk) => {
-                    yield Message::Chunk(mapping_chunk(chunk, &self.upstream_indices));
-                }
-                Message::Barrier(barrier) => {
-                    self.progress.finish(barrier.epoch.curr);
-                    yield Message::Barrier(barrier);
-                }
+            let msg = msg?;
+            if let Message::Barrier(barrier) = &msg {
+                self.progress.finish(barrier.epoch.curr);
             }
+            yield msg;
         }
     }
 }
@@ -209,15 +195,7 @@ mod test {
             ],
         ));
 
-        let chain = ChainExecutor::new(
-            first,
-            second,
-            vec![0],
-            progress,
-            schema,
-            PkIndices::new(),
-            false,
-        );
+        let chain = ChainExecutor::new(first, second, progress, schema, PkIndices::new(), false);
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;
