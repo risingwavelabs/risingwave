@@ -31,16 +31,19 @@ pub struct StreamRowIdGen {
 
 impl StreamRowIdGen {
     pub fn new(input: PlanRef, row_id_index: usize) -> Self {
-        assert!(
-            matches!(input.distribution(), Distribution::SomeShard),
-            "input must be SomeShard"
-        );
+        let distribution = if input.append_only() {
+            // remove exchange for append only source
+            Distribution::HashShard(vec![row_id_index])
+        } else {
+            input.distribution().clone()
+        };
+
         let base = PlanBase::new_stream(
             input.ctx(),
             input.schema().clone(),
             input.logical_pk().to_vec(),
             input.functional_dependency().clone(),
-            Distribution::HashShard(vec![row_id_index]),
+            distribution,
             input.append_only(),
             input.watermark_columns().clone(),
         );
