@@ -479,6 +479,7 @@ pub trait DataChunkTestExt {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self;

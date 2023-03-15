@@ -21,7 +21,7 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
@@ -123,7 +123,7 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = VirtualNode::compute_row(&(&row).project(indices));
+        let vnode = VirtualNode::compute_row(&row, indices);
         check_vnode_is_set(vnode, vnodes);
         vnode
     };

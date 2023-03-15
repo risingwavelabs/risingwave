@@ -17,7 +17,7 @@ use parse_display::Display;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::HashCode;
-use crate::row::Row;
+use crate::row::{Row, RowExt};
 use crate::types::ScalarRefImpl;
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;
@@ -56,32 +56,6 @@ impl VirtualNode {
     pub const COUNT: usize = 1 << Self::BITS;
     /// The size of a virtual node in bytes, in memory or serialized representation.
     pub const SIZE: usize = std::mem::size_of::<Self>();
-}
-
-impl VirtualNode {
-    pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
-        match (keys.len(), data_chunk.columns()) {
-            (1, [column]) if let ArrayImpl::Serial(serial_array) = column.array_ref()=> {
-                serial_array.iter()
-                    .map(|serial| Self::from_index(extract_vnode_id_from_row_id(serial.unwrap().as_row_id()) as usize))
-                    .collect()
-            }
-            _ => data_chunk
-                .get_hash_values(keys, Crc32FastBuilder)
-                .into_iter()
-                .map(|hash| hash.to_vnode())
-                .collect_vec()
-        }
-    }
-
-    pub fn compute_row(row: &impl Row) -> VirtualNode {
-        // row should be projected
-        if let Ok(Some(ScalarRefImpl::Serial(s))) = row.iter().exactly_one().as_ref() {
-            return Self::from_index(extract_vnode_id_from_row_id(s.as_row_id()) as usize);
-        }
-
-        row.hash(Crc32FastBuilder).to_vnode()
-    }
 }
 
 /// An iterator over all virtual nodes.
@@ -130,5 +104,74 @@ impl VirtualNode {
     /// Iterates over all virtual nodes.
     pub fn all() -> AllVirtualNodeIter {
         (0..Self::COUNT).map(Self::from_index)
+    }
+}
+
+impl VirtualNode {
+    pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
+        if let Ok(idx) = keys.iter().exactly_one() &&
+            let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
+
+            return serial_array.iter()
+                .map(|serial| Self::from_index(extract_vnode_id_from_row_id(serial.unwrap().as_row_id()) as usize))
+                .collect();
+        }
+
+        data_chunk
+            .get_hash_values(keys, Crc32FastBuilder)
+            .into_iter()
+            .map(|hash| hash.to_vnode())
+            .collect_vec()
+    }
+
+    pub fn compute_row(row: &impl Row, indices: &[usize]) -> VirtualNode {
+        let project = row.project(indices);
+        if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
+            return Self::from_index(extract_vnode_id_from_row_id(s.as_row_id()) as usize);
+        }
+
+        project.hash(Crc32FastBuilder).to_vnode()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::array::DataChunkTestExt;
+    use crate::row::OwnedRow;
+    use crate::types::ScalarImpl;
+    use crate::util::row_id::RowIdGenerator;
+
+    #[tokio::test]
+    async fn test_serial_key_chunk() {
+        let mut gen = RowIdGenerator::new(100);
+        let chunk = format!(
+            "SRL I
+             {} 1
+             {} 2",
+            gen.next().await,
+            gen.next().await,
+        );
+
+        let chunk = DataChunk::from_pretty(chunk.as_str());
+        let vnodes = VirtualNode::compute_chunk(&chunk, &[0]);
+
+        assert_eq!(
+            vnodes.as_slice(),
+            &[VirtualNode::from_index(100), VirtualNode::from_index(100)]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_serial_key_row() {
+        let mut gen = RowIdGenerator::new(100);
+        let row = OwnedRow::new(vec![
+            Some(ScalarImpl::Serial(gen.next().await.into())),
+            Some(ScalarImpl::Int64(12345)),
+        ]);
+
+        let vnode = VirtualNode::compute_row(&row, &[0]);
+
+        assert_eq!(vnode, VirtualNode::from_index(100));
     }
 }

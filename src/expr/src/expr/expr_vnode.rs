@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, RowExt};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
@@ -79,7 +79,7 @@ impl Expression for VnodeExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         Ok(Some(
-            VirtualNode::compute_row(&input.project(&self.dist_key_indices))
+            VirtualNode::compute_row(&input, &self.dist_key_indices)
                 .to_scalar()
                 .into(),
         ))

@@ -21,7 +21,6 @@ use risingwave_pb::batch_plan::ScanRange as ScanRangePb;
 use super::value_encoding::serialize_datum;
 use crate::catalog::get_dist_key_in_pk_indices;
 use crate::hash::VirtualNode;
-use crate::row::RowExt;
 use crate::types::{Datum, ScalarImpl};
 use crate::util::value_encoding::serialize_datum_into;
 
@@ -106,8 +105,8 @@ impl ScanRange {
             return None;
         }
 
-        let pk_prefix_value = &self.eq_conds;
-        let vnode = VirtualNode::compute_row(&pk_prefix_value.project(&dist_key_in_pk_indices));
+        let pk_prefix_value: &[_] = &self.eq_conds;
+        let vnode = VirtualNode::compute_row(&pk_prefix_value, &dist_key_in_pk_indices);
         Some(vnode)
     }
 }
@@ -194,7 +193,7 @@ mod tests {
             Some(ScalarImpl::from(514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row.project(&[0, 1]));
+        let vnode = VirtualNode::compute_row(&row, &[0, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
@@ -221,7 +220,7 @@ mod tests {
             Some(ScalarImpl::from(114514)),
         ]);
 
-        let vnode = VirtualNode::compute_row(&row.project(&[2, 1]));
+        let vnode = VirtualNode::compute_row(&row, &[2, 1]);
 
         assert_eq!(scan_range.try_compute_vnode(&dist_key, &pk), Some(vnode));
     }
