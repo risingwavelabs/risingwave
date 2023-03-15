@@ -232,7 +232,6 @@ impl StreamTableScan {
                 // The column indices need to be forwarded to the downstream
                 output_indices,
                 upstream_column_ids,
-                is_singleton: *self.distribution() == Distribution::Single,
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),

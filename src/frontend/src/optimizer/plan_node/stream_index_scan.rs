@@ -204,7 +204,6 @@ impl StreamIndexScan {
                 chain_type: self.chain_type as i32,
                 output_indices,
                 upstream_column_ids,
-                is_singleton: false,
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,
