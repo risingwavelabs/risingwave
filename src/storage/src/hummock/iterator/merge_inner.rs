@@ -95,7 +95,7 @@ impl<I: HummockIterator> PartialEq for Node<I, OrderedNodeExtra> {
 /// Iterates on multiple iterators, a.k.a. `MergeIterator`.
 pub struct MergeIteratorInner<I: HummockIterator, NE: NodeExtraOrderInfo> {
     /// Invalid or non-initialized iterators.
-    unused_iters: LinkedList<Node<I, NE>>,
+    unused_iters: Vec<Node<I, NE>>,
 
     /// The heap for merge sort.
     heap: BinaryHeap<Node<I, NE>>,
@@ -217,13 +217,13 @@ trait MergeIteratorNext {
 /// in every branch carefully. When we want to pop the `PeekMut`, we can simply call `guard.pop()`.
 struct PeekMutGuard<'a, T: Ord> {
     peek: Option<PeekMut<'a, T>>,
-    unused: &'a mut LinkedList<T>,
+    unused: &'a mut Vec<T>,
 }
 
 impl<'a, T: Ord> PeekMutGuard<'a, T> {
     /// Call `peek_mut` on the top of heap and return a guard over the `PeekMut` if the heap is not
     /// empty.
-    fn peek_mut(heap: &'a mut BinaryHeap<T>, unused: &'a mut LinkedList<T>) -> Option<Self> {
+    fn peek_mut(heap: &'a mut BinaryHeap<T>, unused: &'a mut Vec<T>) -> Option<Self> {
         heap.peek_mut().map(|peek| Self {
             peek: Some(peek),
             unused,
@@ -264,7 +264,7 @@ impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
                 "PeekMut are dropped without used. May be caused by future cancellation"
             );
             let top = PeekMut::pop(peek);
-            self.unused.push_back(top);
+            self.unused.push(top);
         }
     }
 }
@@ -303,7 +303,7 @@ impl<I: HummockIterator> MergeIteratorNext for OrderedMergeIteratorInner<I> {
                     };
                     if !node.iter.is_valid() {
                         let node = node.pop();
-                        self.unused_iters.push_back(node);
+                        self.unused_iters.push(node);
                     } else {
                         node.used();
                     }
@@ -344,7 +344,7 @@ impl<I: HummockIterator> MergeIteratorNext for UnorderedMergeIteratorInner<I> {
             if !node.iter.is_valid() {
                 // Put back to `unused_iters`
                 let node = node.pop();
-                self.unused_iters.push_back(node);
+                self.unused_iters.push(node);
             } else {
                 // This will update the heap top.
                 node.used();
@@ -395,8 +395,26 @@ where
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
             self.reset_heap();
-            futures::future::try_join_all(self.unused_iters.iter_mut().map(|x| x.iter.seek(key)))
+            const MAX_CONCURRENCY: usize = 5;
+            if self.unused_iters.len() < MAX_CONCURRENCY {
+                futures::future::try_join_all(
+                    self.unused_iters.iter_mut().map(|x| x.iter.seek(key)),
+                )
                 .await?;
+            } else {
+                let mut start_idx = 0;
+                while start_idx < self.unused_iters.len() {
+                    let end_idx =
+                        std::cmp::min(start_idx + MAX_CONCURRENCY, self.unused_iters.len());
+                    futures::future::try_join_all(
+                        self.unused_iters[start_idx..end_idx]
+                            .iter_mut()
+                            .map(|x| x.iter.seek(key)),
+                    )
+                    .await?;
+                    start_idx += MAX_CONCURRENCY;
+                }
+            }
             self.build_heap();
             Ok(())
         }

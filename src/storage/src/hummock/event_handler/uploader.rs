@@ -789,7 +789,7 @@ mod tests {
         )]);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
         let tracker = match limiter {
-            Some(limiter) => Some(limiter.require_memory(size as u64).await),
+            Some(limiter) => Some(limiter.require_quota(size as u64).await),
             None => None,
         };
         SharedBufferBatch::build_shared_buffer_batch(

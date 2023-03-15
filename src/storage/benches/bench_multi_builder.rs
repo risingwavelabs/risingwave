@@ -66,7 +66,7 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
 
     async fn open_builder(&mut self) -> HummockResult<SstableBuilder<Self::Writer, Self::Filter>> {
         let id = self.next_id.fetch_add(1, SeqCst);
-        let tracker = self.limiter.require_memory(1).await;
+        let tracker = self.limiter.require_quota(1).await;
         let writer_options = SstableWriterOptions {
             capacity_hint: Some(self.options.capacity),
             tracker: Some(tracker),

@@ -54,6 +54,7 @@ pub struct CompactorContext {
     pub task_progress_manager: TaskProgressManagerRef,
 
     pub compactor_runtime_config: Arc<tokio::sync::Mutex<CompactorRuntimeConfig>>,
+    pub file_count_limiter: Arc<MemoryLimiter>,
 }
 
 impl CompactorContext {
@@ -85,6 +86,7 @@ impl CompactorContext {
             compaction_executor,
             filter_key_extractor_manager,
             read_memory_limiter: memory_limiter,
+            file_count_limiter: MemoryLimiter::unlimit(),
             sstable_object_id_manager,
             task_progress_manager: Default::default(),
             compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(compactor_runtime_config)),

@@ -122,6 +122,7 @@ pub async fn compactor_serve(
     let memory_limiter = Arc::new(MemoryLimiter::new(output_limit_mb << 20));
     let input_limit_mb = storage_opts.compactor_memory_limit_mb as u64 / 2;
     let max_concurrent_task_number = storage_opts.max_concurrent_compaction_task_number;
+    let max_concurrent_compact_file_count = storage_opts.max_concurrent_compaction_task_number * 10;
     let memory_collector = Arc::new(CompactorMemoryCollector::new(
         memory_limiter.clone(),
         sstable_store.clone(),
@@ -143,6 +144,7 @@ pub async fn compactor_serve(
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
+        file_count_limiter: Arc::new(MemoryLimiter::new(max_concurrent_compact_file_count)),
         sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {

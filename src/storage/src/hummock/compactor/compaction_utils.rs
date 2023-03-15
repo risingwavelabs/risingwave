@@ -60,7 +60,7 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
         // TODO: memory consumption may vary based on `SstableWriter`, `ObjectStore` and cache
         let tracker = self
             .limiter
-            .require_memory((self.options.capacity + self.options.block_capacity) as u64)
+            .require_quota((self.options.capacity + self.options.block_capacity) as u64)
             .await;
         let timer = Instant::now();
         let table_id = self

@@ -282,7 +282,7 @@ impl MemoryLimiter {
 }
 
 impl MemoryLimiter {
-    pub async fn require_memory(&self, quota: u64) -> MemoryTracker {
+    pub async fn require_quota(&self, quota: u64) -> MemoryTracker {
         // Since the over provision limiter gets blocked only when the current usage exceeds the
         // memory quota, it is allowed to apply for more than the memory quota.
         self.inner.require_memory(quota).await;
@@ -520,12 +520,12 @@ mod tests {
     async fn test_loose_memory_limiter() {
         let quota = 5;
         let memory_limiter = MemoryLimiter::new(quota);
-        drop(memory_limiter.require_memory(6).await);
-        let tracker1 = memory_limiter.require_memory(3).await;
+        drop(memory_limiter.require_quota(6).await);
+        let tracker1 = memory_limiter.require_quota(3).await;
         assert_eq!(3, memory_limiter.get_memory_usage());
-        let tracker2 = memory_limiter.require_memory(4).await;
+        let tracker2 = memory_limiter.require_quota(4).await;
         assert_eq!(7, memory_limiter.get_memory_usage());
-        let mut future = memory_limiter.require_memory(5).boxed();
+        let mut future = memory_limiter.require_quota(5).boxed();
         assert_pending(&mut future).await;
         assert_eq!(7, memory_limiter.get_memory_usage());
         drop(tracker1);

@@ -194,6 +194,7 @@ pub async fn compute_node_serve(
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 read_memory_limiter,
+                file_count_limiter: MemoryLimiter::unlimit(),
                 sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
