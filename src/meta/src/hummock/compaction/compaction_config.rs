@@ -28,6 +28,7 @@ const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
 const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = u32::MAX as u64;
+const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 64;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -65,6 +66,7 @@ impl CompactionConfigBuilder {
                 split_by_state_table: false,
                 level0_stop_write_threshold_sub_level_number:
                     DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER,
+                level0_max_compact_file_number: DEFAULT_MAX_COMPACTION_FILE_COUNT,
             },
         }
     }
@@ -127,4 +129,5 @@ builder_field! {
     max_sub_compaction: u32,
     max_space_reclaim_bytes: u64,
     level0_stop_write_threshold_sub_level_number: u64,
+    level0_max_compact_file_number: u64,
 }

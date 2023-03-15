@@ -185,7 +185,6 @@ pub(crate) mod tests {
             is_share_buffer_compact: false,
             compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
             read_memory_limiter: MemoryLimiter::unlimit(),
-            file_count_limiter: MemoryLimiter::unlimit(),
             filter_key_extractor_manager,
             sstable_object_id_manager: Arc::new(SstableObjectIdManager::new(
                 hummock_meta_client.clone(),

@@ -87,15 +87,6 @@ impl Compactor {
         mut compact_task: CompactTask,
         mut shutdown_rx: Receiver<()>,
     ) -> TaskStatus {
-        let file_count = compact_task
-            .input_ssts
-            .iter()
-            .map(|level| level.table_infos.len())
-            .sum::<usize>();
-        compactor_context
-            .file_count_limiter
-            .require_quota(file_count as u64)
-            .await;
         let context = compactor_context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
