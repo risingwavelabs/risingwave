@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16ArrayBuilder};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
@@ -69,21 +70,20 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let hash_values = input.get_hash_values(&self.dist_key_indices, Crc32FastBuilder);
+        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices, Crc32FastBuilder);
         let mut builder = I16ArrayBuilder::new(input.capacity());
-        hash_values
+        vnodes
             .into_iter()
-            .for_each(|h| builder.append(Some(h.to_vnode().to_scalar())));
+            .for_each(|vnode| builder.append(Some(vnode.to_scalar())));
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let vnode = input
-            .project(&self.dist_key_indices)
-            .hash(Crc32FastBuilder)
-            .to_vnode()
-            .to_scalar();
-        Ok(Some(vnode.into()))
+        Ok(Some(
+            VirtualNode::compute_row(&input.project(&self.dist_key_indices))
+                .to_scalar()
+                .into(),
+        ))
     }
 }
 

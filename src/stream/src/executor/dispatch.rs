@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::future::Future;
+use std::hash::Hasher;
 use std::iter::repeat_with;
 use std::sync::Arc;
 
@@ -22,13 +23,14 @@ use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Array, ArrayImpl, DataChunk, Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
-use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
+use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, HashCode, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
+use risingwave_common::util::row_id::extract_vnode_id_from_row_id;
 use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
@@ -597,12 +599,8 @@ impl Dispatcher for HashDataDispatcher {
 
             // get hash value of every line by its key
             let hash_builder = Crc32FastBuilder;
-            let vnodes = chunk
-                .data_chunk()
-                .get_hash_values(&self.keys, hash_builder)
-                .into_iter()
-                .map(|hash| hash.to_vnode())
-                .collect_vec();
+
+            let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, hash_builder);
 
             tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
 

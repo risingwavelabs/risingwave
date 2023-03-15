@@ -12,9 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::hash::{BuildHasher, Hasher};
+
+use itertools::Itertools;
 use parse_display::Display;
 
+use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::HashCode;
+use crate::row::{Row, RowExt};
+use crate::types::ScalarRefImpl;
+use crate::util::hash_util::Crc32FastBuilder;
+use crate::util::row_id::extract_vnode_id_from_row_id;
 
 /// Parallel unit is the minimal scheduling unit.
 // TODO: make it a newtype
@@ -50,6 +58,34 @@ impl VirtualNode {
     pub const COUNT: usize = 1 << Self::BITS;
     /// The size of a virtual node in bytes, in memory or serialized representation.
     pub const SIZE: usize = std::mem::size_of::<Self>();
+}
+
+impl VirtualNode {
+    pub fn compute_chunk<H: BuildHasher>(
+        data_chunk: &DataChunk,
+        keys: &[usize],
+        hash_builder: H,
+    ) -> Vec<VirtualNode> {
+        if let Ok(idx) = keys.iter().exactly_one() && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
+            serial_array.iter().map(|serial| HashCode::from(serial.map(|s| extract_vnode_id_from_row_id(s.as_row_id())).unwrap() as u64).to_vnode()).collect()
+        } else {
+            data_chunk
+                .get_hash_values(keys, hash_builder)
+                .into_iter()
+                .map(|hash| hash.to_vnode())
+                .collect_vec()
+        }
+    }
+
+    pub fn compute_row(row: &impl Row) -> VirtualNode {
+        // row should be projected
+        let vnode = if let Ok(datum) = row.iter().exactly_one() && let Some(ScalarRefImpl::Serial(s)) = datum.as_ref() {
+            HashCode::from(extract_vnode_id_from_row_id(s.as_row_id()) as u64).to_vnode()
+        } else {
+            row.hash(Crc32FastBuilder).to_vnode()
+        };
+        vnode
+    }
 }
 
 /// An iterator over all virtual nodes.

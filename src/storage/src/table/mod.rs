@@ -123,19 +123,12 @@ pub trait TableIter: Send {
 
 /// Get vnode value with `indices` on the given `row`.
 pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> VirtualNode {
-    let vnode = if !indices.is_empty() {
-        let project = (&row).project(indices);
-
-        let vnode = if let Ok(d) = project.iter().exactly_one() && let Some(ScalarRefImpl::Serial(s)) = d.as_ref() {
-            HashCode::from(extract_vnode_id_from_row_id(s.as_row_id()) as u64).to_vnode()
-        } else {
-            project.hash(Crc32FastBuilder).to_vnode()
-        };
-
+    let vnode = if indices.is_empty() {
+        DEFAULT_VNODE
+    } else {
+        let vnode = VirtualNode::compute_row(&(&row).project(indices));
         check_vnode_is_set(vnode, vnodes);
         vnode
-    } else {
-        DEFAULT_VNODE
     };
 
     tracing::trace!(target: "events::storage::storage_table", "compute vnode: {:?} key {:?} => {}", row, indices, vnode);
@@ -157,12 +150,11 @@ pub fn compute_chunk_vnode(
             .iter()
             .map(|idx| pk_indices[*idx])
             .collect_vec();
-        chunk
-            .get_hash_values(&dist_key_indices, Crc32FastBuilder)
+
+        VirtualNode::compute_chunk(chunk, &dist_key_indices, Crc32FastBuilder)
             .into_iter()
             .zip_eq_fast(chunk.vis().iter())
-            .map(|(h, vis)| {
-                let vnode = h.to_vnode();
+            .map(|(vnode, vis)| {
                 // Ignore the invisible rows.
                 if vis {
                     check_vnode_is_set(vnode, vnodes);

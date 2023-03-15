@@ -290,16 +290,6 @@ impl DataChunk {
         column_idxes: &[usize],
         hasher_builder: H,
     ) -> Vec<HashCode> {
-        // If there is only one primary key column and the column is `SERIAL`,
-        // we skip the Hash process and extract the VnodeId directly
-        if let Ok(idx) = column_idxes.iter().exactly_one() &&
-            let ArrayImpl::Serial(array) = self.column_at(*idx).array_ref() {
-            return array
-                .iter()
-                .map(|item| item.map(|s| HashCode::from(extract_vnode_id_from_row_id(s.as_row_id()) as u64)).expect("SERIAL as RowId should not be None"))
-                .collect();
-        }
-
         let mut states = Vec::with_capacity(self.capacity());
         states.resize_with(self.capacity(), || hasher_builder.build_hasher());
         for column_idx in column_idxes {
