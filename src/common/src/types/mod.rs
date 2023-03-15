@@ -131,6 +131,9 @@ pub enum DataType {
     #[display("jsonb")]
     #[from_str(regex = "(?i)^jsonb$")]
     Jsonb,
+    #[display("serial")]
+    #[from_str(regex = "(?i)^serial$")]
+    Serial,
 }
 
 impl std::str::FromStr for Box<DataType> {
@@ -148,6 +151,7 @@ impl DataTypeName {
             | DataTypeName::Int16
             | DataTypeName::Int32
             | DataTypeName::Int64
+            | DataTypeName::Serial
             | DataTypeName::Decimal
             | DataTypeName::Float32
             | DataTypeName::Float64
@@ -170,6 +174,7 @@ impl DataTypeName {
             DataTypeName::Int16 => DataType::Int16,
             DataTypeName::Int32 => DataType::Int32,
             DataTypeName::Int64 => DataType::Int64,
+            DataTypeName::Serial => DataType::Serial,
             DataTypeName::Decimal => DataType::Decimal,
             DataTypeName::Float32 => DataType::Float32,
             DataTypeName::Float64 => DataType::Float64,
@@ -208,6 +213,7 @@ impl From<&ProstDataType> for DataType {
             TypeName::Int16 => DataType::Int16,
             TypeName::Int32 => DataType::Int32,
             TypeName::Int64 => DataType::Int64,
+            TypeName::Serial => DataType::Serial,
             TypeName::Float => DataType::Float32,
             TypeName::Double => DataType::Float64,
             TypeName::Boolean => DataType::Boolean,
@@ -242,6 +248,7 @@ impl DataType {
             DataType::Int16 => PrimitiveArrayBuilder::<i16>::new(capacity).into(),
             DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
             DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
+            DataType::Serial => PrimitiveArrayBuilder::<Serial>::new(capacity).into(),
             DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
             DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
             DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
@@ -271,6 +278,7 @@ impl DataType {
             DataType::Int16 => TypeName::Int16,
             DataType::Int32 => TypeName::Int32,
             DataType::Int64 => TypeName::Int64,
+            DataType::Serial => TypeName::Serial,
             DataType::Float32 => TypeName::Float,
             DataType::Float64 => TypeName::Double,
             DataType::Boolean => TypeName::Boolean,
@@ -313,6 +321,7 @@ impl DataType {
             DataType::Int16
                 | DataType::Int32
                 | DataType::Int64
+                | DataType::Serial
                 | DataType::Float32
                 | DataType::Float64
                 | DataType::Decimal
@@ -346,6 +355,13 @@ impl DataType {
         )
     }
 
+    pub fn as_struct(&self) -> &StructType {
+        match self {
+            DataType::Struct(t) => t,
+            _ => panic!("expect struct type"),
+        }
+    }
+
     /// WARNING: Currently this should only be used in `WatermarkFilterExecutor`. Please be careful
     /// if you want to use this.
     pub fn min(&self) -> ScalarImpl {
@@ -353,6 +369,7 @@ impl DataType {
             DataType::Int16 => ScalarImpl::Int16(i16::MIN),
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
+            DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
             DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
             DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
@@ -782,6 +799,10 @@ impl ScalarImpl {
                 i64::from_sql(&Type::INT8, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
+            DataType::Serial => Self::Serial(Serial::from(
+                i64::from_sql(&Type::INT8, bytes)
+                    .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
+            )),
             DataType::Float32 => Self::Float32(
                 f32::from_sql(&Type::FLOAT4, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
@@ -864,6 +885,9 @@ impl ScalarImpl {
             DataType::Int64 => Self::Int64(i64::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
+            DataType::Serial => Self::Serial(Serial::from(i64::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?)),
             DataType::Float32 => Self::Float32(
                 f32::from_str(str)
                     .map_err(|_| {
@@ -1052,6 +1076,7 @@ impl ScalarImpl {
             Ty::Int16 => Self::Int16(i16::deserialize(de)?),
             Ty::Int32 => Self::Int32(i32::deserialize(de)?),
             Ty::Int64 => Self::Int64(i64::deserialize(de)?),
+            Ty::Serial => Self::Serial(Serial::from(i64::deserialize(de)?)),
             Ty::Float32 => Self::Float32(f32::deserialize(de)?.into()),
             Ty::Float64 => Self::Float64(f64::deserialize(de)?.into()),
             Ty::Varchar => Self::Utf8(Box::<str>::deserialize(de)?),
@@ -1102,6 +1127,7 @@ impl ScalarImpl {
                     DataType::Int16 => size_of::<i16>(),
                     DataType::Int32 => size_of::<i32>(),
                     DataType::Int64 => size_of::<i64>(),
+                    DataType::Serial => size_of::<Serial>(),
                     DataType::Float32 => size_of::<OrderedF32>(),
                     DataType::Float64 => size_of::<OrderedF64>(),
                     DataType::Date => size_of::<NaiveDateWrapper>(),
@@ -1176,6 +1202,7 @@ macro_rules! for_all_type_pairs {
             { Interval,    Interval },
             { Decimal,     Decimal },
             { Jsonb,       Jsonb },
+            { Serial,      Serial },
             { List,        List },
             { Struct,      Struct }
         }
@@ -1362,6 +1389,7 @@ mod tests {
                 DataTypeName::Int16 => (ScalarImpl::Int16(233), DataType::Int16),
                 DataTypeName::Int32 => (ScalarImpl::Int32(233333), DataType::Int32),
                 DataTypeName::Int64 => (ScalarImpl::Int64(233333333333), DataType::Int64),
+                DataTypeName::Serial => (ScalarImpl::Serial(233333333333.into()), DataType::Serial),
                 DataTypeName::Float32 => (ScalarImpl::Float32(23.33.into()), DataType::Float32),
                 DataTypeName::Float64 => (
                     ScalarImpl::Float64(23.333333333333.into()),

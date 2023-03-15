@@ -16,6 +16,7 @@
 
 use std::sync::Arc;
 
+use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::row::OwnedRow;
@@ -202,6 +203,7 @@ fn build_array_access_expr(
         DataType::Int16 => array_access_expression!(I16Array),
         DataType::Int32 => array_access_expression!(I32Array),
         DataType::Int64 => array_access_expression!(I64Array),
+        DataType::Serial => array_access_expression!(SerialArray),
         DataType::Float32 => array_access_expression!(F32Array),
         DataType::Float64 => array_access_expression!(F64Array),
         DataType::Decimal => array_access_expression!(DecimalArray),

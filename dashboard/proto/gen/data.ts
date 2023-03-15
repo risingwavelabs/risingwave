@@ -342,6 +342,7 @@ export const DataType_TypeName = {
   LIST: "LIST",
   BYTEA: "BYTEA",
   JSONB: "JSONB",
+  SERIAL: "SERIAL",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -403,6 +404,9 @@ export function dataType_TypeNameFromJSON(object: any): DataType_TypeName {
     case 18:
     case "JSONB":
       return DataType_TypeName.JSONB;
+    case 19:
+    case "SERIAL":
+      return DataType_TypeName.SERIAL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -448,6 +452,8 @@ export function dataType_TypeNameToJSON(object: DataType_TypeName): string {
       return "BYTEA";
     case DataType_TypeName.JSONB:
       return "JSONB";
+    case DataType_TypeName.SERIAL:
+      return "SERIAL";
     case DataType_TypeName.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

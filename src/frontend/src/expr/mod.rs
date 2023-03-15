@@ -28,6 +28,7 @@ mod correlated_input_ref;
 mod function_call;
 mod input_ref;
 mod literal;
+mod parameter;
 mod subquery;
 mod table_function;
 mod user_defined_function;
@@ -51,6 +52,7 @@ pub use expr_visitor::ExprVisitor;
 pub use function_call::{is_row_function, FunctionCall, FunctionCallDisplay};
 pub use input_ref::{input_ref_to_column_indices, InputRef, InputRefDisplay};
 pub use literal::Literal;
+pub use parameter::Parameter;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 pub use session_timezone::SessionTimezone;
 pub use subquery::{Subquery, SubqueryKind};
@@ -97,7 +99,8 @@ impl_expr_impl!(
     Subquery,
     TableFunction,
     WindowFunction,
-    UserDefinedFunction
+    UserDefinedFunction,
+    Parameter
 );
 
 impl ExprImpl {
@@ -105,6 +108,12 @@ impl ExprImpl {
     #[inline(always)]
     pub fn literal_int(v: i32) -> Self {
         Literal::new(Some(v.to_scalar_value()), DataType::Int32).into()
+    }
+
+    /// A literal float64 value.
+    #[inline(always)]
+    pub fn literal_f64(v: f64) -> Self {
+        Literal::new(Some(v.into()), DataType::Float64).into()
     }
 
     /// A literal boolean value.
@@ -175,6 +184,7 @@ impl ExprImpl {
     /// Check whether self is a literal NULL or literal string.
     pub fn is_unknown(&self) -> bool {
         matches!(self, ExprImpl::Literal(literal) if literal.return_type() == DataType::Varchar)
+            || matches!(self, ExprImpl::Parameter(parameter) if !parameter.has_infer())
     }
 
     /// Shorthand to create cast expr to `target` type in implicit context.
@@ -764,6 +774,7 @@ impl Expr for ExprImpl {
             ExprImpl::TableFunction(expr) => expr.return_type(),
             ExprImpl::WindowFunction(expr) => expr.return_type(),
             ExprImpl::UserDefinedFunction(expr) => expr.return_type(),
+            ExprImpl::Parameter(expr) => expr.return_type(),
         }
     }
 
@@ -782,6 +793,7 @@ impl Expr for ExprImpl {
                 unreachable!("Window function should not be converted to ExprNode")
             }
             ExprImpl::UserDefinedFunction(e) => e.to_expr_proto(),
+            ExprImpl::Parameter(e) => e.to_expr_proto(),
         }
     }
 }
@@ -816,6 +828,7 @@ impl std::fmt::Debug for ExprImpl {
                 Self::UserDefinedFunction(arg0) => {
                     f.debug_tuple("UserDefinedFunction").field(arg0).finish()
                 }
+                Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
             };
         }
         match self {
@@ -828,6 +841,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::TableFunction(x) => write!(f, "{:?}", x),
             Self::WindowFunction(x) => write!(f, "{:?}", x),
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            Self::Parameter(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -870,6 +884,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
                 write!(f, "{:?}", x)
             }
             ExprImpl::UserDefinedFunction(x) => write!(f, "{:?}", x),
+            ExprImpl::Parameter(x) => write!(f, "{:?}", x),
         }
     }
 }

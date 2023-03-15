@@ -1,0 +1,42 @@
+[[test]]
+name = "window_hash_agg"
+# Prepare the tesing table & mviews.
+init_sqls = [
+    # Set up the base table.
+    """
+    CREATE TABLE t1 (
+        created_at timestamp,
+        grp int,
+        v int,
+        WATERMARK FOR created_at AS created_at - interval '9' second
+    ) APPEND ONLY WITH (
+        connector = 'datagen',
+        rows_per_second = 100,
+        datagen.split.num = 16,
+        fields.created_at.max_past_mode = 'relative',
+        fields.created_at.max_past = '10s',
+        fields.grp.min = 0,
+        fields.grp.max = 5,
+    );
+    """,
+    # Set up the tumble window mview.
+    """
+    CREATE MATERIALIZED VIEW mv_tumble AS
+    SELECT grp, SUM(v), window_start
+    FROM tumble(t1, created_at, INTERVAL '1' SECOND)
+    GROUP BY window_start, grp;
+    """,
+    # Set up the hop window mview.
+    """
+    CREATE MATERIALIZED VIEW mv_hop AS
+    SELECT grp, SUM(v), window_start
+    FROM hop(t1, created_at, INTERVAL '1' SECOND, INTERVAL '3' SECOND)
+    GROUP BY window_start, grp;
+    """,
+]
+bound_tables = [
+    # Tumble window agg state table.
+    { pattern = '__internal_mv_tumble_\d+_hashaggresult_\d+', limit = 200 },
+    # Hop window agg state table.
+    { pattern = '__internal_mv_hop_\d+_hashaggresult_\d+', limit = 400 },
+]

@@ -27,11 +27,14 @@ use super::Result;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
-use generate_series::*;
-mod unnest;
-use unnest::*;
 mod regexp_matches;
-use regexp_matches::*;
+mod unnest;
+mod user_defined;
+
+use self::generate_series::*;
+use self::regexp_matches::*;
+use self::unnest::*;
+use self::user_defined::*;
 
 /// Instance of a table function.
 ///
@@ -64,6 +67,7 @@ pub fn build_from_prost(
         Unnest => new_unnest(prost, chunk_size),
         RegexpMatches => new_regexp_matches(prost, chunk_size),
         Range => new_generate_series::<false>(prost, chunk_size),
+        Udtf => new_user_defined(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
