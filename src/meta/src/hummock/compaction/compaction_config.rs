@@ -16,7 +16,7 @@ use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 1 * 1024 * 1024 * 1024; // 1GB
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
 const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
