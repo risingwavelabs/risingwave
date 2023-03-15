@@ -610,6 +610,7 @@ message CompactionConfig {
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
   bool split_by_state_table = 14;
+  uint64 level0_max_compact_file_number = 16;
 }
 
 message TableStats {

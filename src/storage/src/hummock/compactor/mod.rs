@@ -60,7 +60,7 @@ use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_memory_use_for_compaction, generate_splits,
+    build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -158,11 +158,12 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
-        let need_quota = estimate_memory_use_for_compaction(&compact_task);
+        let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
+            "Ready to handle compaction task: {} need memory: {} input_file_counts {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
             need_quota,
+            file_counts,
             compact_task.target_level,
             compact_task.compression_algorithm,
         );

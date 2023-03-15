@@ -163,8 +163,9 @@ impl LevelCompactionPicker {
             target_level_size += sst.file_size;
         }
 
+        // do not compact large task
         if target_level_size > l0_total_file_size
-            && l0_total_file_size < self.config.max_compaction_bytes
+        // && l0_total_file_size < self.config.max_compaction_bytes
         {
             stats.skip_by_write_amp_limit += 1;
             return None;
