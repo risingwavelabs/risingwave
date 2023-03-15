@@ -26,10 +26,11 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
     Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
 };
+use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
-    TableConstraint, ColumnOptionDef,
+    TableConstraint,
 };
 
 use super::create_source::resolve_source_schema;
@@ -37,6 +38,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
+use crate::expr::Expr;
 use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -120,9 +122,7 @@ impl ColumnIdGenerator {
 pub fn bind_sql_columns(
     columns: Vec<ColumnDef>,
     col_id_gen: &mut ColumnIdGenerator,
-) -> Result<(Vec<ColumnDesc>, Option<ColumnId>)> {
-    // In `ColumnDef`, pk can contain only one column. So we use `Option` rather than `Vec`.
-    let mut pk_column_id = None;
+) -> Result<Vec<ColumnDesc>> {
     let mut column_descs = Vec::with_capacity(columns.len());
 
     for column in columns {
@@ -134,8 +134,9 @@ pub fn bind_sql_columns(
             name,
             data_type,
             collation,
-            options,
+            ..
         } = column;
+
         let data_type = data_type.ok_or(ErrorCode::InvalidInputSyntax(
             "data type is not specified".into(),
         ))?;
@@ -147,32 +148,56 @@ pub fn bind_sql_columns(
             .into());
         }
         
+        check_valid_column_name(&name.real_value())?;
+        
+        let field_descs = if let AstDataType::Struct(fields) = &data_type {
+            fields
+                .iter()
+                .map(bind_struct_field)
+                .collect::<Result<Vec<_>>>()?
+        } else {
+            vec![]
+        };
+        column_descs.push(ColumnDesc {
+            data_type: bind_data_type(&data_type)?,
+            column_id,
+            name: name.real_value(),
+            field_descs,
+            type_name: "".to_string(),
+            generated_column: None,
+        });
     }
 
-    Ok((column_descs, pk_column_id))
+    Ok(column_descs)
 }
 
 /// Binds constraits that can be only specified in column definitions.
-pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, column_catalogs: Vec<ColumnCatalog>, column_constrains: Vec<ColumnOptionDef>) {
-    let binder = Binder::new(session);
-    binder.bind_columns_to_context(table_name, column_catalogs);
-    for option_def in column_constrains {
-        match option_def.option {
-            ColumnOption::GeneratedColumns(expr) => {
-                
-            }
-            ColumnOption::Unique { is_primary: true } => {
-                // Bind primary key in `bind_sql_table_column_constraints`
-            }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", option_def),
-                    None.into(),
-                )
-                .into())
+pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, column_catalogs: &mut[ColumnCatalog], columns: Vec<ColumnDef>) -> Result<()> {
+    let mut binder = Binder::new(session);
+    binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
+    for column in columns {
+
+        for option_def in column.options {
+            match option_def.option {
+                ColumnOption::GeneratedColumns(expr) => {
+                    let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                    let expr_node = binder.bind_expr(expr)?.to_expr_proto();
+                    column_catalogs[idx].column_desc.generated_column = Some(GeneratedColumnDesc{expr: Some(expr_node)});
+                }
+                ColumnOption::Unique { is_primary: true } => {
+                    // Bind primary key in `bind_sql_table_column_constraints`
+                }
+                _ => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("column constraints \"{}\"", option_def),
+                        None.into(),
+                    )
+                    .into())
+                }
             }
         }
     }
+    Ok(())
 }
 
 /// Binds constraints that can be specified in both column definitions and table definition.
@@ -180,37 +205,46 @@ pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, co
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
 pub fn bind_sql_table_column_constraints(
-    column_descs: Vec<ColumnDesc>,
-    column_constrains: Vec<ColumnOptionDef>,
+    columns_descs: Vec<ColumnDesc>,
+    columns_defs: Vec<ColumnDef>,
     table_constraints: Vec<TableConstraint>,
 ) -> Result<(Vec<ColumnCatalog>, Vec<ColumnId>, Option<usize>)> {
-    let mut pk_column_id_from_columns = None;
-    for option_def in options {
-        match option_def.option {
-            ColumnOption::Unique { is_primary: true } => {
-                if pk_column_id_from_columns.is_some() {
-                    return Err(ErrorCode::BindError(
-                        "multiple primary keys are not allowed".into(),
-                    )
-                    .into());
+    let mut pk_column_names = vec![];
+    // Mapping from column name to column id.
+    let name_to_id = columns_descs
+        .iter()
+        .map(|c| (c.name.as_str(), c.column_id))
+        .collect::<HashMap<_, _>>();
+
+    // Bind column constraints
+    for column in columns_defs {
+        for option_def in column.options {
+            match option_def.option {
+                ColumnOption::Unique { is_primary: true } => {
+                    if !pk_column_names.is_empty() {
+                        return Err(ErrorCode::BindError(
+                            "multiple primary keys are not allowed".into(),
+                        )
+                        .into());
+                    }
+                    pk_column_names.push(column.name.real_value());
                 }
-                pk_column_id_from_columns = Some(column_id);
-            }
-            ColumnOption::GeneratedColumns(_) => {
-                // Bind generated columns in `bind_sql_column_constraints`
-            }
-            _ => {
-                return Err(ErrorCode::NotImplemented(
-                    format!("column constraints \"{}\"", option_def),
-                    None.into(),
-                )
-                .into())
+                ColumnOption::GeneratedColumns(_) => {
+                    // Bind generated columns in `bind_sql_column_constraints`
+                }
+                _ => {
+                    return Err(ErrorCode::NotImplemented(
+                        format!("column constraints \"{}\"", option_def),
+                        None.into(),
+                    )
+                    .into())
+                }
             }
         }
     }
 
-    let mut pk_column_names = vec![];
-    for constraint in constraints {
+    // Bind table constraints.
+    for constraint in table_constraints {
         match constraint {
             TableConstraint::Unique {
                 name: _,
@@ -223,7 +257,7 @@ pub fn bind_sql_table_column_constraints(
                     )
                     .into());
                 }
-                pk_column_names = columns;
+                pk_column_names = columns.iter().map(|c| c.real_value()).collect_vec();
             }
             _ => {
                 return Err(ErrorCode::NotImplemented(
@@ -234,36 +268,19 @@ pub fn bind_sql_table_column_constraints(
             }
         }
     }
-    let mut pk_column_ids = match (pk_column_id_from_columns, pk_column_names.is_empty()) {
-        (Some(_), false) => {
-            return Err(ErrorCode::BindError("multiple primary keys are not allowed".into()).into())
-        }
-        (None, true) => {
-            // We don't have a pk column now, so we need to add row_id column as the pk column
-            // later.
-            vec![]
-        }
-        (Some(cid), true) => vec![cid],
-        (None, false) => {
-            let name_to_id = column_descs
-                .iter()
-                .map(|c| (c.name.as_str(), c.column_id))
-                .collect::<HashMap<_, _>>();
-            pk_column_names
-                .iter()
-                .map(|ident| {
-                    let name = ident.real_value();
-                    name_to_id.get(name.as_str()).copied().ok_or_else(|| {
-                        ErrorCode::BindError(format!(
-                            "column \"{name}\" named in key does not exist"
-                        ))
-                    })
-                })
-                .try_collect()?
-        }
-    };
 
-    let mut columns_catalog = column_descs
+    let mut pk_column_ids: Vec<_> = pk_column_names
+    .iter()
+    .map(|name| {
+        name_to_id.get(name.as_str()).copied().ok_or_else(|| {
+            ErrorCode::BindError(format!(
+                "column \"{name}\" named in key does not exist"
+            ))
+        })
+    })
+    .try_collect()?;
+
+    let mut columns_catalog = columns_descs
         .into_iter()
         .map(|c| {
             // All columns except `_row_id` or starts with `_rw` should be visible.
@@ -299,7 +316,7 @@ pub fn bind_sql_table_column_constraints(
 pub(crate) async fn gen_create_table_plan_with_source(
     context: OptimizerContext,
     table_name: ObjectName,
-    columns: Vec<ColumnDef>,
+    column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     source_schema: SourceSchema,
     source_watermarks: Vec<SourceWatermark>,
@@ -307,11 +324,11 @@ pub(crate) async fn gen_create_table_plan_with_source(
     append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let session = context.session_ctx();
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+    let column_descs = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
     let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
-        bind_pk_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+        bind_sql_table_column_constraints(column_descs, column_defs.clone(), constraints)?;
 
     let watermark_descs = bind_source_watermark(
         session,
@@ -333,6 +350,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         true,
     )
     .await?;
+
+    bind_sql_column_constraints(session, table_name.real_value(), &mut columns, column_defs)?;
 
     gen_table_plan_inner(
         context.into(),
@@ -361,14 +380,14 @@ pub(crate) fn gen_create_table_plan(
     append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
-    let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
+    let column_descs = bind_sql_columns(columns.clone(), &mut col_id_gen)?;
 
     let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         column_descs,
-        pk_column_id_from_columns,
+        columns,
         constraints,
         properties,
         definition,
@@ -383,7 +402,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     context: OptimizerContext,
     table_name: ObjectName,
     column_descs: Vec<ColumnDesc>,
-    pk_column_id_from_columns: Option<ColumnId>,
+    column_defs: Vec<ColumnDef>,
     constraints: Vec<TableConstraint>,
     properties: HashMap<String, String>,
     definition: String,
@@ -391,8 +410,8 @@ pub(crate) fn gen_create_table_plan_without_bind(
     append_only: bool,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
-    let (columns, pk_column_ids, row_id_index) =
-        bind_sql_table_column_constraints(column_descs, pk_column_id_from_columns, constraints)?;
+    let (mut columns, pk_column_ids, row_id_index) =
+        bind_sql_table_column_constraints(column_descs, column_defs.clone(), constraints)?;
 
     let watermark_descs = bind_source_watermark(
         context.session_ctx(),
@@ -400,6 +419,8 @@ pub(crate) fn gen_create_table_plan_without_bind(
         source_watermarks,
         &columns,
     )?;
+
+    bind_sql_column_constraints(context.session_ctx(), table_name.real_value(), &mut columns, column_defs)?;
 
     gen_table_plan_inner(
         context.into(),
@@ -727,7 +748,6 @@ mod tests {
                 Err("column \"v3\" named in key does not exist"),
             ),
         ] {
-            let session = SessionImpl::mock();
             let mut ast = risingwave_sqlparser::parser::Parser::parse_sql(sql).unwrap();
             let risingwave_sqlparser::ast::Statement::CreateTable {
                     columns,
@@ -735,11 +755,11 @@ mod tests {
                     ..
                 } = ast.remove(0) else { panic!("test case should be create table") };
             let actual: Result<_> = (|| {
-                let (column_descs, pk_column_id_from_columns) =
-                    bind_sql_columns(&session, columns, &mut ColumnIdGenerator::new_initial())?;
+                let column_descs =
+                    bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;
                 let (_, pk_column_ids, _) = bind_sql_table_column_constraints(
                     column_descs,
-                    pk_column_id_from_columns,
+                    columns,
                     constraints,
                 )?;
                 Ok(pk_column_ids)

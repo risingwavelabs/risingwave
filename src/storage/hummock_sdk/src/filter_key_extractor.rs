@@ -338,7 +338,7 @@ mod tests {
 
     use bytes::{BufMut, BytesMut};
     use itertools::Itertools;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::catalog::ColumnDesc;
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
@@ -383,40 +383,25 @@ mod tests {
             columns: vec![
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (
-                            &ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)
-                            )
-                            .into(),
+                        (&ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)).into(),
                     ),
                     is_hidden: true,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (
-                            &ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)
-                            )
-                            .into(),
-                       
+                        (&ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)).into(),
                     ),
                     is_hidden: false,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (
-                            &ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)
-                            )
-                            .into(),
-                        
+                        (&ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)).into(),
                     ),
                     is_hidden: false,
                 },
                 ProstColumnCatalog {
                     column_desc: Some(
-                        (
-                            &ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)
-                            )
-                            .into(),
-                        
+                        (&ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)).into(),
                     ),
                     is_hidden: false,
                 },

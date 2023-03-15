@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc, GeneratedColumnDesc};
+use risingwave_pb::plan_common::{GeneratedColumnDesc, PbColumnCatalog, PbColumnDesc};
 
 use super::row_id_column_desc;
 use crate::catalog::{Field, ROW_ID_COLUMN_ID};

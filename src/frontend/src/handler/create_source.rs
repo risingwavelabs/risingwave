@@ -46,7 +46,7 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
-use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
+use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator, bind_sql_column_constraints};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
@@ -594,17 +594,19 @@ pub async fn handle_create_source(
         .collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
-
-    let (mut column_descs, pk_column_id_from_columns) =
-        bind_sql_columns(stmt.columns, &mut col_id_gen)?;
+        
+    let mut column_descs =
+        bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
     let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_column_constraints(
-        column_descs.clone(),
-        pk_column_id_from_columns,
-        stmt.constraints,
-    )?;
+        column_descs,
+        stmt.columns.clone(),
+            stmt.constraints,
+        )?;
+
+
     if row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
@@ -625,12 +627,12 @@ pub async fn handle_create_source(
 
     debug_assert!(is_column_ids_dedup(&columns));
 
-    
-
     let watermark_descs =
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
+
+    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();

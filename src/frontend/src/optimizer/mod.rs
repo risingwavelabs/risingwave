@@ -38,6 +38,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::WatermarkDesc;
+use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
@@ -50,7 +51,7 @@ use self::plan_visitor::InputRefValidator;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::InputRef;
+use crate::expr::{InputRef, ExprRewriter};
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -366,6 +367,31 @@ impl PlanRoot {
         }
 
         Ok(plan)
+    }
+
+    pub fn gen_optional_generated_column_project(columns: Vec<ColumnCatalog>) -> Option<StreamProject> {
+        let col_mapping = {
+            let mut mapping = Vec::with_capacity(columns.len());
+            let mut cur = 0;
+            for (idx, column) in columns.iter().enumerate() {
+                if column.column_desc.generated_column.is_some() {
+                    mapping[idx] = Some(cur);
+                    cur += 1;
+                } else {
+                    mapping[idx] = None;
+                }
+            }
+            ColIndexMapping::new(mapping)
+        };
+        for column in columns {
+            let GeneratedColumnDesc{expr} = column.column_desc.generated_column.unwrap();
+            if let Some(expr) = expr {
+                    
+            }
+
+        }
+        None
+
     }
 
     /// Optimize and generate a create table plan.
