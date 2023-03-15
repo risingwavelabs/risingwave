@@ -87,14 +87,25 @@ impl IntervalUnit {
     /// <https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L2740>
     pub fn justify_interval(&self) -> Option<Self> {
         let mut v = *self;
+        // When `days` and `usecs` have the same sign, `usecs` could potentially push `days` over
+        // `i32::MAX` or `i32::MIN`, for example in (0, i32::MIN, i64::MIN). So we attempt to
+        // restrict `abs(days) < 30` first.
+        // When they have different signs, restricting `days` first could lead to false positive of
+        // overflow, for example in (i32::MIN, -60, i64::MAX). So this step should be skipped.
         if v.days > 0 && v.usecs > 0 || v.days < 0 && v.usecs < 0 {
             v.months = v.months.checked_add(v.days / 30)?;
             v.days %= 30;
         }
 
+        // Either `days` and `usecs` are of different signs, or we have already limited
+        // `abs(days) < 30` above. It is impossible to overflow here because
+        // `-29 + i64::MIN / USECS_PER_DAY > i32::MIN`
         v.days += (v.usecs / USECS_PER_DAY) as i32;
         v.usecs %= USECS_PER_DAY;
 
+        // Unfortunately this could still generate false positive of overflow due to lack of sign
+        // adjustment below, for example in (i32::MIN, -30, 1). This is the same behavior as
+        // PostgreSQL, but I believe we (and they) would like to have it fixed.
         v.months = v.months.checked_add(v.days / 30)?;
         v.days %= 30;
 
@@ -1482,6 +1493,17 @@ mod tests {
                 }
             }
         }
+
+        // A false positive overflow that is buggy in PostgreSQL 15.2 as well.
+        let input = IntervalUnit::from_month_day_usec(i32::MIN, -30, 1);
+        let actual = input.justify_interval();
+        let actual_deserialize = IntervalCmpValue::from(input).as_justified();
+        // It has a justified interval within range, and can be obtained by our deserialization.
+        assert_eq!(actual_deserialize.unwrap().get_months(), i32::MIN);
+        assert_eq!(actual_deserialize.unwrap().get_days(), -29);
+        assert_eq!(actual_deserialize.unwrap().get_usecs(), -USECS_PER_DAY + 1);
+        // But the PostgreSQL `justify_interval` function reports overflow.
+        assert_eq!(actual, None);
     }
 
     #[test]
