@@ -109,6 +109,7 @@ impl LevelCompactionPicker {
     ) -> Option<CompactionInput> {
         let mut input_levels = vec![];
         let mut l0_total_file_size = 0;
+        let mut l0_total_file_count = 0;
         for level in &l0.sub_levels {
             // This break is optional. We can include overlapping sub-level actually.
             if level.level_type() != LevelType::Nonoverlapping {
@@ -144,6 +145,7 @@ impl LevelCompactionPicker {
                 continue;
             }
 
+            l0_total_file_count += select_level.table_infos.len() as u64;
             l0_total_file_size += cur_level_size;
             input_levels.push(select_level);
         }
@@ -156,15 +158,24 @@ impl LevelCompactionPicker {
             .iter()
             .filter(|sst| table_id.map(|id| sst.table_ids[0] == id).unwrap_or(true));
         let mut target_level_size = 0;
+        let mut target_file_count = 0;
         for sst in target_level_files.clone() {
             if level_handlers[self.target_level].is_pending_compact(&sst.sst_id) {
                 return None;
             }
             target_level_size += sst.file_size;
+            target_file_count += 1;
         }
 
         if target_level_size > l0_total_file_size {
             stats.skip_by_write_amp_limit += 1;
+            return None;
+        }
+
+        if l0_total_file_count + target_file_count as u64
+            > self.config.level0_max_compact_file_number
+        {
+            stats.skip_by_count_limit += 1;
             return None;
         }
 
@@ -438,7 +449,7 @@ pub mod tests {
             .is_none());
     }
 
-    // compact the whole level and upper sub-level when the write-amplification is more than 1.5.
+    // compact the whole level and upper sub-level when the write-amplification is more than 1.0.
     #[test]
     fn test_compact_whole_level_write_amplification_limit() {
         let config = CompactionConfigBuilder::new()
@@ -495,10 +506,8 @@ pub mod tests {
         sub_level.table_infos[0].file_size += 1000 - sub_level.total_file_size;
         sub_level.total_file_size = 1000;
         levels.l0.as_mut().unwrap().sub_levels[1].total_file_size = 1000;
-        let ret = picker
-            .pick_compaction(&levels, &levels_handler, &mut local_stats)
-            .unwrap();
-        assert_eq!(ret.input_levels.len(), 2);
+        let ret = picker.pick_compaction(&levels, &levels_handler, &mut local_stats);
+        assert!(ret.is_none());
     }
 
     #[test]
