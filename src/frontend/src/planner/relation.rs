@@ -278,7 +278,7 @@ impl Planner {
                 Some(ScalarImpl::Interval(window_offset)) => window_offset,
                 _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
             },
-            (None, None) => IntervalUnit::new(0, 0, 0),
+            (None, None) => IntervalUnit::from_month_day_usec(0, 0, 0),
             _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 

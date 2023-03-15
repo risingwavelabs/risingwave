@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper};
+use risingwave_common::types::{
+    IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
+};
 
 use crate::Result;
 
 #[inline(always)]
 fn interval_unit_to_micro_second(t: IntervalUnit) -> i64 {
-    const DAY_MICOR_SECOND: i64 = 86400000000;
-    const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
-
-    t.get_months() as i64 * MONTH_MICOR_SECOND
-        + t.get_days() as i64 * DAY_MICOR_SECOND
-        + t.get_ms() * 1000
+    t.get_months() as i64 * USECS_PER_MONTH + t.get_days() as i64 * USECS_PER_DAY + t.get_usecs()
 }
 
 #[inline(always)]
@@ -123,7 +120,9 @@ mod tests {
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
 
     use super::tumble_start_offset_date_time;
-    use crate::vector_op::tumble::{get_window_start, tumble_start_date_time};
+    use crate::vector_op::tumble::{
+        get_window_start, interval_unit_to_micro_second, tumble_start_date_time,
+    };
 
     #[test]
     fn test_tumble_start_date_time() {
@@ -175,17 +174,11 @@ mod tests {
     fn test_remainder_necessary() {
         let mut wrong_cnt = 0;
         for i in -30..30 {
-            let timestamp_micro_second = IntervalUnit::from_minutes(i).get_ms() * 1000;
+            let timestamp_micro_second = IntervalUnit::from_minutes(i).get_usecs();
             let window_size = IntervalUnit::from_minutes(5);
             let window_start = get_window_start(timestamp_micro_second, window_size).unwrap();
 
-            const DAY_MICOR_SECOND: i64 = 86400000000;
-            const MONTH_MICOR_SECOND: i64 = 30 * DAY_MICOR_SECOND;
-
-            let window_size_micro_second = window_size.get_months() as i64 * MONTH_MICOR_SECOND
-                + window_size.get_days() as i64 * DAY_MICOR_SECOND
-                + window_size.get_ms() * 1000;
-
+            let window_size_micro_second = interval_unit_to_micro_second(window_size);
             let default_window_start = timestamp_micro_second
                 - (timestamp_micro_second + window_size_micro_second) % window_size_micro_second;
 

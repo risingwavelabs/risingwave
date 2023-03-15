@@ -349,8 +349,10 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
+        let offset = IntervalUnit::from_minutes(0);
         let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide, offset)
+                .unwrap();
 
         (
             tx,
