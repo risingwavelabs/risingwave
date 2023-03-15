@@ -172,12 +172,12 @@ impl StreamGraphFormatter {
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
             }
-            stream_node::NodeBody::HashAgg(node) => {
+            stream_node::NodeBody::HashAgg(inner) => {
                 fields.push((
                     "result table",
-                    self.pretty_add_table(node.get_result_table().unwrap()),
+                    self.pretty_add_table(inner.get_result_table().unwrap()),
                 ));
-                fields.push(("state tables", self.call_states(&node.agg_call_states)));
+                fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
             },
             stream_node::NodeBody::HashJoin(node) => {
