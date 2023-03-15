@@ -78,8 +78,8 @@ mod tests {
         do_test("84818.33333333333333333333333", 4, "84818.3333");
         do_test("84818.15", 1, "84818.2");
         do_test("21.372736", -1, "0");
-        // Maximum of 28 digits
-        do_test("0", 340, &format!("0.{}", "0".repeat(28)));
+        // should be "0"
+        do_test("0", 340, "0");
     }
 
     #[test]
