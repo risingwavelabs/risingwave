@@ -15,7 +15,7 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, BytesMut, BufMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
 use risingwave_hummock_sdk::KeyComparator;
@@ -105,7 +105,7 @@ impl BlockIterator {
                 let mut full_key_encoded_without_table_id: BytesMut = Default::default();
                 key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
 
-                self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+                self.seek_restart_point_by_key(key);
 
                 self.next_until_key(&full_key_encoded_without_table_id[..]);
             }
@@ -119,7 +119,7 @@ impl BlockIterator {
             Ordering::Equal => {
                 let mut full_key_encoded_without_table_id: BytesMut = Default::default();
                 key.encode_into_without_table_id(&mut full_key_encoded_without_table_id);
-                self.seek_restart_point_by_key(&full_key_encoded_without_table_id[..]);
+                self.seek_restart_point_by_key(key);
                 self.next_until_key(&full_key_encoded_without_table_id[..]);
                 if !self.is_valid() {
                     self.seek_to_last();
@@ -234,13 +234,17 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
+    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
             .search_restart_partition_point(|&probe| {
                 let prefix = self.decode_prefix_at(probe as usize);
                 let probe_key = &self.block.data()[prefix.diff_key_range()];
-                match KeyComparator::compare_encoded_full_key(probe_key, key) {
+                let mut buf: BytesMut = BytesMut::default();
+                buf.put_u32(self.block.table_id());
+                buf.put_slice(probe_key);
+                let full_probe_key = FullKey::decode(&buf[..]);
+                match KeyComparator::compare_full_key_without_table_id(full_probe_key, key) {
                     Ordering::Less | Ordering::Equal => true,
                     Ordering::Greater => false,
                 }
@@ -249,7 +253,7 @@ impl BlockIterator {
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
-    fn seek_restart_point_by_key(&mut self, key: &[u8]) {
+    fn seek_restart_point_by_key(&mut self, key: FullKey<&[u8]>) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
