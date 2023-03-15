@@ -6520,6 +6520,7 @@ dependencies = [
  "madsim-tokio",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "regex",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_frontend",
