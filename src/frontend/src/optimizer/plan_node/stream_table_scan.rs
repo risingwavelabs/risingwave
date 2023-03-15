@@ -21,9 +21,7 @@ use risingwave_common::catalog::{Field, TableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
-use super::{
-    ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamIndexScan, StreamNode,
-};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -98,12 +96,14 @@ impl StreamTableScan {
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         chain_type: ChainType,
-    ) -> StreamIndexScan {
-        StreamIndexScan::new(
+    ) -> StreamTableScan {
+        let logical_index_scan =
             self.logical
-                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
-            chain_type,
-        )
+                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping);
+        logical_index_scan
+            .distribution_key()
+            .expect("distribution key of stream chain must exist in output columns");
+        StreamTableScan::new_with_chain_type(logical_index_scan, chain_type)
     }
 
     pub fn chain_type(&self) -> ChainType {
