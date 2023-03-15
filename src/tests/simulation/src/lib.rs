@@ -21,6 +21,7 @@ pub mod client;
 pub mod cluster;
 pub mod ctl_ext;
 pub mod kafka;
+pub mod metrics_ext;
 pub mod nexmark;
 pub mod slt;
 pub mod utils;
