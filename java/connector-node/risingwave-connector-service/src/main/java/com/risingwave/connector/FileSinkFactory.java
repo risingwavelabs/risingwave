@@ -26,19 +26,17 @@ public class FileSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
         String sinkPath = tableProperties.get(OUTPUT_PATH_PROP);
         return new FileSink(sinkPath, tableSchema);
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(OUTPUT_PATH_PROP)) {
             throw INVALID_ARGUMENT
                     .withDescription(String.format("%s is not specified", OUTPUT_PATH_PROP))
                     .asRuntimeException();
         }
+        return tableSchema;
     }
 }

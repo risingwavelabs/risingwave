@@ -36,9 +36,6 @@ public class DeltaLakeSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
         String location = tableProperties.get(LOCATION_PROP);
         String locationType = tableProperties.get(LOCATION_TYPE_PROP);
 
@@ -52,7 +49,7 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(LOCATION_PROP)
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
             throw INVALID_ARGUMENT
@@ -72,6 +69,8 @@ public class DeltaLakeSinkFactory implements SinkFactory {
         StructType schema = log.snapshot().getMetadata().getSchema();
         DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
         DeltaLakeSinkUtil.convertSchema(log, tableSchema);
+
+        return tableSchema;
     }
 
     private String getConfig(String location, String locationType, Configuration hadoopConf) {

@@ -27,5 +27,7 @@ public class PrintSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {}
+    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+        return tableSchema;
+    }
 }

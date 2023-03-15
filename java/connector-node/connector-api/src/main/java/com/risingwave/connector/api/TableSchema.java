@@ -42,6 +42,13 @@ public class TableSchema {
         }
     }
 
+    public TableSchema(TableSchema schema, List<String> primaryKeys) {
+        this.columnNames = schema.columnNames;
+        this.columns = schema.columns;
+        this.columnIndices = schema.columnIndices;
+        this.primaryKeys = primaryKeys;
+    }
+
     public int getNumColumns() {
         return columns.size();
     }
@@ -100,6 +107,21 @@ public class TableSchema {
                 tableSchema.getPkIndicesList().stream()
                         .map(i -> tableSchema.getColumns(i).getName())
                         .collect(Collectors.toList()));
+    }
+
+    public ConnectorServiceProto.TableSchema toProto() {
+        var tableSchemaBuiler = ConnectorServiceProto.TableSchema.newBuilder();
+        for (String columnName : columnNames) {
+            tableSchemaBuiler.addColumns(
+                    ConnectorServiceProto.TableSchema.Column.newBuilder()
+                            .setName(columnName)
+                            .setDataType(columns.get(columnName))
+                            .build());
+        }
+        for (String primaryKeyName : primaryKeys) {
+            tableSchemaBuiler.addPkIndices(columnIndices.get(primaryKeyName));
+        }
+        return tableSchemaBuiler.build();
     }
 
     public List<String> getPrimaryKeys() {

@@ -52,9 +52,6 @@ public class IcebergSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
         String mode = tableProperties.get(SINK_MODE_PROP);
         String location = tableProperties.get(LOCATION_TYPE_PROP);
         String warehousePath = tableProperties.get(WAREHOUSE_PATH_PROP);
@@ -83,7 +80,7 @@ public class IcebergSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
         if (!tableProperties.containsKey(SINK_MODE_PROP) // only append-only, upsert
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP) // only local, s3, minio
                 || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
@@ -119,7 +116,8 @@ public class IcebergSinkFactory implements SinkFactory {
                     .withCause(e)
                     .asRuntimeException();
         }
-        // check that all columns in tableSchema exist in the iceberg table
+
+        // Check that all columns in tableSchema exist in the iceberg table.
         for (String columnName : tableSchema.getColumnNames()) {
             if (icebergTable.schema().findField(columnName) == null) {
                 LOG.error("column not found: {}", columnName);
@@ -128,7 +126,8 @@ public class IcebergSinkFactory implements SinkFactory {
                         .asRuntimeException();
             }
         }
-        // check that all required columns in the iceberg table exist in tableSchema
+
+        // Check that all required columns in the iceberg table exist in tableSchema.
         Set<String> columnNames = Set.of(tableSchema.getColumnNames());
         for (Types.NestedField column : icebergTable.schema().columns()) {
             if (column.isRequired() && !columnNames.contains(column.name())) {
@@ -145,12 +144,15 @@ public class IcebergSinkFactory implements SinkFactory {
         }
 
         if (mode.equals("upsert")) {
+            // For upsert iceberg sink, the user must specify its primary key explicitly.
             if (tableSchema.getPrimaryKeys().isEmpty()) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription("no primary keys for upsert mode")
                         .asRuntimeException();
             }
         }
+
+        return tableSchema;
     }
 
     private HadoopCatalog createHadoopCatalog(String location, String warehousePath) {

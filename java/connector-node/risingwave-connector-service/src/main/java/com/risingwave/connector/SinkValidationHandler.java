@@ -32,11 +32,12 @@ public class SinkValidationHandler {
     }
 
     public void handle(ConnectorServiceProto.ValidateSinkRequest request) {
+        TableSchema newTableSchema = null;
         try {
             SinkConfig sinkConfig = request.getSinkConfig();
             TableSchema tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
             SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
-            sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
+            newTableSchema = sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
         } catch (Exception e) {
             LOG.error("sink validation failed", e);
             responseObserver.onNext(
@@ -49,7 +50,10 @@ public class SinkValidationHandler {
             responseObserver.onCompleted();
         }
 
-        responseObserver.onNext(ConnectorServiceProto.ValidateSinkResponse.newBuilder().build());
+        responseObserver.onNext(
+                ConnectorServiceProto.ValidateSinkResponse.newBuilder()
+                        .setSchema(newTableSchema.toProto())
+                        .build());
         responseObserver.onCompleted();
     }
 }

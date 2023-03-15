@@ -95,7 +95,13 @@ message ValidateSinkRequest {
 }
 
 message ValidateSinkResponse {
-  ValidationError error = 1;
+  oneof respose_inner {
+    // On validation success, we return the schema which should be used by the sink 
+    // executor and might differ from the schema passed in before. 
+    TableSchema schema = 1;
+    // On validation failure, we return the error.
+    ValidationError error = 2;
+  }
 }
 
 /* Source Service */
