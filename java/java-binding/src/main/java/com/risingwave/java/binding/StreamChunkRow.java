@@ -14,12 +14,14 @@
 
 package com.risingwave.java.binding;
 
-public class KeyedRow extends BaseRow {
-    public KeyedRow(long pointer) {
+import com.risingwave.proto.Data;
+
+public class StreamChunkRow extends BaseRow {
+    public StreamChunkRow(long pointer) {
         super(pointer);
     }
 
-    public byte[] getKey() {
-        return Binding.rowGetKey(pointer);
+    public Data.Op getOp() {
+        return Data.Op.forNumber(Binding.rowGetOp(pointer));
     }
 }

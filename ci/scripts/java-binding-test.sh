@@ -53,3 +53,6 @@ cargo make ingest-data-and-run-java-binding
 
 echo "--- Kill cluster"
 cargo make ci-kill
+
+echo "--- run stream chunk java binding"
+cargo make run-java-binding-stream-chunk-demo
