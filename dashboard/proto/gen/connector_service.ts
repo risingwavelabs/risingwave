@@ -140,7 +140,7 @@ export interface ValidateSinkRequest {
 }
 
 export interface ValidateSinkResponse {
-  error: ValidationError | undefined;
+  responseInner?: { $case: "schema"; schema: TableSchema } | { $case: "error"; error: ValidationError };
 }
 
 export interface CdcMessage {
@@ -754,25 +754,45 @@ export const ValidateSinkRequest = {
 };
 
 function createBaseValidateSinkResponse(): ValidateSinkResponse {
-  return { error: undefined };
+  return { responseInner: undefined };
 }
 
 export const ValidateSinkResponse = {
   fromJSON(object: any): ValidateSinkResponse {
-    return { error: isSet(object.error) ? ValidationError.fromJSON(object.error) : undefined };
+    return {
+      responseInner: isSet(object.schema)
+        ? { $case: "schema", schema: TableSchema.fromJSON(object.schema) }
+        : isSet(object.error)
+        ? { $case: "error", error: ValidationError.fromJSON(object.error) }
+        : undefined,
+    };
   },
 
   toJSON(message: ValidateSinkResponse): unknown {
     const obj: any = {};
-    message.error !== undefined && (obj.error = message.error ? ValidationError.toJSON(message.error) : undefined);
+    message.responseInner?.$case === "schema" &&
+      (obj.schema = message.responseInner?.schema ? TableSchema.toJSON(message.responseInner?.schema) : undefined);
+    message.responseInner?.$case === "error" &&
+      (obj.error = message.responseInner?.error ? ValidationError.toJSON(message.responseInner?.error) : undefined);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ValidateSinkResponse>, I>>(object: I): ValidateSinkResponse {
     const message = createBaseValidateSinkResponse();
-    message.error = (object.error !== undefined && object.error !== null)
-      ? ValidationError.fromPartial(object.error)
-      : undefined;
+    if (
+      object.responseInner?.$case === "schema" &&
+      object.responseInner?.schema !== undefined &&
+      object.responseInner?.schema !== null
+    ) {
+      message.responseInner = { $case: "schema", schema: TableSchema.fromPartial(object.responseInner.schema) };
+    }
+    if (
+      object.responseInner?.$case === "error" &&
+      object.responseInner?.error !== undefined &&
+      object.responseInner?.error !== null
+    ) {
+      message.responseInner = { $case: "error", error: ValidationError.fromPartial(object.responseInner.error) };
+    }
     return message;
   },
 };
