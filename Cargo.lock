@@ -6335,6 +6335,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "0.2.0-alpha"
 dependencies = [
+ "enum-as-inner",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
