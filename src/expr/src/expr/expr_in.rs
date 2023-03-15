@@ -16,6 +16,7 @@ use std::collections::HashSet;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use futures_util::future::FutureExt;
 use risingwave_common::array::{ArrayBuilder, ArrayRef, BoolArrayBuilder, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
@@ -112,9 +113,10 @@ impl<'a> TryFrom<&'a ExprNode> for InExpression {
         let data_chunk = DataChunk::new_dummy(1);
         for child in &children[1..] {
             let const_expr = build_from_prost(child)?;
-            let array = tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(const_expr.eval(&data_chunk))
-            })?;
+            let array = const_expr
+                .eval(&data_chunk)
+                .now_or_never()
+                .expect("constant expression should not be async")?;
             let datum = array.value_at(0).to_owned_datum();
             data.push(datum);
         }

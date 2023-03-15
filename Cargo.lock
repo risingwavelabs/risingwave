@@ -6100,6 +6100,7 @@ dependencies = [
  "criterion",
  "dyn-clone",
  "either",
+ "futures-util",
  "itertools",
  "madsim-tokio",
  "md5",

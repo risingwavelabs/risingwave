@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::executor::block_on;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -41,7 +40,6 @@ use risingwave_pb::batch_plan::{
 };
 use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
-use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
@@ -138,11 +136,10 @@ impl LocalQueryExecution {
             }
         };
 
-        if cfg!(madsim) {
-            tokio::spawn(future);
-        } else {
-            spawn_blocking(move || block_on(future));
-        }
+        #[cfg(madsim)]
+        tokio::spawn(future);
+        #[cfg(not(madsim))]
+        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
 
         ReceiverStream::new(receiver)
     }

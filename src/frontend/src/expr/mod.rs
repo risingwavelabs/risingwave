@@ -14,6 +14,7 @@
 
 use enum_as_inner::EnumAsInner;
 use fixedbitset::FixedBitSet;
+use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
 use risingwave_common::error::Result as RwResult;
@@ -240,7 +241,9 @@ impl ExprImpl {
     /// Evaluate a constant expression.
     pub fn eval_row_const(&self) -> RwResult<Datum> {
         assert!(self.is_const());
-        tokio::runtime::Handle::current().block_on(self.eval_row(&OwnedRow::empty()))
+        self.eval_row(&OwnedRow::empty())
+            .now_or_never()
+            .expect("constant expression should not be async")
     }
 }
 
