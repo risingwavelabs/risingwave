@@ -38,7 +38,7 @@
           Upstream
           BatchPlanNode
 
-     Table 4294967294 { columns: [a, b, c, t1._row_id, null:Int64, 0:Int32], primary key: [$3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3, 4, 5], read_pk_prefix_len_hint: 3 }
+     Table 4294967294 { columns: [a, b, c, t1._row_id, null:Int64, 0:Int32], primary key: [$3 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3, 4, 5], read pk prefix len hint: 3 }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
@@ -75,7 +75,7 @@
           materialized table: 4294967294
         StreamProject { exprs: [t1.a, t1.b, t1.c] }
           StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-              result table: 0, state tables: [], distinct_tables: []
+              result table: 0, state tables: [], distinct tables: []
             StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -95,8 +95,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
-     Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read pk prefix len hint: 3 }
+     Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2], read pk prefix len hint: 3 }
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
     create table t2 (a int, b numeric, c bigint, primary key(a));
@@ -133,7 +133,7 @@
           materialized table: 4294967294
         StreamProject { exprs: [t1.a, t1.b, t1.c] }
           StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] }
-              result table: 0, state tables: [], distinct_tables: []
+              result table: 0, state tables: [], distinct tables: []
             StreamExchange Hash([0, 1, 2]) from 1
 
     Fragment 1
@@ -153,8 +153,8 @@
           Upstream
           BatchPlanNode
 
-     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
-     Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2], read_pk_prefix_len_hint: 3 }
+     Table 0 { columns: [t1_a, t1_b, t1_c, count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0, 1, 2], read pk prefix len hint: 3 }
+     Table 4294967294 { columns: [a, b, c], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0, 1, 2], read pk prefix len hint: 3 }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);

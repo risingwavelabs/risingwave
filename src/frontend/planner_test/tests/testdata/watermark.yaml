@@ -26,8 +26,8 @@
             StreamSource { source: "t", columns: ["v1", "_row_id"] }
                 source state table: 1
 
-     Table 1 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], read_pk_prefix_len_hint: 0 }
-     Table 4294967294 { columns: [v1, _row_id], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1], read_pk_prefix_len_hint: 1 }
+     Table 1 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], read pk prefix len hint: 0 }
+     Table 4294967294 { columns: [v1, _row_id], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1], read pk prefix len hint: 1 }
 - name: watermark on append only table with source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only with (connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest') ROW FORMAT JSON;

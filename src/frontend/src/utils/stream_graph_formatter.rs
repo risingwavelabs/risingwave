@@ -81,7 +81,7 @@ impl StreamGraphFormatter {
         let tb = TableCatalog::from(tb.clone());
         writeln!(
             f,
-            " Table {} {{ columns: [{}], primary key: {:?}, value indices: {:?}, distribution key: {:?}, read_pk_prefix_len_hint: {:?}{} }}",
+            " Table {} {{ columns: [{}], primary key: {:?}, value indices: {:?}, distribution key: {:?}, read pk prefix len hint: {:?}{} }}",
             tb.id,
             tb.columns
                 .iter()
@@ -156,7 +156,7 @@ impl StreamGraphFormatter {
             stream_node::NodeBody::GlobalSimpleAgg(inner) => {
                 let in_fields = &node.get_input()[0].fields;
                 Some(format!(
-                    "result table: {}, state tables: [{}], distinct_tables: [{}]",
+                    "result table: {}, state tables: [{}], distinct tables: [{}]",
                     self.add_table(inner.get_result_table().unwrap()),
                     inner
                         .agg_call_states
@@ -174,7 +174,7 @@ impl StreamGraphFormatter {
                         .iter()
                         .sorted_by_key(|(i, _)| *i)
                         .map(|(i, table)| format!(
-                            "(distinct key: {}, table_id: {})",
+                            "(distinct key: {}, table id: {})",
                             in_fields[*i as usize].name,
                             self.add_table(table)
                         ))
@@ -184,7 +184,7 @@ impl StreamGraphFormatter {
             stream_node::NodeBody::HashAgg(inner) => {
                 let in_fields = &node.get_input()[0].fields;
                 Some(format!(
-                    "result table: {}, state tables: [{}], distinct_tables: [{}]",
+                    "result table: {}, state tables: [{}], distinct tables: [{}]",
                     self.add_table(inner.get_result_table().unwrap()),
                     inner
                         .agg_call_states
@@ -202,7 +202,7 @@ impl StreamGraphFormatter {
                         .iter()
                         .sorted_by_key(|(i, _)| *i)
                         .map(|(i, table)| format!(
-                            "(distinct key: {}, table_id: {})",
+                            "(distinct key: {}, table id: {})",
                             in_fields[*i as usize].name,
                             self.add_table(table)
                         ))
