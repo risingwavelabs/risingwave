@@ -232,18 +232,16 @@ impl Planner {
                     vec![
                         ExprImpl::InputRef(Box::new(time_col)),
                         window_size.clone(),
-                        window_offset.clone(),
+                        window_offset,
                     ],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
                 // `tumble_start`, or we can depends on common expression
                 // optimization.
-                let window_end = FunctionCall::new(
-                    ExprType::Add,
-                    vec![window_start.clone(), window_size],
-                )?
-                .into();
+                let window_end =
+                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
+                        .into();
                 exprs.push(window_start);
                 exprs.push(window_end);
                 let base = self.plan_relation(input)?;
