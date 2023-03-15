@@ -47,7 +47,7 @@ fn select_all_vnode_stream(
     select_all(streams.into_iter().map(Box::pin))
 }
 
-pub struct Iterator {
+pub struct HummockJavaBindingIterator {
     row_serde: EitherSerde,
     stream: SelectAllIterStream,
 }
@@ -67,7 +67,7 @@ impl KeyedRow {
     }
 }
 
-impl Iterator {
+impl HummockJavaBindingIterator {
     pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
 
@@ -32,6 +32,7 @@ pub trait ExprRewriter {
             ExprImpl::TableFunction(inner) => self.rewrite_table_function(*inner),
             ExprImpl::WindowFunction(inner) => self.rewrite_window_function(*inner),
             ExprImpl::UserDefinedFunction(inner) => self.rewrite_user_defined_function(*inner),
+            ExprImpl::Parameter(inner) => self.rewrite_parameter(*inner),
         }
     }
     fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
@@ -53,6 +54,9 @@ pub trait ExprRewriter {
         AggCall::new(func_type, inputs, distinct, order_by, filter)
             .unwrap()
             .into()
+    }
+    fn rewrite_parameter(&mut self, parameter: Parameter) -> ExprImpl {
+        parameter.into()
     }
     fn rewrite_literal(&mut self, literal: Literal) -> ExprImpl {
         literal.into()
