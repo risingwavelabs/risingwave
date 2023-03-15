@@ -31,16 +31,17 @@ pub struct InputRefExpression {
     idx: usize,
 }
 
+#[async_trait::async_trait]
 impl Expression for InputRefExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         Ok(input.column_at(self.idx).array())
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let cell = input.index(self.idx).as_ref().cloned();
         Ok(cell)
     }
@@ -85,14 +86,14 @@ mod tests {
 
     use crate::expr::{Expression, InputRefExpression};
 
-    #[test]
-    fn test_eval_row_input_ref() {
+    #[tokio::test]
+    async fn test_eval_row_input_ref() {
         let datums: Vec<Datum> = vec![Some(1.into()), Some(2.into()), None];
         let input_row = OwnedRow::new(datums.clone());
 
         for (i, expected) in datums.iter().enumerate() {
             let expr = InputRefExpression::new(DataType::Int32, i);
-            let result = expr.eval_row(&input_row).unwrap();
+            let result = expr.eval_row(&input_row).await.unwrap();
             assert_eq!(*expected, result);
         }
     }

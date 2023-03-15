@@ -57,22 +57,28 @@ impl CaseExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for CaseExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut input = input.clone();
         let input_len = input.capacity();
         let mut selection = vec![None; input_len];
         let when_len = self.when_clauses.len();
         let mut result_array = Vec::with_capacity(when_len + 1);
         for (when_idx, WhenClause { when, then }) in self.when_clauses.iter().enumerate() {
-            let calc_then_vis: Vis = when.eval_checked(&input)?.as_bool().to_bitmap().into();
+            let calc_then_vis: Vis = when
+                .eval_checked(&input)
+                .await?
+                .as_bool()
+                .to_bitmap()
+                .into();
             let input_vis = input.vis().clone();
             input.set_vis(calc_then_vis.clone());
-            let then_res = then.eval_checked(&input)?;
+            let then_res = then.eval_checked(&input).await?;
             calc_then_vis
                 .iter_ones()
                 .for_each(|pos| selection[pos] = Some(when_idx));
@@ -80,7 +86,7 @@ impl Expression for CaseExpression {
             result_array.push(then_res);
         }
         if let Some(ref else_expr) = self.else_clause {
-            let else_res = else_expr.eval_checked(&input)?;
+            let else_res = else_expr.eval_checked(&input).await?;
             input
                 .vis()
                 .iter_ones()
@@ -98,14 +104,14 @@ impl Expression for CaseExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for WhenClause { when, then } in &self.when_clauses {
-            if when.eval_row(input)?.map_or(false, |w| w.into_bool()) {
-                return then.eval_row(input);
+            if when.eval_row(input).await?.map_or(false, |w| w.into_bool()) {
+                return then.eval_row(input).await;
             }
         }
         if let Some(ref else_expr) = self.else_clause {
-            else_expr.eval_row(input)
+            else_expr.eval_row(input).await
         } else {
             Ok(None)
         }
@@ -199,17 +205,17 @@ mod tests {
         assert!(CaseExpression::try_from(&p).is_ok());
     }
 
-    fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
+    async fn test_eval_row(expr: CaseExpression, row_inputs: Vec<i32>, expected: Vec<Option<f32>>) {
         for (i, row_input) in row_inputs.iter().enumerate() {
             let row = OwnedRow::new(vec![Some(row_input.to_scalar_value())]);
-            let datum = expr.eval_row(&row).unwrap();
+            let datum = expr.eval_row(&row).await.unwrap();
             let expected = expected[i].map(|f| f.into());
             assert_eq!(datum, expected)
         }
     }
 
-    #[test]
-    fn test_eval_searched_case() {
+    #[tokio::test]
+    async fn test_eval_searched_case() {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -239,7 +245,7 @@ mod tests {
              4
              5",
         );
-        let output = searched_case_expr.eval(&input).unwrap();
+        let output = searched_case_expr.eval(&input).await.unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), Some(3.1f32.into()));
         assert_eq!(output.datum_at(2), Some(4.1f32.into()));
@@ -247,8 +253,8 @@ mod tests {
         assert_eq!(output.datum_at(4), Some(4.1f32.into()));
     }
 
-    #[test]
-    fn test_eval_without_else() {
+    #[tokio::test]
+    async fn test_eval_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -272,15 +278,15 @@ mod tests {
              3
              4",
         );
-        let output = searched_case_expr.eval(&input).unwrap();
+        let output = searched_case_expr.eval(&input).await.unwrap();
         assert_eq!(output.datum_at(0), Some(3.1f32.into()));
         assert_eq!(output.datum_at(1), None);
         assert_eq!(output.datum_at(2), Some(3.1f32.into()));
         assert_eq!(output.datum_at(3), None);
     }
 
-    #[test]
-    fn test_eval_row_searched_case() {
+    #[tokio::test]
+    async fn test_eval_row_searched_case() {
         let ret_type = DataType::Float32;
         // when x <= 2 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -312,11 +318,11 @@ mod tests {
             Some(4.1f32),
         ];
 
-        test_eval_row(searched_case_expr, row_inputs, expected);
+        test_eval_row(searched_case_expr, row_inputs, expected).await;
     }
 
-    #[test]
-    fn test_eval_row_without_else() {
+    #[tokio::test]
+    async fn test_eval_row_without_else() {
         let ret_type = DataType::Float32;
         // when x <= 3 then 3.1
         let when_clauses = vec![WhenClause::new(
@@ -337,6 +343,6 @@ mod tests {
         let row_inputs = vec![2, 3, 4, 5];
         let expected = vec![Some(3.1f32), Some(3.1f32), None, None];
 
-        test_eval_row(searched_case_expr, row_inputs, expected);
+        test_eval_row(searched_case_expr, row_inputs, expected).await;
     }
 }
