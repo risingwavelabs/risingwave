@@ -113,7 +113,7 @@ async fn validate_case(
         for ProcessedBoundTable {
             interested_tables,
             limit,
-        } in tables.iter()
+        } in &tables
         {
             for table in interested_tables {
                 let sql = format!("SELECT COUNT(*) FROM {}", table);
