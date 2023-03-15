@@ -6127,6 +6127,7 @@ dependencies = [
  "async-trait",
  "bk-tree",
  "bytes",
+ "chrono",
  "clap 4.1.8",
  "derivative",
  "downcast-rs",
