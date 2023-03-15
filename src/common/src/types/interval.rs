@@ -506,6 +506,42 @@ impl std::fmt::Debug for IntervalUnitDisplay<'_> {
 ///
 /// Do NOT make this `pub` as the assumption of 1 month = 30 days and 1 day = 24 hours does not
 /// always hold in other places.
+///
+/// Given this equality definition in PostgreSQL, different interval values can be considered equal,
+/// forming equivalence classes. For example:
+/// * '-45 days' == '-1 months -15 days' == '1 months -75 days'
+/// * '-2147483646 months -210 days' == '-2147483648 months -150 days' == '-2075900865 months
+///   -2147483640 days'
+///
+/// To hash and memcompare them, we need to pick a representative for each equivalence class, and
+/// then map all values from the same equivalence class to the same representative. There are 3
+/// choices (may be more):
+/// (a) an `i128` of total `usecs`, with `months` and `days` transformed into `usecs`;
+/// (b) the justified interval, as defined by PostgreSQL `justify_interval`;
+/// (c) the alternate representative interval that maximizes `abs` of smaller units;
+///
+/// For simplicity we will assume there are only `months` and `days` and ignore `usecs` below.
+///
+/// The justified interval is more human friendly. However, it may overflow. In the 2 examples
+/// above, '-1 months -15 days' is the justified interval of the first equivalence class, but there
+/// is no justified interval in the second one. It would be '-2147483653 months' but this overflows
+/// `i32`. A lot of bits are wasted in a justified interval because `months` is using `i32` for
+/// `-29..=29` only.
+///
+/// The alternate representative interval aims to avoid this overflow. It still requires all units
+/// to have the same sign, but maximizes `abs` of smaller unit rather than limit it to `29`. The
+/// alternate representative of the 2 examples above are '-45 days' and '-2075900865 months
+/// -2147483640 days'. The alternate representative interval always exists.
+///
+/// For serialize, we could use any of 3. But justified interval requires (i33, i6, i38), and
+/// alternate representative interval is not intuitive.
+///
+/// For deserialize, we attempt justified interval first and fallback to alternate. This could give
+/// human friendly results in common cases and still guarantee no overflow, as long as the bytes
+/// were serialized properly.
+///
+/// Note the alternate representative interval does not exist in PostgreSQL as they do not
+/// deserialize from `IntervalCmpValue`.
 #[derive(PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct IntervalCmpValue(i128);
 
@@ -543,8 +579,8 @@ impl Hash for IntervalUnit {
     }
 }
 
-/// Loss of information during the process due to `justify`. Only intended for memcomparable
-/// encoding.
+/// Loss of information during the process due to `IntervalCmpValue`. Only intended for
+/// memcomparable encoding.
 impl Serialize for IntervalUnit {
     fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
     where
@@ -561,6 +597,7 @@ impl Serialize for IntervalUnit {
 }
 
 impl IntervalCmpValue {
+    /// Recover the justified interval from this equivalence class, if it exists.
     fn as_justified(&self) -> Option<IntervalUnit> {
         let usecs = (self.0 % (USECS_PER_DAY as i128)) as i64;
         let remaining_days = self.0 / (USECS_PER_DAY as i128);
@@ -569,6 +606,8 @@ impl IntervalCmpValue {
         Some(IntervalUnit::from_month_day_usec(months, days, usecs))
     }
 
+    /// Recover the alternate representative interval from this equivalence class.
+    /// It always exists unless the encoding is invalid. See [`IntervalCmpValue`] for details.
     fn as_alternate(&self) -> Option<IntervalUnit> {
         match self.0.cmp(&0) {
             Ordering::Equal => Some(IntervalUnit::from_month_day_usec(0, 0, 0)),
