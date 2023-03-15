@@ -308,7 +308,7 @@ impl TierCompactionPicker {
             );
 
             let mut compaction_bytes = level.total_file_size;
-            let mut compact_file_count = level.table_infos.len();
+            let mut compact_file_count = level.table_infos.len() as u64;
             let mut waiting_enough_files = true;
 
             for other in &l0.sub_levels[idx + 1..] {
@@ -331,7 +331,7 @@ impl TierCompactionPicker {
                 }
 
                 compaction_bytes += other.total_file_size;
-                compact_file_count += other.table_infos.len();
+                compact_file_count += other.table_infos.len() as u64;
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: other.level_type,
@@ -339,7 +339,7 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+            if compact_file_count < self.config.level0_tier_compact_file_number
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;

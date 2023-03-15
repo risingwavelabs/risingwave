@@ -208,11 +208,9 @@ impl DynamicLevelSelectorCore {
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels
                 .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            if base_level_size < self.config.max_compaction_bytes {
-                let score = total_size * SCORE_BASE
-                    / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-                ctx.score_levels.push((score, 0, ctx.base_level));
-            }
+            let score = total_size * SCORE_BASE
+                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
+            ctx.score_levels.push((score, 0, ctx.base_level));
         }
 
         // The bottommost level can not be input level.

@@ -163,9 +163,7 @@ impl LevelCompactionPicker {
             target_level_size += sst.file_size;
         }
 
-        if target_level_size > l0_total_file_size
-            && l0_total_file_size < self.config.max_compaction_bytes
-        {
+        if target_level_size > l0_total_file_size {
             stats.skip_by_write_amp_limit += 1;
             return None;
         }
