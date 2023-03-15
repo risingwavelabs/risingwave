@@ -113,7 +113,7 @@ impl StreamGraphFormatter {
         ));
         fields.push((
             "read pk prefix len hint",
-            Pretty::debug(&tb.read_pk_prefix_len_hint),
+            Pretty::debug(&tb.read_prefix_len_hint),
         ));
         if let Some(vnode_col_idx) = tb.vnode_col_index {
             fields.push(("vnode column idx", Pretty::debug(&vnode_col_idx)));
@@ -164,22 +164,23 @@ impl StreamGraphFormatter {
                 "materialized table",
                 self.pretty_add_table(node.get_table().unwrap()),
             )),
-            stream_node::NodeBody::GlobalSimpleAgg(node) => {
+            stream_node::NodeBody::GlobalSimpleAgg(inner) => {
                 fields.push((
                     "result table",
-                    self.pretty_add_table(node.get_result_table().unwrap()),
+                    self.pretty_add_table(inner.get_result_table().unwrap()),
                 ));
-                fields.push(("state tables", self.call_states(&node.agg_call_states)));
+                fields.push(("state tables", self.call_states(&inner.agg_call_states)));
                 let in_fields = &node.get_input()[0].fields;
                 let distinct = Pretty::Array(inner
                 .get_distinct_dedup_tables()
                 .iter()
                 .sorted_by_key(|(i, _)| *i)
-                .map(|(i, table)| format!(
+                .map(|(i, table)|
+                 Pretty::Text(format!(
                     "(distinct key: {}, table id: {})",
                     in_fields[*i as usize].name,
                     self.add_table(table)
-                )).collect());
+                ).into())).collect());
             }
             stream_node::NodeBody::HashAgg(node) => {
                 fields.push((
@@ -261,6 +262,48 @@ impl StreamGraphFormatter {
         };
 
         if self.verbose {
+            fields.push((
+                "output",
+                Pretty::Array(
+                    node.fields
+                        .iter()
+                        .map(|f| Pretty::display(f.get_name()))
+                        .collect(),
+                ),
+            ));
+            fields.push((
+                "stream key",
+                Pretty::Array(
+                    node.stream_key
+                        .iter()
+                        .map(|i| Pretty::display(node.fields[*i as usize].get_name()))
+                        .collect(),
+                ),
+            ));
         }
+        let children = node
+            .input
+            .iter()
+            .map(|input| self.explain_node(None, input))
+            .collect();
+        Pretty::simple_record(one_line_explain, fields, children)
+    }
+
+    fn call_states<'a>(
+        &mut self,
+        agg_call_states: &[risingwave_pb::stream_plan::AggCallState],
+    ) -> Pretty<'a> {
+        let vec = agg_call_states
+            .iter()
+            .filter_map(|state| match state.get_inner().unwrap() {
+                agg_call_state::Inner::ResultValueState(_) => None,
+                agg_call_state::Inner::TableState(TableState { table })
+                | agg_call_state::Inner::MaterializedInputState(MaterializedInputState {
+                    table,
+                    ..
+                }) => Some(self.pretty_add_table(table.as_ref().unwrap())),
+            })
+            .collect();
+        Pretty::Array(vec)
     }
 }
