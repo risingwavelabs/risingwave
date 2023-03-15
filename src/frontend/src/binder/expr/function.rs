@@ -295,7 +295,7 @@ impl Binder {
         fn now() -> Handle {
             Box::new(move |binder, mut inputs| {
                 binder.ensure_now_function_allowed()?;
-                if !binder.in_create_mv {
+                if !binder.in_streaming {
                     inputs.push(ExprImpl::from(Literal::new(
                         Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
                         DataType::Timestamptz,
@@ -627,7 +627,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_create_mv
+        if self.in_streaming
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)

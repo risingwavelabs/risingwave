@@ -85,15 +85,15 @@ pub struct Binder {
     next_share_id: ShareId,
 
     search_path: SearchPath,
-    /// Whether the Binder is binding an MV.
-    in_create_mv: bool,
+    /// Whether the Binder is binding an MV/SINK.
+    in_streaming: bool,
 
     /// `ShareId`s identifying shared views.
     shared_views: HashMap<ViewId, ShareId>,
 }
 
 impl Binder {
-    fn new_inner(session: &SessionImpl, in_create_mv: bool) -> Binder {
+    fn new_inner(session: &SessionImpl, in_streaming: bool) -> Binder {
         let now_ms = session
             .env()
             .hummock_snapshot_manager()
@@ -112,7 +112,7 @@ impl Binder {
             next_values_id: 0,
             next_share_id: 0,
             search_path: session.config().get_search_path(),
-            in_create_mv,
+            in_streaming,
             shared_views: HashMap::new(),
         }
     }

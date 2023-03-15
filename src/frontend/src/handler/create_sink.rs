@@ -79,7 +79,7 @@ pub fn gen_sink_plan(
     let definition = context.normalized_sql().to_owned();
 
     let bound = {
-        let mut binder = Binder::new(session);
+        let mut binder = Binder::new_for_stream(session);
         binder.bind_query(*query)?
     };
 
