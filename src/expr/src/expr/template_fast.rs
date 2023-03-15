@@ -71,6 +71,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<FA, FV> Expression for BooleanUnaryExpression<FA, FV>
 where
     FA: Fn(&BoolArray) -> BoolArray + Send + Sync,
@@ -80,15 +81,15 @@ where
         DataType::Boolean
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let child = self.child.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let child = self.child.eval_checked(data_chunk).await?;
         let a = child.as_bool();
         let c = (self.f_array)(a);
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let datum = self.child.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum = self.child.eval_row(row).await?;
         let scalar = datum.map(|s| *s.as_bool());
         let output_scalar = (self.f_value)(scalar);
         let output_datum = output_scalar.map(|s| s.to_scalar_value());
@@ -127,6 +128,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<FA, FV> Expression for BooleanBinaryExpression<FA, FV>
 where
     FA: Fn(&BoolArray, &BoolArray) -> BoolArray + Send + Sync,
@@ -136,18 +138,18 @@ where
         DataType::Boolean
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let left = self.left.eval_checked(data_chunk)?;
-        let right = self.right.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk).await?;
+        let right = self.right.eval_checked(data_chunk).await?;
         let a = left.as_bool();
         let b = right.as_bool();
         let c = (self.f_array)(a, b);
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let left = self.left.eval_row(row)?.map(|s| *s.as_bool());
-        let right = self.right.eval_row(row)?.map(|s| *s.as_bool());
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let left = self.left.eval_row(row).await?.map(|s| *s.as_bool());
+        let right = self.right.eval_row(row).await?.map(|s| *s.as_bool());
         let output_scalar = (self.f_value)(left, right);
         let output_datum = output_scalar.map(|s| s.to_scalar_value());
         Ok(output_datum)
@@ -186,6 +188,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<F, A, T> Expression for UnaryExpression<F, A, T>
 where
     F: Fn(A) -> T + Send + Sync,
@@ -197,8 +200,8 @@ where
         self.return_type.clone()
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let child = self.child.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let child = self.child.eval_checked(data_chunk).await?;
 
         let bitmap = match data_chunk.visibility() {
             Some(vis) => vis & child.null_bitmap(),
@@ -209,8 +212,8 @@ where
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let datum = self.child.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum = self.child.eval_row(row).await?;
         let scalar = datum
             .as_ref()
             .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
@@ -263,6 +266,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<F, A, B, T> Expression for BinaryExpression<F, A, B, T>
 where
     F: Fn(A, B) -> T + Send + Sync,
@@ -276,9 +280,9 @@ where
         self.return_type.clone()
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let left = self.left.eval_checked(data_chunk)?;
-        let right = self.right.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk).await?;
+        let right = self.right.eval_checked(data_chunk).await?;
         assert_eq!(left.len(), right.len());
 
         let mut bitmap = match data_chunk.visibility() {
@@ -298,9 +302,9 @@ where
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let datum1 = self.left.eval_row(row)?;
-        let datum2 = self.right.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum1 = self.left.eval_row(row).await?;
+        let datum2 = self.right.eval_row(row).await?;
         let scalar1 = datum1
             .as_ref()
             .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
@@ -352,6 +356,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<F, A, B> Expression for CompareExpression<F, A, B>
 where
     F: Fn(A, B) -> bool + Send + Sync,
@@ -364,9 +369,9 @@ where
         DataType::Boolean
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let left = self.left.eval_checked(data_chunk)?;
-        let right = self.right.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk).await?;
+        let right = self.right.eval_checked(data_chunk).await?;
         assert_eq!(left.len(), right.len());
 
         let mut bitmap = match data_chunk.visibility() {
@@ -387,9 +392,9 @@ where
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let datum1 = self.left.eval_row(row)?;
-        let datum2 = self.right.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum1 = self.left.eval_row(row).await?;
+        let datum2 = self.right.eval_row(row).await?;
         let scalar1 = datum1
             .as_ref()
             .map(|s| s.as_scalar_ref_impl().try_into().unwrap());
@@ -442,6 +447,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<F, A, B> Expression for IsDistinctFromExpression<F, A, B>
 where
     F: Fn(A, B) -> bool + Send + Sync,
@@ -454,9 +460,9 @@ where
         DataType::Boolean
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
-        let left = self.left.eval_checked(data_chunk)?;
-        let right = self.right.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> crate::Result<ArrayRef> {
+        let left = self.left.eval_checked(data_chunk).await?;
+        let right = self.right.eval_checked(data_chunk).await?;
         assert_eq!(left.len(), right.len());
 
         let a: &PrimitiveArray<A> = (&*left).into();
@@ -477,9 +483,9 @@ where
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
-        let datum1 = self.left.eval_row(row)?;
-        let datum2 = self.right.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> crate::Result<Datum> {
+        let datum1 = self.left.eval_row(row).await?;
+        let datum2 = self.right.eval_row(row).await?;
         let scalar1 = datum1
             .as_ref()
             .map(|s| s.as_scalar_ref_impl().try_into().unwrap());

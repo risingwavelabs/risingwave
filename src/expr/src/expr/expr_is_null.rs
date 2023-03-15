@@ -44,32 +44,34 @@ impl IsNotNullExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for IsNullExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let child_arr = self.child.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let child_arr = self.child.eval_checked(input).await?;
         let arr = BoolArray::new(!child_arr.null_bitmap(), Bitmap::ones(input.capacity()));
 
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let result = self.child.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let result = self.child.eval_row(input).await?;
         let is_null = result.is_none();
         Ok(Some(is_null.to_scalar_value()))
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for IsNotNullExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let child_arr = self.child.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let child_arr = self.child.eval_checked(input).await?;
         let null_bitmap = match Arc::try_unwrap(child_arr) {
             Ok(child_arr) => child_arr.into_null_bitmap(),
             Err(child_arr) => child_arr.null_bitmap().clone(),
@@ -79,8 +81,8 @@ impl Expression for IsNotNullExpression {
         Ok(Arc::new(ArrayImpl::Bool(arr)))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let result = self.child.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let result = self.child.eval_row(input).await?;
         let is_not_null = result.is_some();
         Ok(Some(is_not_null.to_scalar_value()))
     }
@@ -98,7 +100,7 @@ mod tests {
     use crate::expr::{BoxedExpression, InputRefExpression};
     use crate::Result;
 
-    fn do_test(
+    async fn do_test(
         expr: BoxedExpression,
         expected_eval_result: Vec<bool>,
         expected_eval_row_result: Vec<bool>,
@@ -112,7 +114,7 @@ mod tests {
         };
 
         let input_chunk = DataChunk::new(vec![input_array.into()], 3);
-        let result_array = expr.eval(&input_chunk).unwrap();
+        let result_array = expr.eval(&input_chunk).await.unwrap();
         assert_eq!(3, result_array.len());
         for (i, v) in expected_eval_result.iter().enumerate() {
             assert_eq!(
@@ -127,25 +129,29 @@ mod tests {
         ];
 
         for (i, row) in rows.iter().enumerate() {
-            let result = expr.eval_row(row).unwrap().unwrap();
+            let result = expr.eval_row(row).await.unwrap().unwrap();
             assert_eq!(expected_eval_row_result[i], result.into_bool());
         }
 
         Ok(())
     }
 
-    #[test]
-    fn test_is_null() -> Result<()> {
+    #[tokio::test]
+    async fn test_is_null() -> Result<()> {
         let expr = IsNullExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
-        do_test(Box::new(expr), vec![false, false, true], vec![false, true]).unwrap();
+        do_test(Box::new(expr), vec![false, false, true], vec![false, true])
+            .await
+            .unwrap();
         Ok(())
     }
 
-    #[test]
-    fn test_is_not_null() -> Result<()> {
+    #[tokio::test]
+    async fn test_is_not_null() -> Result<()> {
         let expr =
             IsNotNullExpression::new(Box::new(InputRefExpression::new(DataType::Decimal, 0)));
-        do_test(Box::new(expr), vec![true, true, false], vec![true, false]).unwrap();
+        do_test(Box::new(expr), vec![true, true, false], vec![true, false])
+            .await
+            .unwrap();
         Ok(())
     }
 }

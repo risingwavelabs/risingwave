@@ -33,13 +33,14 @@ pub struct FieldExpression {
     index: usize,
 }
 
+#[async_trait::async_trait]
 impl Expression for FieldExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.input.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let array = self.input.eval_checked(input).await?;
         if let ArrayImpl::Struct(struct_array) = array.as_ref() {
             Ok(struct_array.field_at(self.index))
         } else {
@@ -47,8 +48,8 @@ impl Expression for FieldExpression {
         }
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let struct_datum = self.input.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let struct_datum = self.input.eval_row(input).await?;
         struct_datum
             .map(|s| match s {
                 ScalarImpl::Struct(v) => Ok(v.fields()[self.index].clone()),
@@ -110,8 +111,8 @@ mod tests {
     use crate::expr::test_utils::{make_field_function, make_i32_literal, make_input_ref};
     use crate::expr::Expression;
 
-    #[test]
-    fn test_field_expr() {
+    #[tokio::test]
+    async fn test_field_expr() {
         let input_node = make_input_ref(0, TypeName::Struct);
         let literal_node = make_i32_literal(0);
         let field_expr = FieldExpression::try_from(&make_field_function(
@@ -129,7 +130,7 @@ mod tests {
         );
 
         let data_chunk = DataChunk::new(vec![array.into()], 1);
-        let res = field_expr.eval(&data_chunk).unwrap();
+        let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
@@ -137,8 +138,8 @@ mod tests {
         assert_eq!(res.datum_at(4), Some(ScalarImpl::Int32(5)));
     }
 
-    #[test]
-    fn test_nested_field_expr() {
+    #[tokio::test]
+    async fn test_nested_field_expr() {
         let field_node = make_field_function(
             vec![make_input_ref(0, TypeName::Struct), make_i32_literal(0)],
             TypeName::Int32,
@@ -167,7 +168,7 @@ mod tests {
         );
 
         let data_chunk = DataChunk::new(vec![array.into()], 1);
-        let res = field_expr.eval(&data_chunk).unwrap();
+        let res = field_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Float32(1.0.into())));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Float32(2.0.into())));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Float32(3.0.into())));
