@@ -70,3 +70,24 @@ select count(*) from t;
 
 statement ok
 drop table t;
+
+statement ok
+create table t (v1 int, v2 int primary key, v3 varchar);
+
+statement ok
+insert into t values (0, 1, 'a'), (1, 2, 'b');
+
+statement ok
+update t set (v1, v3) = (v1+v2, v3||v3);
+
+query IIT
+select * from t;
+----
+1 1 aa
+3 2 bb
+
+statement error QueryError: Bind error: update modifying the PK column is banned
+update t set (v3, v2) = (v3||v3, v1+v2);
+
+statement ok
+drop table t;
