@@ -85,6 +85,9 @@ impl IntervalUnit {
     /// Also makes signs of all fields to be the same.
     ///
     /// <https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L2740>
+    ///
+    /// Be careful when using this as the normalized form, as it is not a total function and may not
+    /// exist for certain values (e.g. [`Self::MIN`]). See [`IntervalCmpValue`] for details.
     pub fn justify_interval(&self) -> Option<Self> {
         let mut v = *self;
         // When `days` and `usecs` have the same sign, `usecs` could potentially push `days` over
