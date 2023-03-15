@@ -53,7 +53,7 @@ pub(super) struct BuildingFragment {
     /// The ID of the job if it's materialized in this fragment.
     table_id: Option<u32>,
 
-    /// The indices of required columns of each upstream table.
+    /// The required columns of each upstream table.
     upstream_table_columns: HashMap<TableId, Vec<i32>>,
 }
 
@@ -144,7 +144,7 @@ impl BuildingFragment {
         has_table
     }
 
-    /// Extract the indices of required columns of each upstream table.
+    /// Extract the required columns (in IDs) of each upstream table.
     fn extract_upstream_table_columns(
         // TODO: no need to take `&mut` here
         fragment: &mut StreamFragment,

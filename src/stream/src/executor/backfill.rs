@@ -64,7 +64,7 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
-    /// The column indices need to be forwarded to the downstream.
+    /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
@@ -107,21 +107,6 @@ where
         // The primary key columns, in the output columns of the table scan.
         let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
         let pk_order = self.table.pk_serializer().get_order_types();
-
-        // // TODO: unify these two mappings if we make the upstream and table output the same.
-        // // The columns to be forwarded to the downstream, in the upstream columns.
-        // let downstream_in_upstream_indices = self.output_indices;
-        // // The columns to be forwarded to the downstream, in the output columns of the table
-        // scan. let downstream_in_output_indices = downstream_in_upstream_indices
-        //     .iter()
-        //     .map(|&i| {
-        //         self.table
-        //             .output_indices()
-        //             .iter()
-        //             .position(|&j| i == j)
-        //             .unwrap()
-        //     })
-        //     .collect_vec();
 
         let mut upstream = self.upstream.execute();
 

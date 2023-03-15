@@ -51,7 +51,8 @@ impl ExecutorBuilder for ChainExecutorBuilder {
             .map(|&i| i as usize)
             .collect_vec();
 
-        // For `Chain`s other than `Backfill`, there should be no extra mapping required.
+        // For `Chain`s other than `Backfill`, there should be no extra mapping required. We can
+        // directly output the columns received from the upstream or snapshot.
         if !matches!(node.chain_type(), ChainType::Backfill) {
             let all_indices = (0..schema.len()).collect_vec();
             assert_eq!(output_indices, all_indices);
