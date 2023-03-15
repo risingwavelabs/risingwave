@@ -15,13 +15,13 @@
 pub mod batch_table;
 
 use std::sync::{Arc, LazyLock};
+use itertools::Itertools;
 
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
@@ -148,7 +148,7 @@ pub fn compute_chunk_vnode(
             .map(|idx| pk_indices[*idx])
             .collect_vec();
 
-        VirtualNode::compute_chunk(chunk, &dist_key_indices, Crc32FastBuilder)
+        VirtualNode::compute_chunk(chunk, &dist_key_indices)
             .into_iter()
             .zip_eq_fast(chunk.vis().iter())
             .map(|(vnode, vis)| {

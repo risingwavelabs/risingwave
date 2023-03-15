@@ -25,7 +25,7 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-use risingwave_common::util::hash_util::Crc32FastBuilder;
+
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -597,9 +597,7 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = Crc32FastBuilder;
-
-            let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys, hash_builder);
+            let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
 
             tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
 
@@ -903,6 +901,7 @@ mod tests {
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::helper_make_local_actor;
+    use risingwave_common::util::hash_util::Crc32FastBuilder;
 
     #[derive(Debug)]
     pub struct MockOutput {

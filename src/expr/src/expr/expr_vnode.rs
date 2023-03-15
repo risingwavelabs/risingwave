@@ -18,7 +18,6 @@ use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{DataType, Datum};
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_pb::expr::expr_node::{RexNode, Type};
 use risingwave_pb::expr::ExprNode;
 
@@ -70,7 +69,7 @@ impl Expression for VnodeExpression {
     }
 
     async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices, Crc32FastBuilder);
+        let vnodes = VirtualNode::compute_chunk(input, &self.dist_key_indices);
         let mut builder = I16ArrayBuilder::new(input.capacity());
         vnodes
             .into_iter()

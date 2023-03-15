@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::BuildHasher;
+
 
 use itertools::Itertools;
 use parse_display::Display;
@@ -61,16 +61,15 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
-    pub fn compute_chunk<H: BuildHasher>(
+    pub fn compute_chunk(
         data_chunk: &DataChunk,
         keys: &[usize],
-        hash_builder: H,
     ) -> Vec<VirtualNode> {
         if let Ok(idx) = keys.iter().exactly_one() && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
             serial_array.iter().map(|serial| HashCode::from(serial.map(|s| extract_vnode_id_from_row_id(s.as_row_id())).unwrap() as u64).to_vnode()).collect()
         } else {
             data_chunk
-                .get_hash_values(keys, hash_builder)
+                .get_hash_values(keys, Crc32FastBuilder)
                 .into_iter()
                 .map(|hash| hash.to_vnode())
                 .collect_vec()
