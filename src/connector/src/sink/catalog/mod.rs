@@ -17,7 +17,9 @@ pub mod desc;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
+use risingwave_common::catalog::{
+    ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
+};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{Sink as ProstSink, SinkType as ProstSinkType};
 
@@ -164,6 +166,19 @@ impl SinkCatalog {
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
         }
+    }
+
+    pub fn schema(&self) -> Schema {
+        let fields = self
+            .columns
+            .iter()
+            .map(|column| Field::from(column.column_desc.clone()))
+            .collect_vec();
+        Schema { fields }
+    }
+
+    pub fn pk_indices(&self) -> Vec<usize> {
+        self.pk.iter().map(|k| k.column_index).collect_vec()
     }
 }
 
