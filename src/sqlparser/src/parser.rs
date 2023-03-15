@@ -3259,6 +3259,25 @@ impl Parser {
 
     pub fn parse_set(&mut self) -> Result<Statement, ParserError> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
+        if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+            let value = if self.parse_keyword(Keyword::DEFAULT) {
+                SetTimeZoneValue::Default
+            } else if self.parse_keyword(Keyword::LOCAL) {
+                SetTimeZoneValue::Local
+            } else {
+                if let Ok(ident) = self.parse_identifier() {
+                    SetTimeZoneValue::Ident(ident)
+                } else {
+                    let value = self.parse_value()?;
+                    SetTimeZoneValue::Value(value)
+                }
+            };
+
+            return Ok(Statement::SetTimeZone {
+                local: modifier == Some(Keyword::LOCAL),
+                value,
+            });
+        }
         let variable = self.parse_identifier()?;
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
             let mut values = vec![];

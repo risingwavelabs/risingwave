@@ -1041,6 +1041,11 @@ pub enum Statement {
         snapshot: Option<Value>,
         session: bool,
     },
+    /// `SET [ SESSION | LOCAL ] TIME ZONE { value | 'value' | LOCAL | DEFAULT }`
+    SetTimeZone {
+        local: bool,
+        value: SetTimeZoneValue,
+    },
     /// `COMMENT ON ...`
     ///
     /// Note: this is a PostgreSQL-specific statement.
@@ -1448,6 +1453,14 @@ impl fmt::Display for Statement {
                 if let Some(snapshot_id) = snapshot {
                     write!(f, " SNAPSHOT {}", snapshot_id)?;
                 }
+                Ok(())
+            }
+            Statement::SetTimeZone { local, value } => {
+                write!(f, "SET")?;
+                if *local {
+                    write!(f, " LOCAL")?;
+                }
+                write!(f, " TIME ZONE {}", value)?;
                 Ok(())
             }
             Statement::Commit { chain } => {
@@ -1972,6 +1985,26 @@ impl fmt::Display for EmitMode {
             EmitMode::Immediately => "IMMEDIATELY",
             EmitMode::OnWindowClose => "ON WINDOW CLOSE",
         })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetTimeZoneValue {
+    Ident(Ident),
+    Value(Value),
+    Local,
+    Default,
+}
+
+impl fmt::Display for SetTimeZoneValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SetTimeZoneValue::Ident(ident) => write!(f, "{}", ident),
+            SetTimeZoneValue::Value(value) => write!(f, "{}", value),
+            SetTimeZoneValue::Local => f.write_str("LOCAL"),
+            SetTimeZoneValue::Default => f.write_str("DEFAULT"),
+        }
     }
 }
 

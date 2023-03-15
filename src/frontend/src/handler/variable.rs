@@ -18,7 +18,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_sqlparser::ast::{Ident, SetVariableValue, Value};
+use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
