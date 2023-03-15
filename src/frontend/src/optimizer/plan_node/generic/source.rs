@@ -11,10 +11,10 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use derivative::Derivative;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
@@ -24,10 +24,12 @@ use super::GenericPlanNode;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::ColumnId;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::{TableCatalog, WithOptions};
 
 /// [`Source`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
     pub catalog: Option<Rc<SourceCatalog>>,
@@ -40,6 +42,9 @@ pub struct Source {
     pub gen_row_id: bool,
     /// True if it is a source created when creating table with a source.
     pub for_table: bool,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
+    pub ctx: OptimizerContextRef,
 }
 
 impl GenericPlanNode for Source {
@@ -60,7 +65,17 @@ impl GenericPlanNode for Source {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        unimplemented!()
+        self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let pk_indices = self.logical_pk();
+        match pk_indices {
+            Some(pk_indices) => {
+                FunctionalDependencySet::with_key(self.column_descs.len(), &pk_indices)
+            }
+            None => FunctionalDependencySet::new(self.column_descs.len()),
+        }
     }
 }
 

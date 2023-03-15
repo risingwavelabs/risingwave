@@ -171,6 +171,16 @@ impl StreamTableScan {
 
         let stream_key = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
 
+        // The required columns from the table (both scan and upstream).
+        let upstream_column_ids = match self.chain_type {
+            ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
+                self.logical.output_column_ids()
+            }
+            // For backfill, we additionally need the primary key columns.
+            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
+            ChainType::ChainUnspecified => unreachable!(),
+        };
+
         ProstStreamPlan {
             fields: self.schema().to_prost(),
             input: vec![
@@ -225,6 +235,7 @@ impl StreamTableScan {
                     .iter()
                     .map(|&i| i as _)
                     .collect(),
+                upstream_column_ids: upstream_column_ids.iter().map(|i| i.get_id()).collect(),
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),

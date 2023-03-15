@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Subquery,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, InputRef, Literal, Parameter, Subquery,
     TableFunction, UserDefinedFunction, WindowFunction,
 };
 
@@ -30,6 +30,7 @@ pub trait ExprMutator {
             ExprImpl::TableFunction(inner) => self.visit_table_function(inner),
             ExprImpl::WindowFunction(inner) => self.visit_window_function(inner),
             ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
+            ExprImpl::Parameter(inner) => self.visit_parameter(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -47,6 +48,7 @@ pub trait ExprMutator {
         agg_call.filter_mut().visit_expr_mut(self);
     }
     fn visit_literal(&mut self, _: &mut Literal) {}
+    fn visit_parameter(&mut self, _: &mut Parameter) {}
     fn visit_input_ref(&mut self, _: &mut InputRef) {}
     fn visit_subquery(&mut self, _: &mut Subquery) {}
     fn visit_correlated_input_ref(&mut self, _: &mut CorrelatedInputRef) {}
