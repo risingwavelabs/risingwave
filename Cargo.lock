@@ -4949,9 +4949,9 @@ dependencies = [
 
 [[package]]
 name = "pretty-xmlish"
-version = "0.1.8"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9304c351b44b3ac1f7e824380b3990ff8c1f45ba380dd3eef2388b0786e90ce"
+checksum = "47c554364dcf1cde90eaced9541e52af40efa209236fcf6fbd160eedc1010942"
 
 [[package]]
 name = "pretty_assertions"
