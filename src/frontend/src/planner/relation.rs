@@ -241,7 +241,7 @@ impl Planner {
                 // optimization.
                 let window_end = FunctionCall::new(
                     ExprType::Add,
-                    vec![window_start.clone(), window_size, window_offset],
+                    vec![window_start.clone(), window_size],
                 )?
                 .into();
                 exprs.push(window_start);
