@@ -33,17 +33,19 @@ pub struct UserDefinedTableFunction {
 }
 
 #[cfg(not(madsim))]
+#[async_trait::async_trait]
 impl TableFunction for UserDefinedTableFunction {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let columns: Vec<_> = self
-            .children
-            .iter()
-            .map(|c| c.eval_checked(input).map(|a| a.as_ref().into()))
-            .try_collect()?;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        let mut columns = Vec::with_capacity(self.children.len());
+        for c in &self.children {
+            let val = c.eval_checked(input).await?.as_ref().into();
+            columns.push(val);
+        }
+
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
         let input =
@@ -93,12 +95,13 @@ pub fn new_user_defined(
 }
 
 #[cfg(madsim)]
+#[async_trait::async_trait]
 impl TableFunction for UserDefinedTableFunction {
     fn return_type(&self) -> DataType {
         panic!("UDF is not supported in simulation yet");
     }
 
-    fn eval(&self, _input: &DataChunk) -> Result<Vec<ArrayRef>> {
+    async fn eval(&self, _input: &DataChunk) -> Result<Vec<ArrayRef>> {
         panic!("UDF is not supported in simulation yet");
     }
 }
