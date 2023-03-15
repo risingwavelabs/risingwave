@@ -119,6 +119,10 @@ impl LevelCompactionPicker {
                 break;
             }
 
+            if l0_total_file_count > self.config.level0_max_compact_file_number {
+                break;
+            }
+
             let mut pending_compact = false;
             let mut cur_level_size = 0;
             let mut select_level = InputLevel {
@@ -169,13 +173,6 @@ impl LevelCompactionPicker {
 
         if target_level_size > l0_total_file_size {
             stats.skip_by_write_amp_limit += 1;
-            return None;
-        }
-
-        if l0_total_file_count + target_file_count as u64
-            > self.config.level0_max_compact_file_number
-        {
-            stats.skip_by_count_limit += 1;
             return None;
         }
 
