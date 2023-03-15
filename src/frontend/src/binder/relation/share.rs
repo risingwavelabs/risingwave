@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Relation, ShareId};
 
 /// Share a relation during binding and planning.
@@ -20,4 +21,10 @@ use crate::binder::{Relation, ShareId};
 pub struct BoundShare {
     pub(crate) share_id: ShareId,
     pub(crate) input: Relation,
+}
+
+impl RewriteExprsRecursive for BoundShare {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.input.rewrite_exprs_recursive(rewriter);
+    }
 }

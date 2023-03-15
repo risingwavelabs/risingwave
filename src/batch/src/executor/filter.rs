@@ -58,7 +58,7 @@ impl FilterExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?.compact();
-            let vis_array = self.expr.eval(&data_chunk)?;
+            let vis_array = self.expr.eval(&data_chunk).await?;
 
             if let Bool(vis) = vis_array.as_ref() {
                 // TODO: should we yield masked data chunk directly?

@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
 
 use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::system_catalog::pg_catalog::{
     PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
@@ -62,6 +63,26 @@ pub enum Relation {
     TableFunction(Box<TableFunction>),
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
+}
+
+impl RewriteExprsRecursive for Relation {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        match self {
+            Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::TableFunction(inner) => {
+                let new_args = std::mem::take(&mut inner.args)
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect();
+                inner.args = new_args;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Relation {

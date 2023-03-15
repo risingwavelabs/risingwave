@@ -517,6 +517,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
                 "jsonb" => DataType::Jsonb,
+                "serial" => {
+                    return Err(ErrorCode::NotSupported(
+                        "Column type SERIAL is not supported".into(),
+                        "Please remove the SERIAL column".into(),
+                    )
+                    .into())
+                }
                 _ => return Err(new_err().into()),
             }
         }

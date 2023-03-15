@@ -461,8 +461,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_array_access_expr() {
+    #[tokio::test]
+    async fn test_array_access_expr() {
         let values = FunctionCall {
             children: vec![
                 ExprNode {
@@ -524,7 +524,7 @@ mod tests {
         let expr = build_nullable_binary_expr_prost(&access);
         assert!(expr.is_ok());
 
-        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).unwrap();
+        let res = expr.unwrap().eval(&DataChunk::new_dummy(1)).await.unwrap();
         assert_eq!(*res, ArrayImpl::Utf8(Utf8Array::from_iter(["foo"])));
     }
 

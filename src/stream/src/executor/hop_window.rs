@@ -24,7 +24,6 @@ use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::common::InfallibleExpression;
 
 pub struct HopWindowExecutor {
     ctx: ActorContextRef,
@@ -144,18 +143,22 @@ impl HopWindowExecutor {
                     for i in 0..units {
                         let window_start_col = if output_indices.contains(&window_start_col_index) {
                             Some(
-                                self.window_start_exprs[i].eval_infallible(&data_chunk, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                }),
+                                self.window_start_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
                             )
                         } else {
                             None
                         };
                         let window_end_col = if output_indices.contains(&window_end_col_index) {
                             Some(
-                                self.window_end_exprs[i].eval_infallible(&data_chunk, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                }),
+                                self.window_end_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
                             )
                         } else {
                             None

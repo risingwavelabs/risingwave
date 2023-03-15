@@ -27,7 +27,6 @@ use risingwave_storage::StateStore;
 
 use super::ActorContextRef;
 use crate::common::table::state_table::StateTable;
-use crate::common::InfallibleExpression;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::Executor;
 
@@ -66,7 +65,7 @@ pub fn generate_agg_schema(
     Schema { fields }
 }
 
-pub fn agg_call_filter_res(
+pub async fn agg_call_filter_res(
     ctx: &ActorContextRef,
     identity: &str,
     agg_call: &AggCall,
@@ -90,6 +89,7 @@ pub fn agg_call_filter_res(
         let data_chunk = DataChunk::new(columns.to_vec(), capacity);
         if let Bool(filter_res) = filter
             .eval_infallible(&data_chunk, |err| ctx.on_compute_error(err, identity))
+            .await
             .as_ref()
         {
             Some(filter_res.to_bitmap())

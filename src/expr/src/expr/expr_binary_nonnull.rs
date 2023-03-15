@@ -851,45 +851,47 @@ mod tests {
     use crate::expr::test_utils::make_expression;
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
-    #[test]
-    fn test_binary() {
-        test_binary_i32::<I32Array, _>(|x, y| x + y, Type::Add);
-        test_binary_i32::<I32Array, _>(|x, y| x - y, Type::Subtract);
-        test_binary_i32::<I32Array, _>(|x, y| x * y, Type::Multiply);
-        test_binary_i32::<I32Array, _>(|x, y| x / y, Type::Divide);
-        test_binary_i32::<BoolArray, _>(|x, y| x == y, Type::Equal);
-        test_binary_i32::<BoolArray, _>(|x, y| x != y, Type::NotEqual);
-        test_binary_i32::<BoolArray, _>(|x, y| x > y, Type::GreaterThan);
-        test_binary_i32::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual);
-        test_binary_i32::<BoolArray, _>(|x, y| x < y, Type::LessThan);
-        test_binary_i32::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x + y, Type::Add);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x - y, Type::Subtract);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x * y, Type::Multiply);
-        test_binary_decimal::<DecimalArray, _>(|x, y| x / y, Type::Divide);
-        test_binary_decimal::<BoolArray, _>(|x, y| x == y, Type::Equal);
-        test_binary_decimal::<BoolArray, _>(|x, y| x != y, Type::NotEqual);
-        test_binary_decimal::<BoolArray, _>(|x, y| x > y, Type::GreaterThan);
-        test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual);
-        test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan);
-        test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual);
+    #[tokio::test]
+    async fn test_binary() {
+        test_binary_i32::<I32Array, _>(|x, y| x + y, Type::Add).await;
+        test_binary_i32::<I32Array, _>(|x, y| x - y, Type::Subtract).await;
+        test_binary_i32::<I32Array, _>(|x, y| x * y, Type::Multiply).await;
+        test_binary_i32::<I32Array, _>(|x, y| x / y, Type::Divide).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x == y, Type::Equal).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x != y, Type::NotEqual).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x > y, Type::GreaterThan).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x < y, Type::LessThan).await;
+        test_binary_i32::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual).await;
+        test_binary_decimal::<DecimalArray, _>(|x, y| x + y, Type::Add).await;
+        test_binary_decimal::<DecimalArray, _>(|x, y| x - y, Type::Subtract).await;
+        test_binary_decimal::<DecimalArray, _>(|x, y| x * y, Type::Multiply).await;
+        test_binary_decimal::<DecimalArray, _>(|x, y| x / y, Type::Divide).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x == y, Type::Equal).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x != y, Type::NotEqual).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x > y, Type::GreaterThan).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x >= y, Type::GreaterThanOrEqual).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x < y, Type::LessThan).await;
+        test_binary_decimal::<BoolArray, _>(|x, y| x <= y, Type::LessThanOrEqual).await;
         test_binary_interval::<NaiveDateTimeArray, _>(
             |x, y| {
                 date_interval_add::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
                     .unwrap()
             },
             Type::Add,
-        );
+        )
+        .await;
         test_binary_interval::<NaiveDateTimeArray, _>(
             |x, y| {
                 date_interval_sub::<NaiveDateWrapper, IntervalUnit, NaiveDateTimeWrapper>(x, y)
                     .unwrap()
             },
             Type::Subtract,
-        );
+        )
+        .await;
     }
 
-    fn test_binary_i32<A, F>(f: F, kind: Type)
+    async fn test_binary_i32<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -924,7 +926,7 @@ mod tests {
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Int32, TypeName::Int32], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -936,13 +938,13 @@ mod tests {
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    fn test_binary_interval<A, F>(f: F, kind: Type)
+    async fn test_binary_interval<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -972,7 +974,7 @@ mod tests {
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Date, TypeName::Interval], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -984,13 +986,13 @@ mod tests {
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    fn test_binary_decimal<A, F>(f: F, kind: Type)
+    async fn test_binary_decimal<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -1025,7 +1027,7 @@ mod tests {
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = make_expression(kind, &[TypeName::Decimal, TypeName::Decimal], &[0, 1]);
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -1037,7 +1039,7 @@ mod tests {
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
