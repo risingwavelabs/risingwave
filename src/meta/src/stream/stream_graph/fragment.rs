@@ -152,15 +152,14 @@ impl BuildingFragment {
     ) -> HashMap<TableId, Vec<i32>> {
         let mut table_columns = HashMap::new();
 
-        visit::visit_fragment(fragment, |node_body| match node_body {
-            NodeBody::Chain(chain_node) => {
+        visit::visit_fragment(fragment, |node_body| {
+            if let NodeBody::Chain(chain_node) = node_body {
                 let table_id = chain_node.table_id.into();
                 let column_ids = chain_node.upstream_column_ids.clone();
                 table_columns
                     .try_insert(table_id, column_ids)
                     .expect("currently there should be no two same upstream tables in a fragment");
             }
-            _ => {}
         });
 
         assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());

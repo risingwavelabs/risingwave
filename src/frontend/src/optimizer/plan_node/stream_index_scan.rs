@@ -194,7 +194,7 @@ impl StreamIndexScan {
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
                     input: vec![],
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     append_only: true,
                 },

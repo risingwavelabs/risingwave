@@ -220,7 +220,7 @@ impl StreamTableScan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     input: vec![],
                     append_only: true,
