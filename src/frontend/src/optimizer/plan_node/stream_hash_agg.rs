@@ -164,6 +164,7 @@ impl StreamNode for StreamHashAgg {
             ),
             distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
+                .sorted_by_key(|(i, _)| *i)
                 .map(|(key_idx, table)| {
                     (
                         key_idx as u32,

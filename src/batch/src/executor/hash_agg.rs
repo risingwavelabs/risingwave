@@ -213,7 +213,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
-                    state.update_single(&chunk, row_id)?
+                    state.update_single(&chunk, row_id).await?
                 }
             }
         }
@@ -319,7 +319,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -387,7 +387,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 

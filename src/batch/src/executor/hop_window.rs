@@ -171,21 +171,19 @@ impl HopWindowExecutor {
 
         let window_start_col_index = child.schema().len();
         let window_end_col_index = child.schema().len() + 1;
-        let contains_window_start = output_indices.contains(&window_start_col_index);
-        let contains_window_end = output_indices.contains(&window_end_col_index);
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
             assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
             let len = data_chunk.cardinality();
             for i in 0..units {
-                let window_start_col = if contains_window_start {
-                    Some(self.window_start_exprs[i].eval(&data_chunk)?)
+                let window_start_col = if output_indices.contains(&window_start_col_index) {
+                    Some(self.window_start_exprs[i].eval(&data_chunk).await?)
                 } else {
                     None
                 };
-                let window_end_col = if contains_window_end {
-                    Some(self.window_end_exprs[i].eval(&data_chunk)?)
+                let window_end_col = if output_indices.contains(&window_end_col_index) {
+                    Some(self.window_end_exprs[i].eval(&data_chunk).await?)
                 } else {
                     None
                 };
@@ -214,6 +212,7 @@ mod tests {
     use futures::stream::StreamExt;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 

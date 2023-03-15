@@ -26,6 +26,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_frontend::TableCatalog;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::BlockLocation;
 use risingwave_pb::hummock::{Level, SstableInfo};
 use risingwave_rpc_client::MetaClient;
@@ -41,8 +42,8 @@ type TableData = HashMap<u32, TableCatalog>;
 
 #[derive(Args, Debug)]
 pub struct SstDumpArgs {
-    #[clap(short, long = "sst-id")]
-    sst_id: Option<u64>,
+    #[clap(short, long = "object-id")]
+    object_id: Option<u64>,
     #[clap(short, long = "block-id")]
     block_id: Option<u64>,
     #[clap(short = 'p', long = "print-entries")]
@@ -72,15 +73,15 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     // TODO: We can avoid reading meta if `print_level` is false with the new block format.
     for level in version.get_combined_levels() {
         for sstable_info in &level.table_infos {
-            if let Some(sst_id) = &args.sst_id {
-                if *sst_id == sstable_info.id {
+            if let Some(object_id) = &args.object_id {
+                if *object_id == sstable_info.get_object_id() {
                     if args.print_level {
                         print_level(level);
                     }
 
                     sst_dump_via_sstable_store(
                         sstable_store,
-                        sstable_info.id,
+                        sstable_info.get_object_id(),
                         sstable_info.meta_offset,
                         sstable_info.file_size,
                         &table_data,
@@ -96,7 +97,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 
                 sst_dump_via_sstable_store(
                     sstable_store,
-                    sstable_info.id,
+                    sstable_info.get_object_id(),
                     sstable_info.meta_offset,
                     sstable_info.file_size,
                     &table_data,
@@ -111,16 +112,16 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
 
 pub async fn sst_dump_via_sstable_store(
     sstable_store: &SstableStore,
-    sst_id: u64,
+    object_id: HummockSstableObjectId,
     meta_offset: u64,
     file_size: u64,
     table_data: &TableData,
     args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
     let sstable_info = SstableInfo {
-        id: sst_id,
-        meta_offset,
+        object_id,
         file_size,
+        meta_offset,
         ..Default::default()
     };
     let sstable_cache = sstable_store
@@ -129,7 +130,7 @@ pub async fn sst_dump_via_sstable_store(
     let sstable = sstable_cache.value().as_ref();
     let sstable_meta = &sstable.meta;
 
-    println!("SST id: {}", sst_id);
+    println!("SST object id: {}", object_id);
     println!("-------------------------------------");
     println!("File Size: {}", sstable.estimate_size());
 
@@ -229,7 +230,7 @@ fn print_kv_pairs(
 
     while block_iter.is_valid() {
         let raw_full_key = block_iter.key();
-        let full_key = FullKey::decode(block_iter.key());
+        let full_key = block_iter.key();
         let raw_user_key = full_key.user_key.encode();
 
         let full_val = block_iter.value();
@@ -245,7 +246,7 @@ fn print_kv_pairs(
         println!(
             "\t\t  full key: {:02x?}, len={}",
             raw_full_key,
-            raw_full_key.len()
+            raw_full_key.encoded_len()
         );
         println!("\t\tfull value: {:02x?}, len={}", full_val, full_val.len());
         println!("\t\t  user key: {:02x?}", raw_user_key);

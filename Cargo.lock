@@ -1760,6 +1760,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "csv"
+version = "1.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b015497079b9a9d69c02ad25de6c0a6edef051ea6360a327d0bd05802ef64ad"
+dependencies = [
+ "csv-core",
+ "itoa",
+ "ryu",
+ "serde",
+]
+
+[[package]]
 name = "csv-core"
 version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4215,9 +4227,9 @@ checksum = "0ab1bc2a289d34bd04a330323ac98a1b4bc82c9d9fcb1e66b63caa84da26b575"
 
 [[package]]
 name = "opendal"
-version = "0.27.2"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ef6f7b936f2f8483e19643357cb50d9ec9a49c506971ef69ca676913cf5afd91"
+checksum = "72b63493afc5a8fb8cafbfa87118ffd0aea076935a7ae2375da9e03c1f49aaf3"
 dependencies = [
  "anyhow",
  "async-compat",
@@ -5818,6 +5830,8 @@ dependencies = [
  "darwin-libproc",
  "derivative",
  "easy-ext",
+ "either",
+ "enum-as-inner",
  "fixedbitset",
  "futures",
  "futures-async-stream",
@@ -5994,7 +6008,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
- "csv-core",
+ "csv",
  "duration-str",
  "enum-as-inner",
  "futures",
@@ -6080,11 +6094,13 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "arrow-schema",
+ "async-trait",
  "chrono",
  "chrono-tz",
  "criterion",
  "dyn-clone",
  "either",
+ "futures-util",
  "itertools",
  "madsim-tokio",
  "md5",
@@ -6097,6 +6113,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_udf",
  "speedate",
+ "static_assertions",
  "thiserror",
  "workspace-hack",
 ]
@@ -6215,6 +6232,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
+ "itertools",
  "jni",
  "madsim-tokio",
  "prost 0.11.8",
@@ -6417,6 +6435,7 @@ dependencies = [
  "futures",
  "glob",
  "itertools",
+ "lru",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-etcd-client",
@@ -6432,6 +6451,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_meta",
  "risingwave_pb",
+ "risingwave_sqlparser",
  "risingwave_sqlsmith",
  "serde",
  "serde_derive",
@@ -6481,8 +6501,12 @@ name = "risingwave_sqlparser_test_runner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "console",
+ "futures",
+ "madsim-tokio",
  "risingwave_sqlparser",
  "serde",
+ "serde_with 2.2.0",
  "serde_yaml",
  "walkdir",
  "workspace-hack",
@@ -6500,6 +6524,7 @@ dependencies = [
  "madsim-tokio",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "regex",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_frontend",
@@ -6507,6 +6532,27 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_state_cleaning_test"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 4.1.8",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "regex",
+ "risingwave_rt",
+ "serde",
+ "serde_with 2.2.0",
+ "tokio-postgres",
+ "tokio-stream",
+ "toml 0.4.10",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -7889,6 +7935,15 @@ dependencies = [
 
 [[package]]
 name = "toml"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "758664fc71a3a69038656bee8b6be6477d2a6c315a6b81f7081f591bffa4111f"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
@@ -8739,7 +8794,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
- "digest",
  "either",
  "fail",
  "fixedbitset",
@@ -8778,6 +8832,7 @@ dependencies = [
  "petgraph",
  "phf",
  "phf_shared",
+ "postgres-types",
  "proc-macro2",
  "prometheus",
  "prost 0.11.8",

@@ -18,9 +18,8 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::agg_call::OrderByField as ProstAggOrderByField;
 use risingwave_pb::expr::AggCall as ProstAggCall;
 use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
 
@@ -28,7 +27,7 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Direction;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -48,11 +47,30 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Agg<PlanRef> {
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.agg_calls.iter_mut().for_each(|call| {
             call.filter = call.filter.clone().rewrite_expr(r);
         });
+    }
+
+    fn output_len(&self) -> usize {
+        self.group_key.len() + self.agg_calls.len()
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let mut map = vec![None; self.output_len()];
+        for (i, key) in self.group_key.iter().enumerate() {
+            map[i] = Some(*key);
+        }
+        ColIndexMapping::with_target_size(map, self.input.schema().len())
+    }
+
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 }
 
@@ -81,6 +99,21 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let output_len = self.output_len();
+        let _input_len = self.input.schema().len();
+        let mut fd_set =
+            FunctionalDependencySet::with_key(output_len, &(0..self.group_key.len()).collect_vec());
+        // take group keys from input_columns, then grow the target size to column_cnt
+        let i2o = self.i2o_col_mapping();
+        for fd in self.input.functional_dependency().as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 }
 
@@ -180,13 +213,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             };
 
             for &idx in &self.group_key {
-                add_column(idx, Some(OrderType::Ascending), false);
+                add_column(idx, Some(OrderType::ascending()), false);
             }
             for (order_type, idx) in sort_keys {
                 add_column(idx, Some(order_type), true);
             }
             for &idx in &in_pks {
-                add_column(idx, Some(OrderType::Ascending), true);
+                add_column(idx, Some(OrderType::ascending()), true);
             }
             for idx in include_keys {
                 add_column(idx, None, true);
@@ -222,7 +255,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                    .add_order_column(tb_column_idx, OrderType::ascending());
                 included_upstream_indices.push(idx);
             }
 
@@ -272,15 +305,15 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
-                                    vec![(OrderType::Ascending, agg_call.inputs[0].index)]
+                                    vec![(OrderType::ascending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::Max => {
-                                    vec![(OrderType::Descending, agg_call.inputs[0].index)]
+                                    vec![(OrderType::descending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
-                                    .order_by_fields
+                                    .order_by
                                     .iter()
-                                    .map(|o| (o.direction.to_order(), o.input.index))
+                                    .map(|o| (o.order_type, o.column_index))
                                     .collect(),
                                 _ => unreachable!(),
                             }
@@ -320,24 +353,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             .collect()
     }
 
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input.schema().len();
-        let agg_cal_num = self.agg_calls.len();
-        let group_key = &self.group_key;
-        let mut map = vec![None; agg_cal_num + group_key.len()];
-        for (i, key) in group_key.iter().enumerate() {
-            map[i] = Some(*key);
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to out column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
-    }
-
     pub fn infer_result_table(
         &self,
         me: &impl GenericPlanRef,
@@ -351,7 +366,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::Ascending);
+                    .add_order_column(tb_column_idx, OrderType::ascending());
             }
         }
         internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
@@ -400,7 +415,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .collect_vec();
                 for &idx in &key_cols {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
-                    table_builder.add_order_column(table_col_idx, OrderType::Ascending);
+                    table_builder.add_order_column(table_col_idx, OrderType::ascending());
                 }
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
@@ -464,72 +479,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
     }
 }
 
-/// Rewritten version of [`crate::expr::OrderByExpr`] which uses `InputRef` instead of `ExprImpl`.
-/// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
-///
-/// TODO(yuchao): replace `PlanAggOrderByField` with enhanced `FieldOrder`
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PlanAggOrderByField {
-    pub input: InputRef,
-    pub direction: Direction,
-    pub nulls_first: bool,
-}
-
-impl fmt::Debug for PlanAggOrderByField {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.input)?;
-        match self.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
-        write!(
-            f,
-            " NULLS {}",
-            if self.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PlanAggOrderByFieldDisplay<'a> {
-    pub plan_agg_order_by_field: &'a PlanAggOrderByField,
-    pub input_schema: &'a Schema,
-}
-
-impl fmt::Display for PlanAggOrderByFieldDisplay<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let that = self.plan_agg_order_by_field;
-        InputRefDisplay {
-            input_ref: &that.input,
-            input_schema: self.input_schema,
-        }
-        .fmt(f)?;
-        match that.direction {
-            Direction::Asc => write!(f, " ASC")?,
-            Direction::Desc => write!(f, " DESC")?,
-            _ => {}
-        }
-        write!(
-            f,
-            " NULLS {}",
-            if that.nulls_first { "FIRST" } else { "LAST" }
-        )?;
-        Ok(())
-    }
-}
-
-impl PlanAggOrderByField {
-    fn to_protobuf(&self) -> ProstAggOrderByField {
-        ProstAggOrderByField {
-            input: self.input.index() as _,
-            direction: self.direction.to_protobuf() as i32,
-            nulls_first: self.nulls_first,
-        }
-    }
-}
-
 /// Rewritten version of [`AggCall`] which uses `InputRef` instead of `ExprImpl`.
 /// Refer to [`LogicalAggBuilder::try_rewrite_agg_call`] for more details.
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -551,7 +500,7 @@ pub struct PlanAggCall {
     pub inputs: Vec<InputRef>,
 
     pub distinct: bool,
-    pub order_by_fields: Vec<PlanAggOrderByField>,
+    pub order_by: Vec<ColumnOrder>,
     /// Selective aggregation: only the input rows for which
     /// `filter` evaluates to `true` will be fed to the aggregate function.
     pub filter: Condition,
@@ -571,12 +520,8 @@ impl fmt::Debug for PlanAggCall {
                     write!(f, ",")?;
                 }
             }
-            if !self.order_by_fields.is_empty() {
-                let clause_text = self
-                    .order_by_fields
-                    .iter()
-                    .map(|e| format!("{:?}", e))
-                    .join(", ");
+            if !self.order_by.is_empty() {
+                let clause_text = self.order_by.iter().map(|e| format!("{:?}", e)).join(", ");
                 write!(f, " order_by({})", clause_text)?;
             }
             write!(f, ")")?;
@@ -599,9 +544,9 @@ impl PlanAggCall {
             x.index = mapping.map(x.index);
         });
 
-        // modify order_by_fields
-        self.order_by_fields.iter_mut().for_each(|x| {
-            x.input.index = mapping.map(x.input.index);
+        // modify order_by exprs
+        self.order_by.iter_mut().for_each(|x| {
+            x.column_index = mapping.map(x.column_index);
         });
 
         // modify filter
@@ -617,11 +562,7 @@ impl PlanAggCall {
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),
             distinct: self.distinct,
-            order_by_fields: self
-                .order_by_fields
-                .iter()
-                .map(PlanAggOrderByField::to_protobuf)
-                .collect(),
+            order_by: self.order_by.iter().map(ColumnOrder::to_protobuf).collect(),
             filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
         }
     }
@@ -644,7 +585,7 @@ impl PlanAggCall {
         PlanAggCall {
             agg_kind: total_agg_kind,
             inputs: vec![InputRef::new(partial_output_idx, self.return_type.clone())],
-            order_by_fields: vec![], // order must make no difference when we use 2-phase agg
+            order_by: vec![], // order must make no difference when we use 2-phase agg
             filter: Condition::true_cond(),
             ..self.clone()
         }
@@ -656,7 +597,7 @@ impl PlanAggCall {
             return_type: DataType::Int64,
             inputs: vec![],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         }
     }
@@ -698,13 +639,13 @@ impl fmt::Debug for PlanAggCallDisplay<'_> {
                     write!(f, ", ")?;
                 }
             }
-            if !that.order_by_fields.is_empty() {
+            if !that.order_by.is_empty() {
                 write!(
                     f,
                     " order_by({})",
-                    that.order_by_fields.iter().format_with(", ", |e, f| {
-                        f(&PlanAggOrderByFieldDisplay {
-                            plan_agg_order_by_field: e,
+                    that.order_by.iter().format_with(", ", |o, f| {
+                        f(&ColumnOrderDisplay {
+                            column_order: o,
                             input_schema: self.input_schema,
                         })
                     })

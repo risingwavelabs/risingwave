@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -51,6 +52,18 @@ impl CompactorRunner {
             .flat_map(|level| level.table_infos.iter())
             .map(|table| table.file_size)
             .sum::<u64>();
+
+        let stats_target_table_ids: HashSet<u32> = task
+            .input_ssts
+            .iter()
+            .flat_map(|i| {
+                i.table_infos
+                    .iter()
+                    .flat_map(|t| t.table_ids.clone())
+                    .collect_vec()
+            })
+            .collect();
+
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -67,16 +80,6 @@ impl CompactorRunner {
             right: Bytes::copy_from_slice(task.splits[split_index].get_right()),
             right_exclusive: true,
         };
-        let stats_target_table_ids = task
-            .input_ssts
-            .iter()
-            .flat_map(|i| {
-                i.table_infos
-                    .iter()
-                    .flat_map(|t| t.table_ids.clone())
-                    .collect_vec()
-            })
-            .collect();
 
         let compactor = Compactor::new(
             context.clone(),
@@ -88,6 +91,7 @@ impl CompactorRunner {
                 watermark: task.watermark,
                 stats_target_table_ids: Some(stats_target_table_ids),
                 task_type: task.task_type(),
+                split_by_table: task.split_by_state_table,
             },
         );
 

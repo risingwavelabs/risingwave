@@ -16,31 +16,30 @@ use std::vec;
 
 use fixedbitset::FixedBitSet;
 pub use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::property::{
-    Distribution, FieldOrder, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
+    Distribution, FunctionalDependency, FunctionalDependencySet, Order, RequiredDist,
 };
 
 /// Extension trait for [`ColIndexMapping`] to rewrite frontend structures.
 #[easy_ext::ext(ColIndexMappingRewriteExt)]
 impl ColIndexMapping {
-    /// Rewrite the provided order's field index. It will try its best to give the most accurate
+    /// Rewrite the provided order's column index. It will try its best to give the most accurate
     /// order. Order(0,1,2) with mapping(0->1,1->0,2->2) will be rewritten to Order(1,0,2)
     /// Order(0,1,2) with mapping(0->1,2->0) will be rewritten to Order(1)
     pub fn rewrite_provided_order(&self, order: &Order) -> Order {
-        let mut mapped_field = vec![];
-        for field in &order.field_order {
-            match self.try_map(field.index) {
-                Some(mapped_index) => mapped_field.push(FieldOrder {
-                    index: mapped_index,
-                    direct: field.direct,
-                }),
+        let mut mapped_column_orders = vec![];
+        for column_order in &order.column_orders {
+            match self.try_map(column_order.column_index) {
+                Some(mapped_index) => mapped_column_orders
+                    .push(ColumnOrder::new(mapped_index, column_order.order_type)),
                 None => break,
             }
         }
         Order {
-            field_order: mapped_field,
+            column_orders: mapped_column_orders,
         }
     }
 
@@ -50,17 +49,15 @@ impl ColIndexMapping {
     /// Order(0,1,2) with mapping(0->1,2->0) will return None
     pub fn rewrite_required_order(&self, order: &Order) -> Option<Order> {
         order
-            .field_order
+            .column_orders
             .iter()
-            .map(|field| {
-                self.try_map(field.index).map(|mapped_index| FieldOrder {
-                    index: mapped_index,
-                    direct: field.direct,
-                })
+            .map(|o| {
+                self.try_map(o.column_index)
+                    .map(|mapped_index| ColumnOrder::new(mapped_index, o.order_type))
             })
             .collect::<Option<Vec<_>>>()
-            .map(|mapped_field| Order {
-                field_order: mapped_field,
+            .map(|mapped_column_orders| Order {
+                column_orders: mapped_column_orders,
             })
     }
 

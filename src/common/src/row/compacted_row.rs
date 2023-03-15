@@ -26,6 +26,14 @@ pub struct CompactedRow {
 }
 
 impl CompactedRow {
+    /// Create a new [`CompactedRow`] from given bytes. Caller must ensure the bytes are in valid
+    /// value-encoding row format.
+    pub fn new(value_encoding_bytes: Bytes) -> Self {
+        Self {
+            row: value_encoding_bytes,
+        }
+    }
+
     /// Deserialize [`CompactedRow`] into [`OwnedRow`] with given types.
     pub fn deserialize(&self, data_types: &[DataType]) -> value_encoding::Result<OwnedRow> {
         RowDeserializer::new(data_types).deserialize(self.row.as_ref())

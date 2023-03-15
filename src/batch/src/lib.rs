@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(incomplete_features)]
 #![expect(dead_code)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
@@ -29,6 +30,7 @@
 #![feature(let_chains)]
 #![feature(bound_map)]
 #![feature(int_roundings)]
+#![feature(async_fn_in_trait)]
 
 mod error;
 pub mod exchange_source;

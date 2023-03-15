@@ -2,8 +2,8 @@ syntax = "proto3";
 
 package expr;
 
+import "common.proto";
 import "data.proto";
-import "plan_common.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
@@ -130,6 +130,9 @@ message ExprNode {
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
 
+    // Functions that return a constant value
+    PI = 610;
+
     // Non-pure functions below (> 1000)
     // ------------------------
     // Internal functions
@@ -156,10 +159,14 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // User defined table function
+    UDTF = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
+  // optional. only used when the type is UDTF.
+  UserDefinedTableFunction udtf = 4;
 }
 
 // Reference to an upstream column, containing its index and data type.
@@ -228,18 +235,20 @@ message AggCall {
   repeated InputRef args = 2;
   data.DataType return_type = 3;
   bool distinct = 4;
-  message OrderByField {
-    uint32 input = 1;
-    plan_common.OrderType direction = 3;
-    bool nulls_first = 4;
-  }
-  repeated OrderByField order_by_fields = 5;
+  repeated common.ColumnOrder order_by = 5;
   ExprNode filter = 6;
 }
 
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
+}
+
+message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
   string language = 4;
   string link = 5;

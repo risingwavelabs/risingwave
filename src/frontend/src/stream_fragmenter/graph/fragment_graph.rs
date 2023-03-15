@@ -37,8 +37,8 @@ pub struct StreamFragment {
     /// Bitwise-OR of type Flags of this fragment.
     pub fragment_type_mask: u32,
 
-    /// mark whether this fragment should only have one actor.
-    pub is_singleton: bool,
+    /// Mark whether this fragment requires exactly one actor.
+    pub requires_singleton: bool,
 
     /// Number of table ids (stateful states) for this fragment.
     pub table_ids_cnt: u32,
@@ -64,8 +64,7 @@ impl StreamFragment {
         Self {
             fragment_id,
             fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
-            // FIXME: is it okay to use `false` as default value?
-            is_singleton: false,
+            requires_singleton: false,
             node: None,
             table_ids_cnt: 0,
             upstream_table_ids: vec![],
@@ -77,7 +76,7 @@ impl StreamFragment {
             fragment_id: self.fragment_id,
             node: self.node.clone().map(|n| *n),
             fragment_type_mask: self.fragment_type_mask,
-            is_singleton: self.is_singleton,
+            requires_singleton: self.requires_singleton,
             table_ids_cnt: self.table_ids_cnt,
             upstream_table_ids: self.upstream_table_ids.clone(),
         }

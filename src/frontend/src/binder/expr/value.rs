@@ -292,6 +292,7 @@ fn unescape_c_style(s: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::DataType;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_sqlparser::ast::Value::Number;

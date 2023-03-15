@@ -307,29 +307,27 @@ fn parse_create_table_if_not_exists() {
 
 #[test]
 fn parse_bad_if_not_exists() {
-    let res = parse_sql_statements("CREATE TABLE NOT EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF EXISTS uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: EXISTS".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: uk_cities".to_string()),
-        res.unwrap_err()
-    );
-
-    let res = parse_sql_statements("CREATE TABLE IF NOT uk_cities ()");
-    assert_eq!(
-        ParserError::ParserError("Expected end of statement, found: NOT".to_string()),
-        res.unwrap_err()
-    );
+    for (sql, err_msg) in [
+        (
+            "CREATE TABLE NOT EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF EXISTS uk_cities ()",
+            "Expected end of statement, found: EXISTS",
+        ),
+        (
+            "CREATE TABLE IF uk_cities ()",
+            "Expected end of statement, found: uk_cities",
+        ),
+        (
+            "CREATE TABLE IF NOT uk_cities ()",
+            "Expected end of statement, found: NOT",
+        ),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -438,27 +436,14 @@ fn parse_set() {
 
     one_statement_parses_to("SET a TO b", "SET a = b");
     one_statement_parses_to("SET SESSION a = b", "SET a = b");
-
-    assert_eq!(
-        parse_sql_statements("SET"),
-        Err(ParserError::ParserError(
-            "Expected identifier, found: EOF".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a b"),
-        Err(ParserError::ParserError(
-            "Expected equals sign or TO, found: b".to_string()
-        )),
-    );
-
-    assert_eq!(
-        parse_sql_statements("SET a ="),
-        Err(ParserError::ParserError(
-            "Expected variable value, found: EOF".to_string()
-        )),
-    );
+    for (sql, err_msg) in [
+        ("SET", "Expected identifier, found: EOF"),
+        ("SET a b", "Expected equals sign or TO, found: b"),
+        ("SET a =", "Expected variable value, found: EOF"),
+    ] {
+        let res = parse_sql_statements(sql);
+        assert!(format!("{}", res.unwrap_err()).contains(err_msg));
+    }
 }
 
 #[test]
@@ -769,7 +754,7 @@ fn parse_create_function() {
                 OperateFunctionArg::unnamed(DataType::Int),
                 OperateFunctionArg::unnamed(DataType::Int),
             ]),
-            return_type: Some(DataType::Int),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some("SQL".into()),
                 behavior: Some(FunctionBehavior::Immutable),
@@ -797,7 +782,7 @@ fn parse_create_function() {
                     default_expr: Some(Expr::Value(Value::Number("1".into()))),
                 }
             ]),
-            return_type: Some(DataType::Int),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some("SQL".into()),
                 behavior: Some(FunctionBehavior::Immutable),
@@ -806,6 +791,29 @@ fn parse_create_function() {
                     op: BinaryOperator::Plus,
                     right: Box::new(Expr::Identifier("b".into())),
                 }),
+                ..Default::default()
+            },
+        }
+    );
+
+    let sql = "CREATE FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("unnest")]),
+            args: Some(vec![OperateFunctionArg::with_name(
+                "a",
+                DataType::Array(Box::new(DataType::Int))
+            ),]),
+            returns: Some(CreateFunctionReturns::Table(vec![TableColumnDef {
+                name: Ident::new_unchecked("x"),
+                data_type: DataType::Int,
+            }])),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
         }
@@ -1042,12 +1050,9 @@ fn parse_array() {
     );
 
     let sql = "SELECT [[1, 2], [3, 4]]";
-    assert_eq!(
-        parse_sql_statements(sql),
-        Err(ParserError::ParserError(
-            "Expected an expression:, found: [".to_string()
-        )),
-    );
+    let res = parse_sql_statements(sql);
+    let err_msg = "Expected an expression:, found: [";
+    assert!(format!("{}", res.unwrap_err()).contains(err_msg));
 }
 
 #[test]

@@ -634,6 +634,12 @@ impl Zero for Decimal {
     }
 }
 
+impl From<RustDecimal> for Decimal {
+    fn from(d: RustDecimal) -> Self {
+        Self::Normalized(d)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 

@@ -138,21 +138,17 @@ impl StreamingJob {
         }
     }
 
-    /// Returns the [`TableVersionId`] if this job contains a table.
+    /// Returns the [`TableVersionId`] if this job is `Table`.
     pub fn table_version_id(&self) -> Option<TableVersionId> {
-        self.table()
-            .map(|t| t.get_version().expect("table must be versioned").version)
-    }
-
-    /// Returns the optional [`Source`] if this is a `Table` streaming job.
-    ///
-    /// Only used for registering sources for creating tables with connectors.
-    pub fn source(&self) -> Option<&Source> {
-        match self {
-            Self::MaterializedView(_) => None,
-            Self::Sink(_) => None,
-            Self::Table(source, _) => source.as_ref(),
-            Self::Index(_, _) => None,
+        if let Self::Table(_, table) = self {
+            Some(
+                table
+                    .get_version()
+                    .expect("table must be versioned")
+                    .version,
+            )
+        } else {
+            None
         }
     }
 }

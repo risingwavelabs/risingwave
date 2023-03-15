@@ -1,6 +1,6 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType, Datum } from "./data";
-import { OrderType, orderTypeFromJSON, orderTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "expr";
 
@@ -137,6 +137,8 @@ export const ExprNode_Type = {
   JSONB_ACCESS_STR: "JSONB_ACCESS_STR",
   JSONB_TYPEOF: "JSONB_TYPEOF",
   JSONB_ARRAY_LENGTH: "JSONB_ARRAY_LENGTH",
+  /** PI - Functions that return a constant value */
+  PI: "PI",
   /**
    * VNODE - Non-pure functions below (> 1000)
    * ------------------------
@@ -424,6 +426,9 @@ export function exprNode_TypeFromJSON(object: any): ExprNode_Type {
     case 603:
     case "JSONB_ARRAY_LENGTH":
       return ExprNode_Type.JSONB_ARRAY_LENGTH;
+    case 610:
+    case "PI":
+      return ExprNode_Type.PI;
     case 1101:
     case "VNODE":
       return ExprNode_Type.VNODE;
@@ -622,6 +627,8 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
       return "JSONB_TYPEOF";
     case ExprNode_Type.JSONB_ARRAY_LENGTH:
       return "JSONB_ARRAY_LENGTH";
+    case ExprNode_Type.PI:
+      return "PI";
     case ExprNode_Type.VNODE:
       return "VNODE";
     case ExprNode_Type.NOW:
@@ -637,7 +644,9 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
 export interface TableFunction {
   functionType: TableFunction_Type;
   args: ExprNode[];
-  returnType: DataType | undefined;
+  returnTypes: DataType[];
+  /** optional. only used when the type is UDTF. */
+  udtf: UserDefinedTableFunction | undefined;
 }
 
 export const TableFunction_Type = {
@@ -646,6 +655,8 @@ export const TableFunction_Type = {
   UNNEST: "UNNEST",
   REGEXP_MATCHES: "REGEXP_MATCHES",
   RANGE: "RANGE",
+  /** UDTF - User defined table function */
+  UDTF: "UDTF",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -668,6 +679,9 @@ export function tableFunction_TypeFromJSON(object: any): TableFunction_Type {
     case 4:
     case "RANGE":
       return TableFunction_Type.RANGE;
+    case 100:
+    case "UDTF":
+      return TableFunction_Type.UDTF;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -687,6 +701,8 @@ export function tableFunction_TypeToJSON(object: TableFunction_Type): string {
       return "REGEXP_MATCHES";
     case TableFunction_Type.RANGE:
       return "RANGE";
+    case TableFunction_Type.UDTF:
+      return "UDTF";
     case TableFunction_Type.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -741,7 +757,7 @@ export interface AggCall {
   args: InputRef[];
   returnType: DataType | undefined;
   distinct: boolean;
-  orderByFields: AggCall_OrderByField[];
+  orderBy: ColumnOrder[];
   filter: ExprNode | undefined;
 }
 
@@ -858,15 +874,16 @@ export function aggCall_TypeToJSON(object: AggCall_Type): string {
   }
 }
 
-export interface AggCall_OrderByField {
-  input: number;
-  direction: OrderType;
-  nullsFirst: boolean;
-}
-
 export interface UserDefinedFunction {
   children: ExprNode[];
   name: string;
+  argTypes: DataType[];
+  language: string;
+  link: string;
+  identifier: string;
+}
+
+export interface UserDefinedTableFunction {
   argTypes: DataType[];
   language: string;
   link: string;
@@ -944,7 +961,7 @@ export const ExprNode = {
 };
 
 function createBaseTableFunction(): TableFunction {
-  return { functionType: TableFunction_Type.UNSPECIFIED, args: [], returnType: undefined };
+  return { functionType: TableFunction_Type.UNSPECIFIED, args: [], returnTypes: [], udtf: undefined };
 }
 
 export const TableFunction = {
@@ -956,7 +973,8 @@ export const TableFunction = {
       args: Array.isArray(object?.args)
         ? object.args.map((e: any) => ExprNode.fromJSON(e))
         : [],
-      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
+      returnTypes: Array.isArray(object?.returnTypes) ? object.returnTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      udtf: isSet(object.udtf) ? UserDefinedTableFunction.fromJSON(object.udtf) : undefined,
     };
   },
 
@@ -968,8 +986,12 @@ export const TableFunction = {
     } else {
       obj.args = [];
     }
-    message.returnType !== undefined &&
-      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    if (message.returnTypes) {
+      obj.returnTypes = message.returnTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.returnTypes = [];
+    }
+    message.udtf !== undefined && (obj.udtf = message.udtf ? UserDefinedTableFunction.toJSON(message.udtf) : undefined);
     return obj;
   },
 
@@ -977,8 +999,9 @@ export const TableFunction = {
     const message = createBaseTableFunction();
     message.functionType = object.functionType ?? TableFunction_Type.UNSPECIFIED;
     message.args = object.args?.map((e) => ExprNode.fromPartial(e)) || [];
-    message.returnType = (object.returnType !== undefined && object.returnType !== null)
-      ? DataType.fromPartial(object.returnType)
+    message.returnTypes = object.returnTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.udtf = (object.udtf !== undefined && object.udtf !== null)
+      ? UserDefinedTableFunction.fromPartial(object.udtf)
       : undefined;
     return message;
   },
@@ -1089,7 +1112,7 @@ function createBaseAggCall(): AggCall {
     args: [],
     returnType: undefined,
     distinct: false,
-    orderByFields: [],
+    orderBy: [],
     filter: undefined,
   };
 }
@@ -1101,9 +1124,7 @@ export const AggCall = {
       args: Array.isArray(object?.args) ? object.args.map((e: any) => InputRef.fromJSON(e)) : [],
       returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       distinct: isSet(object.distinct) ? Boolean(object.distinct) : false,
-      orderByFields: Array.isArray(object?.orderByFields)
-        ? object.orderByFields.map((e: any) => AggCall_OrderByField.fromJSON(e))
-        : [],
+      orderBy: Array.isArray(object?.orderBy) ? object.orderBy.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       filter: isSet(object.filter) ? ExprNode.fromJSON(object.filter) : undefined,
     };
   },
@@ -1119,10 +1140,10 @@ export const AggCall = {
     message.returnType !== undefined &&
       (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.distinct !== undefined && (obj.distinct = message.distinct);
-    if (message.orderByFields) {
-      obj.orderByFields = message.orderByFields.map((e) => e ? AggCall_OrderByField.toJSON(e) : undefined);
+    if (message.orderBy) {
+      obj.orderBy = message.orderBy.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.orderByFields = [];
+      obj.orderBy = [];
     }
     message.filter !== undefined && (obj.filter = message.filter ? ExprNode.toJSON(message.filter) : undefined);
     return obj;
@@ -1136,40 +1157,10 @@ export const AggCall = {
       ? DataType.fromPartial(object.returnType)
       : undefined;
     message.distinct = object.distinct ?? false;
-    message.orderByFields = object.orderByFields?.map((e) => AggCall_OrderByField.fromPartial(e)) || [];
+    message.orderBy = object.orderBy?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.filter = (object.filter !== undefined && object.filter !== null)
       ? ExprNode.fromPartial(object.filter)
       : undefined;
-    return message;
-  },
-};
-
-function createBaseAggCall_OrderByField(): AggCall_OrderByField {
-  return { input: 0, direction: OrderType.ORDER_UNSPECIFIED, nullsFirst: false };
-}
-
-export const AggCall_OrderByField = {
-  fromJSON(object: any): AggCall_OrderByField {
-    return {
-      input: isSet(object.input) ? Number(object.input) : 0,
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
-      nullsFirst: isSet(object.nullsFirst) ? Boolean(object.nullsFirst) : false,
-    };
-  },
-
-  toJSON(message: AggCall_OrderByField): unknown {
-    const obj: any = {};
-    message.input !== undefined && (obj.input = Math.round(message.input));
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
-    message.nullsFirst !== undefined && (obj.nullsFirst = message.nullsFirst);
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<AggCall_OrderByField>, I>>(object: I): AggCall_OrderByField {
-    const message = createBaseAggCall_OrderByField();
-    message.input = object.input ?? 0;
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
-    message.nullsFirst = object.nullsFirst ?? false;
     return message;
   },
 };
@@ -1213,6 +1204,43 @@ export const UserDefinedFunction = {
     const message = createBaseUserDefinedFunction();
     message.children = object.children?.map((e) => ExprNode.fromPartial(e)) || [];
     message.name = object.name ?? "";
+    message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.language = object.language ?? "";
+    message.link = object.link ?? "";
+    message.identifier = object.identifier ?? "";
+    return message;
+  },
+};
+
+function createBaseUserDefinedTableFunction(): UserDefinedTableFunction {
+  return { argTypes: [], language: "", link: "", identifier: "" };
+}
+
+export const UserDefinedTableFunction = {
+  fromJSON(object: any): UserDefinedTableFunction {
+    return {
+      argTypes: Array.isArray(object?.argTypes) ? object.argTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      language: isSet(object.language) ? String(object.language) : "",
+      link: isSet(object.link) ? String(object.link) : "",
+      identifier: isSet(object.identifier) ? String(object.identifier) : "",
+    };
+  },
+
+  toJSON(message: UserDefinedTableFunction): unknown {
+    const obj: any = {};
+    if (message.argTypes) {
+      obj.argTypes = message.argTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.argTypes = [];
+    }
+    message.language !== undefined && (obj.language = message.language);
+    message.link !== undefined && (obj.link = message.link);
+    message.identifier !== undefined && (obj.identifier = message.identifier);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<UserDefinedTableFunction>, I>>(object: I): UserDefinedTableFunction {
+    const message = createBaseUserDefinedTableFunction();
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
     message.language = object.language ?? "";
     message.link = object.link ?? "";

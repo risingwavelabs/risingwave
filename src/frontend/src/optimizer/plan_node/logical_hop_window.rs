@@ -13,21 +13,18 @@
 // limitations under the License.
 
 use std::fmt;
-use std::num::NonZeroUsize;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, IntervalUnit};
-use risingwave_expr::ExprError;
+use risingwave_common::types::IntervalUnit;
 
 use super::generic::GenericPlanNode;
 use super::{
     gen_filter_and_pushdown, generic, BatchHopWindow, ColPrunable, ExprRewritable, LogicalFilter,
     PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamHopWindow, ToBatch, ToStream,
 };
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::expr::{ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
@@ -54,24 +51,6 @@ impl LogicalHopWindow {
         // if output_indices is not specified, use default output_indices
         let output_indices =
             output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
-        let output_type = DataType::window_of(&time_col.data_type).unwrap();
-        let original_schema: Schema = input
-            .schema()
-            .clone()
-            .into_fields()
-            .into_iter()
-            .chain([
-                Field::with_name(output_type.clone(), "window_start"),
-                Field::with_name(output_type, "window_end"),
-            ])
-            .collect();
-        let window_start_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len());
-        let window_end_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len() + 1);
-
         let core = generic::HopWindow {
             input,
             time_col,
@@ -80,23 +59,9 @@ impl LogicalHopWindow {
             output_indices,
         };
 
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
+        let _schema = core.schema();
+        let _pk_indices = core.logical_pk();
         let ctx = core.ctx();
-        let functional_dependency = {
-            let mut fd_set =
-                ColIndexMapping::identity_or_none(core.input.schema().len(), original_schema.len())
-                    .composite(&ColIndexMapping::with_remaining_columns(
-                        &core.output_indices,
-                        original_schema.len(),
-                    ))
-                    .rewrite_functional_dependency_set(core.input.functional_dependency().clone());
-            if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
-                fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
-                fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
-            }
-            fd_set
-        };
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
@@ -109,9 +74,9 @@ impl LogicalHopWindow {
 
         let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
+            core.schema(),
+            core.logical_pk().unwrap_or_default(),
+            core.functional_dependency(),
         );
 
         LogicalHopWindow { base, core }
@@ -138,45 +103,28 @@ impl LogicalHopWindow {
         Self::new(input, time_col, window_slide, window_size, None).into()
     }
 
-    pub fn window_start_col_idx(&self) -> usize {
-        self.input().schema().len()
+    pub fn internal_window_start_col_idx(&self) -> usize {
+        self.core.internal_window_start_col_idx()
     }
 
-    pub fn window_end_col_idx(&self) -> usize {
-        self.window_start_col_idx() + 1
+    pub fn internal_window_end_col_idx(&self) -> usize {
+        self.core.internal_window_end_col_idx()
     }
 
     pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        self.output2internal_col_mapping()
-            .composite(&self.internal2input_col_mapping())
+        self.core.o2i_col_mapping()
     }
 
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.input2internal_col_mapping()
-            .composite(&self.internal2output_col_mapping())
+        self.core.i2o_col_mapping()
     }
 
     pub fn internal_column_num(&self) -> usize {
-        self.window_start_col_idx() + 2
+        self.core.internal_column_num()
     }
 
     fn output2internal_col_mapping(&self) -> ColIndexMapping {
-        self.internal2output_col_mapping().inverse()
-    }
-
-    fn internal2output_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::with_remaining_columns(
-            &self.core.output_indices,
-            self.internal_column_num(),
-        )
-    }
-
-    fn input2internal_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::identity_or_none(self.window_start_col_idx(), self.internal_column_num())
-    }
-
-    fn internal2input_col_mapping(&self) -> ColIndexMapping {
-        ColIndexMapping::identity_or_none(self.internal_column_num(), self.window_start_col_idx())
+        self.core.output2internal_col_mapping()
     }
 
     fn clone_with_output_indices(&self, output_indices: Vec<usize>) -> Self {
@@ -206,97 +154,6 @@ impl LogicalHopWindow {
     /// Get output indices
     pub fn output_indices(&self) -> &Vec<usize> {
         &self.core.output_indices
-    }
-
-    fn derive_window_start_and_end_exprs(&self) -> Result<(Vec<ExprImpl>, Vec<ExprImpl>)> {
-        let generic::HopWindow::<PlanRef> {
-            window_size,
-            window_slide,
-            time_col,
-            ..
-        } = &self.core;
-        let units = window_size
-            .exact_div(window_slide)
-            .and_then(|x| NonZeroUsize::new(usize::try_from(x).ok()?))
-            .ok_or_else(|| ExprError::InvalidParam {
-                name: "window",
-                reason: format!(
-                    "window_size {} cannot be divided by window_slide {}",
-                    window_size, window_slide
-                ),
-            })?
-            .get();
-        let window_size_expr = Literal::new(Some((*window_size).into()), DataType::Interval).into();
-        let window_slide_expr: ExprImpl =
-            Literal::new(Some((*window_slide).into()), DataType::Interval).into();
-        let window_size_sub_slide = FunctionCall::new(
-            ExprType::Subtract,
-            vec![window_size_expr, window_slide_expr.clone()],
-        )?
-        .into();
-
-        let time_col_shifted = FunctionCall::new(
-            ExprType::Subtract,
-            vec![
-                ExprImpl::InputRef(Box::new(time_col.clone())),
-                window_size_sub_slide,
-            ],
-        )?
-        .into();
-
-        let hop_start: ExprImpl = FunctionCall::new(
-            ExprType::TumbleStart,
-            vec![time_col_shifted, window_slide_expr],
-        )?
-        .into();
-
-        let mut window_start_exprs = Vec::with_capacity(units);
-        let mut window_end_exprs = Vec::with_capacity(units);
-        for i in 0..units {
-            {
-                let window_start_offset =
-                    window_slide
-                        .checked_mul_int(i)
-                        .ok_or_else(|| ExprError::InvalidParam {
-                            name: "window",
-                            reason: format!(
-                                "window_slide {} cannot be multiplied by {}",
-                                window_slide, i
-                            ),
-                        })?;
-                let window_start_offset_expr =
-                    Literal::new(Some(window_start_offset.into()), DataType::Interval).into();
-                let window_start_expr = FunctionCall::new(
-                    ExprType::Add,
-                    vec![hop_start.clone(), window_start_offset_expr],
-                )?
-                .into();
-                window_start_exprs.push(window_start_expr);
-            }
-            {
-                let window_end_offset =
-                    window_slide.checked_mul_int(i + units).ok_or_else(|| {
-                        ExprError::InvalidParam {
-                            name: "window",
-                            reason: format!(
-                                "window_slide {} cannot be multiplied by {}",
-                                window_slide,
-                                i + units
-                            ),
-                        }
-                    })?;
-                let window_end_offset_expr =
-                    Literal::new(Some(window_end_offset.into()), DataType::Interval).into();
-                let window_end_expr = FunctionCall::new(
-                    ExprType::Add,
-                    vec![hop_start.clone(), window_end_offset_expr],
-                )?
-                .into();
-                window_end_exprs.push(window_end_expr);
-            }
-        }
-        assert_eq!(window_start_exprs.len(), window_end_exprs.len());
-        Ok((window_start_exprs, window_end_exprs))
     }
 }
 
@@ -335,10 +192,10 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
                     Some(new_idx)
                 }
                 None => {
-                    if idx == self.window_start_col_idx() {
+                    if idx == self.internal_window_start_col_idx() {
                         columns_to_be_kept.push(i);
                         Some(input.schema().len())
-                    } else if idx == self.window_end_col_idx() {
+                    } else if idx == self.internal_window_end_col_idx() {
                         columns_to_be_kept.push(i);
                         Some(input.schema().len() + 1)
                     } else {
@@ -407,9 +264,9 @@ impl ColPrunable for LogicalHopWindow {
                     if let Some(idx) = o2i.try_map(idx) {
                         Some(IndexType::Input(idx))
                     } else if let Some(idx) = output2internal.try_map(idx) {
-                        if idx == self.window_start_col_idx() {
+                        if idx == self.internal_window_start_col_idx() {
                             Some(IndexType::WindowStart)
-                        } else if idx == self.window_end_col_idx() {
+                        } else if idx == self.internal_window_end_col_idx() {
                             Some(IndexType::WindowEnd)
                         } else {
                             None
@@ -424,8 +281,8 @@ impl ColPrunable for LogicalHopWindow {
                 .iter()
                 .filter_map(|&idx| match idx {
                     IndexType::Input(x) => input_change.try_map(x),
-                    IndexType::WindowStart => Some(new_hop.window_start_col_idx()),
-                    IndexType::WindowEnd => Some(new_hop.window_end_col_idx()),
+                    IndexType::WindowStart => Some(new_hop.internal_window_start_col_idx()),
+                    IndexType::WindowEnd => Some(new_hop.internal_window_end_col_idx()),
                 })
                 .collect_vec()
         };
@@ -445,8 +302,8 @@ impl PredicatePushdown for LogicalHopWindow {
     ) -> PlanRef {
         let mut window_columns = FixedBitSet::with_capacity(self.schema().len());
 
-        let window_start_idx = self.window_start_col_idx();
-        let window_end_idx = self.window_end_col_idx();
+        let window_start_idx = self.internal_window_start_col_idx();
+        let window_end_idx = self.internal_window_end_col_idx();
         for (i, v) in self.output_indices().iter().enumerate() {
             if *v == window_start_idx || *v == window_end_idx {
                 window_columns.insert(i);
@@ -464,7 +321,7 @@ impl ToBatch for LogicalHopWindow {
         let new_input = self.input().to_batch()?;
         let new_logical = self.clone_with_input(new_input);
         let (window_start_exprs, window_end_exprs) =
-            new_logical.derive_window_start_and_end_exprs()?;
+            new_logical.core.derive_window_start_and_end_exprs()?;
         Ok(BatchHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 }
@@ -473,7 +330,9 @@ impl ToStream for LogicalHopWindow {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
         let new_input = self.input().to_stream(ctx)?;
         let new_logical = self.clone_with_input(new_input);
-        Ok(StreamHopWindow::new(new_logical).into())
+        let (window_start_exprs, window_end_exprs) =
+            new_logical.core.derive_window_start_and_end_exprs()?;
+        Ok(StreamHopWindow::new(new_logical, window_start_exprs, window_end_exprs).into())
     }
 
     fn logical_rewrite_for_stream(
@@ -550,8 +409,8 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
             None,
         )
         .into();
@@ -605,8 +464,8 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
             None,
         )
         .into();

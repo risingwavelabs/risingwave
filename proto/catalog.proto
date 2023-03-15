@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package catalog;
 
+import "common.proto";
 import "data.proto";
 import "expr.proto";
 import "plan_common.proto";
@@ -72,7 +73,7 @@ message Sink {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder pk = 6;
+  repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 7;
   repeated int32 distribution_key = 8;
   // pk_indices of the corresponding materialize operator's output.
@@ -108,6 +109,15 @@ message Function {
   string language = 7;
   string link = 8;
   string identifier = 10;
+
+  oneof kind {
+    ScalarFunction scalar = 11;
+    TableFunction table = 12;
+    AggregateFunction aggregate = 13;
+  }
+  message ScalarFunction {}
+  message TableFunction {}
+  message AggregateFunction {}
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
@@ -134,7 +144,7 @@ message Table {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated plan_common.ColumnOrder pk = 6;
+  repeated common.ColumnOrder pk = 6;
   repeated uint32 dependent_relations = 8;
   oneof optional_associated_source_id {
     uint32 associated_source_id = 9;

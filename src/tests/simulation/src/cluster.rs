@@ -110,6 +110,9 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Start a RisingWave cluster for testing.
+    ///
+    /// This function should be called exactly once in a test.
     pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
@@ -521,6 +524,7 @@ impl Cluster {
     }
 }
 
+/// Options for killing nodes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KillOpts {
     pub kill_rate: f32,
@@ -528,4 +532,15 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+}
+
+impl KillOpts {
+    /// Killing all kind of nodes.
+    pub const ALL: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+    };
 }

@@ -19,7 +19,7 @@ use bytes::Bytes;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_meta::hummock::test_utils::{
     setup_compute_env, update_filter_key_extractor_for_table_ids,
 };
@@ -37,7 +37,7 @@ use risingwave_storage::hummock::shared_buffer::UncommittedData;
 use risingwave_storage::hummock::test_utils::{
     default_opts_for_test, gen_dummy_batch, gen_dummy_batch_several_keys, gen_dummy_sst_info,
 };
-use risingwave_storage::hummock::SstableIdManager;
+use risingwave_storage::hummock::SstableObjectIdManager;
 use risingwave_storage::monitor::CompactorMetrics;
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::storage_value::StorageValue;
@@ -60,7 +60,7 @@ pub async fn prepare_local_version_manager(
         worker_node.id,
     ));
 
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
+    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         opt.sstable_id_remote_fetch_number,
     ));
@@ -74,7 +74,7 @@ pub async fn prepare_local_version_manager(
         sstable_store,
         hummock_meta_client,
         Arc::new(CompactorMetrics::unused()),
-        sstable_id_manager,
+        sstable_object_id_manager,
         filter_key_extractor_manager,
         CompactorRuntimeConfig::default(),
     ));
@@ -459,9 +459,9 @@ async fn test_clear_shared_buffer() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 }
 
@@ -482,9 +482,9 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     for i in 0..2 {
@@ -496,9 +496,9 @@ async fn test_sst_gc_watermark() {
 
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     for epoch in &epochs {
@@ -510,8 +510,8 @@ async fn test_sst_gc_watermark() {
         // Global watermark determined by epoch 0.
         assert_eq!(
             local_version_manager
-                .sstable_id_manager()
-                .global_watermark_sst_id(),
+                .sstable_object_id_manager()
+                .global_watermark_object_id(),
             1
         );
     }
@@ -526,8 +526,8 @@ async fn test_sst_gc_watermark() {
     // Global watermark determined by epoch 1.
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
         2
     );
 
@@ -539,8 +539,8 @@ async fn test_sst_gc_watermark() {
     local_version_manager.try_update_pinned_version(Payload::PinnedVersion(version));
     assert_eq!(
         local_version_manager
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 }

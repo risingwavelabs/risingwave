@@ -20,8 +20,11 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     let mut s = String::new();
     writeln!(
         s,
-        "Compaction task id: {:?}, group-id: {:?}, target level: {:?}",
-        compact_task.task_id, compact_task.compaction_group_id, compact_task.target_level
+        "Compaction task id: {:?}, group-id: {:?}, target level: {:?}, target sub level: {:?}",
+        compact_task.task_id,
+        compact_task.compaction_group_id,
+        compact_task.target_level,
+        compact_task.target_sub_level_id
     )
     .unwrap();
     writeln!(s, "Compaction watermark: {:?} ", compact_task.watermark).unwrap();
@@ -43,7 +46,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| format!("[id: {}, {}KB]", table.id, table.file_size / 1024))
+            .map(|table| format!("[id: {}, {}KB]", table.get_sst_id(), table.file_size / 1024))
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
@@ -73,10 +76,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB, delete_ratio={:?}%",
-            sstable_info.id,
+            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
+            sstable_info.get_object_id(),
+            sstable_info.get_sst_id(),
             left_str,
             right_str,
+            sstable_info.table_ids,
             sstable_info.file_size / 1024,
             ratio,
         )
@@ -84,10 +89,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     } else {
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], size={:?}KB",
-            sstable_info.id,
+            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
+            sstable_info.get_object_id(),
+            sstable_info.get_sst_id(),
             left_str,
             right_str,
+            sstable_info.table_ids,
             sstable_info.file_size / 1024,
         )
         .unwrap();

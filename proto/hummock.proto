@@ -10,15 +10,14 @@ option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
 message SstableInfo {
-  uint64 id = 1;
-  KeyRange key_range = 2;
-  uint64 file_size = 3;
-  repeated uint32 table_ids = 4;
-  uint64 meta_offset = 5;
-  uint64 stale_key_count = 6;
-  uint64 total_key_count = 7;
-  // When a SST is divided, its divide_version will increase one.
-  uint64 divide_version = 8;
+  uint64 object_id = 1;
+  uint64 sst_id = 2;
+  KeyRange key_range = 3;
+  uint64 file_size = 4;
+  repeated uint32 table_ids = 5;
+  uint64 meta_offset = 6;
+  uint64 stale_key_count = 7;
+  uint64 total_key_count = 8;
   uint64 min_epoch = 9;
   uint64 max_epoch = 10;
   uint64 uncompressed_file_size = 11;
@@ -64,6 +63,7 @@ message GroupConstruct {
   uint64 parent_group_id = 2;
   repeated uint32 table_ids = 3;
   uint64 group_id = 4;
+  uint64 new_sst_start_id = 5;
 }
 
 message GroupMetaChange {
@@ -117,7 +117,7 @@ message HummockVersionDelta {
   // Reads against such an epoch will fail.
   uint64 safe_epoch = 5;
   bool trivial_move = 6;
-  repeated uint64 gc_sst_ids = 7;
+  repeated uint64 gc_object_ids = 7;
 }
 
 message HummockVersionDeltas {
@@ -232,7 +232,7 @@ message CompactTask {
     INVALID_GROUP_CANCELED = 8;
     EXECUTE_FAILED = 9;
     JOIN_HANDLE_FAILED = 10;
-    TRACK_SST_ID_FAILED = 11;
+    TRACK_SST_OBJECT_ID_FAILED = 11;
   }
   // SSTs to be compacted, which will be removed from LSM after compaction
   repeated InputLevel input_ssts = 1;
@@ -271,6 +271,7 @@ message CompactTask {
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
   TaskType task_type = 20;
+  bool split_by_state_table = 21;
 }
 
 message LevelHandler {
@@ -389,7 +390,7 @@ message SubscribeCompactTasksResponse {
 
 // Delete SSTs in object store
 message VacuumTask {
-  repeated uint64 sstable_ids = 1;
+  repeated uint64 sstable_object_ids = 1;
 }
 
 // Scan object store to get candidate orphan SSTs.
@@ -424,7 +425,7 @@ message TriggerManualCompactionResponse {
 }
 
 message ReportFullScanTaskRequest {
-  repeated uint64 sst_ids = 1;
+  repeated uint64 object_ids = 1;
 }
 
 message ReportFullScanTaskResponse {
@@ -518,6 +519,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 target_file_size_base = 7;
       uint32 compaction_filter_mask = 8;
       uint32 max_sub_compaction = 9;
+      uint64 level0_stop_write_threshold_sub_level_number = 10;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -600,6 +602,9 @@ message CompactionConfig {
   uint32 compaction_filter_mask = 11;
   uint32 max_sub_compaction = 12;
   uint64 max_space_reclaim_bytes = 13;
+  bool split_by_state_table = 14;
+  // soft limit for max number of sub level number
+  uint64 level0_stop_write_threshold_sub_level_number = 15;
 }
 
 message TableStats {
@@ -611,4 +616,13 @@ message TableStats {
 message HummockVersionStats {
   uint64 hummock_version_id = 1;
   map<uint32, TableStats> table_stats = 2;
+}
+
+message WriteLimits {
+  message WriteLimit {
+    repeated uint32 table_ids = 1;
+    string reason = 2;
+  }
+  // < compaction group id, write limit info >
+  map<uint64, WriteLimit> write_limits = 1;
 }
