@@ -16,17 +16,15 @@ use std::collections::{BTreeMap, HashMap};
 use std::ops::DerefMut;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use await_tree::InstrumentAwait;
-use futures::future::{select, try_join_all, Either};
+use futures::future::{select, Either};
 use futures::FutureExt;
 use parking_lot::RwLock;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_hummock_sdk::{info_in_release, HummockEpoch, KeyComparator, LocalSstableInfo};
+use risingwave_hummock_sdk::{info_in_release, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::{group_delta, HummockVersionDelta};
 use tokio::spawn;
 use tokio::sync::{mpsc, oneshot};
 use tracing::{error, info};
@@ -34,21 +32,17 @@ use tracing::{error, info};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::hummock::compactor::{compact, CompactorContext};
 use crate::hummock::conflict_detector::ConflictDetector;
+use crate::hummock::event_handler::cache_fill_policy::CacheFillPolicy;
 use crate::hummock::event_handler::uploader::{
     HummockUploader, UploadTaskInfo, UploadTaskPayload, UploaderEvent,
 };
 use crate::hummock::event_handler::HummockEvent;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::sstable_store::{SstableStoreRef, TableHolder};
 use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{
-    HummockError, HummockResult, MemoryLimiter, Sstable, SstableBlockIterator, SstableIdManagerRef,
-    TrackerId,
-};
-use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
+use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -114,9 +108,7 @@ pub struct HummockEventHandler {
     last_instance_id: LocalInstanceId,
 
     sstable_id_manager: SstableIdManagerRef,
-    sstable_store: SstableStoreRef,
-    metrics: Arc<CompactorMetrics>,
-    cache_refill_io_count_limit: usize,
+    cache_fill_policy: Arc<CacheFillPolicy>,
 }
 
 async fn flush_imms(
@@ -163,6 +155,11 @@ impl HummockEventHandler {
             }),
             buffer_tracker,
         );
+        let cache_fill_policy = Arc::new(CacheFillPolicy::new(
+            sstable_store,
+            metrics.clone(),
+            cache_refill_io_count_limit,
+        ));
 
         Self {
             hummock_event_tx,
@@ -175,9 +172,7 @@ impl HummockEventHandler {
             uploader,
             last_instance_id: 0,
             sstable_id_manager,
-            sstable_store,
-            cache_refill_io_count_limit,
-            metrics,
+            cache_fill_policy,
         }
     }
 
@@ -384,230 +379,8 @@ impl HummockEventHandler {
         });
     }
 
-    async fn fill_cache(&mut self, delta: &HummockVersionDelta) -> HummockResult<()> {
-        let stats = StoreLocalStatistic::default();
-        let mut prefetch_blocks = vec![];
-        for (group_id, group_delta) in &delta.group_deltas {
-            let mut min_removed_level_idx = u32::MAX;
-            let mut flatten_reqs = vec![];
-            let mut removed_table_ids = vec![];
-            for d in &group_delta.group_deltas {
-                if let Some(group_delta::DeltaType::IntraLevel(level_delta)) = d.delta_type.as_ref()
-                {
-                    for sst in &level_delta.inserted_table_infos {
-                        flatten_reqs.push(self.sstable_store.sstable_syncable(sst, &stats));
-                    }
-                    if !level_delta.removed_table_ids.is_empty() {
-                        min_removed_level_idx =
-                            std::cmp::min(min_removed_level_idx, level_delta.level_idx);
-                    }
-                    removed_table_ids.extend(level_delta.removed_table_ids.clone());
-                }
-            }
-            if flatten_reqs.is_empty()
-                || min_removed_level_idx != 0
-                || self.cache_refill_io_count_limit == 0
-            {
-                continue;
-            }
-            let flatten_resp = futures::future::try_join_all(flatten_reqs).await?;
-            let mut sstables: Vec<TableHolder> = Vec::with_capacity(flatten_resp.len());
-            let mut trivial_move = false;
-            for (sst, cache_miss) in flatten_resp {
-                if cache_miss == 0 {
-                    trivial_move = true;
-                }
-                sstables.push(sst);
-            }
-            if trivial_move {
-                continue;
-            }
-            sstables.sort_by(|a, b| {
-                KeyComparator::compare_encoded_full_key(
-                    &a.value().meta.smallest_key,
-                    &b.value().meta.smallest_key,
-                )
-            });
-            for idx in 1..sstables.len() {
-                if !KeyComparator::encoded_full_key_less_than(
-                    &sstables[idx - 1].value().meta.largest_key,
-                    &sstables[idx].value().meta.smallest_key,
-                ) {
-                    return Ok(());
-                }
-            }
-            let mut group_blocks = vec![];
-            for remove_sst_id in &removed_table_ids {
-                if sstables.iter().any(|sst| sst.value().id == *remove_sst_id) {
-                    continue;
-                }
-                if let Some(sst) = self.sstable_store.lookup_sstable(*remove_sst_id) {
-                    group_blocks.extend(self.refill_sstable(sst.value(), &sstables));
-                }
-            }
-            if !group_blocks.is_empty() {
-                info!(
-                    "group-id: {}, replace {} blocks for {} files. removed {} files",
-                    *group_id,
-                    group_blocks.len(),
-                    sstables.len(),
-                    removed_table_ids.len()
-                );
-                prefetch_blocks.extend(group_blocks);
-            }
-        }
-        if prefetch_blocks.is_empty() {
-            return Ok(());
-        }
-        prefetch_blocks.sort();
-        prefetch_blocks.dedup();
-        let mut last_sst_id = 0;
-        let mut start_block_idx = 0;
-        let mut end_block_idx = 0;
-        let mut prefetch_requests = vec![];
-        let mut last_table: Option<TableHolder> = None;
-        let mut total_preload_block = 0;
-        for (sst_id, block_idx) in prefetch_blocks {
-            if total_preload_block > self.cache_refill_io_count_limit {
-                break;
-            }
-            if sst_id != last_sst_id || block_idx > end_block_idx {
-                if end_block_idx > start_block_idx {
-                    if !last_table
-                        .as_ref()
-                        .map(|sst| sst.value().id == last_sst_id)
-                        .unwrap_or(false)
-                    {
-                        last_table = self.sstable_store.lookup_sstable(last_sst_id);
-                    }
-                    if let Some(sst) = last_table.as_ref() {
-                        if let Some(handle) =
-                            self.sstable_store
-                                .prefetch(sst.value(), start_block_idx, end_block_idx)
-                        {
-                            total_preload_block += end_block_idx - start_block_idx;
-                            prefetch_requests.push(handle);
-                        }
-                    }
-                }
-                last_sst_id = sst_id;
-                start_block_idx = block_idx;
-            }
-            end_block_idx = block_idx + 1;
-        }
-        if end_block_idx > start_block_idx && total_preload_block < self.cache_refill_io_count_limit
-        {
-            if let Some(sst) = self.sstable_store.lookup_sstable(last_sst_id) {
-                if let Some(handle) =
-                    self.sstable_store
-                        .prefetch(sst.value(), start_block_idx, end_block_idx)
-                {
-                    total_preload_block += end_block_idx - start_block_idx;
-                    prefetch_requests.push(handle);
-                }
-            }
-        }
-        self.metrics
-            .preload_io_count
-            .inc_by(total_preload_block as u64);
-        if !prefetch_requests.is_empty() {
-            let _ =
-                tokio::time::timeout(Duration::from_millis(100), try_join_all(prefetch_requests))
-                    .await;
-        }
-        Ok(())
-    }
-
-    fn refill_sstable(&self, remove_sst: &Sstable, sstables: &[TableHolder]) -> Vec<(u64, usize)> {
-        let mut start_idx = sstables.partition_point(|sst| {
-            KeyComparator::compare_encoded_full_key(
-                &sst.value().meta.largest_key,
-                &remove_sst.meta.smallest_key,
-            ) == std::cmp::Ordering::Less
-        });
-        let mut requests = vec![];
-        if start_idx == sstables.len() {
-            return requests;
-        }
-        let end_idx = sstables.partition_point(|sst| {
-            KeyComparator::compare_encoded_full_key(
-                &sst.value().meta.smallest_key,
-                &remove_sst.meta.largest_key,
-            ) == std::cmp::Ordering::Less
-        });
-        if start_idx >= end_idx {
-            return requests;
-        }
-        let mut remove_block_iter = SstableBlockIterator::new(remove_sst);
-        while remove_block_iter.is_valid() {
-            if self.sstable_store.is_hot_block(
-                remove_block_iter.sstable.id,
-                remove_block_iter.current_block_id as u64,
-            ) {
-                break;
-            }
-            remove_block_iter.next();
-        }
-        if !remove_block_iter.is_valid() {
-            return requests;
-        }
-        let mut add_per_delete = 0;
-        const MEMORY_AMPLIFICATION: usize = 5;
-        while start_idx < end_idx {
-            let mut insert_block_iter =
-                SstableBlockIterator::new(sstables[start_idx].value().as_ref());
-            while insert_block_iter.is_valid() {
-                if KeyComparator::compare_encoded_full_key(
-                    insert_block_iter.current_block_largest(),
-                    remove_block_iter.current_block_smallest(),
-                ) != std::cmp::Ordering::Greater
-                {
-                    insert_block_iter.next();
-                    continue;
-                }
-                let mut exist_in_cache = true;
-                loop {
-                    if KeyComparator::encoded_full_key_less_than(
-                        insert_block_iter.current_block_smallest(),
-                        remove_block_iter.current_block_largest(),
-                    ) && exist_in_cache
-                        && add_per_delete < MEMORY_AMPLIFICATION
-                    {
-                        break;
-                    }
-                    remove_block_iter.next();
-                    if remove_block_iter.is_valid() {
-                        exist_in_cache = self.sstable_store.is_hot_block(
-                            remove_block_iter.sstable.id,
-                            remove_block_iter.current_block_id as u64,
-                        );
-                        add_per_delete = 0;
-                    } else {
-                        return requests;
-                    }
-                }
-                // make sure that remove_block_iter.current_block_largest() >
-                // insert_block_iter.current_block_smallest()
-                if KeyComparator::encoded_full_key_less_than(
-                    remove_block_iter.current_block_smallest(),
-                    insert_block_iter.current_block_largest(),
-                ) {
-                    assert!(insert_block_iter.is_valid());
-                    requests.push((
-                        insert_block_iter.sstable.id,
-                        insert_block_iter.current_block_id,
-                    ));
-                    add_per_delete += 1;
-                }
-                insert_block_iter.next();
-            }
-            start_idx += 1;
-        }
-        requests
-    }
-
-    async fn handle_version_update(&mut self, version_payload: Payload) {
-        let pinned_version = self.pinned_version.load();
+    fn handle_version_update(&mut self, version_payload: Payload) {
+        let pinned_version = self.pinned_version.load().clone();
 
         let prev_max_committed_epoch = pinned_version.max_committed_epoch();
         let newly_pinned_version = match version_payload {
@@ -615,7 +388,9 @@ impl HummockEventHandler {
                 let mut version_to_apply = pinned_version.version();
                 for version_delta in &version_deltas.version_deltas {
                     assert_eq!(version_to_apply.id, version_delta.prev_id);
-                    let _ = self.fill_cache(version_delta).await;
+                    if version_to_apply.max_committed_epoch == version_delta.max_committed_epoch {
+                        self.cache_fill_policy.execute(version_delta.clone());
+                    }
                     version_to_apply.apply_version_delta(version_delta);
                 }
                 version_to_apply
@@ -699,7 +474,7 @@ impl HummockEventHandler {
                         }
 
                         HummockEvent::VersionUpdate(version_payload) => {
-                            self.handle_version_update(version_payload).await;
+                            self.handle_version_update(version_payload);
                         }
 
                         HummockEvent::ImmToUploader(imm) => {

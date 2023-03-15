@@ -390,9 +390,7 @@ impl SstableStore {
     }
 
     pub fn is_hot_block(&self, sst_id: u64, block_index: u64) -> bool {
-        self.block_cache
-            .get_block_request_count(sst_id, block_index)
-            > 2
+        self.block_cache.is_hot_block(sst_id, block_index)
     }
 
     pub async fn sstable_syncable(

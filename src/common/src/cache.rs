@@ -93,7 +93,6 @@ pub struct LruHandle<K: LruKey, T: LruValue> {
     /// when `refs == 0`, the handle must either be in LRU cache or has been recycled.
     refs: u32,
     flags: u8,
-    req: u64,
 }
 
 impl<K: LruKey, T: LruValue> Default for LruHandle<K, T> {
@@ -107,7 +106,6 @@ impl<K: LruKey, T: LruValue> Default for LruHandle<K, T> {
             charge: 0,
             refs: 0,
             flags: 0,
-            req: 0,
         }
     }
 }
@@ -128,7 +126,6 @@ impl<K: LruKey, T: LruValue> LruHandle<K, T> {
         self.charge = charge;
         self.flags = 0;
         self.refs = 0;
-        self.req = 0;
     }
 
     /// Set the `in_cache` bit in the flag
@@ -507,7 +504,6 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         if !e.is_null() {
             // If the handle previously has not ref, it must exist in the lru. And therefore we are
             // safe to remove it from lru.
-            (*e).req += 1;
             if !(*e).has_refs() {
                 self.lru_remove(e);
             }
@@ -638,14 +634,14 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         }
     }
 
-    pub fn get_request_count(self: &Arc<Self>, hash: u64, key: &K) -> u64 {
+    pub fn is_hot_block(self: &Arc<Self>, hash: u64, key: &K) -> bool {
         let mut shard = self.shards[self.shard(hash)].lock();
         unsafe {
             let ptr = shard.lookup(hash, key);
             if ptr.is_null() {
-                return 0;
+                return false;
             }
-            (*ptr).req
+            !(*ptr).has_refs()
         }
     }
 
@@ -903,45 +899,6 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> LruCache<K, T> {
                 });
                 LookupResponse::Miss(join_handle)
             }
-        }
-    }
-
-    pub fn prefetch_with_request_dedup<F, E, VC>(
-        self: &Arc<Self>,
-        hash: u64,
-        key: K,
-        fetch_value: F,
-    ) -> Option<JoinHandle<Result<(), E>>>
-    where
-        F: FnOnce() -> VC,
-        E: Error + Send + 'static + From<RecvError>,
-        VC: Future<Output = Result<(T, usize), E>> + Send + 'static,
-    {
-        let mut shard = self.shards[self.shard(hash)].lock();
-        unsafe {
-            let ptr = shard.lookup(hash, &key);
-            if !ptr.is_null() {
-                return None;
-            }
-            if shard.write_request.contains_key(&key) {
-                return None;
-            }
-            shard.write_request.insert(key.clone(), vec![]);
-            let this = self.clone();
-            let fetch_value = fetch_value();
-            let key2 = key;
-            let handle = tokio::spawn(async move {
-                let guard = CleanCacheGuard {
-                    cache: &this,
-                    key: Some(key2),
-                    hash,
-                };
-                let (value, charge) = fetch_value.await?;
-                let key2 = guard.mark_success();
-                this.insert(key2, hash, charge, value);
-                Ok::<(), E>(())
-            });
-            Some(handle)
         }
     }
 }

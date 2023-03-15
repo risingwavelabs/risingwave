@@ -26,7 +26,7 @@ use tokio::task::JoinHandle;
 use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
-const MIN_BUFFER_SIZE_PER_SHARD: usize = 128 * 1024 * 1024;
+const MIN_BUFFER_SIZE_PER_SHARD: usize = 256 * 1024 * 1024;
 
 type CachedBlockEntry = CacheableEntry<(HummockSstableId, u64), Box<Block>>;
 
@@ -161,9 +161,9 @@ impl BlockCache {
             .contains(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
     }
 
-    pub fn get_block_request_count(&self, sst_id: HummockSstableId, block_idx: u64) -> u64 {
+    pub fn is_hot_block(&self, sst_id: HummockSstableId, block_idx: u64) -> bool {
         self.inner
-            .get_request_count(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .is_hot_block(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
     }
 
     pub fn insert(
@@ -178,29 +178,6 @@ impl BlockCache {
             block.capacity(),
             block,
         ))
-    }
-
-    pub fn prefetch_block<F, Fut>(
-        &self,
-        sst_id: HummockSstableId,
-        block_idx: u64,
-        mut fetch_block: F,
-    ) -> Option<JoinHandle<HummockResult<()>>>
-    where
-        F: FnMut() -> Fut,
-        Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
-    {
-        let h = Self::hash(sst_id, block_idx);
-        let key = (sst_id, block_idx);
-        self.inner
-            .prefetch_with_request_dedup::<_, HummockError, _>(h, key, || {
-                let f = fetch_block();
-                async move {
-                    let block = f.await?;
-                    let len = block.capacity();
-                    Ok((block, len))
-                }
-            })
     }
 
     pub fn get_or_insert_with<F, Fut>(
