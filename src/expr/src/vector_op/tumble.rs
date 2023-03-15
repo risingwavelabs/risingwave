@@ -38,10 +38,10 @@ pub fn tumble_start_date_time(
     window_size: IntervalUnit,
 ) -> Result<NaiveDateTimeWrapper> {
     let timestamp_micro_second = timestamp.0.timestamp_micros();
-    let window_start = get_window_start(timestamp_micro_second, window_size)?;
+    let window_start_micro_second = get_window_start(timestamp_micro_second, window_size)?;
     Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
-        window_start / 1_000_000,
-        (window_start % 1_000_000 * 1000) as u32,
+        window_start_micro_second / 1_000_000,
+        (window_start_micro_second % 1_000_000 * 1000) as u32,
     ))
 }
 
