@@ -170,17 +170,7 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(inner.get_result_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&inner.agg_call_states)));
-                let in_fields = &node.get_input()[0].fields;
-                let distinct = Pretty::Array(inner
-                .get_distinct_dedup_tables()
-                .iter()
-                .sorted_by_key(|(i, _)| *i)
-                .map(|(i, table)|
-                 Pretty::Text(format!(
-                    "(distinct key: {}, table id: {})",
-                    in_fields[*i as usize].name,
-                    self.add_table(table)
-                ).into())).collect());
+                fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
             }
             stream_node::NodeBody::HashAgg(node) => {
                 fields.push((
@@ -188,6 +178,7 @@ impl StreamGraphFormatter {
                     self.pretty_add_table(node.get_result_table().unwrap()),
                 ));
                 fields.push(("state tables", self.call_states(&node.agg_call_states)));
+                fields.push(("distinct tables", self.distinct_tables(node, inner.get_distinct_dedup_tables())));
             },
             stream_node::NodeBody::HashJoin(node) => {
                 fields.push((
@@ -305,5 +296,27 @@ impl StreamGraphFormatter {
             })
             .collect();
         Pretty::Array(vec)
+    }
+
+    fn distinct_tables<'a>(
+        &mut self,
+        node: &StreamNode,
+        inner: &HashMap<u32, Table>,
+    ) -> Pretty<'a> {
+        let in_fields = &node.get_input()[0].fields;
+        Pretty::Array(
+            inner
+                .iter()
+                .sorted_by_key(|(i, _)| *i)
+                .map(|(i, table)| {
+                    let fmt = format!(
+                        "(distinct key: {}, table id: {})",
+                        in_fields[*i as usize].name,
+                        self.add_table(table)
+                    );
+                    Pretty::Text(fmt.into())
+                })
+                .collect(),
+        )
     }
 }
