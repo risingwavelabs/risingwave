@@ -190,7 +190,7 @@ export function opToJSON(object: Op): string {
 export interface IntervalUnit {
   months: number;
   days: number;
-  ms: number;
+  usecs: number;
 }
 
 export interface DataType {
@@ -342,6 +342,7 @@ export const DataType_TypeName = {
   LIST: "LIST",
   BYTEA: "BYTEA",
   JSONB: "JSONB",
+  SERIAL: "SERIAL",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -403,6 +404,9 @@ export function dataType_TypeNameFromJSON(object: any): DataType_TypeName {
     case 18:
     case "JSONB":
       return DataType_TypeName.JSONB;
+    case 19:
+    case "SERIAL":
+      return DataType_TypeName.SERIAL;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -448,6 +452,8 @@ export function dataType_TypeNameToJSON(object: DataType_TypeName): string {
       return "BYTEA";
     case DataType_TypeName.JSONB:
       return "JSONB";
+    case DataType_TypeName.SERIAL:
+      return "SERIAL";
     case DataType_TypeName.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -513,7 +519,7 @@ export interface Terminate {
 }
 
 function createBaseIntervalUnit(): IntervalUnit {
-  return { months: 0, days: 0, ms: 0 };
+  return { months: 0, days: 0, usecs: 0 };
 }
 
 export const IntervalUnit = {
@@ -521,7 +527,7 @@ export const IntervalUnit = {
     return {
       months: isSet(object.months) ? Number(object.months) : 0,
       days: isSet(object.days) ? Number(object.days) : 0,
-      ms: isSet(object.ms) ? Number(object.ms) : 0,
+      usecs: isSet(object.usecs) ? Number(object.usecs) : 0,
     };
   },
 
@@ -529,7 +535,7 @@ export const IntervalUnit = {
     const obj: any = {};
     message.months !== undefined && (obj.months = Math.round(message.months));
     message.days !== undefined && (obj.days = Math.round(message.days));
-    message.ms !== undefined && (obj.ms = Math.round(message.ms));
+    message.usecs !== undefined && (obj.usecs = Math.round(message.usecs));
     return obj;
   },
 
@@ -537,7 +543,7 @@ export const IntervalUnit = {
     const message = createBaseIntervalUnit();
     message.months = object.months ?? 0;
     message.days = object.days ?? 0;
-    message.ms = object.ms ?? 0;
+    message.usecs = object.usecs ?? 0;
     return message;
   },
 };

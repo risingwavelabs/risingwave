@@ -378,9 +378,9 @@ pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
 pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
-    let ms = elem.get_ms_of_day();
-    let secs = (ms / 1000) as u32;
-    let nano = (ms % 1000 * 1_000_000) as u32;
+    let usecs = elem.get_usecs_of_day();
+    let secs = (usecs / 1_000_000) as u32;
+    let nano = (usecs % 1_000_000 * 1000) as u32;
     NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
@@ -486,6 +486,7 @@ pub fn literal_parsing(
         DataType::Int16 => str_parse::<i16>(s)?.into(),
         DataType::Int32 => str_parse::<i32>(s)?.into(),
         DataType::Int64 => str_parse::<i64>(s)?.into(),
+        DataType::Serial => return Err(None),
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
         DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
         DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
@@ -893,12 +894,12 @@ mod tests {
             str_to_time("04:02").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::new(1, 2, 61003)),
-            str_to_time("00:01:01.003").unwrap(),
+            interval_to_time(IntervalUnit::from_month_day_usec(1, 2, 61000003)),
+            str_to_time("00:01:01.000003").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::new(0, 0, -61003)),
-            str_to_time("23:58:58.997").unwrap(),
+            interval_to_time(IntervalUnit::from_month_day_usec(0, 0, -61000003)),
+            str_to_time("23:58:58.999997").unwrap(),
         );
     }
 

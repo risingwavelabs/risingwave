@@ -46,7 +46,7 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
         let tables: Vec<String> = level_entry
             .table_infos
             .iter()
-            .map(|table| format!("[id: {}, {}KB]", table.id, table.file_size / 1024))
+            .map(|table| format!("[id: {}, {}KB]", table.get_sst_id(), table.file_size / 1024))
             .collect();
         writeln!(s, "Level {:?} {:?} ", level_entry.level_idx, tables).unwrap();
     }
@@ -76,8 +76,9 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
         let ratio = sstable_info.stale_key_count * 100 / sstable_info.total_key_count;
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
-            sstable_info.id,
+            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB, delete_ratio={:?}%",
+            sstable_info.get_object_id(),
+            sstable_info.get_sst_id(),
             left_str,
             right_str,
             sstable_info.table_ids,
@@ -88,8 +89,9 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
     } else {
         writeln!(
             s,
-            "SstableInfo: id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
-            sstable_info.id,
+            "SstableInfo: object id={:?}, SST id={:?}, KeyRange=[{:?},{:?}], table_ids: {:?}, size={:?}KB",
+            sstable_info.get_object_id(),
+            sstable_info.get_sst_id(),
             left_str,
             right_str,
             sstable_info.table_ids,

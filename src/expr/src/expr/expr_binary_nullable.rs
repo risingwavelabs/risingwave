@@ -45,13 +45,14 @@ impl std::fmt::Debug for BinaryShortCircuitExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for BinaryShortCircuitExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left = self.expr_ia1.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let left = self.expr_ia1.eval_checked(input).await?;
         let left = left.as_bool();
 
         let res_vis: Vis = match self.expr_type {
@@ -67,7 +68,7 @@ impl Expression for BinaryShortCircuitExpression {
         let mut input1 = input.clone();
         input1.set_vis(new_vis);
 
-        let right = self.expr_ia2.eval_checked(&input1)?;
+        let right = self.expr_ia2.eval_checked(&input1).await?;
         let right = right.as_bool();
         assert_eq!(left.len(), right.len());
 
@@ -95,14 +96,14 @@ impl Expression for BinaryShortCircuitExpression {
         Ok(Arc::new(c.into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let ret_ia1 = self.expr_ia1.eval_row(input)?.map(|x| x.into_bool());
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let ret_ia1 = self.expr_ia1.eval_row(input).await?.map(|x| x.into_bool());
         match self.expr_type {
             Type::Or if ret_ia1 == Some(true) => return Ok(Some(true.to_scalar_value())),
             Type::And if ret_ia1 == Some(false) => return Ok(Some(false.to_scalar_value())),
             _ => {}
         }
-        let ret_ia2 = self.expr_ia2.eval_row(input)?.map(|x| x.into_bool());
+        let ret_ia2 = self.expr_ia2.eval_row(input).await?.map(|x| x.into_bool());
         match self.expr_type {
             Type::Or => Ok(or(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
             Type::And => Ok(and(ret_ia1, ret_ia2).map(|x| x.to_scalar_value())),
@@ -141,8 +142,8 @@ mod tests {
     use crate::expr::build_from_prost;
     use crate::expr::test_utils::{make_expression, make_input_ref};
 
-    #[test]
-    fn test_and() {
+    #[tokio::test]
+    async fn test_and() {
         let lhs = vec![
             Some(true),
             Some(true),
@@ -192,14 +193,14 @@ mod tests {
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).unwrap();
+            let res = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
     }
 
-    #[test]
-    fn test_or() {
+    #[tokio::test]
+    async fn test_or() {
         let lhs = vec![
             Some(true),
             Some(true),
@@ -249,14 +250,14 @@ mod tests {
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).unwrap();
+            let res = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
     }
 
-    #[test]
-    fn test_is_distinct_from() {
+    #[tokio::test]
+    async fn test_is_distinct_from() {
         let lhs = vec![None, None, Some(1), Some(2), Some(3)];
         let rhs = vec![None, Some(1), None, Some(2), Some(4)];
         let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
@@ -276,14 +277,14 @@ mod tests {
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).unwrap();
+            let res = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
     }
 
-    #[test]
-    fn test_is_not_distinct_from() {
+    #[tokio::test]
+    async fn test_is_not_distinct_from() {
         let lhs = vec![None, None, Some(1), Some(2), Some(3)];
         let rhs = vec![None, Some(1), None, Some(2), Some(4)];
         let target = vec![
@@ -309,14 +310,14 @@ mod tests {
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).unwrap();
+            let res = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
     }
 
-    #[test]
-    fn test_format_type() {
+    #[tokio::test]
+    async fn test_format_type() {
         let l = vec![Some(16), Some(21), Some(9527), None];
         let r = vec![Some(0), None, Some(0), Some(0)];
         let target: Vec<Option<String>> = vec![
@@ -340,7 +341,7 @@ mod tests {
                 l[i].map(|x| x.to_scalar_value()),
                 r[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).unwrap();
+            let res = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().map(|x| x.into());
             assert_eq!(res, expected);
         }

@@ -49,13 +49,3 @@ pub mod error;
 pub mod executor;
 mod from_proto;
 pub mod task;
-
-/// Controls the behavior when a compute error happens.
-///
-/// - If set to `false`, `NULL` will be inserted.
-/// - TODO: If set to `true`, The MV will be suspended and removed from further checkpoints. It can
-///   still be used to serve outdated data without corruption.
-///
-/// See also <https://github.com/risingwavelabs/risingwave/issues/4625>.
-#[expect(dead_code)]
-const STRICT_MODE: bool = false;

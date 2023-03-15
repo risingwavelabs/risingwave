@@ -36,6 +36,7 @@ members = [
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
+  "src/tests/state_cleaning_test",
   "src/tracing",
   "src/udf",
   "src/utils/local_stats_alloc",

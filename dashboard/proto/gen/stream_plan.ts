@@ -693,8 +693,16 @@ export interface ChainNode {
   tableId: number;
   /** The schema of input stream, which will be used to build a MergeNode */
   upstreamFields: Field[];
-  /** Which columns from upstream are used in this Chain node. */
+  /**
+   * The columns from the upstream table to output.
+   * TODO: rename this field.
+   */
   upstreamColumnIndices: number[];
+  /**
+   * The columns from the upstream table that'll be internally required by this chain node.
+   * TODO: This is currently only used by backfill table scan. We should also apply it to the upstream dispatcher (#4529).
+   */
+  upstreamColumnIds: number[];
   /**
    * Generally, the barrier needs to be rearranged during the MV creation process, so that data can
    * be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
@@ -702,12 +710,6 @@ export interface ChainNode {
    * ChainType is used to decide which implementation for the ChainNode.
    */
   chainType: ChainType;
-  /**
-   * Whether the upstream materialize is and this chain should be a singleton.
-   * FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
-   * fragment in the downstream mview. Remove this when we refactor the fragmenter.
-   */
-  isSingleton: boolean;
   /** The upstream materialized view info used by backfill. */
   tableDesc: StorageTableDesc | undefined;
 }
@@ -976,8 +978,12 @@ export interface StreamFragmentGraph_StreamFragment {
     | undefined;
   /** Bitwise-OR of FragmentTypeFlags */
   fragmentTypeMask: number;
-  /** mark whether this fragment should only have one actor. */
-  isSingleton: boolean;
+  /**
+   * Mark whether this fragment requires exactly one actor.
+   * Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
+   * One should check `meta.Fragment.distribution_type` for the final result.
+   */
+  requiresSingleton: boolean;
   /** Number of table ids (stateful states) for this fragment. */
   tableIdsCnt: number;
   /** Mark the upstream table ids of this fragment, Used for fragments with `Chain`s. */
@@ -3111,8 +3117,8 @@ function createBaseChainNode(): ChainNode {
     tableId: 0,
     upstreamFields: [],
     upstreamColumnIndices: [],
+    upstreamColumnIds: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
-    isSingleton: false,
     tableDesc: undefined,
   };
 }
@@ -3127,8 +3133,10 @@ export const ChainNode = {
       upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
         ? object.upstreamColumnIndices.map((e: any) => Number(e))
         : [],
+      upstreamColumnIds: Array.isArray(object?.upstreamColumnIds)
+        ? object.upstreamColumnIds.map((e: any) => Number(e))
+        : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
-      isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
     };
   },
@@ -3146,8 +3154,12 @@ export const ChainNode = {
     } else {
       obj.upstreamColumnIndices = [];
     }
+    if (message.upstreamColumnIds) {
+      obj.upstreamColumnIds = message.upstreamColumnIds.map((e) => Math.round(e));
+    } else {
+      obj.upstreamColumnIds = [];
+    }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
-    message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
     message.tableDesc !== undefined &&
       (obj.tableDesc = message.tableDesc ? StorageTableDesc.toJSON(message.tableDesc) : undefined);
     return obj;
@@ -3158,8 +3170,8 @@ export const ChainNode = {
     message.tableId = object.tableId ?? 0;
     message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
     message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
+    message.upstreamColumnIds = object.upstreamColumnIds?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
-    message.isSingleton = object.isSingleton ?? false;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)
       : undefined;
@@ -4338,7 +4350,7 @@ function createBaseStreamFragmentGraph_StreamFragment(): StreamFragmentGraph_Str
     fragmentId: 0,
     node: undefined,
     fragmentTypeMask: 0,
-    isSingleton: false,
+    requiresSingleton: false,
     tableIdsCnt: 0,
     upstreamTableIds: [],
   };
@@ -4350,7 +4362,7 @@ export const StreamFragmentGraph_StreamFragment = {
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
       node: isSet(object.node) ? StreamNode.fromJSON(object.node) : undefined,
       fragmentTypeMask: isSet(object.fragmentTypeMask) ? Number(object.fragmentTypeMask) : 0,
-      isSingleton: isSet(object.isSingleton) ? Boolean(object.isSingleton) : false,
+      requiresSingleton: isSet(object.requiresSingleton) ? Boolean(object.requiresSingleton) : false,
       tableIdsCnt: isSet(object.tableIdsCnt) ? Number(object.tableIdsCnt) : 0,
       upstreamTableIds: Array.isArray(object?.upstreamTableIds)
         ? object.upstreamTableIds.map((e: any) => Number(e))
@@ -4363,7 +4375,7 @@ export const StreamFragmentGraph_StreamFragment = {
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
     message.node !== undefined && (obj.node = message.node ? StreamNode.toJSON(message.node) : undefined);
     message.fragmentTypeMask !== undefined && (obj.fragmentTypeMask = Math.round(message.fragmentTypeMask));
-    message.isSingleton !== undefined && (obj.isSingleton = message.isSingleton);
+    message.requiresSingleton !== undefined && (obj.requiresSingleton = message.requiresSingleton);
     message.tableIdsCnt !== undefined && (obj.tableIdsCnt = Math.round(message.tableIdsCnt));
     if (message.upstreamTableIds) {
       obj.upstreamTableIds = message.upstreamTableIds.map((e) => Math.round(e));
@@ -4382,7 +4394,7 @@ export const StreamFragmentGraph_StreamFragment = {
       ? StreamNode.fromPartial(object.node)
       : undefined;
     message.fragmentTypeMask = object.fragmentTypeMask ?? 0;
-    message.isSingleton = object.isSingleton ?? false;
+    message.requiresSingleton = object.requiresSingleton ?? false;
     message.tableIdsCnt = object.tableIdsCnt ?? 0;
     message.upstreamTableIds = object.upstreamTableIds?.map((e) => e) || [];
     return message;

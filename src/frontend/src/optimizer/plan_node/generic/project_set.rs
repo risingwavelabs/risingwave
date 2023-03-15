@@ -18,7 +18,8 @@ use risingwave_common::types::DataType;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 /// [`ProjectSet`] projects one row multiple times according to `select_list`.
 ///
@@ -85,6 +86,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for ProjectSet<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let i2o = self.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 

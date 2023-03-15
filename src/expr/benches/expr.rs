@@ -19,6 +19,9 @@
 // `zip_eq` is a source of poor performance.
 #![allow(clippy::disallowed_methods)]
 
+use std::cell::RefCell;
+
+use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
 use risingwave_common::types::test_utils::IntervalUnitTestExt;
@@ -196,11 +199,15 @@ fn bench_expr(c: &mut Criterion) {
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
-        bencher.iter(|| inputref.eval(&input).unwrap())
+        bencher
+            .to_async(FuturesExecutor)
+            .iter(|| inputref.eval(&input))
     });
     c.bench_function("constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        bencher.iter(|| constant.eval(&input).unwrap())
+        bencher
+            .to_async(FuturesExecutor)
+            .iter(|| constant.eval(&input))
     });
 
     let sigs = func_sigs();
@@ -252,7 +259,7 @@ fn bench_expr(c: &mut Criterion) {
             }
         };
         c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| expr.eval(&input).unwrap())
+            bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 
@@ -261,7 +268,7 @@ fn bench_expr(c: &mut Criterion) {
             println!("todo: {}", sig.to_string_no_return());
             continue;
         }
-        let mut agg = match create_agg_state_unary(
+        let agg = match create_agg_state_unary(
             sig.inputs_type[0].into(),
             input_index_for_type(sig.inputs_type[0].into()),
             sig.func,
@@ -274,8 +281,16 @@ fn bench_expr(c: &mut Criterion) {
                 continue;
             }
         };
+        // to workaround the lifetime issue
+        let agg = RefCell::new(agg);
         c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| agg.update_multi(&input, 0, CHUNK_SIZE).unwrap())
+            #[allow(clippy::await_holding_refcell_ref)]
+            bencher.to_async(FuturesExecutor).iter(|| async {
+                agg.borrow_mut()
+                    .update_multi(&input, 0, CHUNK_SIZE)
+                    .await
+                    .unwrap()
+            })
         });
     }
 
@@ -310,7 +325,7 @@ fn bench_expr(c: &mut Criterion) {
             }
         };
         c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| expr.eval(&input).unwrap())
+            bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 }

@@ -313,14 +313,15 @@ impl ArrayConcatExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for ArrayConcatExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let left_array = self.left.eval_checked(input)?;
-        let right_array = self.right.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let left_array = self.left.eval_checked(input).await?;
+        let right_array = self.right.eval_checked(input).await?;
         let mut builder = self
             .return_type
             .create_array_builder(left_array.len() + right_array.len());
@@ -338,9 +339,9 @@ impl Expression for ArrayConcatExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let left_data = self.left.eval_row(input)?;
-        let right_data = self.right.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let left_data = self.left.eval_row(input).await?;
+        let right_data = self.right.eval_row(input).await?;
         Ok(self.evaluate(left_data.to_datum_ref(), right_data.to_datum_ref()))
     }
 }
@@ -555,8 +556,8 @@ mod tests {
         .boxed()
     }
 
-    #[test]
-    fn test_array_concat_array_of_primitives() {
+    #[tokio::test]
+    async fn test_array_concat_array_of_primitives() {
         let left = make_i64_array_expr(vec![42]);
         let right = make_i64_array_expr(vec![43, 44]);
         let expr = ArrayConcatExpression::new(
@@ -583,6 +584,7 @@ mod tests {
         ];
         let actual = expr
             .eval(&chunk)
+            .await
             .unwrap()
             .iter()
             .map(|v| v.map(|s| s.into_scalar_impl()))
