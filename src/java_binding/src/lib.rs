@@ -17,7 +17,7 @@
 #![feature(once_cell)]
 #![feature(type_alias_impl_trait)]
 
-mod iterator;
+mod hummock_iterator;
 mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
@@ -27,7 +27,7 @@ use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::LazyLock;
 
-use iterator::{Iterator, KeyedRow};
+use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
@@ -264,10 +264,10 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
-) -> Pointer<'static, Iterator> {
+) -> Pointer<'static, HummockJavaBindingIterator> {
     execute_and_catch(env, move || {
         let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
-        let iter = RUNTIME.block_on(Iterator::new(read_plan))?;
+        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
         Ok(iter.into())
     })
 }
@@ -275,7 +275,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
-    mut pointer: Pointer<'a, Iterator>,
+    mut pointer: Pointer<'a, HummockJavaBindingIterator>,
 ) -> Pointer<'static, JavaBindingRow> {
     execute_and_catch(env, move || {
         match RUNTIME.block_on(pointer.as_mut().next())? {
@@ -288,7 +288,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorN
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorClose(
     _env: EnvParam<'_>,
-    pointer: Pointer<'_, Iterator>,
+    pointer: Pointer<'_, HummockJavaBindingIterator>,
 ) {
     pointer.drop();
 }
