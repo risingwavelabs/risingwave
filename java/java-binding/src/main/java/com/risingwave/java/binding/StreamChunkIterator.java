@@ -14,30 +14,28 @@
 
 package com.risingwave.java.binding;
 
-import com.risingwave.proto.JavaBinding.ReadPlan;
-
-public class Iterator implements AutoCloseable {
+public class StreamChunkIterator implements AutoCloseable {
     private final long pointer;
     private boolean isClosed;
 
-    public Iterator(ReadPlan readPlan) {
-        this.pointer = Binding.iteratorNew(readPlan.toByteArray());
+    public StreamChunkIterator(byte[] streamChunkPayload) {
+        this.pointer = Binding.streamChunkIteratorNew(streamChunkPayload);
         this.isClosed = false;
     }
 
-    public KeyedRow next() {
-        long pointer = Binding.iteratorNext(this.pointer);
+    public StreamChunkRow next() {
+        long pointer = Binding.streamChunkIteratorNext(this.pointer);
         if (pointer == 0) {
             return null;
         }
-        return new KeyedRow(pointer);
+        return new StreamChunkRow(pointer);
     }
 
     @Override
     public void close() {
         if (!isClosed) {
             isClosed = true;
-            Binding.iteratorClose(pointer);
+            Binding.streamChunkIteratorClose(pointer);
         }
     }
 }

@@ -96,7 +96,7 @@ impl PrefetchContext {
             if *prefetched_idx == idx {
                 false
             } else {
-                tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
+                tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_object_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
                 self.prefetched_blocks.clear();
                 true
             }
@@ -226,7 +226,7 @@ impl SstableIterator {
     ) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
-            "table iterator seek: sstable_id = {}, block_id = {}",
+            "table iterator seek: sstable_object_id = {}, block_id = {}",
             self.sst.value().id,
             idx,
         );

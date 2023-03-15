@@ -22,55 +22,7 @@ use risingwave_common::error::Result;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::task::LocalStreamManager;
 
-use crate::ComputeNodeOpts;
-
-/// `MemoryControlStats` contains the necessary information for memory control, including both batch
-/// and streaming.
-pub struct MemoryControlStats {
-    pub batch_memory_usage: usize,
-    pub streaming_memory_usage: usize,
-    pub jemalloc_allocated_mib: usize,
-    pub lru_watermark_step: u64,
-    pub lru_watermark_time_ms: u64,
-    pub lru_physical_now_ms: u64,
-}
-
-pub type MemoryControlPolicy = Box<dyn MemoryControl>;
-
-pub trait MemoryControl: Send + Sync {
-    fn apply(
-        &self,
-        total_compute_memory_bytes: usize,
-        barrier_interval_ms: u32,
-        prev_memory_stats: MemoryControlStats,
-        batch_manager: Arc<BatchManager>,
-        stream_manager: Arc<LocalStreamManager>,
-        watermark_epoch: Arc<AtomicU64>,
-    ) -> MemoryControlStats;
-
-    fn describe(&self, total_compute_memory_bytes: usize) -> String;
-}
-
-pub fn memory_control_policy_from_config(opts: &ComputeNodeOpts) -> Result<MemoryControlPolicy> {
-    let input_policy = &opts.memory_control_policy;
-    if input_policy == FixedProportionPolicy::CONFIG_STR {
-        Ok(Box::new(FixedProportionPolicy::new(
-            opts.streaming_memory_proportion,
-        )?))
-    } else if input_policy == StreamingOnlyPolicy::CONFIG_STR {
-        Ok(Box::new(StreamingOnlyPolicy {}))
-    } else {
-        let valid_values = [
-            FixedProportionPolicy::CONFIG_STR,
-            StreamingOnlyPolicy::CONFIG_STR,
-        ];
-        Err(anyhow!(format!(
-            "invalid memory control policy in configuration: {}, valid values: {:?}",
-            input_policy, valid_values,
-        ))
-        .into())
-    }
-}
+use super::{MemoryControl, MemoryControlStats};
 
 /// `FixedProportionPolicy` performs memory control by limiting the memory usage of both batch and
 /// streaming to a fixed proportion.
@@ -83,7 +35,7 @@ pub struct FixedProportionPolicy {
 
 impl FixedProportionPolicy {
     const BATCH_KILL_QUERY_THRESHOLD: f64 = 0.8;
-    const CONFIG_STR: &str = "streaming-batch";
+    pub const CONFIG_STR: &str = "streaming-batch";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 
@@ -172,10 +124,10 @@ impl MemoryControl for FixedProportionPolicy {
 /// `FixedProportionPolicy` in that it calculates the memory usage based on jemalloc statistics,
 /// which actually contains system usage other than computing tasks. This is the default memory
 /// control policy.
-pub struct StreamingOnlyPolicy {}
+pub struct StreamingOnlyPolicy;
 
 impl StreamingOnlyPolicy {
-    const CONFIG_STR: &str = "streaming-only";
+    pub const CONFIG_STR: &str = "streaming-only";
     const STREAM_EVICTION_THRESHOLD_AGGRESSIVE: f64 = 0.9;
     const STREAM_EVICTION_THRESHOLD_GRACEFUL: f64 = 0.7;
 }
@@ -230,7 +182,6 @@ impl MemoryControl for StreamingOnlyPolicy {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
     use tikv_jemalloc_ctl::{epoch as jemalloc_epoch, stats as jemalloc_stats};
 
@@ -244,11 +195,6 @@ fn advance_jemalloc_epoch(prev_jemalloc_allocated_mib: usize) -> usize {
         tracing::warn!("Jemalloc read allocated failed! {:?}", e);
         prev_jemalloc_allocated_mib
     })
-}
-
-#[cfg(not(target_os = "linux"))]
-fn advance_jemalloc_epoch(_prev_jemalloc_allocated_mib: usize) -> usize {
-    0
 }
 
 fn calculate_lru_watermark(

@@ -15,16 +15,19 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use derivative::Derivative;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 
 use super::GenericPlanNode;
 use crate::catalog::{ColumnId, IndexCatalog};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::Condition;
 
 /// [`Scan`] returns contents of a table or other equivalent object
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Derivative)]
+#[derivative(PartialEq, Eq, Hash)]
 pub struct Scan {
     pub table_name: String,
     pub is_sys_table: bool,
@@ -39,6 +42,10 @@ pub struct Scan {
     pub predicate: Condition,
     /// Help RowSeqScan executor use a better chunk size
     pub chunk_size: Option<u32>,
+    pub for_system_time_as_of_now: bool,
+    #[derivative(PartialEq = "ignore")]
+    #[derivative(Hash = "ignore")]
+    pub ctx: OptimizerContextRef,
 }
 
 impl Scan {
@@ -74,7 +81,16 @@ impl GenericPlanNode for Scan {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        unimplemented!()
+        self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let pk_indices = self.logical_pk();
+        let col_num = self.output_col_idx.len();
+        match &pk_indices {
+            Some(pk_indices) => FunctionalDependencySet::with_key(col_num, pk_indices),
+            None => FunctionalDependencySet::new(col_num),
+        }
     }
 }
 
