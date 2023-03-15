@@ -274,7 +274,7 @@ delete from t;
 statement error cannot change materialized view
 insert into mv values (1);
 
-statement error cannot change materialized view
+statement error QueryError: Bind error: update modifying the PK column is banned
 update mv set v = 2;
 
 statement error cannot change materialized view
