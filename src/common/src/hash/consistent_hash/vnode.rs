@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{BuildHasher, Hasher};
+use std::hash::BuildHasher;
 
 use itertools::Itertools;
 use parse_display::Display;
 
 use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::hash::HashCode;
-use crate::row::{Row, RowExt};
+use crate::row::Row;
 use crate::types::ScalarRefImpl;
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::row_id::extract_vnode_id_from_row_id;

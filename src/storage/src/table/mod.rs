@@ -16,16 +16,13 @@ pub mod batch_table;
 
 use std::sync::{Arc, LazyLock};
 
-use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashCode, VirtualNode};
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::row_id::extract_vnode_id_from_row_id;
 
 use crate::error::StorageResult;
 

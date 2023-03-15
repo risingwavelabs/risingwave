@@ -23,7 +23,7 @@ use risingwave_pb::data::PbDataChunk;
 use super::{ArrayResult, Vis};
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
-use crate::array::{Array, ArrayBuilderImpl, ArrayImpl, StructValue};
+use crate::array::{ArrayBuilderImpl, StructValue};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::hash::HashCode;
 use crate::row::Row;
@@ -32,7 +32,6 @@ use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::util::row_id::extract_vnode_id_from_row_id;
 use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 
 /// `DataChunk` is a collection of arrays with visibility mask.
