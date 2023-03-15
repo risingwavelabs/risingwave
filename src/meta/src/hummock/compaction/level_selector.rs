@@ -540,7 +540,7 @@ pub mod tests {
             level_type: LevelType::Overlapping as i32,
             total_file_size: sst.file_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.id,
+            sub_level_id: sst.get_sst_id(),
             table_infos: vec![sst],
         });
     }
@@ -563,7 +563,7 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].id;
+        let sub_level_id = table_infos[0].get_sst_id();
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,
@@ -583,7 +583,8 @@ pub mod tests {
         epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
-            id,
+            object_id: id,
+            sst_id: id,
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
@@ -594,7 +595,6 @@ pub mod tests {
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch: 0,
             max_epoch: 0,
@@ -613,7 +613,8 @@ pub mod tests {
         max_epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
-            id,
+            object_id: id,
+            sst_id: id,
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
@@ -624,7 +625,6 @@ pub mod tests {
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch,
             max_epoch,
@@ -730,7 +730,7 @@ pub mod tests {
     ) {
         for i in &compact_task.input.input_levels {
             for t in &i.table_infos {
-                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.id));
+                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));
             }
         }
     }
@@ -906,7 +906,7 @@ pub mod tests {
             compaction.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.id)
+                .map(|sst| sst.get_sst_id())
                 .collect_vec(),
             vec![5, 6, 7]
         );

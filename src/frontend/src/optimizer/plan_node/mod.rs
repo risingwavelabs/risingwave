@@ -397,6 +397,10 @@ impl GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
 }
 
 /// In order to let expression display id started from 1 for explaining, hidden column names and

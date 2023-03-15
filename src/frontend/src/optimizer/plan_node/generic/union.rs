@@ -18,6 +18,7 @@ use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 /// `Union` returns the union of the rows of its inputs.
 /// If `all` is false, it needs to eliminate duplicates.
@@ -54,6 +55,10 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.inputs[0].ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        FunctionalDependencySet::new(self.inputs[0].schema().len())
     }
 }
 

@@ -18,13 +18,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
-use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
+    generic, ColPrunable, CollectInputRef, ExprRewritable, LogicalProject, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
 };
-use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter};
+use crate::expr::{assert_input_ref, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef};
 use crate::optimizer::plan_node::{
     BatchFilter, ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext,
     StreamFilter, ToStreamContext,
@@ -43,30 +43,12 @@ pub struct LogicalFilter {
 
 impl LogicalFilter {
     pub fn new(input: PlanRef, predicate: Condition) -> Self {
-        let ctx = input.ctx();
+        let _ctx = input.ctx();
         for cond in &predicate.conjunctions {
             assert_input_ref!(cond, input.schema().fields().len());
         }
-        let mut functional_dependency = input.functional_dependency().clone();
-        for i in &predicate.conjunctions {
-            if let Some((col, _)) = i.as_eq_const() {
-                functional_dependency.add_constant_columns(&[col.index()])
-            } else if let Some((left, right)) = i.as_eq_cond() {
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[left.index()], &[right.index()]);
-                functional_dependency
-                    .add_functional_dependency_by_column_indices(&[right.index()], &[left.index()]);
-            }
-        }
         let core = generic::Filter { predicate, input };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalFilter { base, core }
     }
 
@@ -79,7 +61,30 @@ impl LogicalFilter {
         }
     }
 
-    /// the function will check if the predicate is bool expression
+    /// Create a `LogicalFilter` to filter the rows with all keys are null.
+    pub fn filter_if_keys_all_null(input: PlanRef, key: &[usize]) -> PlanRef {
+        let schema = input.schema();
+        let cond = key.iter().fold(ExprImpl::literal_bool(false), |expr, i| {
+            ExprImpl::FunctionCall(
+                FunctionCall::new_unchecked(
+                    ExprType::Or,
+                    vec![
+                        expr,
+                        FunctionCall::new_unchecked(
+                            ExprType::IsNotNull,
+                            vec![InputRef::new(*i, schema.fields()[*i].data_type.clone()).into()],
+                            DataType::Boolean,
+                        )
+                        .into(),
+                    ],
+                    DataType::Boolean,
+                )
+                .into(),
+            )
+        });
+        LogicalFilter::create_with_expr(input, cond)
+    }
+
     pub fn create_with_expr(input: PlanRef, predicate: ExprImpl) -> PlanRef {
         let predicate = Condition::with_expr(predicate);
         Self::new(input, predicate).into()

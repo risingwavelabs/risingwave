@@ -30,10 +30,9 @@ import org.apache.iceberg.types.Types;
 import org.junit.Test;
 
 public class IcebergSinkFactoryTest {
-    static String warehousePath = "/tmp/rw-sinknode/iceberg-sink/warehouse";
+    static String warehousePath = "file:///tmp/rw-sinknode/iceberg-sink/warehouse";
     static String databaseName = "demo_db";
     static String tableName = "demo_table";
-    static String locationType = "local";
     static String sinkMode = "append-only";
     static Schema icebergTableSchema =
             new Schema(
@@ -67,8 +66,6 @@ public class IcebergSinkFactoryTest {
                                 Map.of(
                                         IcebergSinkFactory.SINK_MODE_PROP,
                                         sinkMode,
-                                        IcebergSinkFactory.LOCATION_TYPE_PROP,
-                                        locationType,
                                         IcebergSinkFactory.WAREHOUSE_PATH_PROP,
                                         warehousePath,
                                         IcebergSinkFactory.DATABASE_NAME_PROP,

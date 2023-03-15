@@ -62,12 +62,13 @@ impl<'a> TryFrom<&'a ExprNode> for VnodeExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for VnodeExpression {
     fn return_type(&self) -> DataType {
         DataType::Int16
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let hash_values = input.get_hash_values(&self.dist_key_indices, Crc32FastBuilder);
         let mut builder = I16ArrayBuilder::new(input.capacity());
         hash_values
@@ -76,7 +77,7 @@ impl Expression for VnodeExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let vnode = input
             .project(&self.dist_key_indices)
             .hash(Crc32FastBuilder)
@@ -112,8 +113,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_vnode_expr_eval() {
+    #[tokio::test]
+    async fn test_vnode_expr_eval() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(0, TypeName::Int64);
         let input_node3 = make_input_ref(0, TypeName::Varchar);
@@ -129,7 +130,7 @@ mod tests {
              2  32 def
              3  88 ghi",
         );
-        let actual = vnode_expr.eval(&chunk).unwrap();
+        let actual = vnode_expr.eval(&chunk).await.unwrap();
         actual.iter().for_each(|vnode| {
             let vnode = vnode.unwrap().into_int16();
             assert!(vnode >= 0);
@@ -137,8 +138,8 @@ mod tests {
         });
     }
 
-    #[test]
-    fn test_vnode_expr_eval_row() {
+    #[tokio::test]
+    async fn test_vnode_expr_eval_row() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(0, TypeName::Int64);
         let input_node3 = make_input_ref(0, TypeName::Varchar);
@@ -156,7 +157,7 @@ mod tests {
         );
         let rows: Vec<_> = chunk.rows().map(|row| row.into_owned_row()).collect();
         for row in rows {
-            let actual = vnode_expr.eval_row(&row).unwrap();
+            let actual = vnode_expr.eval_row(&row).await.unwrap();
             let vnode = actual.unwrap().into_int16();
             assert!(vnode >= 0);
             assert!((vnode as usize) < VirtualNode::COUNT);

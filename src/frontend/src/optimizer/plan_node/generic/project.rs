@@ -24,7 +24,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
     if expr.has_subquery() {
@@ -108,6 +109,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let i2o = self.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
     }
 }
 

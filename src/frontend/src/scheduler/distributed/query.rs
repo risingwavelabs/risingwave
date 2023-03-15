@@ -551,6 +551,7 @@ pub(crate) mod tests {
             }),
             vec![],
             ctx,
+            false,
         )
         .to_batch()
         .unwrap()
