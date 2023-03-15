@@ -124,7 +124,7 @@ impl BlockIterator {
                 if !self.is_valid() {
                     self.seek_to_last();
                 }
-                self.prev_until_key(&full_key_encoded_without_table_id[..]);
+                self.prev_until_key(key);
             }
             Ordering::Greater => self.seek_to_last(),
         }
@@ -177,6 +177,10 @@ impl BlockIterator {
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: &[u8]) {
+        // let mut buf: BytesMut = BytesMut::default();
+        // buf.put_u32(self.block.table_id());
+        // buf.put_slice(&self.key[..]);
+        // let current_key = FullKey::decode(&buf[..]);
         while self.is_valid()
             && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
         {
@@ -185,9 +189,13 @@ impl BlockIterator {
     }
 
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
-    fn prev_until_key(&mut self, key: &[u8]) {
+    fn prev_until_key(&mut self, key: FullKey<&[u8]>) {
+        let mut buf: BytesMut = BytesMut::default();
+        buf.put_u32(self.block.table_id());
+        buf.put_slice(&self.key[..]);
+        let current_key = FullKey::decode(&buf[..]);
         while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Greater
+            && KeyComparator::compare_full_key_without_table_id(current_key, key) == Ordering::Greater
         {
             self.prev_inner();
         }
