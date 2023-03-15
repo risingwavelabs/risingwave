@@ -25,7 +25,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -893,6 +892,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 
@@ -901,7 +901,6 @@ mod tests {
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::task::test_utils::helper_make_local_actor;
-    use risingwave_common::util::hash_util::Crc32FastBuilder;
 
     #[derive(Debug)]
     pub struct MockOutput {

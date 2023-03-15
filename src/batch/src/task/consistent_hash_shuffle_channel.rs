@@ -22,7 +22,6 @@ use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::hash::VirtualNode;
-
 use risingwave_pb::batch_plan::exchange_info::ConsistentHashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;

@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
-
 use itertools::Itertools;
 use parse_display::Display;
 
@@ -61,14 +59,14 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
-    pub fn compute_chunk(
-        data_chunk: &DataChunk,
-        keys: &[usize],
-    ) -> Vec<VirtualNode> {
-        if let Ok(idx) = keys.iter().exactly_one() && let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
-            serial_array.iter().map(|serial| HashCode::from(serial.map(|s| extract_vnode_id_from_row_id(s.as_row_id())).unwrap() as u64).to_vnode()).collect()
-        } else {
-            data_chunk
+    pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
+        match (keys.len(), data_chunk.columns()) {
+            (1, [column]) if let ArrayImpl::Serial(serial_array) = column.array_ref()=> {
+                serial_array.iter()
+                    .map(|serial| Self::from_index(extract_vnode_id_from_row_id(serial.unwrap().as_row_id()) as usize))
+                    .collect()
+            }
+            _ => data_chunk
                 .get_hash_values(keys, Crc32FastBuilder)
                 .into_iter()
                 .map(|hash| hash.to_vnode())
@@ -78,12 +76,11 @@ impl VirtualNode {
 
     pub fn compute_row(row: &impl Row) -> VirtualNode {
         // row should be projected
-        let vnode = if let Ok(datum) = row.iter().exactly_one() && let Some(ScalarRefImpl::Serial(s)) = datum.as_ref() {
-            HashCode::from(extract_vnode_id_from_row_id(s.as_row_id()) as u64).to_vnode()
-        } else {
-            row.hash(Crc32FastBuilder).to_vnode()
-        };
-        vnode
+        if let Ok(Some(ScalarRefImpl::Serial(s))) = row.iter().exactly_one().as_ref() {
+            return Self::from_index(extract_vnode_id_from_row_id(s.as_row_id()) as usize);
+        }
+
+        row.hash(Crc32FastBuilder).to_vnode()
     }
 }
 
