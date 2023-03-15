@@ -24,7 +24,7 @@ use risingwave_pb::connector_service::get_event_stream_request::{
     Request as SourceRequest, StartSource, ValidateProperties,
 };
 use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
-use risingwave_pb::connector_service::validate_sink_response::ResposeInner;
+use risingwave_pb::connector_service::validate_sink_response::ResponseInner;
 use risingwave_pb::connector_service::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -168,10 +168,10 @@ impl ConnectorClient {
                 tracing::error!("failed to validate sink properties: {}", err.message())
             })?
             .into_inner();
-        match response.respose_inner.unwrap() {
+        match response.response_inner.unwrap() {
             // TODO(Yuanxin): Use the returned schema as the sink schema.
-            ResposeInner::Schema(_) => Ok(()),
-            ResposeInner::Error(err) => Err(RpcError::Internal(anyhow!(format!(
+            ResponseInner::Schema(_) => Ok(()),
+            ResponseInner::Error(err) => Err(RpcError::Internal(anyhow!(format!(
                 "sink cannot pass validation: {}",
                 err.error_message
             )))),

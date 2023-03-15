@@ -116,7 +116,7 @@ impl StreamSink {
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
         let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
 
-        // TODO(Yuanxin): Remove this contraint.
+        // TODO(Yuanxin): Remove this constraint.
         if sink_type == SinkType::Upsert && pk.is_empty() {
             return Err(ErrorCode::SinkError(Box::new(Error::new(
                 ErrorKind::InvalidInput,
