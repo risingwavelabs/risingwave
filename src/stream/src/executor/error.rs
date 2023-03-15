@@ -26,6 +26,7 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 
 use super::Barrier;
+use crate::common::log_store::LogStoreError;
 
 #[derive(thiserror::Error, Debug)]
 enum Inner {
@@ -35,6 +36,9 @@ enum Inner {
         #[source]
         StorageError,
     ),
+
+    #[error("Log store error: {0}")]
+    LogStoreError(LogStoreError),
 
     #[error("Chunk operation error: {0}")]
     EvalError(Either<ArrayError, ExprError>),
@@ -119,6 +123,13 @@ impl std::fmt::Debug for StreamExecutorError {
 impl From<StorageError> for StreamExecutorError {
     fn from(s: StorageError) -> Self {
         Inner::Storage(s).into()
+    }
+}
+
+/// Log store error
+impl From<LogStoreError> for StreamExecutorError {
+    fn from(e: LogStoreError) -> Self {
+        Inner::LogStoreError(e).into()
     }
 }
 

@@ -15,8 +15,10 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use futures::StreamExt;
+use futures::stream::select;
+use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
+use prometheus::Histogram;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
@@ -28,8 +30,11 @@ use risingwave_connector::ConnectorParams;
 
 use super::error::{StreamExecutorError, StreamExecutorResult};
 use super::{BoxedExecutor, Executor, Message};
+use crate::common::log_store::{
+    BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
+};
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::PkIndices;
+use crate::executor::{expect_first_barrier, Barrier, PkIndices};
 
 pub struct SinkExecutor {
     input: BoxedExecutor,
@@ -48,10 +53,8 @@ async fn build_sink(
     pk_indices: PkIndices,
     connector_params: ConnectorParams,
     sink_type: SinkType,
-) -> StreamExecutorResult<Box<SinkImpl>> {
-    Ok(Box::new(
-        SinkImpl::new(config, schema, pk_indices, connector_params, sink_type).await?,
-    ))
+) -> StreamExecutorResult<SinkImpl> {
+    Ok(SinkImpl::new(config, schema, pk_indices, connector_params, sink_type).await?)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -93,32 +96,57 @@ impl SinkExecutor {
         }
     }
 
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_inner(self) {
-        // the flag is required because kafka transaction requires at least one
-        // message, so we should abort the transaction if the flag is true.
-        let mut empty_checkpoint_flag = true;
-        let mut in_transaction = false;
-        let mut epoch = 0;
-        let data_types = self.schema.data_types();
+    fn execute_inner(
+        self,
+        log_store_factory: impl LogStoreFactory,
+    ) -> impl Stream<Item = StreamExecutorResult<Message>> {
+        let config = self.config.clone();
+        let schema = self.schema.clone();
 
-        let mut sink = build_sink(
-            self.config.clone(),
-            self.schema,
+        let (log_reader, log_writer) = log_store_factory.build();
+
+        let metrics = self
+            .metrics
+            .sink_commit_duration
+            .with_label_values(&[self.identity.as_str(), self.config.get_connector()]);
+        let consume_log_stream = Self::execute_consume_log(
+            config,
+            schema,
             self.pk_indices,
             self.connector_params,
             self.sink_type,
-        )
-        .await?;
+            log_reader,
+            metrics,
+        );
 
-        let input = self.input.execute();
+        let write_log_stream =
+            Self::execute_write_log(self.input, log_writer, self.schema, self.sink_type);
+
+        select(consume_log_stream.into_stream(), write_log_stream)
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_write_log(
+        input: BoxedExecutor,
+        mut log_writer: impl LogWriter,
+        schema: Schema,
+        sink_type: SinkType,
+    ) {
+        let data_types = schema.data_types();
+        let mut input = input.execute();
+
+        let Barrier {
+            epoch: epoch_pair, ..
+        } = expect_first_barrier(&mut input).await?;
+
+        log_writer.init(epoch_pair.curr).await?;
 
         #[for_await]
         for msg in input {
             match msg? {
                 Message::Watermark(w) => yield Message::Watermark(w),
                 Message::Chunk(chunk) => {
-                    let visible_chunk = if self.sink_type == SinkType::ForceAppendOnly {
+                    let visible_chunk = if sink_type == SinkType::ForceAppendOnly {
                         // Force append-only by dropping UPDATE/DELETE messages. We do this when the
                         // user forces the sink to be append-only while it is actually not based on
                         // the frontend derivation result.
@@ -133,22 +161,65 @@ impl SinkExecutor {
                         // At this point (instead of the point above when we receive the upstream
                         // data chunk), we make sure that we do have data to send out, and we can
                         // thus mark the txn as started.
-                        if !in_transaction {
-                            sink.begin_epoch(epoch).await?;
-                            in_transaction = true;
-                        }
-
-                        if let Err(e) = sink.write_batch(chunk.clone()).await {
-                            sink.abort().await?;
-                            return Err(e.into());
-                        }
-                        empty_checkpoint_flag = false;
+                        log_writer.write_chunk(chunk.clone()).await?;
 
                         yield Message::Chunk(chunk);
                     }
                 }
                 Message::Barrier(barrier) => {
-                    if barrier.checkpoint {
+                    log_writer
+                        .flush_current_epoch(barrier.epoch.curr, barrier.checkpoint)
+                        .await?;
+                    yield Message::Barrier(barrier);
+                }
+            }
+        }
+    }
+
+    async fn execute_consume_log<R: LogReader>(
+        config: SinkConfig,
+        schema: Schema,
+        pk_indices: Vec<usize>,
+        connector_params: ConnectorParams,
+        sink_type: SinkType,
+        mut log_reader: R,
+        sink_commit_duration_metrics: Histogram,
+    ) -> StreamExecutorResult<Message> {
+        let mut sink = build_sink(config, schema, pk_indices, connector_params, sink_type).await?;
+
+        let mut epoch = log_reader.init().await?;
+
+        // the flag is required because kafka transaction requires at least one
+        // message, so we should abort the transaction if the flag is true.
+        let mut empty_checkpoint_flag = true;
+        let mut in_transaction = false;
+
+        loop {
+            let item: LogStoreReadItem = log_reader.next_item().await?;
+            match item {
+                LogStoreReadItem::StreamChunk(chunk) => {
+                    // NOTE: We start the txn here because a force-append-only sink might
+                    // receive a data chunk full of DELETE messages and then drop all of them.
+                    // At this point (instead of the point above when we receive the upstream
+                    // data chunk), we make sure that we do have data to send out, and we can
+                    // thus mark the txn as started.
+                    if !in_transaction {
+                        sink.begin_epoch(epoch).await?;
+                        in_transaction = true;
+                    }
+
+                    if let Err(e) = sink.write_batch(chunk.clone()).await {
+                        sink.abort().await?;
+                        return Err(e.into());
+                    }
+                    empty_checkpoint_flag = false;
+                }
+                LogStoreReadItem::Barrier {
+                    next_epoch,
+                    is_checkpoint,
+                } => {
+                    assert!(next_epoch > epoch);
+                    if is_checkpoint {
                         if in_transaction {
                             if empty_checkpoint_flag {
                                 sink.abort().await?;
@@ -159,20 +230,15 @@ impl SinkExecutor {
                             } else {
                                 let start_time = Instant::now();
                                 sink.commit().await?;
-                                self.metrics
-                                    .sink_commit_duration
-                                    .with_label_values(&[
-                                        self.identity.as_str(),
-                                        self.config.get_connector(),
-                                    ])
+                                sink_commit_duration_metrics
                                     .observe(start_time.elapsed().as_millis() as f64);
                             }
                         }
+                        log_reader.truncate().await?;
                         in_transaction = false;
                         empty_checkpoint_flag = true;
                     }
-                    epoch = barrier.epoch.curr;
-                    yield Message::Barrier(barrier);
+                    epoch = next_epoch;
                 }
             }
         }
@@ -181,7 +247,9 @@ impl SinkExecutor {
 
 impl Executor for SinkExecutor {
     fn execute(self: Box<Self>) -> super::BoxedMessageStream {
-        self.execute_inner().boxed()
+        // TODO: dispatch in enum
+        let bounded_log_store_factory = BoundedInMemLogStoreFactory::new(1);
+        self.execute_inner(bounded_log_store_factory).boxed()
     }
 
     fn schema(&self) -> &Schema {

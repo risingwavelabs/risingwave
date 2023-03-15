@@ -19,4 +19,5 @@ pub use infallible_expr::*;
 mod builder;
 mod column_mapping;
 mod infallible_expr;
+pub mod log_store;
 pub mod table;
