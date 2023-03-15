@@ -84,7 +84,7 @@ pub fn validate_table_key_range(version: &HummockVersion) {
             assert!(
                 t.key_range.is_some(),
                 "key_range in table [{}] is none",
-                t.id
+                t.get_object_id()
             );
         }
     }

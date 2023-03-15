@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_sst_ids,
+    build_version_delta_after_version, get_compaction_group_ids, get_compaction_group_ssts,
     get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
     HummockVersionUpdateExt,
 };
@@ -325,9 +325,9 @@ impl<S: MetaStore> HummockManager<S> {
             // We don't bother to add IntraLevelDelta to remove SSTs from group, because the entire
             // group is to be removed.
             // However, we need to take care of SST GC for the removed group.
-            for sst_id in get_compaction_group_sst_ids(current_version, *group_id) {
-                if drop_sst(&mut branched_ssts, *group_id, sst_id) {
-                    new_version_delta.gc_sst_ids.push(sst_id);
+            for (object_id, sst_id) in get_compaction_group_ssts(current_version, *group_id) {
+                if drop_sst(&mut branched_ssts, *group_id, object_id, sst_id) {
+                    new_version_delta.gc_object_ids.push(object_id);
                 }
             }
             let group_deltas = &mut new_version_delta
@@ -481,6 +481,16 @@ impl<S: MetaStore> HummockManager<S> {
             .id_gen_manager()
             .generate::<{ IdCategory::CompactionGroup }>()
             .await?;
+        let new_sst_start_id = self
+            .env
+            .id_gen_manager()
+            .generate_interval::<{ IdCategory::HummockSstableId }>(
+                versioning.current_version.count_new_ssts_in_group_split(
+                    parent_group_id,
+                    &HashSet::from_iter(table_ids.iter().cloned()),
+                ),
+            )
+            .await?;
         let group_deltas = &mut new_version_delta
             .group_deltas
             .entry(new_group_id)
@@ -500,6 +510,7 @@ impl<S: MetaStore> HummockManager<S> {
                 group_id: new_group_id,
                 parent_group_id,
                 table_ids,
+                new_sst_start_id,
             })),
         });
 
@@ -511,27 +522,35 @@ impl<S: MetaStore> HummockManager<S> {
             .current_version
             .apply_version_delta(&new_version_delta);
         // Updates SST split info
-        for (id, divide_ver, _, is_trivial_adjust) in sst_split_info {
-            match branched_ssts.get_mut(id) {
+        for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
+            match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
-                    if is_trivial_adjust {
-                        entry.remove(&parent_group_id).unwrap();
+                    let p = entry.get_mut(&parent_group_id).unwrap();
+                    let parent_pos = p.iter().position(|id| *id == parent_old_sst_id).unwrap();
+                    if let Some(parent_new_sst_id) = parent_new_sst_id {
+                        p[parent_pos] = parent_new_sst_id;
                     } else {
-                        let p = entry.get_mut(&parent_group_id).unwrap();
-                        assert_eq!(*p + 1, divide_ver);
-                        *p = divide_ver;
+                        p.remove(parent_pos);
+                        if p.is_empty() {
+                            entry.remove(&parent_group_id);
+                        }
                     }
-                    entry.insert(new_group_id, divide_ver);
+                    entry.entry(new_group_id).or_default().push(sst_id);
                 }
                 None => {
-                    let to_insert: HashMap<CompactionGroupId, u64> = if is_trivial_adjust {
-                        [(new_group_id, divide_ver)].into_iter().collect()
-                    } else {
-                        [(parent_group_id, divide_ver), (new_group_id, divide_ver)]
+                    branched_ssts.insert(
+                        object_id,
+                        if let Some(parent_new_sst_id) = parent_new_sst_id {
+                            [
+                                (parent_group_id, vec![parent_new_sst_id]),
+                                (new_group_id, vec![sst_id]),
+                            ]
                             .into_iter()
                             .collect()
-                    };
-                    branched_ssts.insert(id, to_insert);
+                        } else {
+                            [(new_group_id, vec![sst_id])].into_iter().collect()
+                        },
+                    );
                 }
             }
         }

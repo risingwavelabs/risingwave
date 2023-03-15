@@ -130,7 +130,7 @@ impl LevelCompactionPicker {
                     continue;
                 }
 
-                if level_handlers[0].is_pending_compact(&sst.id) {
+                if level_handlers[0].is_pending_compact(&sst.sst_id) {
                     pending_compact = true;
                     break;
                 }
@@ -157,7 +157,7 @@ impl LevelCompactionPicker {
             .filter(|sst| table_id.map(|id| sst.table_ids[0] == id).unwrap_or(true));
         let mut target_level_size = 0;
         for sst in target_level_files.clone() {
-            if level_handlers[self.target_level].is_pending_compact(&sst.id) {
+            if level_handlers[self.target_level].is_pending_compact(&sst.sst_id) {
                 return None;
             }
             target_level_size += sst.file_size;
@@ -241,8 +241,8 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 5);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 3);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 5);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 3);
         ret.add_pending_task(0, &mut levels_handler);
 
         // Cannot pick because sub-level[0] is pending.
@@ -254,7 +254,7 @@ pub mod tests {
 
         levels.l0.as_mut().unwrap().sub_levels[0]
             .table_infos
-            .retain(|table| table.id != 4);
+            .retain(|table| table.get_sst_id() != 4);
         levels.l0.as_mut().unwrap().total_file_size -= ret.input_levels[0].table_infos[0].file_size;
 
         levels_handler[0].remove_task(0);
@@ -264,9 +264,9 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
-        assert_eq!(ret.input_levels[2].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 6);
+        assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 5);
         assert_eq!(ret.input_levels[3].table_infos.len(), 3);
         ret.add_pending_task(1, &mut levels_handler);
 
@@ -284,9 +284,9 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 4);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 6);
-        assert_eq!(ret.input_levels[2].table_infos[0].id, 5);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 6);
+        assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 5);
         assert_eq!(ret.input_levels[3].table_infos.len(), 3);
     }
 
@@ -342,7 +342,7 @@ pub mod tests {
             ret.input_levels[1]
                 .table_infos
                 .iter()
-                .map(|t| t.id)
+                .map(|t| t.get_sst_id())
                 .collect_vec(),
             vec![1]
         );
@@ -351,7 +351,7 @@ pub mod tests {
             ret.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|t| t.id)
+                .map(|t| t.get_sst_id())
                 .collect_vec(),
             vec![7, 8]
         );
@@ -488,9 +488,9 @@ pub mod tests {
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
         assert_eq!(ret.input_levels.len(), 3);
-        assert_eq!(ret.input_levels[2].table_infos[0].id, 1);
-        assert_eq!(ret.input_levels[2].table_infos[1].id, 2);
-        assert_eq!(ret.input_levels[2].table_infos[2].id, 3);
+        assert_eq!(ret.input_levels[2].table_infos[0].get_sst_id(), 1);
+        assert_eq!(ret.input_levels[2].table_infos[1].get_sst_id(), 2);
+        assert_eq!(ret.input_levels[2].table_infos[2].get_sst_id(), 3);
         levels.levels[0].table_infos[0].file_size += 1600 - levels.levels[0].total_file_size;
         levels.levels[0].total_file_size = 1600;
         let sub_level = &mut levels.l0.as_mut().unwrap().sub_levels[0];
@@ -572,7 +572,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 7);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 7);
         assert_eq!(
             3,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()
@@ -596,7 +596,7 @@ pub mod tests {
         let ret = picker
             .pick_compaction(&levels, &levels_handler, &mut local_stats)
             .unwrap();
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 6);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 6);
         assert_eq!(
             2,
             ret.input_levels.iter().filter(|l| l.level_idx == 0).count()

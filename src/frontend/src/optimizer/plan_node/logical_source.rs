@@ -22,7 +22,6 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::error::Result;
 use risingwave_connector::source::DataType;
 
-use super::generic::GenericPlanNode;
 use super::stream_watermark_filter::StreamWatermarkFilter;
 use super::{
     generic, BatchSource, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
@@ -35,7 +34,6 @@ use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
 
@@ -72,20 +70,10 @@ impl LogicalSource {
             row_id_index,
             gen_row_id,
             for_table,
+            ctx,
         };
 
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        let (functional_dependency, pk_indices) = match pk_indices {
-            Some(pk_indices) => (
-                FunctionalDependencySet::with_key(schema.len(), &pk_indices),
-                pk_indices,
-            ),
-            None => (FunctionalDependencySet::new(schema.len()), vec![]),
-        };
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices, functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         let kafka_timestamp_range = (Bound::Unbounded, Bound::Unbounded);
         LogicalSource {

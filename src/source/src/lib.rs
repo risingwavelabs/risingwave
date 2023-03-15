@@ -32,5 +32,4 @@ pub mod connector_source;
 pub mod source_desc;
 pub use source_desc::test_utils as connector_test_utils;
 pub mod fs_connector_source;
-pub mod row_id;
 mod table;
