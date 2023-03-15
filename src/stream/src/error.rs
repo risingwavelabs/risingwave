@@ -36,7 +36,7 @@ enum Inner {
     #[error("Array/Chunk error: {0}")]
     Array(ArrayError),
 
-    #[error("Executor error: {0}")]
+    #[error("Executor error: {0:?}")]
     Executor(Box<StreamExecutorError>),
 
     #[error(transparent)]

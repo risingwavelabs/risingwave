@@ -19,7 +19,7 @@ use futures::TryStreamExt;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::DataType;
 use risingwave_common::util::select_all;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::{
@@ -47,7 +47,7 @@ fn select_all_vnode_stream(
     select_all(streams.into_iter().map(Box::pin))
 }
 
-pub struct Iterator {
+pub struct HummockJavaBindingIterator {
     row_serde: EitherSerde,
     stream: SelectAllIterStream,
 }
@@ -62,61 +62,12 @@ impl KeyedRow {
         self.key.as_ref()
     }
 
-    pub fn is_null(&self, idx: usize) -> bool {
-        self.row[idx].is_none()
-    }
-
-    pub fn get_int16(&self, idx: usize) -> i16 {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Int16(num) => *num,
-            _ => unreachable!("type is not int16 at index: {}", idx),
-        }
-    }
-
-    pub fn get_int32(&self, idx: usize) -> i32 {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Int32(num) => *num,
-            _ => unreachable!("type is not int32 at index: {}", idx),
-        }
-    }
-
-    pub fn get_int64(&self, idx: usize) -> i64 {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Int64(num) => *num,
-            _ => unreachable!("type is not int64 at index: {}", idx),
-        }
-    }
-
-    pub fn get_f32(&self, idx: usize) -> f32 {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Float32(num) => num.into_inner(),
-            _ => unreachable!("type is not float32 at index: {}", idx),
-        }
-    }
-
-    pub fn get_f64(&self, idx: usize) -> f64 {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Float64(num) => num.into_inner(),
-            _ => unreachable!("type is not float64 at index: {}", idx),
-        }
-    }
-
-    pub fn get_bool(&self, idx: usize) -> bool {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Bool(num) => *num,
-            _ => unreachable!("type is not boolean at index: {}", idx),
-        }
-    }
-
-    pub fn get_utf8(&self, idx: usize) -> &str {
-        match self.row[idx].as_ref().unwrap() {
-            ScalarImpl::Utf8(s) => s.as_ref(),
-            _ => unreachable!("type is not utf8 at index: {}", idx),
-        }
+    pub fn row(&self) -> &OwnedRow {
+        &self.row
     }
 }
 
-impl Iterator {
+impl HummockJavaBindingIterator {
     pub async fn new(read_plan: ReadPlan) -> StorageResult<Self> {
         // Note(bugen): should we forward the implementation to the `StorageTable`?
         let object_store = Arc::new(

@@ -62,6 +62,11 @@ impl From<i32> for ColumnId {
         Self::new(column_id)
     }
 }
+impl From<&i32> for ColumnId {
+    fn from(column_id: &i32) -> Self {
+        Self::new(*column_id)
+    }
+}
 
 impl From<ColumnId> for i32 {
     fn from(id: ColumnId) -> i32 {

@@ -304,6 +304,9 @@ impl Binder {
                 raw_call(ExprType::Now)(binder, inputs)
             })
         }
+        fn pi() -> Handle {
+            raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
@@ -383,6 +386,8 @@ impl Binder {
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                // Functions that return a constant value
+                ("pi", pi()),
                 // System information operations.
                 (
                     "pg_typeof",
