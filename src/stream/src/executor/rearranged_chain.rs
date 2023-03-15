@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
@@ -25,7 +23,7 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::{BoxedMessageStream, PkIndices, Watermark};
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -45,31 +43,6 @@ pub struct RearrangedChainExecutor {
     actor_id: ActorId,
 
     info: ExecutorInfo,
-}
-
-fn mapping(upstream_indices: &[usize], msg: Message) -> Option<Message> {
-    match msg {
-        Message::Watermark(watermark) => {
-            mapping_watermark(watermark, upstream_indices).map(Message::Watermark)
-        }
-        Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            let mapped_columns = upstream_indices
-                .iter()
-                .map(|&i| columns[i].clone())
-                .collect();
-            Some(Message::Chunk(StreamChunk::new(
-                ops,
-                mapped_columns,
-                visibility,
-            )))
-        }
-        Message::Barrier(_) => Some(msg),
-    }
-}
-
-fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    watermark.transform_with_indices(upstream_indices)
 }
 
 #[derive(Debug)]

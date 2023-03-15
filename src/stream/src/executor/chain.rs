@@ -14,12 +14,11 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::{PkIndices, Watermark};
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -39,19 +38,6 @@ pub struct ChainExecutor {
 
     /// Only consume upstream messages.
     upstream_only: bool,
-}
-
-fn mapping_chunk(chunk: StreamChunk, upstream_indices: &[usize]) -> StreamChunk {
-    let (ops, columns, visibility) = chunk.into_inner();
-    let mapped_columns = upstream_indices
-        .iter()
-        .map(|&i| columns[i].clone())
-        .collect();
-    StreamChunk::new(ops, mapped_columns, visibility)
-}
-
-fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    watermark.transform_with_indices(upstream_indices)
 }
 
 impl ChainExecutor {

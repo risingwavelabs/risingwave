@@ -129,7 +129,6 @@ impl StreamIndexScan {
     // TODO: this method is almost the same as `StreamTableScan::adhoc_to_stream_prost`, we should
     // avoid duplication.
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
-        use risingwave_pb::plan_common::Field as ProstField;
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
