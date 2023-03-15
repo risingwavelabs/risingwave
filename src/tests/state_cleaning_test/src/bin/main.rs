@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::Parser;
 use futures::StreamExt;
@@ -143,13 +143,17 @@ async fn main() -> anyhow::Result<()> {
 
     let opt = TestOptions::parse();
 
-    let (client, connection) = tokio_postgres::Config::new()
+    let conn_builder = tokio_postgres::Config::new()
         .host(&opt.host)
         .port(opt.port)
-        .dbname(&opt.db)
         .user(&opt.user)
         .password(&opt.pass)
         .connect_timeout(Duration::from_secs(5))
+        .clone();
+
+    let (main_client, connection) = conn_builder
+        .clone()
+        .dbname(&opt.db)
         .connect(NoTls)
         .await
         .unwrap_or_else(|e| panic!("Failed to connect to database: {}", e));
@@ -159,6 +163,11 @@ async fn main() -> anyhow::Result<()> {
             error!(?e, "connection error");
         }
     });
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time went backwards")
+        .as_secs();
 
     let manifest = env!("CARGO_MANIFEST_DIR");
 
@@ -170,6 +179,28 @@ async fn main() -> anyhow::Result<()> {
             let content = tokio::fs::read_to_string(&path).await?;
             let test_file: TestFile = toml::from_str(&content)?;
             let cases = test_file.test;
+
+            let test_name = path.file_stem().unwrap().to_string_lossy();
+
+            let cur_db_name = format!("state_cleaning_test_{}_{}", test_name, now);
+
+            main_client
+                .simple_query(&format!("CREATE DATABASE {}", cur_db_name))
+                .await?;
+
+            let (client, connection) = conn_builder
+                .clone()
+                .dbname(&cur_db_name)
+                .connect(NoTls)
+                .await?;
+
+            debug!(%test_name, %cur_db_name, "run test in new database");
+
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    error!(?e, "connection error");
+                }
+            });
 
             for case in cases {
                 validate_case(&client, case).await?;
