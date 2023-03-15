@@ -387,8 +387,6 @@ message ChainNode {
   reserved "same_worker_node";
 
   uint32 table_id = 1;
-  // The schema of input stream, which will be used to build a MergeNode
-  repeated plan_common.Field upstream_fields = 2;
   // TODO
   repeated uint32 output_indices = 3;
   // The columns from the upstream table that'll be internally required by this chain node.

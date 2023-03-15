@@ -180,28 +180,21 @@ impl ActorBuilder {
                 assert_eq!(upstream_actor_id.len(), 1);
 
                 let chain_input = vec![
-                    // Fill the merge node with correct upstream info.
+                    // Fill the merge node body with correct upstream info.
                     StreamNode {
-                        input: vec![],
-                        stream_key: merge_node.stream_key.clone(),
                         node_body: Some(NodeBody::Merge(MergeNode {
                             upstream_actor_id,
                             upstream_fragment_id: upstreams.fragment_id.as_global_id(),
                             upstream_dispatcher_type: DispatcherType::NoShuffle as _,
-                            fields: chain_node.upstream_fields.clone(),
+                            fields: merge_node.fields.clone(),
                         })),
-                        fields: chain_node.upstream_fields.clone(),
-                        operator_id: merge_node.operator_id,
-                        identity: "MergeExecutor".to_string(),
-                        append_only: stream_node.append_only,
+                        ..merge_node.clone()
                     },
                     batch_plan_node.clone(),
                 ];
 
                 Ok(StreamNode {
                     input: chain_input,
-                    identity: "ChainExecutor".to_string(),
-                    fields: chain_node.upstream_fields.clone(),
                     ..stream_node.clone()
                 })
             }

@@ -203,17 +203,6 @@ impl StreamIndexScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 chain_type: self.chain_type as i32,
-                // The fields from upstream
-                upstream_fields: self
-                    .logical
-                    .table_desc()
-                    .columns
-                    .iter()
-                    .map(|x| ProstField {
-                        data_type: Some(x.data_type.to_protobuf()),
-                        name: x.name.clone(),
-                    })
-                    .collect(),
                 output_indices,
                 upstream_column_ids,
                 is_singleton: false,

@@ -209,7 +209,7 @@ impl StreamTableScan {
         ProstStreamPlan {
             fields: self.schema().to_prost(),
             input: vec![
-                // The merge node should be empty
+                // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::Merge(Default::default())),
                     identity: "Upstream".into(),
@@ -230,17 +230,6 @@ impl StreamTableScan {
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 chain_type: self.chain_type as i32,
-                // The fields from upstream
-                upstream_fields: self
-                    .logical
-                    .table_desc()
-                    .columns
-                    .iter()
-                    .map(|x| ProstField {
-                        data_type: Some(x.data_type.to_protobuf()),
-                        name: x.name.clone(),
-                    })
-                    .collect(),
                 // The column indices need to be forwarded to the downstream
                 output_indices,
                 upstream_column_ids,
