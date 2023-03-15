@@ -812,8 +812,6 @@ impl HummockUploader {
             let result = result.map(|mut sstable_infos| {
                 // The newly uploaded `sstable_infos` contains newer data. Therefore,
                 // `sstable_infos` at the front
-                // Siyuan: syncing_data.uploaded可能是在sync之前就已经spilled的数据，
-                // 所以这里需要把它们append进去，放在后面
                 sstable_infos.extend(syncing_data.uploaded);
                 sstable_infos
             });
