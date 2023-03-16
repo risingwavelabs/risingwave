@@ -21,6 +21,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, SelectItem, SetExpr};
 
+use super::statement::RewriteExprsRecursive;
 use super::{BoundQuery, BoundSetExpr};
 use crate::binder::Binder;
 use crate::catalog::TableId;
@@ -64,6 +65,24 @@ pub struct BoundInsert {
     pub returning_list: Vec<ExprImpl>,
 
     pub returning_schema: Option<Schema>,
+}
+
+impl RewriteExprsRecursive for BoundInsert {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.source.rewrite_exprs_recursive(rewriter);
+
+        let new_cast_exprs = std::mem::take(&mut self.cast_exprs)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.cast_exprs = new_cast_exprs;
+
+        let new_returning_list = std::mem::take(&mut self.returning_list)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.returning_list = new_returning_list;
+    }
 }
 
 impl Binder {

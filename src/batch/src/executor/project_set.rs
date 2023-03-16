@@ -73,11 +73,12 @@ impl ProjectSetExecutor {
                 .map(|ty| ty.create_array_builder(self.chunk_size))
                 .collect_vec();
 
-            let results: Vec<_> = self
-                .select_list
-                .iter()
-                .map(|select_item| select_item.eval(&data_chunk))
-                .try_collect()?;
+            let mut results = Vec::with_capacity(self.select_list.len());
+
+            for select_item in &self.select_list {
+                let result = select_item.eval(&data_chunk).await?;
+                results.push(result);
+            }
 
             let mut lens = results
                 .iter()

@@ -55,12 +55,13 @@ impl StringAggUnordered {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for StringAggUnordered {
     fn return_type(&self) -> DataType {
         DataType::Varchar
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
             input.column_at(self.agg_col_idx).array_ref(),
             input.column_at(self.delim_col_idx).array_ref(),
@@ -76,7 +77,7 @@ impl Aggregator for StringAggUnordered {
         }
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -172,12 +173,13 @@ impl StringAggOrdered {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for StringAggOrdered {
     fn return_type(&self) -> DataType {
         DataType::Varchar
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (ArrayImpl::Utf8(agg_col), ArrayImpl::Utf8(delim_col)) = (
             input.column_at(self.agg_col_idx).array_ref(),
             input.column_at(self.delim_col_idx).array_ref(),
@@ -195,7 +197,7 @@ impl Aggregator for StringAggOrdered {
         }
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -260,8 +262,8 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn test_string_agg_basic() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_basic() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T   T
              aaa ,
@@ -271,7 +273,7 @@ mod tests {
         );
         let mut agg = create_string_agg_state(0, 1, vec![])?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();
@@ -281,8 +283,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_string_agg_complex() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_complex() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T   T
              aaa ,
@@ -292,7 +294,7 @@ mod tests {
         );
         let mut agg = create_string_agg_state(0, 1, vec![])?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();
@@ -302,8 +304,8 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn test_string_agg_with_order() -> Result<()> {
+    #[tokio::test]
+    async fn test_string_agg_with_order() -> Result<()> {
         let chunk = DataChunk::from_pretty(
             "T T   i i
              _ aaa 1 3
@@ -321,7 +323,7 @@ mod tests {
             ],
         )?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));
-        agg.update_multi(&chunk, 0, chunk.cardinality())?;
+        agg.update_multi(&chunk, 0, chunk.cardinality()).await?;
         agg.output(&mut builder)?;
         let output = builder.finish();
         let actual = output.as_utf8();

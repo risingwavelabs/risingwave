@@ -18,6 +18,7 @@ use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -142,6 +143,10 @@ pub struct Block {
     pub data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
+
+    /// Table id of this block.
+    table_id: TableId,
+
     /// Restart points.
     restart_points: Vec<RestartPoint>,
 }
@@ -149,6 +154,7 @@ pub struct Block {
 impl Block {
     pub fn decode(buf: Bytes, uncompressed_capacity: usize) -> HummockResult<Self> {
         // Verify checksum.
+
         let xxhash64_checksum = (&buf[buf.len() - 8..]).get_u64_le();
         xxhash64_verify(&buf[..buf.len() - 8], xxhash64_checksum)?;
 
@@ -184,11 +190,12 @@ impl Block {
     }
 
     pub fn decode_from_raw(buf: Bytes) -> Self {
+        let table_id = (&buf[buf.len() - 4..]).get_u32_le();
         // decode restart_points_type_index
-        let n_index = ((&buf[buf.len() - 4..]).get_u32_le()) as usize;
+        let n_index = ((&buf[buf.len() - 8..buf.len() - 4]).get_u32_le()) as usize;
         let index_data_len = size_of::<u32>() + n_index * RestartPoint::size_of();
-        let data_len = buf.len() - index_data_len;
-        let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 4];
+        let data_len = buf.len() - 4 - index_data_len;
+        let mut restart_points_type_index_buf = &buf[data_len..buf.len() - 8];
 
         let mut index_key_vec = Vec::with_capacity(n_index);
         for _ in 0..n_index {
@@ -213,6 +220,7 @@ impl Block {
         let mut restart_points_buf = &buf[data_len..restarts_end];
 
         let mut type_index: usize = 0;
+
         for _ in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
             if type_index < index_key_vec.len() - 1
@@ -232,6 +240,7 @@ impl Block {
             data: buf,
             data_len,
             restart_points,
+            table_id: TableId::new(table_id),
         }
     }
 
@@ -243,7 +252,13 @@ impl Block {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>()
+        self.data.len()
+            + self.restart_points.capacity() * std::mem::size_of::<u32>()
+            + std::mem::size_of::<u32>()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Gets restart point by index.
@@ -385,6 +400,7 @@ pub struct BlockBuilder {
     /// Compression algorithm.
     compression_algorithm: CompressionAlgorithm,
 
+    table_id: Option<u32>,
     // restart_points_type_index stores only the restart_point corresponding to each type change,
     // as an index, in order to reduce space usage
     restart_points_type_index: Vec<RestartPoint>,
@@ -402,6 +418,7 @@ impl BlockBuilder {
             last_key: vec![],
             entry_count: 0,
             compression_algorithm: options.compression_algorithm,
+            table_id: None,
             restart_points_type_index: Vec::default(),
         }
     }
@@ -420,15 +437,20 @@ impl BlockBuilder {
     ///
     /// Panic if key is not added in ASCEND order.
     pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        let input_table_id = full_key.user_key.table_id.table_id();
+        match self.table_id {
+            Some(current_table_id) => debug_assert_eq!(current_table_id, input_table_id),
+            None => self.table_id = Some(input_table_id),
+        }
         #[cfg(debug_assertions)]
         self.debug_valid();
 
         let mut key: BytesMut = Default::default();
-        full_key.encode_into(&mut key);
+        full_key.encode_into_without_table_id(&mut key);
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
                 Ordering::Less
             );
         }
@@ -462,7 +484,7 @@ impl BlockBuilder {
 
             key.as_ref()
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, &key)
+            bytes_diff_below_max_key_length(&self.last_key, &key[..])
         };
 
         let prefix = KeyPrefix::new_without_len(
@@ -492,6 +514,7 @@ impl BlockBuilder {
     pub fn clear(&mut self) {
         self.buf.clear();
         self.restart_points.clear();
+        self.table_id = None;
         self.restart_points_type_index.clear();
         self.last_key.clear();
         self.entry_count = 0;
@@ -504,6 +527,7 @@ impl BlockBuilder {
             + (RestartPoint::size_of()) // (offset + len_type(u8)) * len
                 * self.restart_points_type_index.len()
             + std::mem::size_of::<u32>() // restart_points_type_index len
+            + std::mem::size_of::<u32>() // table_id len
     }
 
     /// Finishes building block.
@@ -545,6 +569,7 @@ impl BlockBuilder {
         self.buf
             .put_u32_le(self.restart_points_type_index.len() as u32);
 
+        self.buf.put_u32_le(self.table_id.unwrap());
         match self.compression_algorithm {
             CompressionAlgorithm::None => (),
             CompressionAlgorithm::Lz4 => {
@@ -581,6 +606,7 @@ impl BlockBuilder {
         self.compression_algorithm.encode(&mut self.buf);
         let checksum = xxhash64_checksum(&self.buf);
         self.buf.put_u64_le(checksum);
+
         self.buf.as_ref()
     }
 
@@ -595,6 +621,7 @@ impl BlockBuilder {
             + std::mem::size_of::<u32>() // restart_points_type_indics.len
             + std::mem::size_of::<CompressionAlgorithm>() // compression_algorithm
             + std::mem::size_of::<u64>() // checksum
+            + std::mem::size_of::<u32>() // table_id
     }
 
     pub fn debug_valid(&self) {
