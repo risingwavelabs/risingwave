@@ -3264,13 +3264,11 @@ impl Parser {
                 SetTimeZoneValue::Default
             } else if self.parse_keyword(Keyword::LOCAL) {
                 SetTimeZoneValue::Local
+            } else if let Ok(ident) = self.parse_identifier() {
+                SetTimeZoneValue::Ident(ident)
             } else {
-                if let Ok(ident) = self.parse_identifier() {
-                    SetTimeZoneValue::Ident(ident)
-                } else {
-                    let value = self.parse_value()?;
-                    SetTimeZoneValue::Value(value)
-                }
+                let value = self.parse_value()?;
+                SetTimeZoneValue::Value(value)
             };
 
             return Ok(Statement::SetTimeZone {
