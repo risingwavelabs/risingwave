@@ -27,8 +27,8 @@ use crate::util::resource_util::memory::{total_memory_available_bytes, total_mem
 /// Url of telemetry backend
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v1/report";
 
-/// Telemetry reporting interval in seconds, 24h
-pub const TELEMETRY_REPORT_INTERVAL: u64 = 24 * 60 * 60;
+/// Telemetry reporting interval in seconds, 6 hours
+pub const TELEMETRY_REPORT_INTERVAL: u64 = 6 * 60 * 60;
 
 /// Environment Variable that is default to be true
 const TELEMETRY_ENV_ENABLE: &str = "ENABLE_TELEMETRY";

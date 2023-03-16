@@ -330,8 +330,12 @@ pub async fn compute_node_serve(
 
     // if the toml config file or env variable disables telemetry, do not watch system params change
     // because if any of configs disable telemetry, we should never start it
-    if config.server.telemetry_enabled && telemetry_env_enabled() && telemetry_enabled {
-        telemetry_manager.start_telemetry_reporting();
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
+        // if all configs are true, start reporting
+        if telemetry_enabled {
+            telemetry_manager.start_telemetry_reporting();
+        }
+        // if config and env are true, starting watching
         sub_tasks.push(telemetry_manager.watch_params_change());
     } else {
         tracing::info!("Telemetry didn't start due to config");
