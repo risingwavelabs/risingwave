@@ -691,18 +691,18 @@ export interface ExchangeNode {
  */
 export interface ChainNode {
   tableId: number;
-  /** The schema of input stream, which will be used to build a MergeNode */
-  upstreamFields: Field[];
-  /**
-   * The columns from the upstream table to output.
-   * TODO: rename this field.
-   */
-  upstreamColumnIndices: number[];
   /**
    * The columns from the upstream table that'll be internally required by this chain node.
-   * TODO: This is currently only used by backfill table scan. We should also apply it to the upstream dispatcher (#4529).
+   * - For non-backfill chain node, it's the same as the output columns.
+   * - For backfill chain node, there're additionally primary key columns.
    */
   upstreamColumnIds: number[];
+  /**
+   * The columns to be output by this chain node. The index is based on the internal required columns.
+   * - For non-backfill chain node, it's simply all the columns.
+   * - For backfill chain node, this strips the primary key columns if they're unnecessary.
+   */
+  outputIndices: number[];
   /**
    * Generally, the barrier needs to be rearranged during the MV creation process, so that data can
    * be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
@@ -3115,9 +3115,8 @@ export const ExchangeNode = {
 function createBaseChainNode(): ChainNode {
   return {
     tableId: 0,
-    upstreamFields: [],
-    upstreamColumnIndices: [],
     upstreamColumnIds: [],
+    outputIndices: [],
     chainType: ChainType.CHAIN_UNSPECIFIED,
     tableDesc: undefined,
   };
@@ -3127,14 +3126,11 @@ export const ChainNode = {
   fromJSON(object: any): ChainNode {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
-      upstreamFields: Array.isArray(object?.upstreamFields)
-        ? object.upstreamFields.map((e: any) => Field.fromJSON(e))
-        : [],
-      upstreamColumnIndices: Array.isArray(object?.upstreamColumnIndices)
-        ? object.upstreamColumnIndices.map((e: any) => Number(e))
-        : [],
       upstreamColumnIds: Array.isArray(object?.upstreamColumnIds)
         ? object.upstreamColumnIds.map((e: any) => Number(e))
+        : [],
+      outputIndices: Array.isArray(object?.outputIndices)
+        ? object.outputIndices.map((e: any) => Number(e))
         : [],
       chainType: isSet(object.chainType) ? chainTypeFromJSON(object.chainType) : ChainType.CHAIN_UNSPECIFIED,
       tableDesc: isSet(object.tableDesc) ? StorageTableDesc.fromJSON(object.tableDesc) : undefined,
@@ -3144,20 +3140,15 @@ export const ChainNode = {
   toJSON(message: ChainNode): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    if (message.upstreamFields) {
-      obj.upstreamFields = message.upstreamFields.map((e) => e ? Field.toJSON(e) : undefined);
-    } else {
-      obj.upstreamFields = [];
-    }
-    if (message.upstreamColumnIndices) {
-      obj.upstreamColumnIndices = message.upstreamColumnIndices.map((e) => Math.round(e));
-    } else {
-      obj.upstreamColumnIndices = [];
-    }
     if (message.upstreamColumnIds) {
       obj.upstreamColumnIds = message.upstreamColumnIds.map((e) => Math.round(e));
     } else {
       obj.upstreamColumnIds = [];
+    }
+    if (message.outputIndices) {
+      obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
+    } else {
+      obj.outputIndices = [];
     }
     message.chainType !== undefined && (obj.chainType = chainTypeToJSON(message.chainType));
     message.tableDesc !== undefined &&
@@ -3168,9 +3159,8 @@ export const ChainNode = {
   fromPartial<I extends Exact<DeepPartial<ChainNode>, I>>(object: I): ChainNode {
     const message = createBaseChainNode();
     message.tableId = object.tableId ?? 0;
-    message.upstreamFields = object.upstreamFields?.map((e) => Field.fromPartial(e)) || [];
-    message.upstreamColumnIndices = object.upstreamColumnIndices?.map((e) => e) || [];
     message.upstreamColumnIds = object.upstreamColumnIds?.map((e) => e) || [];
+    message.outputIndices = object.outputIndices?.map((e) => e) || [];
     message.chainType = object.chainType ?? ChainType.CHAIN_UNSPECIFIED;
     message.tableDesc = (object.tableDesc !== undefined && object.tableDesc !== null)
       ? StorageTableDesc.fromPartial(object.tableDesc)

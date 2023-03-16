@@ -363,6 +363,7 @@ pub type DataType = risingwave_common::types::DataType;
 pub struct Column {
     pub name: String,
     pub data_type: DataType,
+    pub is_visible: bool,
 }
 
 /// Split id resides in every source message, use `Arc` to avoid copying.

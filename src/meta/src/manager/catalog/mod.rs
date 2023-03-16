@@ -995,8 +995,8 @@ where
             view_name.to_string(),
         ))?;
 
-        // 2. rename view, note that there's no need to update its definition since only it only
-        // stores the query sql.
+        // 2. rename view, note that there's no need to update its definition since it only stores
+        // the query part.
         view.name = view_name.to_string();
 
         // 3. update all relations that depend on this view.

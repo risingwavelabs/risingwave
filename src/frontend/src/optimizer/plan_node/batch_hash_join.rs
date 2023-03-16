@@ -173,7 +173,9 @@ impl ToDistributedBatch for BatchHashJoin {
         let r2l = self
             .eq_join_predicate()
             .r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-        let l2r = r2l.inverse();
+        let l2r = self
+            .eq_join_predicate()
+            .l2r_eq_columns_mapping(left.schema().len());
 
         let right_dist = right.distribution();
         match right_dist {
