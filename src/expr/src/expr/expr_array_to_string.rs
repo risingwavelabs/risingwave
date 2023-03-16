@@ -121,20 +121,21 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayToStringExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for ArrayToStringExpression {
     fn return_type(&self) -> DataType {
         DataType::Varchar
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let list_array = self.array.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let list_array = self.array.eval_checked(input).await?;
         let list_array = list_array.as_list();
 
-        let delim_array = self.delimiter.eval_checked(input)?;
+        let delim_array = self.delimiter.eval_checked(input).await?;
         let delim_array = delim_array.as_utf8();
 
         let null_string_array = if let Some(expr) = &self.null_string {
-            let null_string_array = expr.eval_checked(input)?;
+            let null_string_array = expr.eval_checked(input).await?;
             Some(null_string_array)
         } else {
             None
@@ -171,13 +172,13 @@ impl Expression for ArrayToStringExpression {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let array = self.array.eval_row(input)?;
-        let delimiter = self.delimiter.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let array = self.array.eval_row(input).await?;
+        let delimiter = self.delimiter.eval_row(input).await?;
 
         let result = if let Some(array) = array && let Some(delimiter) = delimiter {
             let null_string = if let Some(e) = &self.null_string {
-                e.eval_row(input)?
+                e.eval_row(input).await?
             } else {
                 None
             };

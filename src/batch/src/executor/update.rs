@@ -132,11 +132,11 @@ impl UpdateExecutor {
             let data_chunk = data_chunk?;
 
             let updated_data_chunk = {
-                let columns: Vec<_> = self
-                    .exprs
-                    .iter_mut()
-                    .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                    .try_collect()?;
+                let mut columns = Vec::with_capacity(self.exprs.len());
+                for expr in &mut self.exprs {
+                    let column = Column::new(expr.eval(&data_chunk).await?);
+                    columns.push(column);
+                }
 
                 DataChunk::new(columns, data_chunk.vis().clone())
             };
