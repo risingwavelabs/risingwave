@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use itertools::Itertools;
+use prost::Message;
 use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
@@ -28,12 +29,16 @@ use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
-use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
+use risingwave_pb::connector_service::sink_stream_request::write_batch::{
+    JsonPayload, Payload, StreamChunkPayload,
+};
 use risingwave_pb::connector_service::sink_stream_request::{
     Request as SinkRequest, StartEpoch, SyncBatch, WriteBatch,
 };
 use risingwave_pb::connector_service::table_schema::Column;
-use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest, TableSchema};
+use risingwave_pb::connector_service::{
+    SinkPayloadFormat, SinkResponse, SinkStreamRequest, TableSchema,
+};
 use risingwave_rpc_client::ConnectorClient;
 use serde_json::Value;
 use serde_json::Value::Number;
@@ -110,6 +115,7 @@ pub struct RemoteSink<const APPEND_ONLY: bool> {
     _client: Option<ConnectorClient>,
     request_sender: Option<UnboundedSender<SinkStreamRequest>>,
     response_stream: ResponseStreamImpl,
+    payload_format: SinkPayloadFormat,
 }
 
 impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
@@ -146,6 +152,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 config.connector_type.clone(),
                 config.properties.clone(),
                 table_schema,
+                connector_params.sink_payload_format,
             )
             .await
             .map_err(SinkError::from)?;
@@ -160,6 +167,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
             _client: Some(client),
             request_sender: Some(request_sender),
             response_stream: ResponseStreamImpl::Grpc(response),
+            payload_format: connector_params.sink_payload_format,
         })
     }
 
@@ -239,6 +247,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
             _client: None,
             request_sender: Some(request_sender),
             response_stream: ResponseStreamImpl::Receiver(response_receiver),
+            payload_format: SinkPayloadFormat::Json,
         }
     }
 }
@@ -246,25 +255,36 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
 #[async_trait]
 impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
-        let mut row_ops = vec![];
-        for (op, row_ref) in chunk.rows() {
-            let mut map = serde_json::Map::new();
-            row_ref
-                .iter()
-                .zip_eq_fast(self.schema.fields.iter())
-                .for_each(|(v, f)| {
-                    map.insert(f.name.clone(), parse_datum(v));
-                });
-            let row_op = RowOp {
-                op_type: op.to_protobuf() as i32,
-                line: serde_json::to_string(&map)
-                    .map_err(|e| SinkError::Remote(format!("{:?}", e)))?,
-            };
+        let payload = match self.payload_format {
+            SinkPayloadFormat::Json => {
+                let mut row_ops = vec![];
+                for (op, row_ref) in chunk.rows() {
+                    let mut map = serde_json::Map::new();
+                    row_ref
+                        .iter()
+                        .zip_eq_fast(self.schema.fields.iter())
+                        .for_each(|(v, f)| {
+                            map.insert(f.name.clone(), parse_datum(v));
+                        });
+                    let row_op = RowOp {
+                        op_type: op.to_protobuf() as i32,
+                        line: serde_json::to_string(&map)
+                            .map_err(|e| SinkError::Remote(format!("{:?}", e)))?,
+                    };
 
-            row_ops.push(row_op);
-        }
-        // let prost_stream_chunk = chunk.to_protobuf();
-        // let binary_data = Message::encode_to_vec(&prost_stream_chunk);
+                    row_ops.push(row_op);
+                }
+                Payload::JsonPayload(JsonPayload { row_ops })
+            }
+            SinkPayloadFormat::StreamChunk => {
+                let prost_stream_chunk = chunk.to_protobuf();
+                let binary_data = Message::encode_to_vec(&prost_stream_chunk);
+                Payload::StreamChunkPayload(StreamChunkPayload { binary_data })
+            }
+            SinkPayloadFormat::FormatUnspecified => {
+                unreachable!("should specify sink payload format")
+            }
+        };
 
         let epoch = self.epoch.ok_or_else(|| {
             SinkError::Remote("epoch has not been initialize, call `begin_epoch`".to_string())
@@ -275,8 +295,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
                 request: Some(SinkRequest::Write(WriteBatch {
                     epoch,
                     batch_id,
-                    payload: Some(Payload::JsonPayload(JsonPayload { row_ops })),
-                    // payload: Some(Payload::JsonPayload(JsonPayload { row_ops })),
+                    payload: Some(payload),
                 })),
             })
             .map_err(|e| SinkError::Remote(e.to_string()))?;
@@ -488,6 +507,7 @@ mod test {
                         assert_eq!(row_2.line, "{\"id\":3,\"name\":\"Clare\"}");
                         assert_eq!(row_2.op_type, data::Op::Insert as i32);
                     }
+                    _ => unreachable!("should be json payload"),
                 }
             }
             _ => panic!("test failed: failed to construct write request"),
@@ -549,6 +569,7 @@ mod test {
                         assert_eq!(row_2.line, "{\"id\":6,\"name\":\"Frank\"}");
                         assert_eq!(row_2.op_type, data::Op::Insert as i32);
                     }
+                    _ => unreachable!("should be json payload"),
                 }
             }
             _ => panic!("test failed: failed to construct write request"),

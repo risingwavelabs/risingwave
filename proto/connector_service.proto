@@ -31,6 +31,7 @@ message SinkConfig {
 enum SinkPayloadFormat {
   FORMAT_UNSPECIFIED = 0;
   JSON = 1;
+  STREAM_CHUNK = 2;
 }
 
 message SinkStreamRequest {

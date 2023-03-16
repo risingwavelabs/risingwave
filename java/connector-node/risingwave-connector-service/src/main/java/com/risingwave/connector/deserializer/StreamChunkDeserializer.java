@@ -12,18 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.java.binding;
+package com.risingwave.connector.deserializer;
 
 import static io.grpc.Status.INVALID_ARGUMENT;
 
-import com.risingwave.connector.Deserializer;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
+import com.risingwave.connector.api.sink.CloseableIterator;
+import com.risingwave.connector.api.sink.Deserializer;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.java.binding.StreamChunkIterator;
+import com.risingwave.java.binding.StreamChunkRow;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.StreamChunkPayload;
 import com.risingwave.proto.Data;
-import java.util.Iterator;
 
 public class StreamChunkDeserializer implements Deserializer {
     private final TableSchema tableSchema;
@@ -33,7 +35,7 @@ public class StreamChunkDeserializer implements Deserializer {
     }
 
     @Override
-    public Iterator<SinkRow> deserialize(
+    public CloseableIterator<SinkRow> deserialize(
             ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
         if (!writeBatch.hasStreamChunkPayload()) {
             throw INVALID_ARGUMENT
@@ -42,14 +44,9 @@ public class StreamChunkDeserializer implements Deserializer {
                     .asRuntimeException();
         }
         StreamChunkPayload streamChunkPayload = writeBatch.getStreamChunkPayload();
-        return new MyIterator(
+        return new StreamChunkIteratorWrapper(
                 tableSchema,
                 new StreamChunkIterator(streamChunkPayload.getBinaryData().toByteArray()));
-    }
-
-    @Override
-    public void close() {
-        // TODO: implement it
     }
 
     private static Object validateStreamChunkDataTypes(
@@ -79,25 +76,20 @@ public class StreamChunkDeserializer implements Deserializer {
         }
     }
 
-    static class MyIterator implements Iterator<SinkRow>, AutoCloseable {
+    static class StreamChunkIteratorWrapper implements CloseableIterator<SinkRow> {
         private final TableSchema tableSchema;
         private final StreamChunkIterator iter;
         private StreamChunkRow row;
-        private boolean isClosed;
 
-        public MyIterator(TableSchema tableSchema, StreamChunkIterator iter) {
+        public StreamChunkIteratorWrapper(TableSchema tableSchema, StreamChunkIterator iter) {
             this.tableSchema = tableSchema;
             this.iter = iter;
             this.row = null;
-            this.isClosed = false;
         }
 
         @Override
         public void close() {
-            if (!isClosed) {
-                isClosed = true;
-                iter.close();
-            }
+            iter.close();
         }
 
         @Override
@@ -115,7 +107,7 @@ public class StreamChunkDeserializer implements Deserializer {
                 values[tableSchema.getColumnIndex(columnName)] =
                         validateStreamChunkDataTypes(typeName, columnIdx, row);
             }
-            return new ArraySinkrow(row.getOp(), values);
+            return new ArraySinkRow(row.getOp(), values);
         }
     }
 }

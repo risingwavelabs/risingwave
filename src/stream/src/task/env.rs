@@ -19,6 +19,8 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
+#[cfg(test)]
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_source::dml_manager::DmlManagerRef;
 use risingwave_storage::StateStoreImpl;
 
@@ -82,7 +84,7 @@ impl StreamEnvironment {
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
             server_addr: "127.0.0.1:5688".parse().unwrap(),
-            connector_params: ConnectorParams::new(None),
+            connector_params: ConnectorParams::new(None, SinkPayloadFormat::Json),
             config: Arc::new(StreamingConfig::default()),
             worker_id: WorkerNodeId::default(),
             state_store: StateStoreImpl::shared_in_memory_store(Arc::new(

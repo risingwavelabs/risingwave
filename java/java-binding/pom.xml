@@ -29,14 +29,6 @@
             <artifactId>common-utils</artifactId>
         </dependency>
         <dependency>
-            <groupId>com.risingwave.java</groupId>
-            <artifactId>connector-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave.java</groupId>
-            <artifactId>risingwave-connector-service</artifactId>
-        </dependency>
-        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.13.1</version>
