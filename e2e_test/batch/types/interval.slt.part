@@ -150,3 +150,18 @@ select '-2562047788:00:54.775808'::interval;
 
 statement error
 select '-2562047788:00:54.775809'::interval;
+
+query T
+select interval '3 mons -3 days' / 2;
+----
+1 mon 14 days -12:00:00
+
+# The following is an overflow bug present in PostgreSQL 15.2
+# Their `days` overflows to a negative value, leading to the latter smaller
+# than the former. We report an error in this case.
+
+statement ok
+select interval '2147483647 mons 2147483647 days' * 0.999999991;
+
+statement error out of range
+select interval '2147483647 mons 2147483647 days' * 0.999999992;
