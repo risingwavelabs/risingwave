@@ -15,7 +15,7 @@
 use std::cmp::{self, Ordering};
 
 use super::key::split_key_epoch;
-use crate::key::{UserKey, FullKey};
+use crate::key::{FullKey, UserKey};
 
 /// A comparator for comparing [`FullKey`] and [`UserKey`] with possibly different table key types.
 pub struct KeyComparator;
@@ -30,11 +30,16 @@ impl KeyComparator {
         l_p.cmp(r_p).then_with(|| r_s.cmp(l_s))
     }
 
-
-    pub fn compare_full_key_without_table_id(lhs: FullKey<&[u8]>, rhs: FullKey<&[u8]>) -> cmp::Ordering {
-      
-        lhs.user_key.table_key.cmp(&rhs.user_key.table_key).then_with(|| rhs.epoch.cmp(&lhs.epoch))
+    pub fn compare_full_key_without_table_id(
+        lhs: FullKey<&[u8]>,
+        rhs: FullKey<&[u8]>,
+    ) -> cmp::Ordering {
+        lhs.user_key
+            .table_key
+            .cmp(&rhs.user_key.table_key)
+            .then_with(|| rhs.epoch.cmp(&lhs.epoch))
     }
+
     /// Used to compare [`UserKey`] and its encoded format.
     pub fn compare_user_key_cross_format(
         encoded: impl AsRef<[u8]>,
