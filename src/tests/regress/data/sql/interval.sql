@@ -77,16 +77,16 @@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES
 -- Test edge-case overflow detection in interval multiplication
 --@ select extract(epoch from '256 microseconds'::interval * (2^55)::float8);
 
---@ SELECT r1.*, r2.*
---@    FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
---@    WHERE r1.f1 > r2.f1
---@    ORDER BY r1.f1, r2.f1;
+SELECT r1.*, r2.*
+   FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
+   WHERE r1.f1 > r2.f1
+   ORDER BY r1.f1, r2.f1;
 
 --@ CREATE INDEX ON INTERVAL_TBL_OF USING btree (f1);
 --@ SET enable_seqscan TO false;
 --@ EXPLAIN (COSTS OFF)
 --@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
---@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
+SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
 --@ RESET enable_seqscan;
 
 DROP TABLE INTERVAL_TBL_OF;

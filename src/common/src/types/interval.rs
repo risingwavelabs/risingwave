@@ -813,29 +813,28 @@ impl Display for IntervalUnit {
         let months = self.months % 12;
         let days = self.days;
         let mut space = false;
-        let mut write = |arg: std::fmt::Arguments<'_>| {
+        let mut need_pos = false;
+        let mut write_i32 = |arg: i32, unit: &str| -> std::fmt::Result {
+            if arg == 0 {
+                return Ok(());
+            }
             if space {
                 write!(f, " ")?;
             }
-            write!(f, "{arg}")?;
+            if need_pos && arg > 0 {
+                write!(f, "+")?;
+            }
+            write!(f, "{arg} {unit}")?;
+            if arg != 1 {
+                write!(f, "s")?;
+            }
             space = true;
+            need_pos = arg < 0;
             Ok(())
         };
-        if years == 1 {
-            write(format_args!("{years} year"))?;
-        } else if years != 0 {
-            write(format_args!("{years} years"))?;
-        }
-        if months == 1 {
-            write(format_args!("{months} mon"))?;
-        } else if months != 0 {
-            write(format_args!("{months} mons"))?;
-        }
-        if days == 1 {
-            write(format_args!("{days} day"))?;
-        } else if days != 0 {
-            write(format_args!("{days} days"))?;
-        }
+        write_i32(years, "year")?;
+        write_i32(months, "mon")?;
+        write_i32(days, "day")?;
         if self.usecs != 0 || self.months == 0 && self.days == 0 {
             let usecs = self.usecs.abs();
             let ms = usecs / 1000;
@@ -844,11 +843,15 @@ impl Display for IntervalUnit {
             let seconds = ms % 60000 / 1000;
             let secs_fract = usecs % USECS_PER_SEC;
 
-            if self.usecs < 0 {
-                write(format_args!("-{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
-            } else {
-                write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
+            if space {
+                write!(f, " ")?;
             }
+            if need_pos && self.usecs > 0 {
+                write!(f, "+")?;
+            } else if self.usecs < 0 {
+                write!(f, "-")?;
+            }
+            write!(f, "{hours:0>2}:{minutes:0>2}:{seconds:0>2}")?;
             if secs_fract != 0 {
                 let mut buf = [0u8; 7];
                 write!(buf.as_mut_slice(), ".{:06}", secs_fract).unwrap();
@@ -1275,11 +1278,11 @@ mod tests {
                 (11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233
             )
             .to_string(),
-            "-1 years -2 mons 3 days 11:45:14.000233"
+            "-1 years -2 mons +3 days 11:45:14.000233"
         );
         assert_eq!(
             IntervalUnit::from_month_day_usec(-14, 3, 0).to_string(),
-            "-1 years -2 mons 3 days"
+            "-1 years -2 mons +3 days"
         );
         assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
         assert_eq!(
@@ -1289,7 +1292,7 @@ mod tests {
                 -((11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233)
             )
             .to_string(),
-            "-1 years -2 mons 3 days -11:45:14.000233"
+            "-1 years -2 mons +3 days -11:45:14.000233"
         );
     }
 
