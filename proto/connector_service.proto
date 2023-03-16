@@ -29,7 +29,7 @@ message SinkConfig {
 }
 
 enum SinkPayloadFormat {
-  UNSPECIFIED_FORMAT = 0;
+  FORMAT_UNSPECIFIED = 0;
   JSON = 1;
 }
 

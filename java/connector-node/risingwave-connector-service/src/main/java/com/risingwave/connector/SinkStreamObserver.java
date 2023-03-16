@@ -17,9 +17,7 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
-import com.risingwave.connector.api.sink.SinkFactory;
-import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.*;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -28,7 +26,6 @@ import com.risingwave.proto.ConnectorServiceProto.SinkResponse.StartResponse;
 import com.risingwave.proto.ConnectorServiceProto.SinkResponse.SyncResponse;
 import com.risingwave.proto.ConnectorServiceProto.SinkResponse.WriteResponse;
 import io.grpc.stub.StreamObserver;
-import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -122,9 +119,10 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .asRuntimeException();
                 }
 
-                Iterator<SinkRow> rows;
-                rows = deserializer.deserialize(sinkTask.getWrite());
-                sink.write(new MonitoredRowIterator(rows));
+                try (CloseableIterator<SinkRow> rowIter =
+                        deserializer.deserialize(sinkTask.getWrite())) {
+                    sink.write(new MonitoredRowIterator(rowIter));
+                }
 
                 currentBatchId = sinkTask.getWrite().getBatchId();
                 LOG.debug(
@@ -189,9 +187,6 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         if (sink != null) {
             sink.drop();
         }
-        if (deserializer != null) {
-            deserializer.close();
-        }
     }
 
     private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
@@ -199,7 +194,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
         switch (format) {
-            case UNSPECIFIED_FORMAT:
+            case FORMAT_UNSPECIFIED:
             case UNRECOGNIZED:
                 throw INVALID_ARGUMENT
                         .withDescription("should specify payload format in request")

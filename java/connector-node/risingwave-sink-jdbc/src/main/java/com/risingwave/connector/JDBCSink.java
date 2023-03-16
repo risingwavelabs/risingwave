@@ -156,22 +156,25 @@ public class JDBCSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            PreparedStatement stmt = prepareStatement(row);
-            if (row.getOp() == Data.Op.UPDATE_DELETE) {
-                continue;
-            }
-            if (stmt != null) {
-                try {
-                    LOG.debug("Executing statement: " + stmt);
-                    stmt.executeUpdate();
-                } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+            try (SinkRow row = rows.next()) {
+                PreparedStatement stmt = prepareStatement(row);
+                if (row.getOp() == Data.Op.UPDATE_DELETE) {
+                    continue;
                 }
-            } else {
-                throw Status.INTERNAL
-                        .withDescription("empty statement encoded")
-                        .asRuntimeException();
+                if (stmt != null) {
+                    try {
+                        LOG.debug("Executing statement: " + stmt);
+                        stmt.executeUpdate();
+                    } catch (SQLException e) {
+                        throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    }
+                } else {
+                    throw Status.INTERNAL
+                            .withDescription("empty statement encoded")
+                            .asRuntimeException();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }
