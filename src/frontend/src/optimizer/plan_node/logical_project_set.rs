@@ -239,6 +239,7 @@ impl fmt::Display for LogicalProjectSet {
 
 impl ColPrunable for LogicalProjectSet {
     fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // TODO: column pruning for ProjectSet https://github.com/risingwavelabs/risingwave/issues/8593
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         let new_input = {
             let input = self.input();
@@ -271,6 +272,7 @@ impl PredicatePushdown for LogicalProjectSet {
         predicate: Condition,
         ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
+        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
         gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
