@@ -131,6 +131,10 @@ message StreamSource {
   string source_name = 8;
 }
 
+message BarrierRecvNode {
+
+}
+
 message SourceNode {
   // The source node can contain either a stream source or nothing. So here we extract all
   // information about stream source to a message, and here it will be an `Option` in Rust.
@@ -543,6 +547,7 @@ message StreamNode {
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
     TemporalJoinNode temporal_join = 131;
+    BarrierRecvNode barrier_recv = 132;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
