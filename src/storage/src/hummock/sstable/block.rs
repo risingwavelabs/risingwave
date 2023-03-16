@@ -450,7 +450,13 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
+                KeyComparator::compare_full_key_without_table_id(
+                    FullKey::from_slice_without_table_id(
+                        TableId::new(input_table_id),
+                        &self.last_key[..]
+                    ),
+                    full_key
+                ),
                 Ordering::Less
             );
         }

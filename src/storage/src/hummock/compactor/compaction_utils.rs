@@ -219,7 +219,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
             );
         }
         // sort by key, as for every data block has the same size;
-        indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
+        indexes.sort_by(|a, b| FullKey::decode(a.1.as_ref()).cmp(&FullKey::decode(b.1.as_ref())));
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(

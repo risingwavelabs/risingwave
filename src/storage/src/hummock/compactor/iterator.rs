@@ -346,7 +346,7 @@ impl HummockIterator for ConcatSstableIterator {
             let seek_key: &[u8] = if self.key_range.left.is_empty() {
                 key_slice
             } else {
-                match KeyComparator::compare_encoded_full_key(key_slice, &self.key_range.left) {
+                match key.cmp(&FullKey::decode(&self.key_range.left)) {
                     Ordering::Less | Ordering::Equal => &self.key_range.left,
                     Ordering::Greater => key_slice,
                 }

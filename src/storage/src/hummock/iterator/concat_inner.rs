@@ -195,22 +195,17 @@ impl<TI: SstableIteratorType> HummockIterator for ConcatIteratorInner<TI> {
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let encoded_key = key.encode();
             let table_idx = self
                 .tables
                 .partition_point(|table| match Self::Direction::direction() {
                     DirectionEnum::Forward => {
-                        let ord = KeyComparator::compare_encoded_full_key(
-                            table.smallest_key(),
-                            &encoded_key[..],
-                        );
+                        let ord = FullKey::decode(&table.smallest_key()).cmp(&key);
+
                         ord == Less || ord == Equal
                     }
                     DirectionEnum::Backward => {
-                        let ord = KeyComparator::compare_encoded_full_key(
-                            table.largest_key(),
-                            &encoded_key[..],
-                        );
+                        let ord = FullKey::decode(&table.largest_key()).cmp(&key);
+
                         ord == Greater || ord == Equal
                     }
                 })
