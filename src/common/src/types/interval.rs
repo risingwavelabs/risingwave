@@ -81,20 +81,6 @@ impl IntervalUnit {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    #[deprecated]
-    fn from_total_usecs(usecs: i64) -> Self {
-        let mut remaining_usecs = usecs;
-        let months = remaining_usecs / USECS_PER_MONTH;
-        remaining_usecs -= months * USECS_PER_MONTH;
-        let days = remaining_usecs / USECS_PER_DAY;
-        remaining_usecs -= days * USECS_PER_DAY;
-        IntervalUnit {
-            months: (months as i32),
-            days: (days as i32),
-            usecs: remaining_usecs,
-        }
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -193,11 +179,6 @@ impl IntervalUnit {
             self.days as f64 / rhs,
             self.usecs as f64 / rhs,
         )
-    }
-
-    #[deprecated]
-    fn as_usecs_i64(&self) -> i64 {
-        self.months as i64 * USECS_PER_MONTH + self.days as i64 * USECS_PER_DAY + self.usecs
     }
 
     /// times [`IntervalUnit`] with an integer/float.
