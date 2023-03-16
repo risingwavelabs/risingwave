@@ -257,7 +257,9 @@ pub(crate) mod tests {
                 .await;
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
-        let b: JsonbVal = serde_json::from_str::<Value>("{\"k1\": \"v1\", \"k2\": 11}").unwrap().into();
+        let b: JsonbVal = serde_json::from_str::<Value>("{\"k1\": \"v1\", \"k2\": 11}")
+            .unwrap()
+            .into();
         let b: Datum = Some(ScalarImpl::Jsonb(b));
 
         let init_epoch_num = 100100;
