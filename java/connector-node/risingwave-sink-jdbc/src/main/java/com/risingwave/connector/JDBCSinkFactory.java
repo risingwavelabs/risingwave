@@ -91,7 +91,8 @@ public class JDBCSinkFactory implements SinkFactory {
             // must have primary key.
             if (jdbcPk.isEmpty()) {
                 throw Status.INVALID_ARGUMENT
-                        .withDescription("JDBC table has no primary key")
+                        .withDescription(
+                                "JDBC table has no primary key, consider making the sink append-only or defining primary key on the JDBC table")
                         .asRuntimeException();
             }
             // The user is not allowed to define the primary key for upsert JDBC sink.
