@@ -129,7 +129,7 @@
     └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count(1:Int32)] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.v2 > t.v3) }
-- name: filter project set transpose
+- name: filter project set transpose TODO(https://github.com/risingwavelabs/risingwave/issues/8591)
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);
     with cte as (select v1, v2, v3, unnest(arr) as arr_unnested from t) select * from cte where v1=10 AND v2=20 AND v3=30 AND arr_unnested=30;

@@ -21,7 +21,7 @@ use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use local_stats_alloc::{SharedStatsAlloc, StatsAlloc};
 use lru::DefaultHasher;
-use risingwave_common::array::{Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -32,7 +32,7 @@ use risingwave_storage::StateStore;
 
 use super::{Barrier, Executor, Message, MessageStream, StreamExecutorError, StreamExecutorResult};
 use crate::cache::{new_with_hasher_in, ManagedLruCache};
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{ActorContextRef, BoxedExecutor, JoinType, JoinTypePrimitive, PkIndices};
 use crate::task::AtomicU64Ref;
@@ -227,19 +227,6 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
             self.right.schema().len(),
         );
 
-        let mut check_join_condition = |left_row: &RowRef<'_>, right_row: &OwnedRow| -> bool {
-            if let Some(ref mut cond) = self.condition {
-                let concat_row = left_row.chain(right_row).into_owned_row();
-                cond.eval_row_infallible(&concat_row, |err| {
-                    self.ctx.on_compute_error(err, self.identity.as_str())
-                })
-                .map(|s| *s.as_bool())
-                .unwrap_or(false)
-            } else {
-                true
-            }
-        };
-
         let mut prev_epoch = None;
         #[for_await]
         for msg in align_input(self.left, self.right) {
@@ -261,9 +248,23 @@ impl<S: StateStore, const T: JoinTypePrimitive> TemporalJoinExecutor<S, T> {
                         {
                             continue;
                         }
-                        if let Some(right_row) = self.right_table.lookup(key, epoch).await? && check_join_condition(&left_row, &right_row) {
-                            if let Some(chunk) = builder.append_row(op, left_row, &right_row) {
-                                yield Message::Chunk(chunk);
+                        if let Some(right_row) = self.right_table.lookup(key, epoch).await? {
+                            // check join condition
+                            let ok = if let Some(ref mut cond) = self.condition {
+                                let concat_row = left_row.chain(&right_row).into_owned_row();
+                                cond.eval_row_infallible(&concat_row, |err| {
+                                    self.ctx.on_compute_error(err, self.identity.as_str())
+                                })
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                            } else {
+                                true
+                            };
+                            if ok {
+                                if let Some(chunk) = builder.append_row(op, left_row, &right_row) {
+                                    yield Message::Chunk(chunk);
+                                }
                             }
                         } else if T == JoinType::LeftOuter {
                             if let Some(chunk) = builder.append_row_update(op, left_row) {

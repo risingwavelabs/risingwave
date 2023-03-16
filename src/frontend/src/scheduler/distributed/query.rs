@@ -551,6 +551,7 @@ pub(crate) mod tests {
             }),
             vec![],
             ctx,
+            false,
         )
         .to_batch()
         .unwrap()
@@ -659,6 +660,7 @@ pub(crate) mod tests {
         let fragmenter = BatchPlanFragmenter::new(
             worker_node_manager,
             catalog_reader,
+            None,
             batch_exchange_node.clone(),
         )
         .unwrap();

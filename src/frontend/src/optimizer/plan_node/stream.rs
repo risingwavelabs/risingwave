@@ -29,7 +29,7 @@ use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -99,6 +99,10 @@ impl generic::GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.0.ctx.clone()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.0.functional_dependency()
+    }
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -112,6 +116,10 @@ impl generic::GenericPlanRef for PlanBase {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        todo!()
     }
 }
 
@@ -279,15 +287,12 @@ impl HashJoin {
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
         degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
 
         (
-            internal_table_catalog_builder.build(internal_table_dist_keys),
-            degree_table_catalog_builder.build(degree_table_dist_keys),
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
             deduped_input_pk_indices,
         )
     }

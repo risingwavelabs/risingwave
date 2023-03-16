@@ -353,3 +353,6 @@
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
     See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
+- sql: |
+    SELECT 1, (SELECT regexp_matches('barbeque barbeque', '(bar)(beque)', 'g'))
+  batch_error: 'internal error: Scalar subquery might produce more than one row.'

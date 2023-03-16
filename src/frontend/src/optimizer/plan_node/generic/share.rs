@@ -18,6 +18,7 @@ use std::hash::Hash;
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,5 +43,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.borrow().ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.input.borrow().functional_dependency().clone()
     }
 }

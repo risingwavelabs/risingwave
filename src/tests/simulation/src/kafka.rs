@@ -82,7 +82,11 @@ pub async fn producer(broker_addr: &str, datadir: String) {
             // binary message data, a file is a message
             Box::new(std::iter::once(content.as_slice()))
         } else {
-            Box::new(content.split(|&b| b == b'\n'))
+            Box::new(
+                content
+                    .split(|&b| b == b'\n')
+                    .filter(|line| !line.is_empty()),
+            )
         };
         for msg in msgs {
             loop {

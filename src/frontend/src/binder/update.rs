@@ -21,6 +21,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Assignment, Expr, ObjectName, SelectItem};
 
+use super::statement::RewriteExprsRecursive;
 use super::{Binder, Relation};
 use crate::catalog::TableId;
 use crate::expr::{Expr as _, ExprImpl};
@@ -57,6 +58,27 @@ pub struct BoundUpdate {
     pub returning_schema: Option<Schema>,
 }
 
+impl RewriteExprsRecursive for BoundUpdate {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.table.rewrite_exprs_recursive(rewriter);
+
+        self.selection =
+            std::mem::take(&mut self.selection).map(|expr| rewriter.rewrite_expr(expr));
+
+        let new_exprs = std::mem::take(&mut self.exprs)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.exprs = new_exprs;
+
+        let new_returning_list = std::mem::take(&mut self.returning_list)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.returning_list = new_returning_list;
+    }
+}
+
 impl Binder {
     pub(super) fn bind_update(
         &mut self,
@@ -73,7 +95,7 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let table = self.bind_relation_by_name(name, None)?;
+        let table = self.bind_relation_by_name(name, None, false)?;
 
         let selection = selection.map(|expr| self.bind_expr(expr)).transpose()?;
 

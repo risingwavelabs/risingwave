@@ -8,12 +8,22 @@ connection_pool_size = 16
 [batch]
 
 [storage]
-shared_buffer_capacity_mb = 1024
-sstable_size_mb = 256
-block_size_kb = 64
-bloom_false_positive = 0.001
-data_directory = "hummock_001"
-block_cache_capacity_mb = 2048
-meta_cache_capacity_mb = 256
-compactor_memory_limit_mb = 1024
+shared_buffer_capacity_mb = 4096
+block_cache_capacity_mb = 4096
+meta_cache_capacity_mb = 1024
+compactor_memory_limit_mb = 5120
+
+[storage.file_cache]
+capacity_mb = 1024
+total_buffer_capacity_mb = 128
+cache_file_fallocate_unit_mb = 512
+cache_meta_fallocate_unit_mb = 16
+cache_file_max_write_size_mb = 4
+
+#The configurable parameters in [XXX.developer] subsection are for developers.
+#Users are not encouraged to tune or depend on the following parameters.
+#Some configurable parameters exist only temporarily.
+[batch.developer]
+batch_output_channel_size = 64
+batch_chunk_size = 1024
 

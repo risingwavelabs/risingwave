@@ -18,6 +18,7 @@ pub use anyhow::anyhow;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{ErrorCode, RwError};
 use thiserror::Error;
+use tonic::Status;
 
 use crate::error::BatchError::Internal;
 
@@ -65,5 +66,11 @@ pub fn to_rw_error(e: Arc<BatchError>) -> RwError {
 impl From<RwError> for BatchError {
     fn from(s: RwError) -> Self {
         Internal(anyhow!(format!("{}", s)))
+    }
+}
+
+impl<'a> From<&'a BatchError> for Status {
+    fn from(err: &'a BatchError) -> Self {
+        Status::internal(err.to_string())
     }
 }

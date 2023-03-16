@@ -25,7 +25,7 @@ use tracing::error;
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableIdManagerRef};
+use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
 use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
@@ -319,8 +319,8 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager().clone()
+    pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
+        self.inner.sstable_object_id_manager().clone()
     }
 }
 
