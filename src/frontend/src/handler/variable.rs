@@ -56,6 +56,7 @@ pub(super) fn handle_set_time_zone(
         SetTimeZoneValue::Local => iana_time_zone::get_timezone()
             .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
         SetTimeZoneValue::Default => Ok("UTC".to_string()),
+        SetTimeZoneValue::Ident(ident) => Ok(ident.real_value()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
         | SetTimeZoneValue::Literal(Value::SingleQuotedString(s)) => Ok(s),
         _ => Ok(value.to_string()),
