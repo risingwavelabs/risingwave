@@ -82,7 +82,7 @@ impl SstableStreamIterator {
             if self
                 .sstable_info
                 .get_table_ids()
-                .binary_search(&block_iter.key().user_key.table_id.table_id)
+                .binary_search(&block_iter.table_id().table_id)
                 .is_ok()
             {
                 return Ok(());
