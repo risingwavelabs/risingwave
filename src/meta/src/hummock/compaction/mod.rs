@@ -16,6 +16,7 @@ pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -27,7 +28,9 @@ use std::sync::Arc;
 use picker::{
     LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
@@ -220,11 +223,11 @@ impl CompactStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub sst_ids: Vec<u64>,
+    pub sst_ids: Vec<HummockSstableId>,
     /// Filters out SSTs to pick.
     pub key_range: KeyRange,
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub internal_table_id: HashSet<u32>,
+    pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
 }

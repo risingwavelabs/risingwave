@@ -51,6 +51,7 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::system_param::default;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -106,10 +107,41 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
-    // TODO(zhidong): Make it required in v0.1.18
     /// State store url.
     #[clap(long, env = "RW_STATE_STORE")]
     state_store: Option<String>,
+
+    /// The interval of periodic barrier.
+    #[clap(long, env = "RW_BARRIER_INTERVAL_MS", default_value_t = default::barrier_interval_ms())]
+    barrier_interval_ms: u32,
+
+    /// There will be a checkpoint for every n barriers
+    #[clap(long, env = "RW_CHECKPOINT_FREQUENCY", default_value_t = default::checkpoint_frequency())]
+    pub checkpoint_frequency: u64,
+
+    /// Target size of the Sstable.
+    #[clap(long, env = "RW_SSTABLE_SIZE_MB", default_value_t = default::sstable_size_mb())]
+    sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    #[clap(long, env = "RW_BLOCK_SIZE_KB", default_value_t = default::block_size_kb())]
+    block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE", default_value_t = default::bloom_false_positive())]
+    bloom_false_positive: f64,
+
+    /// Remote directory for storing data and metadata objects.
+    #[clap(long, env = "RW_DATA_DIRECTORY", default_value_t = default::data_directory())]
+    data_directory: String,
+
+    /// Remote storage url for storing snapshots.
+    #[clap(long, env = "RW_BACKUP_STORAGE_URL", default_value_t = default::backup_storage_url())]
+    backup_storage_url: String,
+
+    /// Remote directory for storing snapshots.
+    #[clap(long, env = "RW_STORAGE_DIRECTORY", default_value_t = default::backup_storage_directory())]
+    backup_storage_directory: String,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
@@ -132,36 +164,6 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
-
-    /// Target size of the Sstable.
-    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = storage.sstable_size_mb)]
-    sstable_size_mb: Option<u32>,
-
-    /// Size of each block in bytes in SST.
-    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = storage.block_size_kb)]
-    block_size_kb: Option<u32>,
-
-    /// False positive probability of bloom filter.
-    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = storage.bloom_false_positive)]
-    bloom_false_positive: Option<f64>,
-
-    /// Remote directory for storing data and metadata objects.
-    #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = storage.data_directory)]
-    data_directory: Option<String>,
-
-    /// Remote storage url for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = backup.storage_url)]
-    backup_storage_url: Option<String>,
-
-    /// Remote directory for storing snapshots.
-    #[clap(long, env = "RW_STORAGE_DIRECTORY")]
-    #[override_opts(path = backup.storage_directory)]
-    backup_storage_directory: Option<String>,
 }
 
 use std::future::Future;
@@ -246,15 +248,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .periodic_ttl_reclaim_compaction_interval_sec,
             },
             SystemParams {
-                barrier_interval_ms: Some(config.streaming.barrier_interval_ms),
-                checkpoint_frequency: Some(config.streaming.checkpoint_frequency as u64),
-                sstable_size_mb: Some(config.storage.sstable_size_mb),
-                block_size_kb: Some(config.storage.block_size_kb),
-                bloom_false_positive: Some(config.storage.bloom_false_positive),
+                barrier_interval_ms: Some(opts.barrier_interval_ms),
+                checkpoint_frequency: Some(opts.checkpoint_frequency),
+                sstable_size_mb: Some(opts.sstable_size_mb),
+                block_size_kb: Some(opts.block_size_kb),
+                bloom_false_positive: Some(opts.bloom_false_positive),
                 state_store: Some(opts.state_store.unwrap_or_default()),
-                data_directory: Some(config.storage.data_directory),
-                backup_storage_url: Some(config.backup.storage_url),
-                backup_storage_directory: Some(config.backup.storage_directory),
+                data_directory: Some(opts.data_directory),
+                backup_storage_url: Some(opts.backup_storage_url),
+                backup_storage_directory: Some(opts.backup_storage_directory),
             },
         )
         .await

@@ -54,11 +54,11 @@ impl ProjectExecutor {
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?;
             // let data_chunk = data_chunk.compact();
-            let arrays: Vec<Column> = self
-                .expr
-                .iter_mut()
-                .map(|expr| expr.eval(&data_chunk).map(Column::new))
-                .try_collect()?;
+            let mut arrays = Vec::with_capacity(self.expr.len());
+            for expr in &mut self.expr {
+                let column = Column::new(expr.eval(&data_chunk).await?);
+                arrays.push(column);
+            }
             let (_, vis) = data_chunk.into_parts();
             let ret = DataChunk::new(arrays, vis);
             yield ret

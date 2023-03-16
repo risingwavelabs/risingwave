@@ -23,7 +23,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
@@ -604,11 +603,7 @@ impl CompleteStreamFragmentGraph {
             table_id,
         } = self.get_fragment(id).into_building().unwrap();
 
-        let distribution_type = if inner.is_singleton {
-            FragmentDistributionType::Single
-        } else {
-            FragmentDistributionType::Hash
-        } as i32;
+        let distribution_type = distribution.to_distribution_type() as i32;
 
         let state_table_ids = internal_tables
             .iter()

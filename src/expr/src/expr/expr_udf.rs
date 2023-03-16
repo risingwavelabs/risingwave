@@ -37,30 +37,26 @@ pub struct UdfExpression {
     identifier: String,
 }
 
-// TODO: make evaluation functions async
-// At present, we use `block_in_place` + `block_on` as a workaround to run
-// async functions in sync context.
 #[cfg(not(madsim))]
+#[async_trait::async_trait]
 impl Expression for UdfExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let vis = input.vis().to_bitmap();
-        let columns: Vec<_> = self
-            .children
-            .iter()
-            .map(|c| c.eval_checked(input).map(|a| a.as_ref().into()))
-            .try_collect()?;
+        let mut columns = Vec::with_capacity(self.children.len());
+        for child in &self.children {
+            let array = child.eval_checked(input).await?;
+            columns.push(array.as_ref().into());
+        }
         let opts =
             arrow_array::RecordBatchOptions::default().with_row_count(Some(input.cardinality()));
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.client.call(&self.identifier, input))
-        })?;
+        let output = self.client.call(&self.identifier, input).await?;
         let arrow_array = output
             .columns()
             .get(0)
@@ -70,9 +66,9 @@ impl Expression for UdfExpression {
         Ok(Arc::new(array))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         let chunk = DataChunk::from_rows(std::slice::from_ref(input), &self.arg_types);
-        let output_array = self.eval(&chunk)?;
+        let output_array = self.eval(&chunk).await?;
         Ok(output_array.to_datum())
     }
 }
@@ -111,16 +107,17 @@ impl<'a> TryFrom<&'a ExprNode> for UdfExpression {
 }
 
 #[cfg(madsim)]
+#[async_trait::async_trait]
 impl Expression for UdfExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         panic!("UDF is not supported in simulation yet");
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         panic!("UDF is not supported in simulation yet");
     }
 }

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
@@ -98,7 +98,11 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(ColumnDesc::from)
                     .collect_vec();
-                let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
 
                 // Use indices based on full table instead of streaming executor output.
                 let pk_indices = table_desc
