@@ -13,14 +13,18 @@
 // limitations under the License.
 
 use std::str::FromStr;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::error::ErrorCode;
 use risingwave_common::types::{unnested_list_type, DataType, ScalarImpl};
 use risingwave_pb::expr::table_function::Type;
-use risingwave_pb::expr::TableFunction as TableFunctionProst;
+use risingwave_pb::expr::{
+    TableFunction as TableFunctionProst, UserDefinedTableFunction as UserDefinedTableFunctionProst,
+};
 
 use super::{Expr, ExprImpl, ExprRewriter, RwResult};
+use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -32,14 +36,17 @@ pub struct TableFunction {
     pub args: Vec<ExprImpl>,
     pub return_type: DataType,
     pub function_type: TableFunctionType,
+    /// Catalog of user defined table function.
+    pub udtf_catalog: Option<Arc<FunctionCatalog>>,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TableFunctionType {
     Generate,
     Range,
     Unnest,
     RegexpMatches,
+    Udtf,
 }
 
 impl TableFunctionType {
@@ -49,6 +56,7 @@ impl TableFunctionType {
             TableFunctionType::Range => Type::Range,
             TableFunctionType::Unnest => Type::Unnest,
             TableFunctionType::RegexpMatches => Type::RegexpMatches,
+            TableFunctionType::Udtf => Type::Udtf,
         }
     }
 }
@@ -60,6 +68,7 @@ impl TableFunctionType {
             TableFunctionType::Range => "range",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
+            TableFunctionType::Udtf => "udtf",
         }
     }
 }
@@ -122,6 +131,7 @@ impl TableFunction {
                     args,
                     return_type: data_type,
                     function_type,
+                    udtf_catalog: None,
                 })
             }
             TableFunctionType::Unnest => {
@@ -140,6 +150,7 @@ impl TableFunction {
                         args: vec![expr],
                         return_type: data_type,
                         function_type: TableFunctionType::Unnest,
+                        udtf_catalog: None,
                     })
                 } else {
                     Err(ErrorCode::BindError(
@@ -197,8 +208,24 @@ impl TableFunction {
                         datatype: Box::new(DataType::Varchar),
                     },
                     function_type: TableFunctionType::RegexpMatches,
+                    udtf_catalog: None,
                 })
             }
+            // not in this path
+            TableFunctionType::Udtf => unreachable!(),
+        }
+    }
+
+    /// Create a user-defined `TableFunction`.
+    pub fn new_user_defined(catalog: Arc<FunctionCatalog>, args: Vec<ExprImpl>) -> Self {
+        let FunctionKind::Table = &catalog.kind else {
+            panic!("not a table function");
+        };
+        TableFunction {
+            args,
+            return_type: catalog.return_type.clone(),
+            function_type: TableFunctionType::Udtf,
+            udtf_catalog: Some(catalog),
         }
     }
 
@@ -207,6 +234,15 @@ impl TableFunction {
             function_type: self.function_type.to_protobuf() as i32,
             args: self.args.iter().map(|c| c.to_expr_proto()).collect_vec(),
             return_type: Some(self.return_type.to_protobuf()),
+            udtf: self
+                .udtf_catalog
+                .as_ref()
+                .map(|c| UserDefinedTableFunctionProst {
+                    arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+                    language: c.language.clone(),
+                    link: c.link.clone(),
+                    identifier: c.identifier.clone(),
+                }),
         }
     }
 

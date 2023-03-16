@@ -33,8 +33,8 @@ use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
@@ -878,12 +878,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let resp = self
             .inner
             .get_new_sst_ids(GetNewSstIdsRequest { number })
             .await?;
-        Ok(SstIdRange::new(resp.start_id, resp.end_id))
+        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(
@@ -944,8 +944,8 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        let req = ReportFullScanTaskRequest { sst_ids };
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { object_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
     }

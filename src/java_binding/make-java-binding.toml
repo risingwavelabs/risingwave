@@ -22,6 +22,7 @@ script = '''
 set -ex
 cd java
 mvn clean install --pl java-binding-integration-test --am -DskipTests=true
+mvn dependency:copy-dependencies --pl java-binding-integration-test
 '''
 
 [tasks.start-java-binding-demo-cluster]
@@ -76,3 +77,24 @@ dependencies = [
     "ingest-data-and-run-java-binding",
     "kill-java-binding-demo-cluster"
 ]
+
+[tasks.run-java-binding-stream-chunk-demo]
+description = "Run the java binding stream chunk demo"
+dependencies = [
+    "build-java-binding-rust",
+    "build-java-binding-java",
+]
+script = '''
+#!/usr/bin/env bash
+set -ex
+
+RISINGWAVE_ROOT=$(git rev-parse --show-toplevel)
+
+cd ${RISINGWAVE_ROOT}/java
+
+(cd ${RISINGWAVE_ROOT} && cargo run --bin data-chunk-payload-generator) | \
+    java -cp "./java-binding-integration-test/target/dependency/*:./java-binding-integration-test/target/classes" \
+     -Djava.library.path=${RISINGWAVE_ROOT}/target/debug  com.risingwave.java.binding.StreamChunkDemo
+
+
+'''

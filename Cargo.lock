@@ -6094,11 +6094,13 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "arrow-schema",
+ "async-trait",
  "chrono",
  "chrono-tz",
  "criterion",
  "dyn-clone",
  "either",
+ "futures-util",
  "itertools",
  "madsim-tokio",
  "md5",
@@ -6111,6 +6113,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_udf",
  "speedate",
+ "static_assertions",
  "thiserror",
  "workspace-hack",
 ]
@@ -6229,6 +6232,7 @@ version = "0.1.0"
 dependencies = [
  "bytes",
  "futures",
+ "itertools",
  "jni",
  "madsim-tokio",
  "prost 0.11.8",
@@ -6521,6 +6525,7 @@ dependencies = [
  "madsim-tokio",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "regex",
  "risingwave_common",
  "risingwave_expr",
  "risingwave_frontend",
@@ -6528,6 +6533,27 @@ dependencies = [
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",
+ "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_state_cleaning_test"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 4.1.8",
+ "futures",
+ "itertools",
+ "madsim-tokio",
+ "regex",
+ "risingwave_rt",
+ "serde",
+ "serde_with 2.2.0",
+ "tokio-postgres",
+ "tokio-stream",
+ "toml 0.4.10",
+ "tracing",
  "workspace-hack",
 ]
 
@@ -6741,9 +6767,9 @@ dependencies = [
 
 [[package]]
 name = "rust_decimal"
-version = "1.28.1"
+version = "1.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e13cf35f7140155d02ba4ec3294373d513a3c7baa8364c162b030e33c61520a8"
+checksum = "2b1b21b8760b0ef8ae5b43d40913ff711a2053cb7ff892a34facff7a6365375a"
 dependencies = [
  "arrayvec",
  "borsh",
@@ -7910,6 +7936,15 @@ dependencies = [
 
 [[package]]
 name = "toml"
+version = "0.4.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "758664fc71a3a69038656bee8b6be6477d2a6c315a6b81f7081f591bffa4111f"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "toml"
 version = "0.5.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
@@ -8217,7 +8252,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.8.5",
+ "rand 0.7.3",
  "static_assertions",
 ]
 
@@ -8760,7 +8795,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
- "digest",
  "either",
  "fail",
  "fixedbitset",
@@ -8799,6 +8833,7 @@ dependencies = [
  "petgraph",
  "phf",
  "phf_shared",
+ "postgres-types",
  "proc-macro2",
  "prometheus",
  "prost 0.11.8",

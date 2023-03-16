@@ -403,7 +403,8 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         };
 
         let sst_info = SstableInfo {
-            id: self.sstable_id,
+            object_id: self.sstable_id,
+            sst_id: self.sstable_id,
             key_range: Some(risingwave_pb::hummock::KeyRange {
                 left: meta.smallest_key.clone(),
                 right: meta.largest_key.clone(),
@@ -414,7 +415,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             meta_offset: meta.meta_offset,
             stale_key_count: self.stale_key_count,
             total_key_count: self.total_key_count,
-            divide_version: 0,
             uncompressed_file_size: uncompressed_file_size + meta.encoded_size() as u64,
             min_epoch: cmp::min(min_epoch, tombstone_min_epoch),
             max_epoch: cmp::max(max_epoch, tombstone_max_epoch),

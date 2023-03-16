@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,6 +62,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             order_cols.insert(idx);
         });
 
+        let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
         column_orders.iter().for_each(|order| {
             if !order_cols.contains(&order.column_index) {
                 internal_table_catalog_builder
@@ -80,9 +81,10 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
         }
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
-        internal_table_catalog_builder
-            .build(self.input.distribution().dist_column_indices().to_vec())
+        internal_table_catalog_builder.build(
+            self.input.distribution().dist_column_indices().to_vec(),
+            read_prefix_len_hint,
+        )
     }
 }
 
@@ -97,5 +99,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.input.functional_dependency().clone()
     }
 }

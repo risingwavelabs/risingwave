@@ -21,7 +21,7 @@ use risingwave_rpc_client::HummockMetaClient;
 use super::task_progress::TaskProgressManagerRef;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{MemoryLimiter, SstableIdManagerRef};
+use crate::hummock::{MemoryLimiter, SstableObjectIdManagerRef};
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 
@@ -49,7 +49,7 @@ pub struct CompactorContext {
 
     pub read_memory_limiter: Arc<MemoryLimiter>,
 
-    pub sstable_id_manager: SstableIdManagerRef,
+    pub sstable_object_id_manager: SstableObjectIdManagerRef,
 
     pub task_progress_manager: TaskProgressManagerRef,
 
@@ -62,7 +62,7 @@ impl CompactorContext {
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
         compactor_metrics: Arc<CompactorMetrics>,
-        sstable_id_manager: SstableIdManagerRef,
+        sstable_object_id_manager: SstableObjectIdManagerRef,
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         compactor_runtime_config: CompactorRuntimeConfig,
     ) -> Self {
@@ -85,7 +85,7 @@ impl CompactorContext {
             compaction_executor,
             filter_key_extractor_manager,
             read_memory_limiter: memory_limiter,
-            sstable_id_manager,
+            sstable_object_id_manager,
             task_progress_manager: Default::default(),
             compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(compactor_runtime_config)),
         }

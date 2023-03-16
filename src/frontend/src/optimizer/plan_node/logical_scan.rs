@@ -22,7 +22,7 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanRef;
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
@@ -36,7 +36,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -89,21 +89,10 @@ impl LogicalScan {
             predicate,
             chunk_size: None,
             for_system_time_as_of_now,
-        };
-
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        let functional_dependency = match &pk_indices {
-            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
-            None => FunctionalDependencySet::new(schema.len()),
-        };
-        let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        };
+
+        let base = PlanBase::new_logical_with_core(&core);
 
         Self { base, core }
     }
@@ -199,6 +188,18 @@ impl LogicalScan {
             .iter()
             .map(|i| self.table_desc().columns[*i].column_id)
             .collect()
+    }
+
+    /// Get the ids of the output columns and primary key columns.
+    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
+        let mut ids = self.output_column_ids();
+        for column_order in self.primary_key() {
+            let id = self.table_desc().columns[column_order.column_index].column_id;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
     }
 
     pub fn output_column_indices(&self) -> &[usize] {
@@ -664,12 +665,11 @@ impl ToBatch for LogicalScan {
             if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
+                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order.enforce_if_not_satisfies(
-                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
-                    );
+                    return required_order
+                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
                 } else {
                     unreachable!();
                 }

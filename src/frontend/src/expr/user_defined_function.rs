@@ -19,7 +19,7 @@ use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
 
 use super::{Expr, ExprImpl};
-use crate::catalog::function_catalog::FunctionCatalog;
+use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserDefinedFunction {
@@ -34,7 +34,7 @@ impl UserDefinedFunction {
 
     pub(super) fn from_expr_proto(
         udf: &risingwave_pb::expr::UserDefinedFunction,
-        ret_type: DataType,
+        return_type: DataType,
     ) -> risingwave_common::error::Result<Self> {
         let args: Vec<_> = udf
             .get_children()
@@ -50,8 +50,9 @@ impl UserDefinedFunction {
             name: udf.get_name().clone(),
             // FIXME(yuhao): owner is not in udf proto.
             owner: u32::MAX - 1,
+            kind: FunctionKind::Scalar,
             arg_types,
-            return_type: ret_type,
+            return_type,
             language: udf.get_language().clone(),
             identifier: udf.get_identifier().clone(),
             link: udf.get_link().clone(),
