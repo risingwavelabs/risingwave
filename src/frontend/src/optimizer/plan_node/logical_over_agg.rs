@@ -256,7 +256,6 @@ impl ColPrunable for LogicalOverAgg {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         let new_input = {
             let input = self.input();
-            let input_schema = input.schema();
             let required = (0..input.schema().len()).collect_vec();
             input.prune_col(&required, ctx)
         };

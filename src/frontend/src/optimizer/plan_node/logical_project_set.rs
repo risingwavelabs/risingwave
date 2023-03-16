@@ -18,9 +18,8 @@ use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet,
-    ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
@@ -243,7 +242,6 @@ impl ColPrunable for LogicalProjectSet {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
         let new_input = {
             let input = self.input();
-            let input_schema = input.schema();
             let required = (0..input.schema().len()).collect_vec();
             input.prune_col(&required, ctx)
         };
