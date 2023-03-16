@@ -18,6 +18,7 @@ import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.*;
+import com.risingwave.connector.deserializer.StreamChunkDeserializer;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -201,6 +202,9 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                         .asRuntimeException();
             case JSON:
                 deserializer = new JsonDeserializer(tableSchema);
+                break;
+            case STREAM_CHUNK:
+                deserializer = new StreamChunkDeserializer(tableSchema);
                 break;
         }
         ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");

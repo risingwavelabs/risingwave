@@ -298,6 +298,9 @@ pub async fn compute_node_serve(
             }
         },
     };
+
+    info!("connector param: {:?}", connector_params);
+
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
