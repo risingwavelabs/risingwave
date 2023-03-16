@@ -19,10 +19,9 @@ function clean_etcd_data() {
 
 function start_cluster() {
   cargo make d ci-meta-backup-test 1>/dev/null 2>&1
-}
-
-function wait_cluster_ready() {
-  # TODO #6482: wait cluster to finish actor migration and other recovery stuff deterministically.
+  execute_sql_and_expect \
+  "alter system set  backup_storage_url to \"minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001\";" \
+  "ALTER_SYSTEM"
   sleep 5
 }
 
