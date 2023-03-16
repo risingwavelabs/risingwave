@@ -121,7 +121,7 @@ impl NestedLoopJoinExecutor {
 impl NestedLoopJoinExecutor {
     /// Create a chunk by concatenating a row with a chunk and set its visibility according to the
     /// evaluation result of the expression.
-    fn concatenate_and_eval(
+    async fn concatenate_and_eval(
         expr: &dyn Expression,
         left_row_types: &[DataType],
         left_row: RowRef<'_>,
@@ -129,7 +129,7 @@ impl NestedLoopJoinExecutor {
     ) -> Result<DataChunk> {
         let left_chunk = convert_row_to_chunk(&left_row, right_chunk.capacity(), left_row_types)?;
         let mut chunk = concatenate(&left_chunk, right_chunk)?;
-        chunk.set_visibility(expr.eval(&chunk)?.as_bool().iter().collect());
+        chunk.set_visibility(expr.eval(&chunk).await?.as_bool().iter().collect());
         Ok(chunk)
     }
 }
@@ -232,7 +232,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 // 4. Yield the concatenated chunk.
                 if chunk.cardinality() > 0 {
                     for spilled in chunk_builder.append_chunk(chunk) {
@@ -264,7 +265,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     matched.set(left_row_idx, true);
                     for spilled in chunk_builder.append_chunk(chunk) {
@@ -308,7 +310,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     matched.set(left_row_idx, true)
                 }
@@ -345,7 +348,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
                     matched = &matched | chunk.visibility().unwrap();
@@ -385,7 +389,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     // chunk.visibility() must be Some(_)
                     matched = &matched | chunk.visibility().unwrap();
@@ -424,7 +429,8 @@ impl NestedLoopJoinExecutor {
                     &left_data_types,
                     left_row,
                     &right_chunk,
-                )?;
+                )
+                .await?;
                 if chunk.cardinality() > 0 {
                     left_matched.set(left_row_idx, true);
                     right_matched = &right_matched | chunk.visibility().unwrap();
