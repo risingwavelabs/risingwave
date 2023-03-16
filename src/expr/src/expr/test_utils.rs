@@ -131,8 +131,7 @@ pub fn make_hop_window_expression(
 
         // The first window_start of hop window should be:
         // tumble_start(`time_col` - (`window_size` - `window_slide`), `window_slide`,
-        // `window_offset`). Let's pre calculate (`window_size` - `window_slide`) and
-        // `offset` % `window_size`.
+        // `window_offset`). Let's pre calculate (`window_size` - `window_slide`).
         let window_size_sub_slide =
             window_size
                 .checked_sub(&window_slide)
