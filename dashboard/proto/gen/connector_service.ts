@@ -11,7 +11,7 @@ import {
 export const protobufPackage = "connector_service";
 
 export const SinkPayloadFormat = {
-  UNSPECIFIED_FORMAT: "UNSPECIFIED_FORMAT",
+  FORMAT_UNSPECIFIED: "FORMAT_UNSPECIFIED",
   JSON: "JSON",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
@@ -21,8 +21,8 @@ export type SinkPayloadFormat = typeof SinkPayloadFormat[keyof typeof SinkPayloa
 export function sinkPayloadFormatFromJSON(object: any): SinkPayloadFormat {
   switch (object) {
     case 0:
-    case "UNSPECIFIED_FORMAT":
-      return SinkPayloadFormat.UNSPECIFIED_FORMAT;
+    case "FORMAT_UNSPECIFIED":
+      return SinkPayloadFormat.FORMAT_UNSPECIFIED;
     case 1:
     case "JSON":
       return SinkPayloadFormat.JSON;
@@ -35,8 +35,8 @@ export function sinkPayloadFormatFromJSON(object: any): SinkPayloadFormat {
 
 export function sinkPayloadFormatToJSON(object: SinkPayloadFormat): string {
   switch (object) {
-    case SinkPayloadFormat.UNSPECIFIED_FORMAT:
-      return "UNSPECIFIED_FORMAT";
+    case SinkPayloadFormat.FORMAT_UNSPECIFIED:
+      return "FORMAT_UNSPECIFIED";
     case SinkPayloadFormat.JSON:
       return "JSON";
     case SinkPayloadFormat.UNRECOGNIZED:
@@ -441,14 +441,14 @@ export const SinkStreamRequest = {
 };
 
 function createBaseSinkStreamRequest_StartSink(): SinkStreamRequest_StartSink {
-  return { sinkConfig: undefined, format: SinkPayloadFormat.UNSPECIFIED_FORMAT };
+  return { sinkConfig: undefined, format: SinkPayloadFormat.FORMAT_UNSPECIFIED };
 }
 
 export const SinkStreamRequest_StartSink = {
   fromJSON(object: any): SinkStreamRequest_StartSink {
     return {
       sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined,
-      format: isSet(object.format) ? sinkPayloadFormatFromJSON(object.format) : SinkPayloadFormat.UNSPECIFIED_FORMAT,
+      format: isSet(object.format) ? sinkPayloadFormatFromJSON(object.format) : SinkPayloadFormat.FORMAT_UNSPECIFIED,
     };
   },
 
@@ -465,7 +465,7 @@ export const SinkStreamRequest_StartSink = {
     message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
       ? SinkConfig.fromPartial(object.sinkConfig)
       : undefined;
-    message.format = object.format ?? SinkPayloadFormat.UNSPECIFIED_FORMAT;
+    message.format = object.format ?? SinkPayloadFormat.FORMAT_UNSPECIFIED;
     return message;
   },
 };
