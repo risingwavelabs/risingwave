@@ -15,7 +15,9 @@
 use std::collections::HashMap;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::common::AwsPrivateLinks;
 use risingwave_connector::source::kafka::{KAFKA_PROPS_BROKER_KEY, KAFKA_PROPS_BROKER_KEY_ALIAS};
 use risingwave_connector::source::KAFKA_CONNECTOR;
@@ -649,13 +651,26 @@ where
         &self,
         properties: &mut HashMap<String, String>,
     ) -> MetaResult<()> {
-        let mut dns_entries = vec![];
+        let mut broker_rewrite_map = HashMap::new();
         const UPSTREAM_SOURCE_PRIVATE_LINK_KEY: &str = "private.links";
         if let Some(prop) = properties.get(UPSTREAM_SOURCE_PRIVATE_LINK_KEY) {
-            let links: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
+            if !is_kafka_connector(properties) {
+                return Err(MetaError::from(anyhow!(
+                    "Private link is only supported for Kafka connector",
+                )));
+            }
 
-            // if private link is required, get connection info from catalog
-            for link in &links.infos {
+            let servers = properties
+                .get(kafka_props_broker_key(properties))
+                .cloned()
+                .ok_or(MetaError::from(anyhow!(
+                    "Must specify brokers in WITH clause",
+                )))?;
+
+            let broker_addrs = servers.split(',').collect_vec();
+            let link_info: AwsPrivateLinks = serde_json::from_str(prop).map_err(|e| anyhow!(e))?;
+            // construct the rewrite mapping for brokers
+            for (link, broker) in link_info.infos.iter().zip_eq_fast(broker_addrs.into_iter()) {
                 let conn = self
                     .catalog_manager
                     .get_connection_by_name(&link.service_name)
@@ -664,49 +679,24 @@ where
                 if let Some(info) = conn.info {
                     match info {
                         connection::Info::PrivateLinkService(svc) => {
-                            link.availability_zones.iter().for_each(|az| {
-                                svc.dns_entries.get(az).map_or((), |dns_name| {
-                                    dns_entries.push(format!("{}:{}", dns_name.clone(), link.port));
+                            svc.dns_entries
+                                .get(&link.availability_zone)
+                                .map_or((), |dns_name| {
+                                    broker_rewrite_map.insert(
+                                        broker.to_string(),
+                                        format!("{}:{}", dns_name, link.port),
+                                    );
                                 });
-                            })
                         }
                     }
                 }
             }
-        }
-
-        // if dns entries are not empty, but it is not a kafka connector, return error
-        if !is_kafka_connector(properties) && !dns_entries.is_empty() {
-            return Err(MetaError::from(anyhow!(
-                "Private link is only supported for Kafka connector",
-            )));
-        }
-
-        // store the rewrite rules in properties
-        if is_kafka_connector(properties) && !dns_entries.is_empty() {
-            let broker_key = kafka_props_broker_key(properties);
-            let servers = properties
-                .get(broker_key)
-                .cloned()
-                .ok_or(MetaError::from(anyhow!(
-                    "Must specify brokers in WITH clause",
-                )))?;
-
-            let broker_addrs = servers.split(',').collect::<Vec<&str>>();
-            if broker_addrs.len() != dns_entries.len() {
-                return Err(MetaError::from(anyhow!(
-                    "The number of private link dns entries does not match the number of kafka brokers.\
-                     dns entries: {:?}, kafka brokers: {:?}",
-                    dns_entries,
-                    broker_addrs,
-                )));
-            }
 
             // save private link dns names into source properties, which
             // will be extracted into KafkaProperties
-            tracing::info!("private link broker address: {:?}", dns_entries);
-            const PRIVATE_LINK_DNS_KEY: &str = "private.links.endpoints";
-            properties.insert(PRIVATE_LINK_DNS_KEY.to_string(), dns_entries.join(","));
+            let json = serde_json::to_string(&broker_rewrite_map).map_err(|e| anyhow!(e))?;
+            const BROKER_REWRITE_MAP_KEY: &str = "broker.rewrite.endpoints";
+            properties.insert(BROKER_REWRITE_MAP_KEY.to_string(), json);
         }
         Ok(())
     }

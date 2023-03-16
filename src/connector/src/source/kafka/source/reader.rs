@@ -61,7 +61,7 @@ impl SplitReader for KafkaSplitReader {
         let mut config = ClientConfig::new();
 
         let bootstrap_servers = &properties.common.brokers;
-        let private_links = properties.common.private_link_dns_names.clone();
+        let broker_rewrite_map = properties.common.broker_rewrite_map.clone();
 
         // disable partition eof
         config.set("enable.partition.eof", "false");
@@ -84,7 +84,7 @@ impl SplitReader for KafkaSplitReader {
             );
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(bootstrap_servers, &private_links)?;
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
         let consumer: StreamConsumer<PrivateLinkConsumerContext> = config
             .set_log_level(RDKafkaLogLevel::Info)
             .create_with_context(client_ctx)

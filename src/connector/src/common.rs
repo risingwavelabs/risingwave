@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use aws_sdk_kinesis::Client as KinesisClient;
 use http::Uri;
@@ -27,7 +28,7 @@ use crate::source::kinesis::config::AwsConfigInfo;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AwsPrivateLinkItem {
     pub service_name: String,
-    pub availability_zones: Vec<String>,
+    pub availability_zone: String,
     pub port: u16,
 }
 
@@ -42,8 +43,8 @@ pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
-    #[serde(rename = "private.links.endpoints")]
-    pub private_link_dns_names: Option<String>,
+    #[serde(rename = "broker.rewrite.endpoints")]
+    pub broker_rewrite_map: Option<HashMap<String, String>>,
 
     #[serde(rename = "topic", alias = "kafka.topic")]
     pub topic: String,

@@ -54,11 +54,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = common_props.brokers.clone();
-        let private_links = common_props.private_link_dns_names.clone();
+        let broker_rewrite_map = common_props.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         common_props.set_security_properties(&mut config);
-        tracing::debug!("private_links: {:?}", private_links);
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -80,7 +79,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client_ctx = PrivateLinkConsumerContext::new(&broker_address, &private_links)?;
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
         let client: BaseConsumer<PrivateLinkConsumerContext> =
             config.create_with_context(client_ctx).await?;
 

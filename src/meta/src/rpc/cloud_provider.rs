@@ -50,13 +50,17 @@ impl AwsEc2Client {
     pub async fn create_aws_private_link(
         &self,
         service_name: &str,
-        availability_zones: &Vec<String>,
+        az_ids: &[String],
     ) -> MetaResult<PrivateLinkService> {
-        let subnet_ids = self
-            .describe_subnets(&self.vpc_id, availability_zones)
-            .await?;
+        let subnet_and_azs = self.describe_subnets(&self.vpc_id, az_ids).await?;
 
-        let (endpoint_id, dns_names) = self
+        let subnet_ids: Vec<String> = subnet_and_azs.iter().map(|(id, _, _)| id.clone()).collect();
+        let az_to_azid_map: HashMap<String, String> = subnet_and_azs
+            .into_iter()
+            .map(|(_, az, az_id)| (az, az_id))
+            .collect();
+
+        let (endpoint_id, endpoint_dns_names) = self
             .create_vpc_endpoint(
                 &self.vpc_id,
                 service_name,
@@ -65,32 +69,35 @@ impl AwsEc2Client {
             )
             .await?;
 
-        let mut az_to_dns_map = HashMap::new();
-        for dns_name in &dns_names {
-            for az in availability_zones {
+        // The number of returned DNS names may not equal to the input AZs,
+        // because some AZs may not have a subnet in the RW VPC
+        let mut azid_to_dns_map = HashMap::new();
+        for dns_name in &endpoint_dns_names {
+            for az in az_to_azid_map.keys() {
                 if dns_name.contains(az) {
-                    az_to_dns_map.insert(az.clone(), dns_name.clone());
+                    azid_to_dns_map
+                        .insert(az_to_azid_map.get(az).unwrap().clone(), dns_name.clone());
                     break;
                 }
             }
         }
-        debug_assert!(az_to_dns_map.len() == availability_zones.len());
+
         Ok(PrivateLinkService {
             provider: CLOUD_PROVIDER_AWS.to_string(),
             endpoint_id,
-            dns_entries: az_to_dns_map,
+            dns_entries: azid_to_dns_map,
         })
     }
 
     async fn describe_subnets(
         &self,
         vpc_id: &str,
-        availability_zones: &[String],
-    ) -> MetaResult<Vec<String>> {
+        az_ids: &[String],
+    ) -> MetaResult<Vec<(String, String, String)>> {
         let vpc_filter = Filter::builder().name("vpc-id").values(vpc_id).build();
         let az_filter = Filter::builder()
             .name("availability-zone")
-            .set_values(Some(Vec::from(availability_zones)))
+            .set_values(Some(Vec::from(az_ids)))
             .build();
         let output = self
             .client
@@ -104,7 +111,13 @@ impl AwsEc2Client {
             .unwrap_or_default()
             .into_iter()
             .unique_by(|s| s.availability_zone().unwrap_or_default().to_string())
-            .map(|s| s.subnet_id.unwrap_or_default())
+            .map(|s| {
+                (
+                    s.subnet_id.unwrap_or_default(),
+                    s.availability_zone.unwrap_or_default(),
+                    s.availability_zone_id.unwrap_or_default(),
+                )
+            })
             .collect();
         Ok(subnets)
     }

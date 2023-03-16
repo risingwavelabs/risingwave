@@ -12,43 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::str::FromStr;
 
-use itertools::Itertools;
 use rdkafka::client::BrokerAddr;
 use rdkafka::consumer::ConsumerContext;
 use rdkafka::ClientContext;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::iter_util::ZipEqFast;
 
 pub struct PrivateLinkConsumerContext {
     rewrite_map: BTreeMap<BrokerAddr, BrokerAddr>,
 }
 
 impl PrivateLinkConsumerContext {
-    pub fn new(brokers: &str, private_links: &Option<String>) -> anyhow::Result<Self> {
-        let mut rewrite_map = BTreeMap::new();
-        if let Some(private_links) = private_links {
-            let dns_names = private_links.split(',').collect_vec();
-            let broker_adds = brokers.split(',').collect_vec();
-
-            for (broker_addr, dns_name) in
-                broker_adds.into_iter().zip_eq_fast(dns_names.into_iter())
-            {
-                let broker_addr = HostAddr::from_str(broker_addr)?;
-                let dns_name = HostAddr::from_str(dns_name)?;
-                let old_addr = BrokerAddr {
-                    host: broker_addr.host,
-                    port: broker_addr.port.to_string(),
-                };
-                let new_addr = BrokerAddr {
-                    host: dns_name.host,
-                    port: dns_name.port.to_string(),
-                };
-                rewrite_map.insert(old_addr, new_addr);
-            }
-        }
+    pub fn new(broker_rewrite_map: Option<HashMap<String, String>>) -> anyhow::Result<Self> {
+        let rewrite_map: anyhow::Result<BTreeMap<BrokerAddr, BrokerAddr>> = broker_rewrite_map
+            .map_or(Ok(BTreeMap::new()), |addr_map| {
+                addr_map
+                    .into_iter()
+                    .map(|(old_addr, new_addr)| {
+                        let old_addr = HostAddr::from_str(&old_addr)?;
+                        let new_addr = HostAddr::from_str(&new_addr)?;
+                        let old_addr = BrokerAddr {
+                            host: old_addr.host,
+                            port: old_addr.port.to_string(),
+                        };
+                        let new_addr = BrokerAddr {
+                            host: new_addr.host,
+                            port: new_addr.port.to_string(),
+                        };
+                        Ok((old_addr, new_addr))
+                    })
+                    .collect()
+            });
+        let rewrite_map = rewrite_map?;
         tracing::info!("broker addr rewrite map {:?}", rewrite_map);
         Ok(Self { rewrite_map })
     }
