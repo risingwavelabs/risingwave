@@ -3268,7 +3268,7 @@ impl Parser {
                 SetTimeZoneValue::Ident(ident)
             } else {
                 let value = self.parse_value()?;
-                SetTimeZoneValue::Value(value)
+                SetTimeZoneValue::Literal(value)
             };
 
             return Ok(Statement::SetTimeZone {

@@ -19,6 +19,7 @@ use pgwire::types::Row;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
+use tracing::warn;
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -44,6 +45,27 @@ pub fn handle_set(
     handler_args
         .session
         .set_config(&name.real_value().to_lowercase(), string_vals)?;
+
+    Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
+}
+
+pub(super) fn handle_set_time_zone(
+    handler_args: HandlerArgs,
+    value: SetTimeZoneValue,
+) -> Result<RwPgResponse> {
+    let tz_info = match value {
+        SetTimeZoneValue::Local => iana_time_zone::get_timezone()
+            .inspect_err(|e| {
+                warn!(?e, "get IANA timezone failed, will use UTC as substitute");
+            })
+            .unwrap_or("UTC".to_string()),
+        SetTimeZoneValue::Default => "UTC".to_string(),
+        SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
+        | SetTimeZoneValue::Literal(Value::SingleQuotedString(s)) => s,
+        _ => value.to_string(),
+    };
+
+    handler_args.session.set_config("timezone", vec![tz_info])?;
 
     Ok(PgResponse::empty_result(StatementType::SET_VARIABLE))
 }

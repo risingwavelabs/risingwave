@@ -1992,7 +1992,7 @@ impl fmt::Display for EmitMode {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SetTimeZoneValue {
     Ident(Ident),
-    Value(Value),
+    Literal(Value),
     Local,
     Default,
 }
@@ -2001,7 +2001,7 @@ impl fmt::Display for SetTimeZoneValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             SetTimeZoneValue::Ident(ident) => write!(f, "{}", ident),
-            SetTimeZoneValue::Value(value) => write!(f, "{}", value),
+            SetTimeZoneValue::Literal(value) => write!(f, "{}", value),
             SetTimeZoneValue::Local => f.write_str("LOCAL"),
             SetTimeZoneValue::Default => f.write_str("DEFAULT"),
         }
