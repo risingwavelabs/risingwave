@@ -25,7 +25,6 @@ use risingwave_sqlparser::ast::{
 mod options {
     use risingwave_common::catalog::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 
-    pub const APPEND_ONLY: &str = "appendonly";
     pub const RETENTION_SECONDS: &str = PROPERTIES_RETENTION_SECOND_KEY;
 }
 
@@ -66,11 +65,6 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
-    }
-
-    /// Parse the append only property from the options.
-    pub fn append_only(&self) -> bool {
-        self.value_eq_ignore_case(options::APPEND_ONLY, "true")
     }
 
     /// Get a subset of the options from the given keys.

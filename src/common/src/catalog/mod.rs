@@ -366,3 +366,11 @@ impl From<UserId> for u32 {
         id.user_id
     }
 }
+
+#[derive(Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub enum ConflictBehavior {
+    NoCheck,
+    OverWrite,
+    IgnoreConflict,
+}

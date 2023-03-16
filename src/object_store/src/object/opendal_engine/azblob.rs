@@ -35,7 +35,7 @@ impl OpendalObjectStore {
         builder.endpoint(&endpoint);
         builder.account_name(&account_name);
         builder.account_key(&account_key);
-        let op: Operator = Operator::create(builder)?.finish();
+        let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Azblob,

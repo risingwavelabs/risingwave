@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package livestream.schema;
+option go_package = "livestream/proto";
+
+message LiveStreamMetrics {
+  string client_ip = 1;
+  string user_agent = 2;
+  string user_id = 3;
+  string room_id = 4;
+  int64 video_bps = 5;
+  int64 video_fps = 6;
+  int64 video_rtt = 7;
+  int64 video_lost_pps = 8;
+  int64 video_longest_freeze_duration = 9;
+  int64 video_total_freeze_duration = 10;
+  int64 report_timestamp = 11;
+  string country = 12;
+}

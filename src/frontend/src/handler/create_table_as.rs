@@ -30,6 +30,7 @@ pub async fn handle_create_as(
     if_not_exists: bool,
     query: Box<Query>,
     columns: Vec<ColumnDef>,
+    append_only: bool,
 ) -> Result<RwPgResponse> {
     if columns.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -86,14 +87,22 @@ pub async fn handle_create_as(
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
+        let properties = handler_args
+            .with_options
+            .inner()
+            .clone()
+            .into_iter()
+            .collect();
         let (plan, source, table) = gen_create_table_plan_without_bind(
             context,
             table_name.clone(),
             column_descs,
             None,
             vec![],
+            properties,
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
             vec![],        // No watermark should be defined in for `CREATE TABLE AS`
+            append_only,
             Some(col_id_gen.into_version()),
         )?;
         let mut graph = build_graph(plan);

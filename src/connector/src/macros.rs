@@ -163,8 +163,9 @@ macro_rules! impl_connector_properties {
 macro_rules! impl_common_parser_logic {
     ($parser_name:ty) => {
         impl $parser_name {
+            #[allow(unused_mut)]
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = RwError)]
-            async fn into_chunk_stream(self, data_stream: $crate::source::BoxSourceStream) {
+            async fn into_chunk_stream(mut self, data_stream: $crate::source::BoxSourceStream) {
                 #[for_await]
                 for batch in data_stream {
                     let batch = batch?;
@@ -181,8 +182,9 @@ macro_rules! impl_common_parser_logic {
                             if let Err(e) = self.parse_inner(content.as_ref(), builder.row_writer())
                                 .await
                             {
-                                self.source_ctx.report_stream_source_error(&e);
                                 tracing::warn!("message parsing failed {}, skipping", e.to_string());
+                                // This will throw an error for batch
+                                self.source_ctx.report_user_source_error(e)?;
                                 continue;
                             }
 
@@ -236,6 +238,7 @@ macro_rules! impl_common_split_reader_logic {
         impl $reader {
             #[try_stream(boxed, ok = $crate::source::StreamChunkWithState, error = risingwave_common::error::RwError)]
             pub(crate) async fn into_chunk_stream(self) {
+                use $crate::parser::ByteStreamSourceParser;
                 let parser_config = self.parser_config.clone();
                 let actor_id = self.source_ctx.source_info.actor_id.to_string();
                 let source_id = self.source_ctx.source_info.source_id.to_string();

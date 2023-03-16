@@ -18,7 +18,7 @@ use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use anyhow::{Context, Result};
-use clap::{ArgEnum, Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use console::style;
 use dialoguer::MultiSelect;
 use enum_iterator::{all, Sequence};
@@ -42,20 +42,20 @@ enum Commands {
     /// Enable one component
     Enable {
         /// Component to enable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Disable one component
     Disable {
         /// Component to disable
-        #[clap(arg_enum)]
+        #[clap(value_enum)]
         component: Components,
     },
     /// Use default configuration
     Default,
 }
 
-#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ArgEnum)]
+#[derive(Clone, Copy, Debug, Sequence, PartialEq, Eq, ValueEnum)]
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
@@ -66,6 +66,7 @@ pub enum Components {
     Pubsub,
     Redis,
     ConnectorNode,
+    BuildConnectorNode,
     Tracing,
     RustComponents,
     Dashboard,
@@ -85,6 +86,7 @@ impl Components {
             Self::Pubsub => "[Component] Google Pubsub",
             Self::Redis => "[Component] Redis",
             Self::ConnectorNode => "[Component] RisingWave Connector",
+            Self::BuildConnectorNode => "[Build] Build RisingWave Connector from source",
             Self::RustComponents => "[Build] Rust components",
             Self::Dashboard => "[Build] Dashboard v2",
             Self::Tracing => "[Component] Tracing: Jaeger",
@@ -168,6 +170,11 @@ Required if you want to sink data to redis.
 Required if you want to create CDC source from external Databases.
                 "
             }
+            Self::BuildConnectorNode => {
+                "
+Required if you want to build Connector Node from source locally.
+                "
+            }
         }
         .into()
     }
@@ -188,6 +195,7 @@ Required if you want to create CDC source from external Databases.
             "ENABLE_SANITIZER" => Some(Self::Sanitizer),
             "ENABLE_REDIS" => Some(Self::Redis),
             "ENABLE_RW_CONNECTOR" => Some(Self::ConnectorNode),
+            "ENABLE_BUILD_RW_CONNECTOR" => Some(Self::BuildConnectorNode),
             _ => None,
         }
     }
@@ -208,6 +216,7 @@ Required if you want to create CDC source from external Databases.
             Self::AllInOne => "ENABLE_ALL_IN_ONE",
             Self::Sanitizer => "ENABLE_SANITIZER",
             Self::ConnectorNode => "ENABLE_RW_CONNECTOR",
+            Self::BuildConnectorNode => "ENABLE_BUILD_RW_CONNECTOR",
         }
         .into()
     }

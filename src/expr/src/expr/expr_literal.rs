@@ -33,12 +33,13 @@ pub struct LiteralExpression {
     literal: Datum,
 }
 
+#[async_trait::async_trait]
 impl Expression for LiteralExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let mut array_builder = self.return_type.create_array_builder(input.capacity());
         let capacity = input.capacity();
         let builder = &mut array_builder;
@@ -67,7 +68,7 @@ impl Expression for LiteralExpression {
         Ok(Arc::new(array_builder.finish()))
     }
 
-    fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
 }
@@ -120,6 +121,7 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
@@ -243,17 +245,17 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_literal_eval_dummy_chunk() {
+    #[tokio::test]
+    async fn test_literal_eval_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval(&DataChunk::new_dummy(1)).unwrap();
+        let result = literal.eval(&DataChunk::new_dummy(1)).await.unwrap();
         assert_eq!(*result, array_nonnull!(I32Array, [1]).into());
     }
 
-    #[test]
-    fn test_literal_eval_row_dummy_chunk() {
+    #[tokio::test]
+    async fn test_literal_eval_row_dummy_chunk() {
         let literal = LiteralExpression::new(DataType::Int32, Some(1.into()));
-        let result = literal.eval_row(&OwnedRow::new(vec![])).unwrap();
+        let result = literal.eval_row(&OwnedRow::new(vec![])).await.unwrap();
         assert_eq!(result, Some(1.into()))
     }
 }

@@ -254,17 +254,17 @@ pub mod agg_executor {
                 };
 
                 for idx in group_key_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
                 }
 
                 add_column(agg_call.args.val_indices()[0], agg_call.args.arg_types()[0].clone(), if agg_call.kind == AggKind::Max {
-                    OrderType::Descending
+                    OrderType::descending()
                 } else {
-                    OrderType::Ascending
+                    OrderType::ascending()
                 });
 
                 for idx in pk_indices {
-                    add_column(*idx, input_fields[*idx].data_type(), OrderType::Ascending);
+                    add_column(*idx, input_fields[*idx].data_type(), OrderType::ascending());
                 }
 
                 let state_table = StateTable::new_without_distribution(
@@ -316,7 +316,7 @@ pub mod agg_executor {
 
         group_key_indices.iter().for_each(|idx| {
             add_column_desc(input_fields[*idx].data_type());
-            order_types.push(OrderType::Ascending);
+            order_types.push(OrderType::ascending());
         });
 
         agg_calls.iter().for_each(|agg_call| {
@@ -338,6 +338,7 @@ pub mod agg_executor {
         store: S,
         input: BoxedExecutor,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         pk_indices: PkIndices,
         executor_id: u64,
     ) -> Box<dyn Executor> {
@@ -374,6 +375,7 @@ pub mod agg_executor {
             extreme_cache_size: 1024,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),

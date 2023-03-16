@@ -13,67 +13,79 @@
 // limitations under the License.
 
 //! Provides E2E Test runner functionality.
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
 
+use anyhow::anyhow;
 use itertools::Itertools;
 use rand::rngs::SmallRng;
 use rand::{Rng, SeedableRng};
 #[cfg(madsim)]
 use rand_chacha::ChaChaRng;
 use tokio_postgres::error::Error as PgError;
-use tokio_postgres::Error;
+use tokio_postgres::Client;
 
+use crate::utils::read_file_contents;
 use crate::validation::is_permissible_error;
 use crate::{
     create_table_statement_to_table, insert_sql_gen, mview_sql_gen, parse_sql, session_sql_gen,
     sql_gen, Table,
 };
 
+type PgResult<A> = std::result::Result<A, PgError>;
+type Result<A> = anyhow::Result<A>;
+
 /// e2e test runner for pre-generated queries from sqlsmith
-pub async fn run_pre_generated(client: &tokio_postgres::Client, outdir: &str) {
-    let ddl_path = format!("{}/ddl.sql", outdir);
+pub async fn run_pre_generated(client: &Client, outdir: &str) {
     let queries_path = format!("{}/queries.sql", outdir);
-    let ddl = std::fs::read_to_string(ddl_path).unwrap();
     let queries = std::fs::read_to_string(queries_path).unwrap();
-    let mut setup_sql = String::with_capacity(1000);
-    for ddl_statement in parse_sql(&ddl) {
-        let sql = ddl_statement.to_string();
-        tracing::info!("Executing: {}", sql);
-        let response = client.execute(&sql, &[]).await;
-        if let Err(e) = response {
-            panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
-        }
-        setup_sql.push_str(&sql);
-    }
+    let ddl = queries
+        .lines()
+        .filter(|s| s.starts_with("CREATE"))
+        .collect::<String>();
+    tracing::info!("[DDL]: {}", ddl);
+    let dml = queries
+        .lines()
+        .filter(|s| s.starts_with("INSERT"))
+        .collect::<String>();
+    tracing::info!("[DML]: {}", dml);
     for statement in parse_sql(&queries) {
         let sql = statement.to_string();
-        tracing::info!("Executing: {}", sql);
-        let response = client.simple_query(&sql).await;
-        if let Err(e) = response {
-            panic!("{}", format_fail_reason(&setup_sql, &sql, &e))
-        }
+        tracing::info!("[EXECUTING STATEMENT]: {}", sql);
+        validate_response(client.simple_query(&sql).await).unwrap();
     }
 }
 
-/// e2e query generator
-/// The goal is to generate NON-FAILING queries.
+/// Query Generator
 /// If we encounter an expected error, just skip.
-/// If we panic or encounter an unexpected error, query generation
-/// should still fail.
-/// Returns ddl and queries.
-pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: usize, outdir: &str) {
-    let mut rng = rand::rngs::SmallRng::from_entropy();
-    let (tables, base_tables, mviews, setup_sql) = create_tables(&mut rng, testdata, client).await;
+/// If we encounter an unexpected error,
+/// Sqlsmith should stop execution, but writeout ddl and queries so far.
+/// NOTE(noel): It will still fail if DDL creation fails.
+pub async fn generate(
+    client: &Client,
+    testdata: &str,
+    count: usize,
+    _outdir: &str,
+    seed: Option<u64>,
+) {
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
+    tracing::info!("Set session variables");
+
+    let mut rng = generate_rng(seed);
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
 
     let rows_per_table = 10;
     let max_rows_inserted = rows_per_table * base_tables.len();
+    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
+    tracing::info!("Populated base tables");
+
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        &setup_sql,
         base_tables,
         max_rows_inserted,
     )
@@ -83,114 +95,122 @@ pub async fn generate(client: &tokio_postgres::Client, testdata: &str, count: us
     let mut queries = String::with_capacity(10000);
     let mut generated_queries = 0;
     for _ in 0..count {
-        let session_sql = test_session_variable(client, &mut rng).await;
+        test_session_variable(client, &mut rng).await;
         let sql = sql_gen(&mut rng, tables.clone());
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        let skipped =
-            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
-        if skipped == 0 {
-            generated_queries += 1;
-            queries.push_str(&format!("{};\n", &sql));
+        match validate_response(response) {
+            Err(_e) => {
+                generated_queries += 1;
+                queries.push_str(&format!("-- {};\n", &sql));
+                tracing::info!("Generated {} batch queries", generated_queries);
+                tracing::error!("Unrecoverable error encountered.");
+                return;
+            }
+            Ok(skipped) if skipped == 0 => {
+                generated_queries += 1;
+                queries.push_str(&format!("{};\n", &sql));
+            }
+            _ => {}
         }
     }
     tracing::info!("Generated {} batch queries", generated_queries);
 
     let mut generated_queries = 0;
     for _ in 0..count {
-        let session_sql = test_session_variable(client, &mut rng).await;
+        test_session_variable(client, &mut rng).await;
         let (sql, table) = mview_sql_gen(&mut rng, tables.clone(), "stream_query");
-        tracing::info!("Executing: {}", sql);
+        tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        let skipped =
-            validate_response(&setup_sql, &format!("{};\n{};", session_sql, sql), response);
-        drop_mview_table(&table, client).await;
-        if skipped == 0 {
-            generated_queries += 1;
-            queries.push_str(&format!("{};\n", &sql));
-            queries.push_str(&format!("{};\n", format_drop_mview(&table)));
+        match validate_response(response) {
+            Err(_e) => {
+                generated_queries += 1;
+                queries.push_str(&format!("-- {};\n", &sql));
+                queries.push_str(&format!("-- {};\n", format_drop_mview(&table)));
+                tracing::info!("Generated {} stream queries", generated_queries);
+                tracing::error!("Unrecoverable error encountered.");
+                return;
+            }
+            Ok(skipped) if skipped == 0 => {
+                generated_queries += 1;
+                queries.push_str(&format!("{};\n", &sql));
+                queries.push_str(&format!("{};\n", format_drop_mview(&table)));
+            }
+            _ => {}
         }
+        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
+        drop_mview_table(&table, client).await;
     }
     tracing::info!("Generated {} stream queries", generated_queries);
 
     drop_tables(&mviews, testdata, client).await;
-    write_to_file(outdir, "ddl.sql", &setup_sql);
-    write_to_file(outdir, "queries.sql", &queries);
-}
-
-fn write_to_file(outdir: &str, name: &str, sql: &str) {
-    let resolved = format!("{}/{}", outdir, name);
-    let path = Path::new(&resolved);
-    let mut file = match File::create(path) {
-        Err(e) => panic!("couldn't create {}: {}", path.display(), e),
-        Ok(file) => file,
-    };
-    match file.write_all(sql.as_bytes()) {
-        Err(why) => panic!("couldn't write to {}: {}", path.display(), why),
-        Ok(_) => tracing::info!("successfully wrote to {}", path.display()),
-    }
 }
 
 /// e2e test runner for sqlsmith
-pub async fn run(client: &tokio_postgres::Client, testdata: &str, count: usize, seed: Option<u64>) {
-    #[cfg(madsim)]
-    let mut rng = if let Some(seed) = seed {
-        ChaChaRng::seed_from_u64(seed)
-    } else {
-        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
-    };
-    #[cfg(not(madsim))]
-    let mut rng = if let Some(seed) = seed {
-        SmallRng::seed_from_u64(seed)
-    } else {
-        SmallRng::from_entropy()
-    };
-    let (tables, base_tables, mviews, mut setup_sql) =
-        create_tables(&mut rng, testdata, client).await;
-    tracing::info!("Created tables");
+pub async fn run(client: &Client, testdata: &str, count: usize, seed: Option<u64>) {
+    let mut rng = generate_rng(seed);
 
-    let session_sql = set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
-    setup_sql.push_str(&session_sql);
-    let session_sql = set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
-    setup_sql.push_str(&session_sql);
+    set_variable(client, "RW_IMPLICIT_FLUSH", "TRUE").await;
+    set_variable(client, "QUERY_MODE", "DISTRIBUTED").await;
     tracing::info!("Set session variables");
 
+    let base_tables = create_base_tables(testdata, client).await.unwrap();
+    let (tables, mviews) = create_mviews(&mut rng, base_tables.clone(), client)
+        .await
+        .unwrap();
+    tracing::info!("Created tables");
+
     let rows_per_table = 10;
-    // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
-    // let populate_sql = populate_tables(client, &mut rng, base_tables.clone(),
-    // rows_per_table).await; let setup_sql = format!("{}\n{}", setup_sql, populate_sql);
+    populate_tables(client, &mut rng, base_tables.clone(), rows_per_table).await;
     tracing::info!("Populated base tables");
 
     let max_rows_inserted = rows_per_table * base_tables.len();
-
     test_sqlsmith(
         client,
         &mut rng,
         tables.clone(),
-        &setup_sql,
         base_tables,
         max_rows_inserted,
     )
     .await;
     tracing::info!("Passed sqlsmith tests");
-    test_batch_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
+    test_batch_queries(client, &mut rng, tables.clone(), count)
+        .await
+        .unwrap();
     tracing::info!("Passed batch queries");
-    test_stream_queries(client, &mut rng, tables.clone(), &setup_sql, count).await;
+    test_stream_queries(client, &mut rng, tables.clone(), count)
+        .await
+        .unwrap();
     tracing::info!("Passed stream queries");
 
     drop_tables(&mviews, testdata, client).await;
 }
 
+fn generate_rng(seed: Option<u64>) -> impl Rng {
+    #[cfg(madsim)]
+    if let Some(seed) = seed {
+        ChaChaRng::seed_from_u64(seed)
+    } else {
+        ChaChaRng::from_rng(SmallRng::from_entropy()).unwrap()
+    }
+    #[cfg(not(madsim))]
+    if let Some(seed) = seed {
+        SmallRng::seed_from_u64(seed)
+    } else {
+        SmallRng::from_entropy()
+    }
+}
+
 #[allow(dead_code)]
 async fn populate_tables<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     base_tables: Vec<Table>,
     row_count: usize,
 ) -> String {
     let inserts = insert_sql_gen(rng, base_tables, row_count);
     for insert in &inserts {
-        tracing::info!("[EXECUTING POPULATION]: {}", insert);
+        tracing::info!("[EXECUTING INSERT]: {}", insert);
         client.simple_query(insert).await.unwrap();
     }
     inserts.into_iter().map(|i| format!("{};\n", i)).collect()
@@ -198,25 +218,25 @@ async fn populate_tables<R: Rng>(
 
 /// Sanity checks for sqlsmith
 async fn test_sqlsmith<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
-    _base_tables: Vec<Table>,
-    _row_count: usize,
+    base_tables: Vec<Table>,
+    row_count: usize,
 ) {
     // Test inserted rows should be at least 50% population count,
     // otherwise we don't have sufficient data in our system.
     // ENABLE: https://github.com/risingwavelabs/risingwave/issues/3844
-    // test_population_count(client, base_tables, row_count).await;
-    // tracing::info!("passed population count test");
+    test_population_count(client, base_tables, row_count).await;
+    tracing::info!("passed population count test");
 
     // Test percentage of skipped queries <=5% of sample size.
     let threshold = 0.40; // permit at most 40% of queries to be skipped.
     let sample_size = 50;
 
-    let skipped_percentage =
-        test_batch_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    let skipped_percentage = test_batch_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
     tracing::info!(
         "percentage of skipped batch queries = {}, threshold: {}",
         skipped_percentage,
@@ -226,8 +246,9 @@ async fn test_sqlsmith<R: Rng>(
         panic!("skipped batch queries exceeded threshold.");
     }
 
-    let skipped_percentage =
-        test_stream_queries(client, rng, tables.clone(), setup_sql, sample_size).await;
+    let skipped_percentage = test_stream_queries(client, rng, tables.clone(), sample_size)
+        .await
+        .unwrap();
     tracing::info!(
         "percentage of skipped stream queries = {}, threshold: {}",
         skipped_percentage,
@@ -238,14 +259,14 @@ async fn test_sqlsmith<R: Rng>(
     }
 }
 
-async fn set_variable(client: &tokio_postgres::Client, variable: &str, value: &str) -> String {
-    let s = format!("SET {variable} TO {value};");
+async fn set_variable(client: &Client, variable: &str, value: &str) -> String {
+    let s = format!("SET {variable} TO {value}");
     tracing::info!("[EXECUTING SET_VAR]: {}", s);
     client.simple_query(&s).await.unwrap();
     s
 }
 
-async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mut R) -> String {
+async fn test_session_variable<R: Rng>(client: &Client, rng: &mut R) -> String {
     let session_sql = session_sql_gen(rng);
     tracing::info!("[EXECUTING TEST SESSION_VAR]: {}", session_sql);
     client.simple_query(session_sql.as_str()).await.unwrap();
@@ -254,11 +275,7 @@ async fn test_session_variable<R: Rng>(client: &tokio_postgres::Client, rng: &mu
 
 /// Expects at least 50% of inserted rows included.
 #[allow(dead_code)]
-async fn test_population_count(
-    client: &tokio_postgres::Client,
-    base_tables: Vec<Table>,
-    expected_count: usize,
-) {
+async fn test_population_count(client: &Client, base_tables: Vec<Table>, expected_count: usize) {
     let mut actual_count = 0;
     for t in base_tables {
         let q = format!("select * from {};", t.name);
@@ -278,63 +295,57 @@ async fn test_population_count(
 /// Runs in distributed mode, since queries can be complex and cause overflow in local execution
 /// mode.
 async fn test_batch_queries<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
     sample_size: usize,
-) -> f64 {
+) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        let session_sql = test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let sql = sql_gen(rng, tables.clone());
         tracing::info!("[EXECUTING TEST_BATCH]: {}", sql);
         let response = client.simple_query(sql.as_str()).await;
-        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response);
+        skipped += validate_response(response)?;
     }
-    skipped as f64 / sample_size as f64
+    Ok(skipped as f64 / sample_size as f64)
 }
 
 /// Test stream queries, returns skipped query statistics
 async fn test_stream_queries<R: Rng>(
-    client: &tokio_postgres::Client,
+    client: &Client,
     rng: &mut R,
     tables: Vec<Table>,
-    setup_sql: &str,
     sample_size: usize,
-) -> f64 {
+) -> Result<f64> {
     let mut skipped = 0;
     for _ in 0..sample_size {
-        let session_sql = test_session_variable(client, rng).await;
+        test_session_variable(client, rng).await;
         let (sql, table) = mview_sql_gen(rng, tables.clone(), "stream_query");
         tracing::info!("[EXECUTING TEST_STREAM]: {}", sql);
         let response = client.simple_query(&sql).await;
-        skipped += validate_response(setup_sql, &format!("{};\n{};", session_sql, sql), response);
+        skipped += validate_response(response)?;
+        tracing::info!("[EXECUTING DROP MVIEW]: {}", &format_drop_mview(&table));
         drop_mview_table(&table, client).await;
     }
-    skipped as f64 / sample_size as f64
+    Ok(skipped as f64 / sample_size as f64)
 }
 
 fn get_seed_table_sql(testdata: &str) -> String {
     let seed_files = vec!["tpch.sql", "nexmark.sql", "alltypes.sql"];
     seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>()
 }
 
 /// Create the tables defined in testdata, along with some mviews.
 /// TODO: Generate indexes and sinks.
-async fn create_tables(
-    rng: &mut impl Rng,
-    testdata: &str,
-    client: &tokio_postgres::Client,
-) -> (Vec<Table>, Vec<Table>, Vec<Table>, String) {
+async fn create_base_tables(testdata: &str, client: &Client) -> Result<Vec<Table>> {
     tracing::info!("Preparing tables...");
 
-    let mut setup_sql = String::with_capacity(1000);
     let sql = get_seed_table_sql(testdata);
-    let statements = parse_sql(&sql);
+    let statements = parse_sql(sql);
     let mut mvs_and_base_tables = vec![];
     let base_tables = statements
         .iter()
@@ -346,9 +357,19 @@ async fn create_tables(
         let create_sql = stmt.to_string();
         tracing::info!("[EXECUTING CREATE TABLE]: {}", &create_sql);
         client.simple_query(&create_sql).await.unwrap();
-        setup_sql.push_str(&format!("{};\n", &create_sql));
     }
 
+    Ok(base_tables)
+}
+
+/// Create the tables defined in testdata, along with some mviews.
+/// TODO: Generate indexes and sinks.
+async fn create_mviews(
+    rng: &mut impl Rng,
+    mvs_and_base_tables: Vec<Table>,
+    client: &Client,
+) -> Result<(Vec<Table>, Vec<Table>)> {
+    let mut mvs_and_base_tables = mvs_and_base_tables;
     let mut mviews = vec![];
     // Generate some mviews
     for i in 0..10 {
@@ -356,14 +377,13 @@ async fn create_tables(
             mview_sql_gen(rng, mvs_and_base_tables.clone(), &format!("m{}", i));
         tracing::info!("[EXECUTING CREATE MVIEW]: {}", &create_sql);
         let response = client.simple_query(&create_sql).await;
-        let skip_count = validate_response(&setup_sql, &create_sql, response);
+        let skip_count = validate_response(response)?;
         if skip_count == 0 {
-            setup_sql.push_str(&format!("{};\n", &create_sql));
             mvs_and_base_tables.push(table.clone());
             mviews.push(table);
         }
     }
-    (mvs_and_base_tables, base_tables, mviews, setup_sql)
+    Ok((mvs_and_base_tables, mviews))
 }
 
 fn format_drop_mview(mview: &Table) -> String {
@@ -371,7 +391,7 @@ fn format_drop_mview(mview: &Table) -> String {
 }
 
 /// Drops mview tables.
-async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
+async fn drop_mview_table(mview: &Table, client: &Client) {
     client
         .simple_query(&format_drop_mview(mview))
         .await
@@ -379,7 +399,7 @@ async fn drop_mview_table(mview: &Table, client: &tokio_postgres::Client) {
 }
 
 /// Drops mview tables and seed tables
-async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::Client) {
+async fn drop_tables(mviews: &[Table], testdata: &str, client: &Client) {
     tracing::info!("Cleaning tables...");
 
     for mview in mviews.iter().rev() {
@@ -389,7 +409,7 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     let seed_files = vec!["drop_tpch.sql", "drop_nexmark.sql", "drop_alltypes.sql"];
     let sql = seed_files
         .iter()
-        .map(|filename| std::fs::read_to_string(format!("{}/{}", testdata, filename)).unwrap())
+        .map(|filename| read_file_contents(format!("{}/{}", testdata, filename)).unwrap())
         .collect::<String>();
 
     for stmt in sql.lines() {
@@ -397,40 +417,21 @@ async fn drop_tables(mviews: &[Table], testdata: &str, client: &tokio_postgres::
     }
 }
 
-fn format_fail_reason(setup_sql: &str, query: &str, e: &Error) -> String {
-    format!(
-        "
-Query failed:
----- START
--- Setup
-{}
--- Query
-{}
----- END
-
-Reason:
-{}
-",
-        setup_sql, query, e
-    )
-}
-
 /// Validate client responses, returning a count of skipped queries.
-fn validate_response<_Row>(setup_sql: &str, query: &str, response: Result<_Row, PgError>) -> i64 {
+fn validate_response<_Row>(response: PgResult<_Row>) -> Result<i64> {
     match response {
-        Ok(_) => 0,
+        Ok(_) => Ok(0),
         Err(e) => {
             // Permit runtime errors conservatively.
             if let Some(e) = e.as_db_error()
                 && is_permissible_error(&e.to_string())
             {
-                tracing::info!("[SKIPPED ERROR]: {:?}", e);
-                return 1;
+                tracing::info!("[SKIPPED ERROR]: {:#?}", e);
+                return Ok(1);
             }
             // consolidate error reason for deterministic test
-            let error_msg = format_fail_reason(setup_sql, query, &e);
-            tracing::info!(error_msg);
-            panic!("{}", error_msg);
+            tracing::info!("[UNEXPECTED ERROR]: {:#?}", e);
+            Err(anyhow!("Encountered unexpected error: {e}"))
         }
     }
 }

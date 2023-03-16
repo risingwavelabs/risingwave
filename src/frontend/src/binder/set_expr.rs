@@ -17,6 +17,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{SetExpr, SetOperator};
 
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::expr::{CorrelatedId, Depth};
 
@@ -34,6 +35,20 @@ pub enum BoundSetExpr {
         left: Box<BoundSetExpr>,
         right: Box<BoundSetExpr>,
     },
+}
+
+impl RewriteExprsRecursive for BoundSetExpr {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        match self {
+            BoundSetExpr::Select(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::Values(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundSetExpr::SetOperation { left, right, .. } => {
+                left.rewrite_exprs_recursive(rewriter);
+                right.rewrite_exprs_recursive(rewriter);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

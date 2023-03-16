@@ -28,3 +28,5 @@ pub mod oss;
 pub use oss::*;
 pub mod azblob;
 pub use azblob::*;
+pub mod fs;
+pub use fs::*;

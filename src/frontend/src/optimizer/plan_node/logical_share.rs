@@ -18,15 +18,14 @@ use std::fmt;
 use risingwave_common::error::ErrorCode::NotImplemented;
 use risingwave_common::error::Result;
 
-use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, LogicalProject, PredicatePushdownContext, RewriteStreamContext,
-    StreamShare, ToStreamContext,
+    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamShare,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -55,19 +54,12 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        let ctx = input.ctx();
-        let functional_dependency = input.functional_dependency().clone();
+        let _ctx = input.ctx();
+        let _functional_dependency = input.functional_dependency().clone();
         let core = generic::Share {
             input: RefCell::new(input),
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }
     }
 
@@ -165,14 +157,8 @@ impl ToStream for LogicalShare {
             None => {
                 let (new_input, col_change) = self.input().logical_rewrite_for_stream(ctx)?;
                 let new_share: PlanRef = self.clone_with_input(new_input).into();
-
-                // FIXME: Add an identity project here to avoid parent exchange connecting directly
-                // to the share operator.
-                let identity = ColIndexMapping::identity(new_share.schema().len());
-                let project: PlanRef = LogicalProject::with_mapping(new_share, identity).into();
-
-                ctx.add_rewrite_result(self.id(), project.clone(), col_change.clone());
-                Ok((project, col_change))
+                ctx.add_rewrite_result(self.id(), new_share.clone(), col_change.clone());
+                Ok((new_share, col_change))
             }
             Some(cache) => Ok(cache.clone()),
         }

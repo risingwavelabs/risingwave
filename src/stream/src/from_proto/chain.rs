@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId, TableOption};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::plan_common::{OrderType as ProstOrderType, StorageTableDesc};
+use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::{ChainNode, ChainType};
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::Distribution;
@@ -90,9 +90,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                 let order_types = table_desc
                     .pk
                     .iter()
-                    .map(|desc| {
-                        OrderType::from_prost(&ProstOrderType::from_i32(desc.order_type).unwrap())
-                    })
+                    .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
                     .collect_vec();
 
                 let column_descs = table_desc
@@ -100,10 +98,18 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .iter()
                     .map(ColumnDesc::from)
                     .collect_vec();
-                let column_ids = column_descs.iter().map(|x| x.column_id).collect_vec();
+                let column_ids = node
+                    .upstream_column_ids
+                    .iter()
+                    .map(ColumnId::from)
+                    .collect_vec();
 
                 // Use indices based on full table instead of streaming executor output.
-                let pk_indices = table_desc.pk.iter().map(|k| k.index as usize).collect_vec();
+                let pk_indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|k| k.column_index as usize)
+                    .collect_vec();
 
                 let dist_key_indices = table_desc
                     .dist_key_indices
@@ -131,6 +137,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     .map(|&k| k as usize)
                     .collect_vec();
                 let prefix_hint_len = table_desc.get_read_prefix_len_hint() as usize;
+                let versioned = table_desc.versioned;
                 // TODO: refactor it with from_table_catalog in the future.
                 let table = StorageTable::new_partial(
                     state_store,
@@ -143,6 +150,7 @@ impl ExecutorBuilder for ChainExecutorBuilder {
                     table_option,
                     value_indices,
                     prefix_hint_len,
+                    versioned,
                 );
 
                 BackfillExecutor::new(

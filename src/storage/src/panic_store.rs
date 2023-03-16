@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::future::Future;
-use std::ops::Bound;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -39,12 +38,7 @@ impl StateStoreRead for PanicStateStore {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        _key: &'a [u8],
-        _epoch: u64,
-        _read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, _key: Bytes, _epoch: u64, _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             panic!("should not read from the state store!");
         }
@@ -52,7 +46,7 @@ impl StateStoreRead for PanicStateStore {
 
     fn iter(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: IterKeyRange,
         _epoch: u64,
         _read_options: ReadOptions,
     ) -> Self::IterFuture<'_> {
@@ -88,7 +82,7 @@ impl LocalStateStore for PanicStateStore {
 
     fn may_exist(
         &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
+        _key_range: IterKeyRange,
         _read_options: ReadOptions,
     ) -> Self::MayExistFuture<'_> {
         async move {
@@ -96,17 +90,13 @@ impl LocalStateStore for PanicStateStore {
         }
     }
 
-    fn get<'a>(&'a self, _key: &'a [u8], _read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, _key: Bytes, _read_options: ReadOptions) -> Self::GetFuture<'_> {
         async move {
             panic!("should not operate on the panic state store!");
         }
     }
 
-    fn iter(
-        &self,
-        _key_range: (Bound<Vec<u8>>, Bound<Vec<u8>>),
-        _read_options: ReadOptions,
-    ) -> Self::IterFuture<'_> {
+    fn iter(&self, _key_range: IterKeyRange, _read_options: ReadOptions) -> Self::IterFuture<'_> {
         async move {
             panic!("should not operate on the panic state store!");
         }

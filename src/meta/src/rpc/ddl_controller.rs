@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
@@ -28,7 +27,7 @@ use crate::manager::{
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
     StreamFragmentGraph,
 };
@@ -238,9 +237,18 @@ where
 
             internal_tables = ctx.internal_tables();
 
-            if let Some(source) = stream_job.source() {
-                self.source_manager.register_source(source).await?;
+            match &stream_job {
+                StreamingJob::Table(Some(source), _) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
+                }
+                StreamingJob::Sink(sink) => {
+                    // Validate the sink on the connector node.
+                    validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+                }
+                _ => {}
             }
+
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;
@@ -460,18 +468,10 @@ where
             StreamingJob::Table(source, table) => {
                 creating_internal_table_ids.push(table.id);
                 if let Some(source) = source {
-                    let internal_tables: [_; 1] = internal_tables.try_into().unwrap();
                     self.catalog_manager
-                        .finish_create_table_procedure_with_source(
-                            source,
-                            table,
-                            &internal_tables[0],
-                        )
+                        .finish_create_table_procedure_with_source(source, table, internal_tables)
                         .await?
                 } else {
-                    assert!(internal_tables.is_empty());
-                    // Though `internal_tables` is empty here, we pass it as a parameter to reuse
-                    // the method.
                     self.catalog_manager
                         .finish_create_table_procedure(internal_tables, table)
                         .await?
@@ -505,10 +505,9 @@ where
         if let Some(source_id) = source_id {
             // Drop table and source in catalog. Check `source_id` if it is the table's
             // `associated_source_id`. Indexes also need to be dropped atomically.
-            assert_eq!(internal_table_ids.len(), 1);
             let (version, delete_jobs) = self
                 .catalog_manager
-                .drop_table_with_source(source_id, table_id, internal_table_ids[0])
+                .drop_table_with_source(source_id, table_id, internal_table_ids)
                 .await?;
             // Unregister source connector worker.
             self.source_manager
@@ -605,7 +604,12 @@ where
             .into_iter()
             .map(|(d, f)| Some((table_col_index_mapping.rewrite_dispatch_strategy(&d)?, f)))
             .collect::<Option<_>>()
-            .context("failed to map columns")?;
+            .ok_or_else(|| {
+                // The `rewrite` only fails if some column is dropped.
+                MetaError::invalid_parameter(
+                    "unable to drop the column due to being referenced by downstream materialized views or sinks",
+                )
+            })?;
 
         let complete_graph = CompleteStreamFragmentGraph::with_downstreams(
             fragment_graph,

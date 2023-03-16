@@ -32,6 +32,7 @@ use risingwave_storage::StateStore;
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
     agg_call_filter_res, iter_table_storage, AggStateStorage, DistinctDeduplicater,
+    OnlyOutputIfHasInput,
 };
 use super::{
     expect_first_barrier, ActorContextRef, Executor, ExecutorInfo, PkIndicesRef,
@@ -46,7 +47,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-type BoxedAggGroup<S> = Box<AggGroup<S>>;
+type BoxedAggGroup<S> = Box<AggGroup<S, OnlyOutputIfHasInput>>;
 type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
@@ -82,6 +83,9 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
 
     /// A [`HashAggExecutor`] may have multiple [`AggCall`]s.
     agg_calls: Vec<AggCall>,
+
+    /// Index of row count agg call (`count(*)`) in the call list.
+    row_count_index: usize,
 
     /// State storages for each aggregation calls.
     /// `None` means the agg call need not to maintain a state table by itself.
@@ -196,6 +200,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 input_schema: input_info.schema,
                 group_key_indices: extra_args.group_key_indices,
                 agg_calls: args.agg_calls,
+                row_count_index: args.row_count_index,
                 storages: args.storages,
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
@@ -257,6 +262,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                                 &this.storages,
                                 &this.result_table,
                                 &this.input_pk_indices,
+                                this.row_count_index,
                                 this.extreme_cache_size,
                                 &this.input_schema,
                             )
@@ -304,20 +310,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let call_visibilities: Vec<_> = this
-            .agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    &this.actor_ctx,
-                    &this.info.identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
+        for agg_call in &this.agg_calls {
+            let agg_call_filter_res = agg_call_filter_res(
+                &this.actor_ctx,
+                &this.info.identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            call_visibilities.push(agg_call_filter_res);
+        }
 
         // Materialize input chunk if needed.
         this.storages
@@ -644,6 +649,7 @@ mod tests {
         store: S,
         input: Box<dyn Executor>,
         agg_calls: Vec<AggCall>,
+        row_count_index: usize,
         group_key_indices: Vec<usize>,
         pk_indices: PkIndices,
         extreme_cache_size: usize,
@@ -682,6 +688,7 @@ mod tests {
             extreme_cache_size,
 
             agg_calls,
+            row_count_index,
             storages,
             result_table,
             distinct_dedup_tables: Default::default(),
@@ -746,10 +753,10 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -758,7 +765,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -767,7 +774,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -778,6 +785,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![],
             1 << 10,
@@ -850,10 +858,10 @@ mod tests {
         let append_only = false;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -862,7 +870,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -872,7 +880,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -883,6 +891,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             key_indices,
             vec![],
             1 << 10,
@@ -956,10 +965,10 @@ mod tests {
         let keys = vec![0];
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -968,7 +977,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -979,6 +988,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,
@@ -1057,10 +1067,10 @@ mod tests {
         let append_only = true;
         let agg_calls = vec![
             AggCall {
-                kind: AggKind::Count,
+                kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -1069,7 +1079,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -1080,6 +1090,7 @@ mod tests {
             store,
             Box::new(source),
             agg_calls,
+            0,
             keys,
             vec![2],
             1 << 10,

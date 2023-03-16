@@ -38,7 +38,7 @@ use crate::pg_message::{
     FeCloseMessage, FeDescribeMessage, FeExecuteMessage, FeMessage, FeParseMessage,
     FePasswordMessage, FeStartupMessage,
 };
-use crate::pg_response::RowSetResult;
+use crate::pg_response::{RowSetResult, StatementType};
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
@@ -394,23 +394,35 @@ where
 
     async fn process_parse_msg(&mut self, msg: FeParseMessage) -> PsqlResult<()> {
         let sql = cstr_to_str(&msg.sql_bytes).unwrap();
-        tracing::trace!("(extended query)parse query: {}", sql);
+        let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
+        tracing::trace!(
+            "(extended query)parse query: {}, statement name: {}",
+            sql,
+            statement_name
+        );
 
-        // Flag indicate whether statement is a query statement.
-        // TODO: regard DML with RETURNING as a query
         let is_query_sql = {
-            let lower_sql = sql.to_ascii_lowercase();
-            lower_sql.starts_with("select")
-                || lower_sql.starts_with("values")
-                || lower_sql.starts_with("show")
-                || lower_sql.starts_with("with")
-                || lower_sql.starts_with("describe")
-                || lower_sql.starts_with("explain")
+            let stmts = Parser::parse_sql(sql)
+                .inspect_err(|e| tracing::error!("failed to parse sql:\n{}:\n{}", sql, e))
+                .map_err(|err| PsqlError::ParseError(err.into()))?;
+
+            if stmts.len() > 1 {
+                return Err(PsqlError::ParseError(
+                    "Only one statement is allowed in extended query mode".into(),
+                ));
+            }
+
+            if stmts.is_empty() {
+                false
+            } else {
+                StatementType::infer_from_statement(&stmts[0])
+                    .map_or(false, |stmt_type| stmt_type.is_query())
+            }
         };
 
         let prepared_statement = PreparedStatement::parse_statement(sql.to_string(), msg.type_ids)?;
 
-        // 2. Create the row description.
+        // Create the row description.
         let fields: Vec<PgFieldDescriptor> = if is_query_sql {
             let sql = prepared_statement.instance_default()?;
 
@@ -423,15 +435,8 @@ where
             vec![]
         };
 
-        // 3. Create the statement.
-        let statement = PgStatement::new(
-            cstr_to_str(&msg.statement_name).unwrap().to_string(),
-            prepared_statement,
-            fields,
-            is_query_sql,
-        );
+        let statement = PgStatement::new(statement_name, prepared_statement, fields, is_query_sql);
 
-        // 4. Insert the statement.
         let name = statement.name();
         if name.is_empty() {
             self.unnamed_statement.replace(statement);
@@ -444,11 +449,12 @@ where
 
     fn process_bind_msg(&mut self, msg: FeBindMessage) -> PsqlResult<()> {
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_string();
+        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         // 1. Get statement.
         trace!(
             target: "pgwire_query_log",
-            "(extended query)bind: get statement name: {}",
-            &statement_name
+            "(extended query)bind: statement name: {}, portal name: {}",
+            &statement_name,&portal_name
         );
         let statement = if statement_name.is_empty() {
             self.unnamed_statement
@@ -472,7 +478,6 @@ where
             .try_collect()?;
 
         // 2. Instance the statement to get the portal.
-        let portal_name = cstr_to_str(&msg.portal_name).unwrap().to_string();
         let portal = statement.instance(
             portal_name.clone(),
             &msg.params,
@@ -504,7 +509,7 @@ where
                 .ok_or_else(PsqlError::no_portal)?
         };
 
-        tracing::trace!(target: "pgwire_query_log", "(extended query)execute query: {}", portal.query_string());
+        tracing::trace!(target: "pgwire_query_log", "(extended query)execute query: {}, portal name: {}", portal.query_string(),portal_name);
 
         // 2. Execute instance statement using portal.
         let session = self.session.clone().unwrap();

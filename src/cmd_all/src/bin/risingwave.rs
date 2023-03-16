@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::env;
 
 use anyhow::{bail, Result};
-use clap::StructOpt;
+use clap::Parser;
 use risingwave_cmd_all::playground;
 use risingwave_common::enable_task_local_jemalloc_on_linux;
 use tracing::Level;
@@ -128,7 +128,7 @@ fn main() -> Result<()> {
             Box::new(move |_: Vec<String>| {
                 let settings = risingwave_rt::LoggerSettings::new()
                     .enable_tokio_console(false)
-                    .with_target("risingwave_storage", Level::INFO);
+                    .with_target("risingwave_storage", Level::WARN);
                 risingwave_rt::init_risingwave_logger(settings);
 
                 risingwave_rt::main_okk(playground())
@@ -162,7 +162,9 @@ fn main() -> Result<()> {
             func(args)?;
         }
         None => {
-            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, fns.keys().collect::<Vec<_>>());
+            let mut components = fns.keys().collect::<Vec<_>>();
+            components.sort();
+            bail!("unknown target: {}\nPlease either:\n* set `RW_NODE` env variable (`RW_NODE=<component>`)\n* create a symbol link to `risingwave` binary (ln -s risingwave <component>)\n* start with subcommand `risingwave <component>``\nwith one of the following: {:?}", target, components);
         }
     }
 

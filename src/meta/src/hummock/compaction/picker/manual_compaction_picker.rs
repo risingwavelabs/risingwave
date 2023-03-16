@@ -148,7 +148,7 @@ impl ManualCompactionPicker {
             info.check_multiple_overlap(&levels.levels[self.target_level - 1].table_infos);
         if target_input_ssts
             .iter()
-            .any(|table| level_handlers[self.target_level].is_pending_compact(&table.id))
+            .any(|table| level_handlers[self.target_level].is_pending_compact(&table.sst_id))
         {
             return None;
         }
@@ -189,7 +189,7 @@ impl ManualCompactionPicker {
             && !level
                 .table_infos
                 .iter()
-                .any(|t| hint_sst_ids.contains(&t.id))
+                .any(|t| hint_sst_ids.contains(&t.sst_id))
         {
             return false;
         }
@@ -239,19 +239,15 @@ impl CompactionPicker for ManualCompactionPicker {
             .get_level(self.option.level)
             .table_infos
             .iter()
-            .filter(|sst_info| hint_sst_ids.is_empty() || hint_sst_ids.contains(&sst_info.id))
+            .filter(|sst_info| hint_sst_ids.is_empty() || hint_sst_ids.contains(&sst_info.sst_id))
             .filter(|sst_info| range_overlap_info.check_overlap(sst_info))
             .filter(|sst_info| {
                 if self.option.internal_table_id.is_empty() {
                     return true;
                 }
 
-                // to collect internal_table_id from sst_info
-                let table_id_in_sst: Vec<u32> =
-                    sst_info.get_table_ids().iter().cloned().collect_vec();
-
                 // to filter sst_file by table_id
-                for table_id in &table_id_in_sst {
+                for table_id in &sst_info.table_ids {
                     if self.option.internal_table_id.contains(table_id) {
                         return true;
                     }
@@ -269,13 +265,15 @@ impl CompactionPicker for ManualCompactionPicker {
                 .get_level(level)
                 .table_infos
                 .iter()
-                .find_position(|p| p.id == select_input_ssts.first().unwrap().id)
+                .find_position(|p| {
+                    p.get_sst_id() == select_input_ssts.first().unwrap().get_sst_id()
+                })
                 .unwrap();
             let (right, _) = levels
                 .get_level(level)
                 .table_infos
                 .iter()
-                .find_position(|p| p.id == select_input_ssts.last().unwrap().id)
+                .find_position(|p| p.get_sst_id() == select_input_ssts.last().unwrap().get_sst_id())
                 .unwrap();
             select_input_ssts = levels.get_level(level).table_infos[left..=right].to_vec();
             vec![]
@@ -287,13 +285,13 @@ impl CompactionPicker for ManualCompactionPicker {
         };
         if select_input_ssts
             .iter()
-            .any(|table| level_handlers[level].is_pending_compact(&table.id))
+            .any(|table| level_handlers[level].is_pending_compact(&table.sst_id))
         {
             return None;
         }
         if target_input_ssts
             .iter()
-            .any(|table| level_handlers[target_level].is_pending_compact(&table.id))
+            .any(|table| level_handlers[target_level].is_pending_compact(&table.sst_id))
         {
             return None;
         }
@@ -576,8 +574,9 @@ pub mod tests {
         for iter in [l0.sub_levels.iter_mut(), levels.iter_mut()] {
             for (idx, l) in iter.enumerate() {
                 for t in &mut l.table_infos {
+                    t.table_ids.clear();
                     if idx == 0 {
-                        t.table_ids.push(((t.id % 2) + 1) as _);
+                        t.table_ids.push(((t.get_sst_id() % 2) + 1) as _);
                     } else {
                         t.table_ids.push(3);
                     }
@@ -702,7 +701,7 @@ pub mod tests {
                 result.input_levels[l]
                     .table_infos
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 *e
             );
@@ -738,7 +737,7 @@ pub mod tests {
                 result.input_levels[l]
                     .table_infos
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 *e
             );
@@ -790,7 +789,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.id)
+                        .map(|s| s.get_sst_id())
                         .collect_vec(),
                     *e
                 );
@@ -856,7 +855,7 @@ pub mod tests {
                     .iter()
                     .take(3)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![9, 10, 7, 8, 5, 6]
             );
@@ -864,7 +863,7 @@ pub mod tests {
                 result.input_levels[3]
                     .table_infos
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![3]
             );
@@ -898,7 +897,7 @@ pub mod tests {
                     .iter()
                     .take(3)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![9, 10, 7, 8, 5, 6]
             );
@@ -906,7 +905,7 @@ pub mod tests {
                 result.input_levels[3]
                     .table_infos
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![3]
             );
@@ -944,7 +943,7 @@ pub mod tests {
                     .iter()
                     .take(1)
                     .flat_map(|s| s.table_infos.clone())
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![5, 6]
             );
@@ -952,7 +951,7 @@ pub mod tests {
                 result.input_levels[1]
                     .table_infos
                     .iter()
-                    .map(|s| s.id)
+                    .map(|s| s.get_sst_id())
                     .collect_vec(),
                 vec![3]
             );
@@ -1047,7 +1046,7 @@ pub mod tests {
                     result.input_levels[l]
                         .table_infos
                         .iter()
-                        .map(|s| s.id)
+                        .map(|s| s.get_sst_id())
                         .collect_vec(),
                     *e
                 );
@@ -1090,7 +1089,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.id)
+                        .map(|s| s.get_sst_id())
                         .collect_vec(),
                     *e
                 );
@@ -1140,7 +1139,7 @@ pub mod tests {
                     result.input_levels[i]
                         .table_infos
                         .iter()
-                        .map(|s| s.id)
+                        .map(|s| s.get_sst_id())
                         .collect_vec(),
                     *e
                 );

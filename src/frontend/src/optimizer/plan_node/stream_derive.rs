@@ -17,7 +17,7 @@ use risingwave_common::catalog::Schema;
 use super::generic::GenericPlanNode;
 use super::stream::*;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::utils::ColIndexMappingRewriteExt;
 
 impl GenericPlanNode for DynamicFilter {
@@ -32,8 +32,11 @@ impl GenericPlanNode for DynamicFilter {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
-}
 
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
+}
 impl StreamPlanNode for DynamicFilter {
     fn distribution(&self) -> Distribution {
         todo!()
@@ -54,6 +57,10 @@ impl GenericPlanNode for Exchange {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
+        todo!("new plan node derivation")
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
         todo!("new plan node derivation")
     }
 }
@@ -80,6 +87,10 @@ impl GenericPlanNode for DeltaJoin {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for DeltaJoin {
@@ -103,6 +114,10 @@ impl GenericPlanNode for Expand {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -128,6 +143,10 @@ impl GenericPlanNode for Filter {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for Filter {
@@ -151,6 +170,10 @@ impl GenericPlanNode for GlobalSimpleAgg {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -176,6 +199,10 @@ impl GenericPlanNode for GroupTopN {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for GroupTopN {
@@ -199,6 +226,10 @@ impl GenericPlanNode for HashAgg {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -224,6 +255,10 @@ impl GenericPlanNode for HashJoin {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for HashJoin {
@@ -247,6 +282,10 @@ impl GenericPlanNode for HopWindow {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -272,6 +311,10 @@ impl GenericPlanNode for IndexScan {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for IndexScan {
@@ -296,6 +339,10 @@ impl GenericPlanNode for LocalSimpleAgg {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for LocalSimpleAgg {
@@ -318,6 +365,10 @@ impl GenericPlanNode for Materialize {
     }
 
     fn ctx(&self) -> OptimizerContextRef {
+        todo!("new plan node derivation")
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
         todo!("new plan node derivation")
     }
 }
@@ -344,6 +395,10 @@ impl GenericPlanNode for ProjectSet {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for ProjectSet {
@@ -367,6 +422,10 @@ impl GenericPlanNode for Project {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -394,6 +453,10 @@ impl GenericPlanNode for Sink {
     fn ctx(&self) -> OptimizerContextRef {
         todo!("new plan node derivation")
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        todo!("new plan node derivation")
+    }
 }
 
 impl StreamPlanNode for Sink {
@@ -417,6 +480,10 @@ impl GenericPlanNode for Source {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 
@@ -442,6 +509,10 @@ impl GenericPlanNode for TableScan {
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
+    }
 }
 
 impl StreamPlanNode for TableScan {
@@ -465,6 +536,10 @@ impl GenericPlanNode for TopN {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.core.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.core.functional_dependency()
     }
 }
 

@@ -17,25 +17,28 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
 
-use async_stack_trace::StackTrace;
 use futures::Future;
-use risingwave_common::cache::{CacheableEntry, LruCache, LruCacheEventListener};
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_common::cache::{CacheableEntry, LookupResponse, LruCache, LruCacheEventListener};
+use risingwave_hummock_sdk::HummockSstableObjectId;
+use tokio::sync::oneshot::Receiver;
+use tokio::task::JoinHandle;
 
 use super::{Block, HummockResult, TieredCacheEntry};
 use crate::hummock::HummockError;
 
 const MIN_BUFFER_SIZE_PER_SHARD: usize = 32 * 1024 * 1024;
 
+type CachedBlockEntry = CacheableEntry<(HummockSstableObjectId, u64), Box<Block>>;
+
 enum BlockEntry {
-    Cache(CacheableEntry<(HummockSstableId, u64), Box<Block>>),
+    Cache(CachedBlockEntry),
     Owned(Box<Block>),
     RefEntry(Arc<Block>),
 }
 
 pub struct BlockHolder {
     _handle: BlockEntry,
-    block: *const Block,
+    pub block: *const Block,
 }
 
 impl BlockHolder {
@@ -55,7 +58,7 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_cached_block(entry: CacheableEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+    pub fn from_cached_block(entry: CachedBlockEntry) -> Self {
         let ptr = entry.value().as_ref() as *const _;
         Self {
             _handle: BlockEntry::Cache(entry),
@@ -63,7 +66,9 @@ impl BlockHolder {
         }
     }
 
-    pub fn from_tiered_cache(entry: TieredCacheEntry<(HummockSstableId, u64), Box<Block>>) -> Self {
+    pub fn from_tiered_cache(
+        entry: TieredCacheEntry<(HummockSstableObjectId, u64), Box<Block>>,
+    ) -> Self {
         match entry {
             TieredCacheEntry::Cache(entry) => Self::from_cached_block(entry),
             TieredCacheEntry::Owned(block) => Self::from_owned_block(*block),
@@ -83,11 +88,33 @@ unsafe impl Send for BlockHolder {}
 unsafe impl Sync for BlockHolder {}
 
 type BlockCacheEventListener =
-    Arc<dyn LruCacheEventListener<K = (HummockSstableId, u64), T = Box<Block>>>;
+    Arc<dyn LruCacheEventListener<K = (HummockSstableObjectId, u64), T = Box<Block>>>;
 
 #[derive(Clone)]
 pub struct BlockCache {
-    inner: Arc<LruCache<(HummockSstableId, u64), Box<Block>>>,
+    inner: Arc<LruCache<(HummockSstableObjectId, u64), Box<Block>>>,
+}
+
+pub enum BlockResponse {
+    Block(BlockHolder),
+    WaitPendingRequest(Receiver<CachedBlockEntry>),
+    Miss(JoinHandle<Result<CachedBlockEntry, HummockError>>),
+}
+
+impl BlockResponse {
+    pub async fn wait(self) -> HummockResult<BlockHolder> {
+        match self {
+            BlockResponse::Block(block_holder) => Ok(block_holder),
+            BlockResponse::WaitPendingRequest(receiver) => receiver
+                .await
+                .map_err(|recv_error| recv_error.into())
+                .map(BlockHolder::from_cached_block),
+            BlockResponse::Miss(join_handle) => join_handle
+                .await
+                .unwrap()
+                .map(BlockHolder::from_cached_block),
+        }
+    }
 }
 
 impl BlockCache {
@@ -125,39 +152,39 @@ impl BlockCache {
         }
     }
 
-    pub fn get(&self, sst_id: HummockSstableId, block_idx: u64) -> Option<BlockHolder> {
+    pub fn get(&self, object_id: HummockSstableObjectId, block_idx: u64) -> Option<BlockHolder> {
         self.inner
-            .lookup(Self::hash(sst_id, block_idx), &(sst_id, block_idx))
+            .lookup(Self::hash(object_id, block_idx), &(object_id, block_idx))
             .map(BlockHolder::from_cached_block)
     }
 
     pub fn insert(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableObjectId,
         block_idx: u64,
         block: Box<Block>,
     ) -> BlockHolder {
         BlockHolder::from_cached_block(self.inner.insert(
-            (sst_id, block_idx),
-            Self::hash(sst_id, block_idx),
+            (object_id, block_idx),
+            Self::hash(object_id, block_idx),
             block.capacity(),
             block,
         ))
     }
 
-    pub async fn get_or_insert_with<F, Fut>(
+    pub fn get_or_insert_with<F, Fut>(
         &self,
-        sst_id: HummockSstableId,
+        object_id: HummockSstableObjectId,
         block_idx: u64,
         mut fetch_block: F,
-    ) -> HummockResult<BlockHolder>
+    ) -> BlockResponse
     where
         F: FnMut() -> Fut,
         Fut: Future<Output = HummockResult<Box<Block>>> + Send + 'static,
     {
-        let h = Self::hash(sst_id, block_idx);
-        let key = (sst_id, block_idx);
-        let block = self
+        let h = Self::hash(object_id, block_idx);
+        let key = (object_id, block_idx);
+        match self
             .inner
             .lookup_with_request_dedup::<_, HummockError, _>(h, key, || {
                 let f = fetch_block();
@@ -166,15 +193,21 @@ impl BlockCache {
                     let len = block.capacity();
                     Ok((block, len))
                 }
-            })
-            .verbose_stack_trace("block_cache_lookup")
-            .await?;
-        Ok(BlockHolder::from_cached_block(block))
+            }) {
+            LookupResponse::Invalid => unreachable!(),
+            LookupResponse::Cached(entry) => {
+                BlockResponse::Block(BlockHolder::from_cached_block(entry))
+            }
+            LookupResponse::WaitPendingRequest(receiver) => {
+                BlockResponse::WaitPendingRequest(receiver)
+            }
+            LookupResponse::Miss(join_handle) => BlockResponse::Miss(join_handle),
+        }
     }
 
-    fn hash(sst_id: HummockSstableId, block_idx: u64) -> u64 {
+    fn hash(object_id: HummockSstableObjectId, block_idx: u64) -> u64 {
         let mut hasher = DefaultHasher::default();
-        sst_id.hash(&mut hasher);
+        object_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         hasher.finish()
     }

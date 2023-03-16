@@ -25,7 +25,7 @@ pub mod opendal_engine;
 pub use opendal_engine::*;
 
 pub mod s3;
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 pub use s3::*;
 
 mod disk;
@@ -619,7 +619,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .upload(path, obj)
-            .verbose_stack_trace("object_store_upload")
+            .verbose_instrument_await("object_store_upload")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -656,7 +656,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .read(path, block_loc)
-            .verbose_stack_trace("object_store_read")
+            .verbose_instrument_await("object_store_read")
             .await
             .map_err(|err| {
                 ObjectError::internal(format!(
@@ -693,7 +693,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let res = self
             .inner
             .readv(path, block_locs)
-            .verbose_stack_trace("object_store_readv")
+            .verbose_instrument_await("object_store_readv")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &res, operation_type);
@@ -743,7 +743,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .metadata(path)
-            .verbose_stack_trace("object_store_metadata")
+            .verbose_instrument_await("object_store_metadata")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -761,7 +761,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete(path)
-            .verbose_stack_trace("object_store_delete")
+            .verbose_instrument_await("object_store_delete")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -779,7 +779,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .delete_objects(paths)
-            .verbose_stack_trace("object_store_delete_objects")
+            .verbose_instrument_await("object_store_delete_objects")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -797,7 +797,7 @@ impl<OS: ObjectStore> MonitoredObjectStore<OS> {
         let ret = self
             .inner
             .list(prefix)
-            .verbose_stack_trace("object_store_list")
+            .verbose_instrument_await("object_store_list")
             .await;
 
         try_update_failure_metric(&self.object_store_metrics, &ret, operation_type);
@@ -862,6 +862,15 @@ pub async fn parse_remote_object_store(
             let (container_name, root) = azblob.split_once('@').unwrap();
             ObjectStoreImpl::Opendal(
                 OpendalObjectStore::new_azblob_engine(container_name.to_string(), root.to_string())
+                    .unwrap()
+                    .monitored(metrics),
+            )
+        }
+        fs if fs.starts_with("fs://") => {
+            let fs = fs.strip_prefix("fs://").unwrap();
+            let (_, root) = fs.split_once('@').unwrap();
+            ObjectStoreImpl::Opendal(
+                OpendalObjectStore::new_fs_engine(root.to_string())
                     .unwrap()
                     .monitored(metrics),
             )

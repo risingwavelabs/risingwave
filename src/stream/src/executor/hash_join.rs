@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_stack_trace::StackTrace;
+use await_tree::InstrumentAwait;
 use fixedbitset::FixedBitSet;
 use futures::{pin_mut, StreamExt};
 use futures_async_stream::try_stream;
@@ -43,7 +43,7 @@ use super::{
     Watermark,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
 use crate::task::AtomicU64Ref;
@@ -630,7 +630,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
         while let Some(msg) = aligned_stream
             .next()
-            .stack_trace("hash_join_barrier_align")
+            .instrument_await("hash_join_barrier_align")
             .await
         {
             self.metrics
@@ -864,26 +864,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ),
         };
 
-        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &OwnedRow| -> bool {
-            // TODO(yuhao-su): We should find a better way to eval the expression without concat
-            // two rows.
-            // if there are non-equi expressions
-            if let Some(ref mut cond) = cond {
-                let new_row = Self::row_concat(
-                    row_update,
-                    side_update.start_pos,
-                    row_matched,
-                    side_match.start_pos,
-                );
-
-                cond.eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
-                    .map(|s| *s.as_bool())
-                    .unwrap_or(false)
-            } else {
-                true
-            }
-        };
-
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
             let matched_rows: Option<HashValueType> =
@@ -897,7 +877,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
-                            if check_join_condition(&row, &matched_row.row) {
+                            // TODO(yuhao-su): We should find a better way to eval the expression
+                            // without concat two rows.
+                            // if there are non-equi expressions
+                            let check_join_condition = if let Some(ref mut cond) = cond {
+                                let new_row = Self::row_concat(
+                                    &row,
+                                    side_update.start_pos,
+                                    &matched_row.row,
+                                    side_match.start_pos,
+                                );
+
+                                cond.eval_row_infallible(&new_row, |err| {
+                                    ctx.on_compute_error(err, identity)
+                                })
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                            } else {
+                                true
+                            };
+                            if check_join_condition {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
@@ -922,19 +922,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                     {
                         yield chunk;
                     }
@@ -954,7 +954,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
-                            if check_join_condition(&row, &matched_row.row) {
+                            // TODO(yuhao-su): We should find a better way to eval the expression
+                            // without concat two rows.
+                            // if there are non-equi expressions
+                            let check_join_condition = if let Some(ref mut cond) = cond {
+                                let new_row = Self::row_concat(
+                                    &row,
+                                    side_update.start_pos,
+                                    &matched_row.row,
+                                    side_match.start_pos,
+                                );
+
+                                cond.eval_row_infallible(&new_row, |err| {
+                                    ctx.on_compute_error(err, identity)
+                                })
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                            } else {
+                                true
+                            };
+                            if check_join_condition {
                                 degree += 1;
                                 if side_match.need_degree_table {
                                     side_match.ht.dec_degree(matched_row_ref, &mut matched_row);
@@ -970,19 +990,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                     {
                         yield chunk;
                     }
@@ -1101,7 +1121,7 @@ mod tests {
         let (state_l, degree_state_l) = create_in_memory_state_table(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             0,
             join_key_indices.len(),
@@ -1111,7 +1131,7 @@ mod tests {
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             2,
             join_key_indices.len(),
@@ -1171,9 +1191,9 @@ mod tests {
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 0],
             0,
@@ -1185,9 +1205,9 @@ mod tests {
             mem_state,
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 1],
             0,

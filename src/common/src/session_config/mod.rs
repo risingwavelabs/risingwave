@@ -24,6 +24,7 @@ use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -32,7 +33,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 19] = [
+const CONFIG_KEYS: [&str; 20] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -52,6 +53,7 @@ const CONFIG_KEYS: [&str; 19] = [
     "RW_ENABLE_TWO_PHASE_AGG",
     "RW_FORCE_TWO_PHASE_AGG",
     "RW_ENABLE_SHARE_PLAN",
+    "INTERVALSTYLE",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -75,6 +77,7 @@ const STREAMING_ENABLE_DELTA_JOIN: usize = 15;
 const ENABLE_TWO_PHASE_AGG: usize = 16;
 const FORCE_TWO_PHASE_AGG: usize = 17;
 const RW_ENABLE_SHARE_PLAN: usize = 18;
+const INTERVAL_STYLE: usize = 19;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -274,6 +277,7 @@ type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
+type IntervalStyle = ConfigString<INTERVAL_STYLE>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -288,7 +292,8 @@ pub struct ConfigMap {
     create_compaction_group_for_mv: CreateCompactionGroupForMv,
 
     /// A temporary config variable to force query running in either local or distributed mode.
-    /// It will be removed in the future.
+    /// The default value is auto which means let the system decide to run batch queries in local
+    /// or distributed mode automatically.
     query_mode: QueryMode,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#:~:text=for%20more%20information.-,extra_float_digits,-(integer)>
@@ -346,10 +351,14 @@ pub struct ConfigMap {
     /// This means that DAG structured query plans can be constructed,
     /// rather than only tree structured query plans.
     enable_share_plan: EnableSharePlan,
+
+    /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
+    interval_style: IntervalStyle,
 }
 
 impl ConfigMap {
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+        info!(%key, ?val, "set config");
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             self.implicit_flush = val.as_slice().try_into()?;
@@ -399,6 +408,8 @@ impl ConfigMap {
             }
         } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
             self.enable_share_plan = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
+            self.interval_style = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -445,6 +456,8 @@ impl ConfigMap {
             Ok(self.force_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(EnableSharePlan::entry_name()) {
             Ok(self.enable_share_plan.to_string())
+        } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
+            Ok(self.interval_style.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -465,7 +478,7 @@ impl ConfigMap {
             VariableInfo{
                 name : QueryMode::entry_name().to_lowercase(),
                 setting : self.query_mode.to_string(),
-                description : String::from("A temporary config variable to force query running in either local or distributed mode.")
+                description : String::from("A temporary config variable to force query running in either local or distributed mode. If the value is auto, the system will decide for you automatically.")
             },
             VariableInfo{
                 name : ExtraFloatDigit::entry_name().to_lowercase(),
@@ -541,6 +554,11 @@ impl ConfigMap {
                 name : EnableSharePlan::entry_name().to_lowercase(),
                 setting : self.enable_share_plan.to_string(),
                 description: String::from("Enable sharing of common sub-plans. This means that DAG structured query plans can be constructed, rather than only tree structured query plans.")
+            },
+            VariableInfo{
+                name : IntervalStyle::entry_name().to_lowercase(),
+                setting : self.interval_style.to_string(),
+                description : String::from("It is typically set by an application upon connection to the server.")
             },
         ]
     }
@@ -625,5 +643,9 @@ impl ConfigMap {
 
     pub fn get_enable_share_plan(&self) -> bool {
         *self.enable_share_plan
+    }
+
+    pub fn get_interval_style(&self) -> &str {
+        &self.interval_style
     }
 }

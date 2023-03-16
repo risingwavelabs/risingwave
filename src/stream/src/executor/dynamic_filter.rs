@@ -32,6 +32,7 @@ use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
 };
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::barrier_align::*;
@@ -41,7 +42,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
@@ -92,7 +93,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
     }
 
-    fn apply_batch(
+    async fn apply_batch(
         &mut self,
         data_chunk: &DataChunk,
         ops: Vec<Op>,
@@ -103,11 +104,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let eval_results = condition.map(|cond| {
-            cond.eval_infallible(data_chunk, |err| {
-                self.ctx.on_compute_error(err, self.identity())
-            })
-        });
+        let eval_results = if let Some(cond) = condition {
+            Some(
+                cond.eval_infallible(data_chunk, |err| {
+                    self.ctx.on_compute_error(err, &self.identity)
+                })
+                .await,
+            )
+        } else {
+            None
+        };
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq_debug(ops.iter()).enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
@@ -232,7 +238,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
     async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
         // Recover value for RHS if available
-        let rhs_stream = self.right_table.iter().await?;
+        let rhs_stream = self.right_table.iter(Default::default()).await?;
         pin_mut!(rhs_stream);
 
         if let Some(res) = rhs_stream.next().await {
@@ -322,7 +328,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let condition = dynamic_cond(right_val).transpose()?;
 
                     let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition)?;
+                        self.apply_batch(&data_chunk, ops, condition).await?;
 
                     let (columns, _) = data_chunk.into_parts();
 
@@ -387,8 +393,14 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
 
                         // TODO: prefetching for append-only case.
                         for vnode in self.left_table.vnodes().iter_vnodes() {
-                            let row_stream =
-                                self.left_table.iter_with_pk_range(&range, vnode).await?;
+                            let row_stream = self
+                                .left_table
+                                .iter_with_pk_range(
+                                    &range,
+                                    vnode,
+                                    PrefetchOptions::new_for_exhaust_iter(),
+                                )
+                                .await?;
                             pin_mut!(row_stream);
                             while let Some(res) = row_stream.next().await {
                                 let row = res?;
@@ -494,7 +506,7 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
@@ -502,7 +514,7 @@ mod tests {
             mem_state,
             TableId::new(1),
             vec![column_descs],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;

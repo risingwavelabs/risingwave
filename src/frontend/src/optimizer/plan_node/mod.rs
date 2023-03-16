@@ -397,6 +397,24 @@ impl GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
+}
+
+/// In order to let expression display id started from 1 for explaining, hidden column names and
+/// other places. We will reset expression display id to 0 and clone the whole plan to reset the
+/// schema.
+pub fn reorganize_elements_id(plan: PlanRef) -> PlanRef {
+    let old_expr_display_id = plan.ctx().get_expr_display_id();
+    let old_plan_node_id = plan.ctx().get_plan_node_id();
+    plan.ctx().set_expr_display_id(0);
+    plan.ctx().set_plan_node_id(0);
+    let plan = PlanCloner::clone_whole_plan(plan);
+    plan.ctx().set_expr_display_id(old_expr_display_id);
+    plan.ctx().set_plan_node_id(old_plan_node_id);
+    plan
 }
 
 pub trait Explain {
@@ -452,15 +470,7 @@ impl Explain for PlanRef {
 
     /// Explain the plan node and return a string.
     fn explain_to_string(&self) -> Result<String> {
-        // In order to let expression display id started from 1 for explaining.
-        // We will reset expression display id to 0 and clone the whole plan to reset the schema.
-        let plan = {
-            let old_expr_display_id = self.ctx().get_expr_display_id();
-            self.ctx().set_expr_display_id(0);
-            let plan = PlanCloner::clone_whole_plan(self.clone());
-            self.ctx().set_expr_display_id(old_expr_display_id);
-            plan
-        };
+        let plan = reorganize_elements_id(self.clone());
 
         let mut output = String::new();
         plan.explain(&mut vec![], 0, &mut output)
@@ -665,6 +675,7 @@ mod stream_watermark_filter;
 
 mod derive;
 mod stream_share;
+mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
 
@@ -736,6 +747,7 @@ pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_watermark_filter::StreamWatermarkFilter;
@@ -834,6 +846,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }
@@ -934,6 +947,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }

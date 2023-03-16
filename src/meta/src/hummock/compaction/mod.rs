@@ -16,6 +16,7 @@ pub mod compaction_config;
 mod level_selector;
 mod overlap_strategy;
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 
@@ -27,7 +28,9 @@ use std::sync::Arc;
 use picker::{
     LevelCompactionPicker, ManualCompactionPicker, MinOverlappingPicker, TierCompactionPicker,
 };
-use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId, HummockEpoch};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, HummockCompactionTaskId, HummockEpoch, HummockSstableId,
+};
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{CompactTask, CompactionConfig, InputLevel, KeyRange, LevelType};
@@ -94,6 +97,7 @@ pub struct CompactionTask {
     pub compression_algorithm: String,
     pub target_file_size: u64,
     pub compaction_task_type: compact_task::TaskType,
+    pub enable_split_by_table: bool,
 }
 
 pub fn create_overlap_strategy(compaction_mode: CompactionMode) -> Arc<dyn OverlapStrategy> {
@@ -163,6 +167,7 @@ impl CompactStatus {
             current_epoch_time: 0,
             target_sub_level_id: ret.input.target_sub_level_id,
             task_type: ret.compaction_task_type as i32,
+            split_by_state_table: group.compaction_config.split_by_state_table,
         };
         Some(compact_task)
     }
@@ -218,11 +223,11 @@ impl CompactStatus {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ManualCompactionOption {
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub sst_ids: Vec<u64>,
+    pub sst_ids: Vec<HummockSstableId>,
     /// Filters out SSTs to pick.
     pub key_range: KeyRange,
     /// Filters out SSTs to pick. Has no effect if empty.
-    pub internal_table_id: HashSet<u32>,
+    pub internal_table_id: HashSet<StateTableId>,
     /// Input level.
     pub level: usize,
 }
@@ -323,6 +328,7 @@ pub fn create_compaction_task(
         input,
         target_file_size,
         compaction_task_type,
+        enable_split_by_table: false,
     }
 }
 

@@ -25,11 +25,12 @@
 extern crate tracing;
 
 pub mod memory_management;
+pub mod observer;
 pub mod rpc;
 pub mod server;
 
 use clap::Parser;
-use risingwave_common::config::{true_if_present, AsyncStackTraceOption, Flag};
+use risingwave_common::config::AsyncStackTraceOption;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::total_memory_available_bytes;
 use risingwave_common_proc_macro::OverrideConfig;
@@ -40,19 +41,14 @@ pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:5688"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5688")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", long)]
     pub advertise_addr: Option<String>,
 
     #[clap(
@@ -62,7 +58,7 @@ pub struct ComputeNodeOpts {
     )]
     pub prometheus_listener_addr: String,
 
-    #[clap(long, env = "RW_META_ADDRESS", default_value = "http://127.0.0.1:5690")]
+    #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
 
     /// Endpoint of the connector node
@@ -92,6 +88,22 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     pub parallelism: usize,
 
+    /// The policy for compute node memory control. Valid values:
+    /// - streaming-only
+    /// - streaming-batch
+    #[clap(
+        long,
+        env = "RW_MEMORY_CONTROL_POLICY",
+        default_value = "streaming-only"
+    )]
+    pub memory_control_policy: String,
+
+    /// The proportion of streaming memory to all available memory for computing. Only works when
+    /// `memory_control_policy` is set to "streaming-batch". Ignored otherwise. See
+    /// [`FixedProportionPolicy`] for more details.
+    #[clap(long, env = "RW_STREAMING_MEMORY_PROPORTION", default_value_t = 0.7)]
+    pub streaming_memory_proportion: f64,
+
     #[clap(flatten)]
     override_config: OverrideConfigOpts,
 }
@@ -113,12 +125,12 @@ struct OverrideConfigOpts {
     pub file_cache_dir: Option<String>,
 
     /// Enable reporting tracing information to jaeger.
-    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", parse(from_flag = true_if_present))]
+    #[clap(long, env = "RW_ENABLE_JAEGER_TRACING", default_missing_value = None)]
     #[override_opts(path = streaming.enable_jaeger_tracing)]
-    pub enable_jaeger_tracing: Flag,
+    pub enable_jaeger_tracing: Option<bool>,
 
-    /// Enable async stack tracing for risectl.
-    #[clap(long, env = "RW_ASYNC_STACK_TRACE", arg_enum)]
+    /// Enable async stack tracing through `await-tree` for risectl.
+    #[clap(long, env = "RW_ASYNC_STACK_TRACE", value_enum)]
     #[override_opts(path = streaming.async_stack_trace)]
     pub async_stack_trace: Option<AsyncStackTraceOption>,
 }

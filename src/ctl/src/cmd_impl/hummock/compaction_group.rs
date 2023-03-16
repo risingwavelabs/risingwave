@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 
@@ -34,7 +35,7 @@ pub async fn update_compaction_config(
         .risectl_update_compaction_config(ids.as_slice(), configs.as_slice())
         .await?;
     println!(
-        "Succeed: update compaction groups {:#?}\n with configs {:#?}",
+        "Succeed: update compaction groups {:#?} with configs {:#?}.",
         ids, configs
     );
     Ok(())
@@ -50,6 +51,7 @@ pub fn build_compaction_config_vec(
     target_file_size_base: Option<u64>,
     compaction_filter_mask: Option<u32>,
     max_sub_compaction: Option<u32>,
+    level0_stop_write_threshold_sub_level_number: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -76,5 +78,24 @@ pub fn build_compaction_config_vec(
     if let Some(c) = max_sub_compaction {
         configs.push(MutableConfig::MaxSubCompaction(c));
     }
+    if let Some(c) = level0_stop_write_threshold_sub_level_number {
+        configs.push(MutableConfig::Level0StopWriteThresholdSubLevelNumber(c));
+    }
     configs
+}
+
+pub async fn split_compaction_group(
+    context: &CtlContext,
+    group_id: CompactionGroupId,
+    table_ids_to_new_group: &[StateTableId],
+) -> anyhow::Result<()> {
+    let meta_client = context.meta_client().await?;
+    let new_group_id = meta_client
+        .split_compaction_group(group_id, table_ids_to_new_group)
+        .await?;
+    println!(
+        "Succeed: split compaction group {}. tables {:#?} are moved to new group {}.",
+        group_id, table_ids_to_new_group, new_group_id
+    );
+    Ok(())
 }

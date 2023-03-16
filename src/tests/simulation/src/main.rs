@@ -144,12 +144,12 @@ async fn main() {
     use risingwave_simulation::slt::*;
     use tracing_subscriber::EnvFilter;
 
-    tracing_subscriber::fmt()
+    _ = tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
         // no ANSI color codes when output to file
         .with_ansi(console::colors_enabled_stderr() && console::colors_enabled())
         .with_writer(std::io::stderr)
-        .init();
+        .try_init();
 
     let args = Args::parse();
     let config = Configuration {
@@ -159,6 +159,7 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
+        meta_node_extra_args: vec![],
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };
@@ -193,6 +194,7 @@ async fn main() {
                         &args.files,
                         count,
                         &outdir,
+                        Some(seed),
                     )
                     .await;
                 } else {

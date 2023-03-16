@@ -18,24 +18,24 @@ use std::{fmt, vec};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{FragmentId, TableCatalog, TableId};
-use crate::optimizer::property::{Direction, FieldOrder};
 use crate::utils::WithOptions;
 
 #[derive(Default)]
 pub struct TableCatalogBuilder {
     /// All columns in this table
     columns: Vec<ColumnCatalog>,
-    pk: Vec<FieldOrder>,
+    pk: Vec<ColumnOrder>,
     properties: WithOptions,
     value_indices: Option<Vec<usize>>,
     vnode_col_idx: Option<usize>,
     column_names: HashMap<String, i32>,
     read_prefix_len_hint: usize,
     watermark_columns: Option<FixedBitSet>,
+    dist_key_in_pk: Option<Vec<usize>>,
 }
 
 /// For DRY, mainly used for construct internal table catalog in stateful streaming executors.
@@ -71,18 +71,13 @@ impl TableCatalogBuilder {
 
     /// Check whether need to add a ordered column. Different from value, order desc equal pk in
     /// semantics and they are encoded as storage key.
-    pub fn add_order_column(&mut self, index: usize, order_type: OrderType) {
-        self.pk.push(FieldOrder {
-            index,
-            direct: match order_type {
-                OrderType::Ascending => Direction::Asc,
-                OrderType::Descending => Direction::Desc,
-            },
-        });
+    pub fn add_order_column(&mut self, column_index: usize, order_type: OrderType) {
+        self.pk.push(ColumnOrder::new(column_index, order_type));
     }
 
-    pub fn set_read_prefix_len_hint(&mut self, read_prefix_len_hint: usize) {
-        self.read_prefix_len_hint = read_prefix_len_hint;
+    /// get the current exist field number of the primary key.
+    pub fn get_current_pk_len(&self) -> usize {
+        self.pk.len()
     }
 
     pub fn set_vnode_col_idx(&mut self, vnode_col_idx: usize) {
@@ -96,6 +91,10 @@ impl TableCatalogBuilder {
     #[allow(dead_code)]
     pub fn set_watermark_columns(&mut self, watermark_columns: FixedBitSet) {
         self.watermark_columns = Some(watermark_columns);
+    }
+
+    pub fn set_dist_key_in_pk(&mut self, dist_key_in_pk: Vec<usize>) {
+        self.dist_key_in_pk = Some(dist_key_in_pk);
     }
 
     /// Check the column name whether exist before. if true, record occurrence and change the name
@@ -116,8 +115,10 @@ impl TableCatalogBuilder {
         self.column_names.insert(column_desc.name.clone(), 0);
     }
 
-    /// Consume builder and create `TableCatalog` (for proto).
-    pub fn build(self, distribution_key: Vec<usize>) -> TableCatalog {
+    /// Consume builder and create `TableCatalog` (for proto). The `read_prefix_len_hint` is the
+    /// anticipated read prefix pattern (number of fields) for the table, which can be utilized for
+    /// implementing the table's bloom filter or other storage optimization techniques.
+    pub fn build(self, distribution_key: Vec<usize>, read_prefix_len_hint: usize) -> TableCatalog {
         assert!(self.read_prefix_len_hint <= self.pk.len());
         let watermark_columns = match self.watermark_columns {
             Some(w) => w,
@@ -145,10 +146,11 @@ impl TableCatalogBuilder {
                 .value_indices
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
-            handle_pk_conflict: false,
-            read_prefix_len_hint: self.read_prefix_len_hint,
+            conflict_behavior_type: 0,
+            read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
+            dist_key_in_pk: self.dist_key_in_pk.unwrap_or(vec![]),
         }
     }
 

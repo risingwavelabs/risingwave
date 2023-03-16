@@ -25,7 +25,7 @@ use parking_lot::Mutex;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::TableId;
-use risingwave_common::error::{ErrorCode, ErrorSuppressor, RwError};
+use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -107,10 +107,10 @@ impl SourceContext {
         self.error_suppressor = Some(error_suppressor)
     }
 
-    pub(crate) fn report_stream_source_error(&self, e: &RwError) {
-        // Do not report for batch
+    pub(crate) fn report_user_source_error(&self, e: RwError) -> RwResult<()> {
+        // Repropagate the error if batch
         if self.source_info.fragment_id == u32::MAX {
-            return;
+            return Err(e);
         }
         let mut err_str = e.inner().to_string();
         if let Some(suppressor) = &self.error_suppressor &&
@@ -130,6 +130,7 @@ impl SourceContext {
                 &self.source_info.source_id.table_id.to_string(),
             ])
             .inc();
+        Ok(())
     }
 }
 

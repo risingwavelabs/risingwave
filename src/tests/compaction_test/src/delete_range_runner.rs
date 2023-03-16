@@ -41,15 +41,14 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
+    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
 use risingwave_storage::StateStore;
 
 use crate::CompactionTestOpts;
@@ -122,7 +121,7 @@ async fn compaction_test(
         vnode_col_index: None,
         value_indices: vec![],
         definition: "".to_string(),
-        handle_pk_conflict: false,
+        handle_pk_conflict_behavior: 0,
         read_prefix_len_hint: 0,
         optional_associated_source_id: None,
         table_type: 0,
@@ -130,6 +129,7 @@ async fn compaction_test(
         row_id_index: None,
         version: None,
         watermark_indices: vec![],
+        dist_key_in_pk: vec![],
     };
     let mut delete_range_table = delete_key_table.clone();
     delete_range_table.id = 2;
@@ -184,7 +184,6 @@ async fn compaction_test(
     let store = HummockStorage::new(
         storage_opts.clone(),
         sstable_store.clone(),
-        BackupReader::unused(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
@@ -192,7 +191,7 @@ async fn compaction_test(
         compactor_metrics.clone(),
     )
     .await?;
-    let sstable_id_manager = store.sstable_id_manager().clone();
+    let sstable_object_id_manager = store.sstable_object_id_manager().clone();
     let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
     filter_key_extractor_manager.update(
         1,
@@ -212,7 +211,7 @@ async fn compaction_test(
         sstable_store,
         meta_client.clone(),
         filter_key_extractor_manager,
-        sstable_id_manager,
+        sstable_object_id_manager,
         compactor_metrics,
     );
     run_compare_result(&store, meta_client.clone(), test_range, test_count)
@@ -385,13 +384,14 @@ impl NormalState {
     async fn get_impl(&self, key: &[u8], ignore_range_tombstone: bool) -> Option<Bytes> {
         self.storage
             .get(
-                key,
+                Bytes::copy_from_slice(key),
                 ReadOptions {
                     prefix_hint: None,
                     ignore_range_tombstone,
                     retention_seconds: None,
                     table_id: self.table_id,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await
@@ -408,8 +408,8 @@ impl NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -417,6 +417,7 @@ impl NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -439,8 +440,8 @@ impl CheckState for NormalState {
             self.storage
                 .iter(
                     (
-                        Bound::Included(left.to_vec()),
-                        Bound::Excluded(right.to_vec()),
+                        Bound::Included(Bytes::copy_from_slice(left)),
+                        Bound::Excluded(Bytes::copy_from_slice(right)),
                     ),
                     ReadOptions {
                         prefix_hint: None,
@@ -448,6 +449,7 @@ impl CheckState for NormalState {
                         retention_seconds: None,
                         table_id: self.table_id,
                         read_version_from_backup: false,
+                        prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
                     },
                 )
                 .await
@@ -528,7 +530,7 @@ fn run_compactor_thread(
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    sstable_id_manager: Arc<SstableIdManager>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
@@ -543,7 +545,7 @@ fn run_compactor_thread(
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
         read_memory_limiter: MemoryLimiter::unlimit(),
-        sstable_id_manager,
+        sstable_object_id_manager,
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number: 4,

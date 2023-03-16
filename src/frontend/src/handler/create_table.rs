@@ -24,8 +24,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::{
-    ColumnIndex as ProstColumnIndex, Source as ProstSource, StreamSourceInfo, Table as ProstTable,
-    WatermarkDesc,
+    Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
 };
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -281,6 +280,7 @@ pub fn bind_sql_table_constraints(
 
 /// `gen_create_table_plan_with_source` generates the plan for creating a table with an external
 /// stream source.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn gen_create_table_plan_with_source(
     context: OptimizerContext,
     table_name: ObjectName,
@@ -289,9 +289,10 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_schema: SourceSchema,
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
+    append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner().clone().into_iter().collect();
+    let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -310,7 +311,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        &properties,
+        &mut properties,
         &mut row_id_index,
         &mut pk_column_ids,
         true,
@@ -321,11 +322,13 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         Some(source_info),
         definition,
         watermark_descs,
+        append_only,
         Some(col_id_gen.into_version()),
     )
 }
@@ -339,18 +342,22 @@ pub(crate) fn gen_create_table_plan(
     constraints: Vec<TableConstraint>,
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
 
+    let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         column_descs,
         pk_column_id_from_columns,
         constraints,
+        properties,
         definition,
         source_watermarks,
+        append_only,
         Some(col_id_gen.into_version()),
     )
 }
@@ -362,8 +369,10 @@ pub(crate) fn gen_create_table_plan_without_bind(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
+    properties: HashMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
     version: Option<TableVersion>,
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
     let (columns, pk_column_ids, row_id_index) =
@@ -380,11 +389,13 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         None,
         definition,
         watermark_descs,
+        append_only,
         version,
     )
 }
@@ -394,11 +405,13 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
+    properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
     definition: String,
     watermark_descs: Vec<WatermarkDesc>,
+    append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
 ) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
@@ -412,13 +425,13 @@ fn gen_table_plan_inner(
         schema_id,
         database_id,
         name: name.clone(),
-        row_id_index: row_id_index.map(|i| ProstColumnIndex { index: i as _ }),
+        row_id_index: row_id_index.map(|i| i as _),
         columns: columns
             .iter()
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone().into_iter().collect(),
+        properties,
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),
@@ -456,8 +469,6 @@ fn gen_table_plan_inner(
         out_names,
     );
 
-    let append_only = context.with_options().append_only();
-
     if append_only && row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
             "PRIMARY KEY constraint can not be appiled on a append only table.".to_owned(),
@@ -468,7 +479,7 @@ fn gen_table_plan_inner(
     if !append_only && !watermark_descs.is_empty() {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
-            "Set the option `appendonly=true`".to_owned(),
+            "Use the key words `APPEND ONLY`".to_owned(),
         )
         .into());
     }
@@ -489,6 +500,7 @@ fn gen_table_plan_inner(
     Ok((materialize.into(), source, table))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_create_table(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -497,6 +509,7 @@ pub async fn handle_create_table(
     if_not_exists: bool,
     source_schema: Option<SourceSchema>,
     source_watermarks: Vec<SourceWatermark>,
+    append_only: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
 
@@ -526,6 +539,7 @@ pub async fn handle_create_table(
                     source_schema,
                     source_watermarks,
                     col_id_gen,
+                    append_only,
                 )
                 .await?
             }
@@ -536,6 +550,7 @@ pub async fn handle_create_table(
                 constraints,
                 col_id_gen,
                 source_watermarks,
+                append_only,
             )?,
         };
         let mut graph = build_graph(plan);
@@ -621,7 +636,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_table_handler() {
-        let sql = "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) with (appendonly = true);";
+        let sql =
+            "create table t (v1 smallint, v2 struct<v3 bigint, v4 float, v5 double>) append only;";
         let frontend = LocalFrontend::new(Default::default()).await;
         frontend.run_sql(sql).await.unwrap();
 

@@ -31,7 +31,6 @@ use risingwave_pb::common::{batch_query_epoch, BatchQueryEpoch};
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
-use crate::key::user_key;
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
 
@@ -43,6 +42,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 
+pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
@@ -172,7 +172,7 @@ impl PartialEq for LocalSstableInfo {
 }
 
 /// Package read epoch of hummock, it be used for `wait_epoch`
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum HummockReadEpoch {
     /// We need to wait the `max_committed_epoch`
     Committed(HummockEpoch),
@@ -210,19 +210,19 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstIdRange {
+pub struct SstObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableId,
+    pub start_id: HummockSstableObjectId,
     // exclusive
-    pub end_id: HummockSstableId,
+    pub end_id: HummockSstableObjectId,
 }
 
-impl SstIdRange {
-    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+impl SstObjectIdRange {
+    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
         Self { start_id, end_id }
     }
 
-    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -230,8 +230,8 @@ impl SstIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
-        let next_id = self.peek_next_sst_id();
+    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
+        let next_id = self.peek_next_sst_object_id();
         self.start_id += 1;
         next_id
     }

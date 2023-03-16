@@ -20,6 +20,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::Values;
 
 use super::bind_context::Clause;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::Binder;
 use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 
@@ -27,6 +28,21 @@ use crate::expr::{align_types, CorrelatedId, Depth, ExprImpl};
 pub struct BoundValues {
     pub rows: Vec<Vec<ExprImpl>>,
     pub schema: Schema,
+}
+
+impl RewriteExprsRecursive for BoundValues {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        let new_rows = std::mem::take(&mut self.rows)
+            .into_iter()
+            .map(|exprs| {
+                exprs
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        self.rows = new_rows;
+    }
 }
 
 impl BoundValues {

@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::io::Write;
 
 use super::{OrderedF32, OrderedF64};
+use crate::array::serial_array::Serial;
 use crate::array::ArrayResult;
 
 pub trait NativeType:
@@ -39,6 +40,14 @@ impl NativeType for i32 {
 impl NativeType for i64 {
     fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write(&self.to_be_bytes()).map_err(Into::into)
+    }
+}
+
+impl NativeType for Serial {
+    fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
+        output
+            .write(&self.into_inner().to_be_bytes())
+            .map_err(Into::into)
     }
 }
 

@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use clap::StructOpt;
+use clap::Parser;
 use tempfile::TempPath;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -71,6 +71,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
                 "0.0.0.0:5691",
                 "--state-store",
                 "hummock+memory",
+                "--advertise-addr",
+                "127.0.0.1:5690",
                 "--connector-rpc-endpoint",
                 "127.0.0.1:50051",
             ])),
@@ -82,6 +84,8 @@ fn get_services(profile: &str) -> (Vec<RisingWaveService>, bool) {
             RisingWaveService::Meta(osstrs([
                 "--dashboard-host",
                 "0.0.0.0:5691",
+                "--advertise-addr",
+                "127.0.0.1:5690",
                 "--state-store",
                 "hummock+memory-shared",
             ])),

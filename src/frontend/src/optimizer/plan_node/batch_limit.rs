@@ -52,7 +52,7 @@ impl BatchLimit {
         let any_order = Order::any();
         let ensure_single_dist = RequiredDist::single().enforce_if_not_satisfies(
             batch_partial_limit.into(),
-            if self.order().field_order.is_empty() {
+            if self.order().column_orders.is_empty() {
                 &any_order
             } else {
                 self.order()
@@ -60,6 +60,14 @@ impl BatchLimit {
         )?;
         let batch_global_limit = self.clone_with_input(ensure_single_dist);
         Ok(batch_global_limit.into())
+    }
+
+    pub fn limit(&self) -> u64 {
+        self.logical.limit
+    }
+
+    pub fn offset(&self) -> u64 {
+        self.logical.offset
     }
 }
 

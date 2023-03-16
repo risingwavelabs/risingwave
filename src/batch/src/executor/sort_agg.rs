@@ -123,11 +123,11 @@ impl SortAggExecutor {
             if no_input_data && child_chunk.cardinality() > 0 {
                 no_input_data = false;
             }
-            let group_columns: Vec<_> = self
-                .group_key
-                .iter_mut()
-                .map(|expr| expr.eval(&child_chunk))
-                .try_collect()?;
+            let mut group_columns = Vec::with_capacity(self.group_key.len());
+            for expr in &mut self.group_key {
+                let result = expr.eval(&child_chunk).await?;
+                group_columns.push(result);
+            }
 
             let groups: Vec<_> = self
                 .sorted_groupers
@@ -153,7 +153,8 @@ impl SortAggExecutor {
                         &child_chunk,
                         start_row_idx,
                         end_row_idx,
-                    )?;
+                    )
+                    .await?;
                 }
                 Self::output_sorted_groupers(&mut self.sorted_groupers, &mut group_builders)?;
                 Self::output_agg_states(&mut self.agg_states, &mut agg_builders)?;
@@ -186,12 +187,8 @@ impl SortAggExecutor {
                     start_row_idx,
                     row_cnt,
                 )?;
-                Self::update_agg_states(
-                    &mut self.agg_states,
-                    &child_chunk,
-                    start_row_idx,
-                    row_cnt,
-                )?;
+                Self::update_agg_states(&mut self.agg_states, &child_chunk, start_row_idx, row_cnt)
+                    .await?;
             }
         }
 
@@ -228,16 +225,18 @@ impl SortAggExecutor {
             .map_err(Into::into)
     }
 
-    fn update_agg_states(
+    async fn update_agg_states(
         agg_states: &mut [BoxedAggState],
         child_chunk: &DataChunk,
         start_row_idx: usize,
         end_row_idx: usize,
     ) -> Result<()> {
-        agg_states
-            .iter_mut()
-            .try_for_each(|state| state.update_multi(child_chunk, start_row_idx, end_row_idx))
-            .map_err(Into::into)
+        for state in agg_states.iter_mut() {
+            state
+                .update_multi(child_chunk, start_row_idx, end_row_idx)
+                .await?;
+        }
+        Ok(())
     }
 
     fn output_sorted_groupers(
@@ -291,10 +290,10 @@ mod tests {
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::data::DataType as ProstDataType;
-    use risingwave_pb::expr::agg_call::{Arg, Type};
+    use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::InputRef;
-    use risingwave_pb::expr::{AggCall, ExprNode, InputRefExpr};
+    use risingwave_pb::expr::{AggCall, ExprNode, InputRef as ProstInputRef};
 
     use super::*;
     use crate::executor::test_utils::MockExecutor;
@@ -340,7 +339,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -434,7 +433,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -447,7 +446,7 @@ mod tests {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+                    rex_node: Some(RexNode::InputRef(idx as _)),
                 })
             })
             .try_collect()?;
@@ -551,8 +550,8 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: 0 }),
+            args: vec![ProstInputRef {
+                index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
@@ -563,7 +562,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -636,8 +635,8 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: 0 }),
+            args: vec![ProstInputRef {
+                index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
@@ -648,7 +647,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -661,7 +660,7 @@ mod tests {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+                    rex_node: Some(RexNode::InputRef(idx as _)),
                 })
             })
             .try_collect()?;
@@ -760,8 +759,8 @@ mod tests {
 
         let prost = AggCall {
             r#type: Type::Sum as i32,
-            args: vec![Arg {
-                input: Some(InputRefExpr { column_idx: 0 }),
+            args: vec![ProstInputRef {
+                index: 0,
                 r#type: Some(ProstDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
@@ -772,7 +771,7 @@ mod tests {
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -785,7 +784,7 @@ mod tests {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::InputRef(InputRefExpr { column_idx: idx })),
+                    rex_node: Some(RexNode::InputRef(idx as _)),
                 })
             })
             .try_collect()?;

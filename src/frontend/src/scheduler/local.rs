@@ -17,15 +17,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::executor::block_on;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
+use itertools::Itertools;
 use pgwire::pg_server::BoxedError;
+use rand::seq::SliceRandom;
 use risingwave_batch::executor::{BoxedDataChunkStream, ExecutorBuilder};
 use risingwave_batch::task::TaskId;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
 use risingwave_common::error::RwError;
+use risingwave_common::hash::ParallelUnitMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_cancel::{cancellable_stream, Tripwire};
 use risingwave_connector::source::SplitMetaData;
@@ -36,13 +38,14 @@ use risingwave_pb::batch_plan::{
     ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
     TaskId as ProstTaskId, TaskOutputId,
 };
+use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
-use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::debug;
 use uuid::Uuid;
 
-use super::plan_fragmenter::{PartitionInfo, QueryStageRef};
+use super::plan_fragmenter::{PartitionInfo, QueryStage, QueryStageRef};
+use crate::catalog::TableId;
 use crate::optimizer::plan_node::PlanNodeType;
 use crate::scheduler::plan_fragmenter::{ExecutionPlanNode, Query, StageId};
 use crate::scheduler::task_context::FrontendBatchTaskContext;
@@ -133,11 +136,10 @@ impl LocalQueryExecution {
             }
         };
 
-        if cfg!(madsim) {
-            tokio::spawn(future);
-        } else {
-            spawn_blocking(move || block_on(future));
-        }
+        #[cfg(madsim)]
+        tokio::spawn(future);
+        #[cfg(not(madsim))]
+        tokio::task::spawn_blocking(move || futures::executor::block_on(future));
 
         ReceiverStream::new(receiver)
     }
@@ -319,11 +321,7 @@ impl LocalQueryExecution {
                         epoch: Some(self.snapshot.get_batch_query_epoch()),
                     };
 
-                    let workers = if second_stage.parallelism.unwrap() == 1 {
-                        vec![self.front_env.worker_node_manager().next_random()?]
-                    } else {
-                        self.front_env.worker_node_manager().list_worker_nodes()
-                    };
+                    let workers = self.choose_worker(&second_stage)?;
                     *sources = workers
                         .iter()
                         .enumerate()
@@ -451,6 +449,45 @@ impl LocalQueryExecution {
                     node_body: Some(execution_plan_node.node.clone()),
                 })
             }
+        }
+    }
+
+    #[inline(always)]
+    fn get_vnode_mapping(&self, table_id: &TableId) -> Option<ParallelUnitMapping> {
+        self.front_env
+            .catalog_reader()
+            .read_guard()
+            .get_table_by_id(table_id)
+            .map(|table| {
+                self.front_env
+                    .worker_node_manager()
+                    .get_fragment_mapping(&table.fragment_id)
+            })
+            .ok()
+            .flatten()
+    }
+
+    fn choose_worker(&self, stage: &Arc<QueryStage>) -> SchedulerResult<Vec<WorkerNode>> {
+        if stage.parallelism.unwrap() == 1 {
+            if let NodeBody::Insert(insert_node) = &stage.root.node
+                && let Some(vnode_mapping) = self.get_vnode_mapping(&insert_node.table_id.into()) {
+                    let worker_node = {
+                        let parallel_unit_ids = vnode_mapping.iter_unique().collect_vec();
+                        let candidates = self.front_env
+                            .worker_node_manager()
+                            .get_workers_by_parallel_unit_ids(&parallel_unit_ids)?;
+                        candidates.choose(&mut rand::thread_rng()).unwrap().clone()
+                    };
+                    Ok(vec![worker_node])
+            } else {
+                Ok(vec![self.front_env.worker_node_manager().next_random()?])
+            }
+        } else {
+            let mut workers = Vec::with_capacity(stage.parallelism.unwrap() as usize);
+            for _ in 0..stage.parallelism.unwrap() {
+                workers.push(self.front_env.worker_node_manager().next_random()?);
+            }
+            Ok(workers)
         }
     }
 }
