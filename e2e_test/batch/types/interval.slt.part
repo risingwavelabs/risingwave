@@ -122,7 +122,9 @@ select '1 mons 1 days 00:00:00.0000001'::INTERVAL;
 
 # Tests moved from regress tests due to not matching exactly.
 
-# PostgreSQL outputs `-1 mons +1 day` while we output `-1 mons 1 day`.
+# In mixed sign intervals, PostgreSQL displays positive sign after negative
+# (e.g. `-1 mons +1 day`) while we display it without sign
+# (e.g. `-1 mons 1 day`).
 # But the main purpose of this test case is ordering of large values.
 
 statement ok

@@ -24,6 +24,7 @@ use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
+use static_assertions::const_assert;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -103,6 +104,8 @@ impl IntervalUnit {
         // Either `days` and `usecs` are of different signs, or we have already limited
         // `abs(days) < 30` above. It is impossible to overflow here because
         // `-29 + i64::MIN / USECS_PER_DAY > i32::MIN`
+        const_assert!(29 + i64::MAX / USECS_PER_DAY <= (i32::MAX as i64));
+        const_assert!(-29 + i64::MIN / USECS_PER_DAY >= (i32::MIN as i64));
         v.days += (v.usecs / USECS_PER_DAY) as i32;
         v.usecs %= USECS_PER_DAY;
 
@@ -547,8 +550,8 @@ impl std::fmt::Debug for IntervalUnitDisplay<'_> {
 /// alternate representative of the 2 examples above are '-45 days' and '-2075900865 months
 /// -2147483640 days'. The alternate representative interval always exists.
 ///
-/// For serialize, we could use any of 3. But justified interval requires (i33, i6, i38), and
-/// alternate representative interval is not intuitive.
+/// For serialize, we could use any of 3, with a workaround of using (i33, i6, i38) rather than
+/// (i32, i32, i64) to avoid overflow of the justified interval. We chose the `usecs: i128` option.
 ///
 /// For deserialize, we attempt justified interval first and fallback to alternate. This could give
 /// human friendly results in common cases and still guarantee no overflow, as long as the bytes
@@ -629,11 +632,19 @@ impl IntervalCmpValue {
                 let remaining_usecs = self.0;
                 let mut usecs = (remaining_usecs % (USECS_PER_DAY as i128)) as i64;
                 let mut remaining_days = remaining_usecs / (USECS_PER_DAY as i128);
+                // `usecs` is now smaller than `USECS_PER_DAY` but has 64 bits.
+                // How much more days (multiples of `USECS_PER_DAY`) can it hold before overflowing
+                // i64::MAX?
+                // It should also not exceed `remaining_days` to bring it from positive to negative.
+                // When `remaining_days` is larger than `i64::MAX`, just limit by `i64::MAX` (no-op)
                 let extra_days = ((i64::MAX - usecs) / USECS_PER_DAY)
                     .min(remaining_days.try_into().unwrap_or(i64::MAX));
+                // The lhs of `min` ensures `extra_days * USECS_PER_DAY <= i64::MAX - usecs`
                 usecs += extra_days * USECS_PER_DAY;
+                // The rhs of `min` ensures `extra_days <= remaining_days`
                 remaining_days -= extra_days as i128;
 
+                // Similar above
                 let mut days = (remaining_days % 30) as i32;
                 let mut remaining_months = remaining_days / 30;
                 let extra_months =
@@ -648,6 +659,8 @@ impl IntervalCmpValue {
                 let remaining_usecs = self.0;
                 let mut usecs = (remaining_usecs % (USECS_PER_DAY as i128)) as i64;
                 let mut remaining_days = remaining_usecs / (USECS_PER_DAY as i128);
+                // The negative case. Borrow negative `extra_days` to make `usecs` as close to
+                // `i64::MIN` as possible.
                 let extra_days = ((i64::MIN - usecs) / USECS_PER_DAY)
                     .max(remaining_days.try_into().unwrap_or(i64::MIN));
                 usecs += extra_days * USECS_PER_DAY;
