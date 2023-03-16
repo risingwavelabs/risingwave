@@ -923,6 +923,8 @@ where
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
         });
+        // TODO: there are some inconsistencies in the process of notifying the frontend, we need to
+        // support batch notification.
         to_update_views.iter().for_each(|view| {
             views.insert(view.id, view.clone());
         });

@@ -64,7 +64,6 @@ pub fn alter_relation_rename_refs(
     from: &str,
     to: &str,
 ) -> MetaResult<String> {
-    tracing::info!("alter_relation_rename_refs: {} {} {} {}", relation, definition, from, to);
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt = ast
         .into_iter()
@@ -102,7 +101,7 @@ pub fn alter_relation_rename_refs(
 /// Returns an ambiguous error if the new name is used as alias by the target relation.
 fn ambiguous_error(relation: &str, from: &str, to: &str) -> MetaError {
     MetaError::invalid_parameter(format!(
-        "Can't rename {from} to {to}, which is ambiguous and used by {relation}"
+        "Can't rename \'{from}\' to \'{to}\', which is ambiguous and used by relation \'{relation}\'"
     ))
 }
 
