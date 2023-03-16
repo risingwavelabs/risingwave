@@ -624,6 +624,20 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
+    /// Construct a [`FullKey`] from a byte slice without  `table_id` encoded.
+    pub fn from_slice_without_table_id(
+        table_id: TableId,
+        slice_without_table_id: &'a [u8],
+    ) -> Self {
+        let epoch_pos = slice_without_table_id.len() - EPOCH_LEN;
+        let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
+            epoch,
+        }
+    }
+
     /// Construct a [`FullKey`] from a byte slice.
     pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;

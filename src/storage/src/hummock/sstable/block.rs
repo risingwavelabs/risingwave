@@ -18,6 +18,7 @@ use std::mem::size_of;
 use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::KeyComparator;
 use {lz4, zstd};
@@ -142,9 +143,11 @@ pub struct Block {
     pub data: Bytes,
     /// Uncompressed entried data length.
     data_len: usize,
-    /// Restart points.
-    table_id: u32,
 
+    /// Table id of this block.
+    table_id: TableId,
+
+    /// Restart points.
     restart_points: Vec<RestartPoint>,
 }
 
@@ -237,7 +240,7 @@ impl Block {
             data: buf,
             data_len,
             restart_points,
-            table_id,
+            table_id: TableId::new(table_id),
         }
     }
 
@@ -249,10 +252,12 @@ impl Block {
     }
 
     pub fn capacity(&self) -> usize {
-        self.data.len() + self.restart_points.capacity() * std::mem::size_of::<u32>() + 4
+        self.data.len()
+            + self.restart_points.capacity() * std::mem::size_of::<u32>()
+            + std::mem::size_of::<u32>()
     }
 
-    pub fn table_id(&self) -> u32 {
+    pub fn table_id(&self) -> TableId {
         self.table_id
     }
 

@@ -15,9 +15,8 @@
 use std::cmp::Ordering;
 use std::ops::Range;
 
-use bytes::{Buf, BufMut, BytesMut};
-use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
+use bytes::BytesMut;
+use risingwave_hummock_sdk::key::FullKey;
 
 use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
@@ -77,11 +76,8 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        let table_id = TableId::new(self.block.table_id());
-        let epoch_pos = self.key[..].len() - EPOCH_LEN;
-        let epoch = (&self.key[epoch_pos..]).get_u64();
-        let user_key = UserKey::new(table_id, TableKey(&self.key[..epoch_pos]));
-        FullKey::from_user_key(user_key, epoch)
+
+        FullKey::from_slice_without_table_id(self.block.table_id(), &self.key[..])
     }
 
     pub fn value(&self) -> &[u8] {
@@ -252,10 +248,8 @@ impl BlockIterator {
                     let prefix =
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
-                    let mut buf: BytesMut = BytesMut::default();
-                    buf.put_u32(self.block.table_id());
-                    buf.put_slice(probe_key);
-                    let full_probe_key = FullKey::decode(&buf[..]);
+                    let full_probe_key =
+                        FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
                     match full_probe_key.cmp(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
