@@ -106,6 +106,6 @@ impl Source {
         builder.add_column(&value);
         builder.add_order_column(ordered_col_idx, OrderType::default_ascending());
 
-        builder.build(vec![])
+        builder.build(vec![], 1)
     }
 }

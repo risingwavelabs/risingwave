@@ -137,7 +137,7 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
     builder.set_vnode_col_idx(0);
     builder.set_value_indices(vec![1]);
 
-    builder.build(vec![0])
+    builder.build(vec![0], 1)
 }
 
 impl StreamNode for StreamWatermarkFilter {

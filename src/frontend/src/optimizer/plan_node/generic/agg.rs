@@ -196,33 +196,56 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             let mut included_upstream_indices = vec![]; // all upstream indices that are included in the state table
             let mut column_mapping = BTreeMap::new(); // key: upstream col idx, value: table col idx
             let mut table_value_indices = BTreeSet::new(); // table column indices of value columns
-            let mut add_column = |upstream_idx, order_type, is_value| {
-                column_mapping.entry(upstream_idx).or_insert_with(|| {
-                    let table_col_idx =
-                        internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
-                    if let Some(order_type) = order_type {
-                        internal_table_catalog_builder.add_order_column(table_col_idx, order_type);
+            let mut add_column =
+                |upstream_idx,
+                 order_type,
+                 is_value,
+                 internal_table_catalog_builder: &mut TableCatalogBuilder| {
+                    column_mapping.entry(upstream_idx).or_insert_with(|| {
+                        let table_col_idx =
+                            internal_table_catalog_builder.add_column(&in_fields[upstream_idx]);
+                        if let Some(order_type) = order_type {
+                            internal_table_catalog_builder
+                                .add_order_column(table_col_idx, order_type);
+                        }
+                        included_upstream_indices.push(upstream_idx);
+                        table_col_idx
+                    });
+                    if is_value {
+                        // note that some indices may be added before as group keys which are not
+                        // value
+                        table_value_indices.insert(column_mapping[&upstream_idx]);
                     }
-                    included_upstream_indices.push(upstream_idx);
-                    table_col_idx
-                });
-                if is_value {
-                    // note that some indices may be added before as group keys which are not value
-                    table_value_indices.insert(column_mapping[&upstream_idx]);
-                }
-            };
+                };
 
             for &idx in &self.group_key {
-                add_column(idx, Some(OrderType::default_ascending()), false);
+                add_column(
+                    idx,
+                    Some(OrderType::default_ascending()),
+                    false,
+                    &mut internal_table_catalog_builder,
+                );
             }
+            let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
+
             for (order_type, idx) in sort_keys {
-                add_column(idx, Some(order_type), true);
+                add_column(
+                    idx,
+                    Some(order_type),
+                    true,
+                    &mut internal_table_catalog_builder,
+                );
             }
             for &idx in &in_pks {
-                add_column(idx, Some(OrderType::default_ascending()), true);
+                add_column(
+                    idx,
+                    Some(OrderType::default_ascending()),
+                    true,
+                    &mut internal_table_catalog_builder,
+                );
             }
             for idx in include_keys {
-                add_column(idx, None, true);
+                add_column(idx, None, true, &mut internal_table_catalog_builder);
             }
 
             let mapping =
@@ -232,16 +255,13 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
 
-            // prefix_len_hint should be the length of deduplicated group key because pk is
-            // deduplicated.
-            let prefix_len = self.group_key.iter().unique().count();
-            internal_table_catalog_builder.set_read_prefix_len_hint(prefix_len);
             // set value indices to reduce ser/de overhead
             let table_value_indices = table_value_indices.into_iter().collect_vec();
             internal_table_catalog_builder.set_value_indices(table_value_indices.clone());
 
             MaterializedInputState {
-                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
+                table: internal_table_catalog_builder
+                    .build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
                 included_upstream_indices,
                 table_value_indices,
             }
@@ -258,8 +278,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .add_order_column(tb_column_idx, OrderType::default_ascending());
                 included_upstream_indices.push(idx);
             }
-
-            internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
+            let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
 
             match agg_kind {
                 AggKind::ApproxCountDistinct => {
@@ -288,7 +307,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 internal_table_catalog_builder.set_vnode_col_idx(tb_vnode_idx);
             }
             TableState {
-                table: internal_table_catalog_builder.build(tb_dist.unwrap_or_default()),
+                table: internal_table_catalog_builder
+                    .build(tb_dist.unwrap_or_default(), read_prefix_len_hint),
             }
         };
 
@@ -372,7 +392,8 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .add_order_column(tb_column_idx, OrderType::default_ascending());
             }
         }
-        internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
+        let read_prefix_len_hint = self.group_key.len();
+
         let mapping = self.i2o_col_mapping();
         let tb_dist = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
         if let Some(tb_vnode_idx) = vnode_col_idx.and_then(|idx| mapping.try_map(idx)) {
@@ -383,7 +404,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
         // of this table should skip group_key.len().
         internal_table_catalog_builder
             .set_value_indices((self.group_key.len()..out_fields.len()).collect());
-        internal_table_catalog_builder.build(tb_dist)
+        internal_table_catalog_builder.build(tb_dist, read_prefix_len_hint)
     }
 
     /// Infer dedup tables for distinct agg calls, partitioned by distinct columns.
@@ -420,6 +441,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
                     table_builder.add_order_column(table_col_idx, OrderType::default_ascending());
                 }
+                let read_prefix_len_hint = table_builder.get_current_pk_len();
 
                 // Agg calls with same distinct column share the same dedup table, but they may have
                 // different filter conditions, so the count of occurrence of one distinct key may
@@ -440,7 +462,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     table_builder.set_vnode_col_idx(idx);
                 }
                 let dist_key = mapping.rewrite_dist_key(&in_dist_key).unwrap_or_default();
-                let table = table_builder.build(dist_key);
+                let table = table_builder.build(dist_key, read_prefix_len_hint);
                 (distinct_col, table)
             })
             .collect()

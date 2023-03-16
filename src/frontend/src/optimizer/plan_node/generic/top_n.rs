@@ -62,6 +62,7 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             order_cols.insert(idx);
         });
 
+        let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
         column_orders.iter().for_each(|order| {
             if !order_cols.contains(&order.column_index) {
                 internal_table_catalog_builder
@@ -81,9 +82,10 @@ impl<PlanRef: stream::StreamPlanRef> TopN<PlanRef> {
             internal_table_catalog_builder.set_vnode_col_idx(vnode_col_idx);
         }
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(self.group_key.len());
-        internal_table_catalog_builder
-            .build(self.input.distribution().dist_column_indices().to_vec())
+        internal_table_catalog_builder.build(
+            self.input.distribution().dist_column_indices().to_vec(),
+            read_prefix_len_hint,
+        )
     }
 }
 
