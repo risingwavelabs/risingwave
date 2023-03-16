@@ -110,6 +110,19 @@ impl OrderType {
         }
     }
 
+    pub fn from_bools(asc: Option<bool>, nulls_first: Option<bool>) -> Self {
+        let direction = match asc {
+            None => Direction::default(),
+            Some(true) => Direction::Ascending,
+            Some(false) => Direction::Descending,
+        };
+        match nulls_first {
+            None => Self::new(direction, NullsAre::default()),
+            Some(true) => Self::nulls_first(direction),
+            Some(false) => Self::nulls_last(direction),
+        }
+    }
+
     pub fn ascending(nulls_are: NullsAre) -> Self {
         Self {
             direction: Direction::Ascending,

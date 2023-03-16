@@ -27,7 +27,7 @@ use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
 
 use super::RwPgResponse;
-use crate::binder::{derive_order_type_from_order_by_expr, Binder};
+use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::expr::{Expr, ExprImpl, InputRef};
 use crate::handler::privilege::ObjectCheckItem;
@@ -337,7 +337,7 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            let order_type = derive_order_type_from_order_by_expr(&column);
+            let order_type = OrderType::from_bools(column.asc, column.nulls_first);
 
             use risingwave_sqlparser::ast::Expr;
 

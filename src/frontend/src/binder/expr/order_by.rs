@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
-use crate::binder::derive_order_type_from_order_by_expr;
 use crate::expr::OrderByExpr as BoundOrderByExpr;
 use crate::Binder;
 
@@ -28,10 +28,14 @@ impl Binder {
     /// output-column names or numbers are not allowed here.
     pub(super) fn bind_order_by_expr(
         &mut self,
-        order_by_expr: OrderByExpr,
+        OrderByExpr {
+            expr,
+            asc,
+            nulls_first,
+        }: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        let order_type = derive_order_type_from_order_by_expr(&order_by_expr);
-        let expr = self.bind_expr(order_by_expr.expr)?;
+        let order_type = OrderType::from_bools(asc, nulls_first);
+        let expr = self.bind_expr(expr)?;
         Ok(BoundOrderByExpr { expr, order_type })
     }
 }

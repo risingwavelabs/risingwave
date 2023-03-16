@@ -24,7 +24,6 @@ use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
 mod bind_param;
-mod common;
 mod create;
 mod delete;
 mod expr;
@@ -39,7 +38,6 @@ mod update;
 mod values;
 
 pub use bind_context::{BindContext, LateralBindContext};
-pub(crate) use common::derive_order_type_from_order_by_expr;
 pub use delete::BoundDelete;
 pub use expr::{bind_data_type, bind_struct_field};
 pub use insert::BoundInsert;
