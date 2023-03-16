@@ -22,8 +22,8 @@ use crate::array::{ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
 use crate::row::{OwnedRow, Row};
 use crate::types::{
-    DataType, Datum, DatumRef, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarImpl, ToDatumRef,
+    DataType, Datum, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64, ScalarImpl, ToDatumRef,
 };
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -66,20 +66,6 @@ pub(crate) fn serialize_datum_in_composite(
     Ok(())
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
-fn serialize_datum_not_null(
-    datum: impl ToDatumRef,
-    order: OrderType,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    serializer.set_reverse(order.is_descending());
-    datum
-        .to_datum_ref()
-        .as_ref()
-        .expect("datum cannot be null")
-        .serialize(serializer)
-}
-
 pub(crate) fn deserialize_datum(
     ty: &DataType,
     order: OrderType,
@@ -114,16 +100,6 @@ pub(crate) fn deserialize_datum_in_composite(
     } else {
         Err(memcomparable::Error::InvalidTagEncoding(null_tag as _))
     }
-}
-
-#[cfg_attr(not(test), expect(dead_code))]
-fn deserialize_datum_not_null(
-    ty: &DataType,
-    order: OrderType,
-    deserializer: &mut memcomparable::Deserializer<impl Buf>,
-) -> memcomparable::Result<Datum> {
-    deserializer.set_reverse(order.is_descending());
-    Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
 }
 
 /// Deserialize the `data_size` of `input_data_type` in `memcmp_encoding`. This function will
@@ -207,7 +183,7 @@ fn calculate_encoded_size_inner(
     Ok(deserializer.position() - base_position)
 }
 
-pub fn encode_value(value: DatumRef<'_>, order: OrderType) -> Result<Vec<u8>> {
+pub fn encode_value(value: impl ToDatumRef, order: OrderType) -> Result<Vec<u8>> {
     let mut serializer = memcomparable::Serializer::new(vec![]);
     serialize_datum(value, order, &mut serializer)?;
     Ok(serializer.into_inner())
@@ -277,32 +253,89 @@ mod tests {
     use crate::array::DataChunk;
     use crate::row::OwnedRow;
     use crate::types::{DataType, OrderedF32, ScalarImpl};
-    use crate::util::sort_util::{ColumnOrder, OrderType};
-
-    fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        serialize_datum_not_null(
-            &Some(ScalarImpl::Int64(data)),
-            OrderType::default(),
-            &mut serializer,
-        )
-        .unwrap();
-        serializer.into_inner()
-    }
+    use crate::util::sort_util::{ColumnOrder, Direction, OrderType};
 
     #[test]
     fn test_memcomparable() {
-        let memcmp_minus_1 = serialize_datum_not_null_into_vec(-1);
-        let memcmp_3874 = serialize_datum_not_null_into_vec(3874);
-        let memcmp_45745 = serialize_datum_not_null_into_vec(45745);
-        let memcmp_21234 = serialize_datum_not_null_into_vec(21234);
-        assert!(memcmp_3874 < memcmp_45745);
-        assert!(memcmp_3874 < memcmp_21234);
-        assert!(memcmp_21234 < memcmp_45745);
+        fn encode_num(num: Option<i32>, order_type: OrderType) -> Vec<u8> {
+            encode_value(num.map(ScalarImpl::from), order_type).unwrap()
+        }
 
-        assert!(memcmp_minus_1 < memcmp_3874);
-        assert!(memcmp_minus_1 < memcmp_21234);
-        assert!(memcmp_minus_1 < memcmp_45745);
+        {
+            // default ascending
+            let order_type = OrderType::default_ascending();
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_45745 = encode_num(Some(45745), order_type);
+            let memcmp_i32_min = encode_num(Some(i32::MIN), order_type);
+            let memcmp_i32_max = encode_num(Some(i32::MAX), order_type);
+            let memcmp_none = encode_num(None, order_type);
+
+            assert!(memcmp_3874 < memcmp_45745);
+            assert!(memcmp_3874 < memcmp_i32_max);
+            assert!(memcmp_45745 < memcmp_i32_max);
+
+            assert!(memcmp_i32_min < memcmp_i32_max);
+            assert!(memcmp_i32_min < memcmp_3874);
+            assert!(memcmp_i32_min < memcmp_45745);
+
+            assert!(memcmp_minus_1 < memcmp_3874);
+            assert!(memcmp_minus_1 < memcmp_45745);
+            assert!(memcmp_minus_1 < memcmp_i32_max);
+            assert!(memcmp_minus_1 > memcmp_i32_min);
+
+            assert!(memcmp_none > memcmp_minus_1);
+            assert!(memcmp_none > memcmp_3874);
+            assert!(memcmp_none > memcmp_i32_min);
+            assert!(memcmp_none > memcmp_i32_max);
+        }
+        {
+            // default descending
+            let order_type = OrderType::default_descending();
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_none = encode_num(None, order_type);
+
+            assert!(memcmp_none < memcmp_minus_1);
+            assert!(memcmp_none < memcmp_3874);
+            assert!(memcmp_3874 < memcmp_minus_1);
+        }
+        {
+            // ASC NULLS FIRST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_none = encode_num(None, order_type);
+            assert!(memcmp_none < memcmp_minus_1);
+            assert!(memcmp_none < memcmp_3874);
+        }
+        {
+            // ASC NULLS LAST (NULLS LARGEST)
+            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_none = encode_num(None, order_type);
+            assert!(memcmp_none > memcmp_minus_1);
+            assert!(memcmp_none > memcmp_3874);
+        }
+        {
+            // DESC NULLS FIRST (NULLS LARGEST)
+            let order_type = OrderType::nulls_first(Direction::Descending);
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_none = encode_num(None, order_type);
+            assert!(memcmp_none < memcmp_minus_1);
+            assert!(memcmp_none < memcmp_3874);
+        }
+        {
+            // DESC NULLS LAST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_last(Direction::Descending);
+            let memcmp_minus_1 = encode_num(Some(-1), order_type);
+            let memcmp_3874 = encode_num(Some(3874), order_type);
+            let memcmp_none = encode_num(None, order_type);
+            assert!(memcmp_none > memcmp_minus_1);
+            assert!(memcmp_none > memcmp_3874);
+        }
     }
 
     #[test]
@@ -311,21 +344,14 @@ mod tests {
         use rand::seq::SliceRandom;
 
         fn serialize(f: OrderedF32) -> Vec<u8> {
-            let mut serializer = memcomparable::Serializer::new(vec![]);
-            serialize_datum_not_null(&Some(f.into()), OrderType::default(), &mut serializer)
-                .unwrap();
-            serializer.into_inner()
+            encode_value(&Some(ScalarImpl::from(f)), OrderType::default()).unwrap()
         }
 
         fn deserialize(data: Vec<u8>) -> OrderedF32 {
-            let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
-            let datum = deserialize_datum_not_null(
-                &DataType::Float32,
-                OrderType::default(),
-                &mut deserializer,
-            )
-            .unwrap();
-            datum.unwrap().try_into().unwrap()
+            decode_value(&DataType::Float32, &data, OrderType::default())
+                .unwrap()
+                .unwrap()
+                .into_float32()
         }
 
         let floats = vec![
