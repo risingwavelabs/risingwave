@@ -101,11 +101,10 @@ impl ConnectorSource {
             let data_gen_columns = Some(
                 columns
                     .iter()
-                    .filter(|col| col.is_visible())
-                    .cloned()
                     .map(|col| Column {
-                        name: col.name,
-                        data_type: col.data_type,
+                        name: col.name.clone(),
+                        data_type: col.data_type.clone(),
+                        is_visible: col.is_visible(),
                     })
                     .collect_vec(),
             );
