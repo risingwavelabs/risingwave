@@ -23,7 +23,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{generate_internal_table_name_with_type, TableId};
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::table_fragments::Fragment;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
     Parallelism, StreamFragment, StreamFragmentEdge as StreamFragmentEdgeProto,
@@ -53,6 +52,9 @@ pub(super) struct BuildingFragment {
 
     /// The ID of the job if it's materialized in this fragment.
     table_id: Option<u32>,
+
+    /// The required columns of each upstream table.
+    upstream_table_columns: HashMap<TableId, Vec<i32>>,
 }
 
 impl BuildingFragment {
@@ -70,11 +72,13 @@ impl BuildingFragment {
         };
         let internal_tables = Self::fill_internal_tables(&mut fragment, job, table_id_gen);
         let table_id = Self::fill_job(&mut fragment, job).then(|| job.id());
+        let upstream_table_columns = Self::extract_upstream_table_columns(&mut fragment);
 
         Self {
             inner: fragment,
             internal_tables,
             table_id,
+            upstream_table_columns,
         }
     }
 
@@ -139,6 +143,28 @@ impl BuildingFragment {
 
         has_table
     }
+
+    /// Extract the required columns (in IDs) of each upstream table.
+    fn extract_upstream_table_columns(
+        // TODO: no need to take `&mut` here
+        fragment: &mut StreamFragment,
+    ) -> HashMap<TableId, Vec<i32>> {
+        let mut table_columns = HashMap::new();
+
+        visit::visit_fragment(fragment, |node_body| {
+            if let NodeBody::Chain(chain_node) = node_body {
+                let table_id = chain_node.table_id.into();
+                let column_ids = chain_node.upstream_column_ids.clone();
+                table_columns
+                    .try_insert(table_id, column_ids)
+                    .expect("currently there should be no two same upstream tables in a fragment");
+            }
+        });
+
+        assert_eq!(table_columns.len(), fragment.upstream_table_ids.len());
+
+        table_columns
+    }
 }
 
 impl Deref for BuildingFragment {
@@ -164,7 +190,7 @@ pub(super) enum EdgeId {
     /// MV on MV.
     UpstreamExternal {
         /// The ID of the upstream table or materialized view.
-        upstream_table_id: u32,
+        upstream_table_id: TableId,
         /// The ID of the downstream fragment.
         downstream_fragment_id: GlobalFragmentId,
     },
@@ -412,17 +438,34 @@ impl CompleteStreamFragmentGraph {
         // Build the extra edges between the upstream `Materialize` and the downstream `Chain` of
         // the new materialized view.
         for (&id, fragment) in &graph.fragments {
-            for &upstream_table_id in &fragment.upstream_table_ids {
+            for (&upstream_table_id, output_columns) in &fragment.upstream_table_columns {
                 let mview_fragment = upstream_mview_fragments
-                    .get(&TableId::new(upstream_table_id))
+                    .get(&upstream_table_id)
                     .context("upstream materialized view fragment not found")?;
                 let mview_id = GlobalFragmentId::new(mview_fragment.fragment_id);
 
-                // TODO: only output the fields that are used by the downstream `Chain`.
-                // https://github.com/risingwavelabs/risingwave/issues/4529
-                let mview_output_indices = {
-                    let nodes = mview_fragment.actors[0].nodes.as_ref().unwrap();
-                    (0..nodes.fields.len() as u32).collect()
+                // Resolve the required output columns from the upstream materialized view.
+                let output_indices = {
+                    let nodes = mview_fragment.actors[0].get_nodes().unwrap();
+                    let mview_node = nodes.get_node_body().unwrap().as_materialize().unwrap();
+                    let all_column_ids = mview_node
+                        .get_table()
+                        .unwrap()
+                        .columns
+                        .iter()
+                        .map(|c| c.column_desc.as_ref().unwrap().column_id)
+                        .collect_vec();
+
+                    output_columns
+                        .iter()
+                        .map(|c| {
+                            all_column_ids
+                                .iter()
+                                .position(|&id| id == *c)
+                                .map(|i| i as u32)
+                        })
+                        .collect::<Option<Vec<_>>>()
+                        .context("column not found in the upstream materialized view")?
                 };
 
                 let edge = StreamFragmentEdge {
@@ -434,8 +477,8 @@ impl CompleteStreamFragmentGraph {
                     // and the downstream `Chain` of the new materialized view.
                     dispatch_strategy: DispatchStrategy {
                         r#type: DispatcherType::NoShuffle as _,
-                        dist_key_indices: vec![], // not used
-                        output_indices: mview_output_indices,
+                        dist_key_indices: vec![], // not used for `NoShuffle`
+                        output_indices,
                     },
                 };
 
@@ -602,13 +645,10 @@ impl CompleteStreamFragmentGraph {
             inner,
             internal_tables,
             table_id,
+            upstream_table_columns: _,
         } = self.get_fragment(id).into_building().unwrap();
 
-        let distribution_type = if inner.is_singleton {
-            FragmentDistributionType::Single
-        } else {
-            FragmentDistributionType::Hash
-        } as i32;
+        let distribution_type = distribution.to_distribution_type() as i32;
 
         let state_table_ids = internal_tables
             .iter()

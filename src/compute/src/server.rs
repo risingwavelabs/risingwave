@@ -57,10 +57,10 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::memory_management::memory_control_policy_from_config;
 use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
-use crate::memory_management::policy::memory_control_policy_from_config;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
@@ -179,7 +179,7 @@ pub async fn compute_node_serve(
 
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
-        extra_info_sources.push(storage.sstable_id_manager().clone());
+        extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
@@ -194,7 +194,7 @@ pub async fn compute_node_serve(
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 read_memory_limiter,
-                sstable_id_manager: storage.sstable_id_manager().clone(),
+                sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
                     CompactorRuntimeConfig {
@@ -214,6 +214,7 @@ pub async fn compute_node_serve(
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
+        let system_params_manager = system_params_manager.clone();
         tokio::spawn(async move {
             backup_reader
                 .watch_config_change(system_params_manager.watch_params())
@@ -295,6 +296,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store,
         dml_mgr,
+        system_params_manager,
         source_metrics,
     );
 

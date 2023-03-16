@@ -19,7 +19,7 @@ use fail::fail_point;
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::{
-    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableId,
+    ExtendedSstableInfo, HummockContextId, HummockEpoch, HummockSstableObjectId,
 };
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{HummockVersion, ValidationTask};
@@ -131,7 +131,7 @@ where
         &self,
         epoch: HummockEpoch,
         sstables: &Vec<ExtendedSstableInfo>,
-        sst_to_context: &HashMap<HummockSstableId, HummockContextId>,
+        sst_to_context: &HashMap<HummockSstableObjectId, HummockContextId>,
         current_version: &HummockVersion,
     ) -> Result<()> {
         for (sst_id, context_id) in sst_to_context {

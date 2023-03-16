@@ -91,15 +91,11 @@ impl SstableStreamIterator {
 
         if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
             block_iter.seek(seek_key);
+
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;
             }
-        }
-
-        if self.block_iter.is_none() {
-            // End of stream.
-            self.remaining_blocks = 0;
         }
 
         Ok(())
@@ -180,8 +176,11 @@ impl SstableStreamIterator {
 
     fn sst_debug_info(&self) -> String {
         format!(
-            "sst_id={}, meta_offset={}, table_ids={:?}",
-            self.sstable_info.id, self.sstable_info.meta_offset, self.sstable_info.table_ids
+            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
+            self.sstable_info.get_object_id(),
+            self.sstable_info.get_sst_id(),
+            self.sstable_info.meta_offset,
+            self.sstable_info.table_ids
         )
     }
 }
@@ -392,12 +391,12 @@ mod tests {
     async fn test_concat_iterator() {
         let sstable_store = mock_sstable_store();
         let mut table_infos = vec![];
-        for sst_id in 0..3 {
-            let start_index = sst_id * TEST_KEYS_COUNT;
-            let end_index = (sst_id + 1) * TEST_KEYS_COUNT;
+        for object_id in 0..3 {
+            let start_index = object_id * TEST_KEYS_COUNT;
+            let end_index = (object_id + 1) * TEST_KEYS_COUNT;
             let table = gen_test_sstable(
                 default_builder_opt_for_test(),
-                sst_id as u64,
+                object_id as u64,
                 (start_index..end_index)
                     .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
                 sstable_store.clone(),
@@ -492,12 +491,12 @@ mod tests {
     async fn test_concat_iterator_seek_idx() {
         let sstable_store = mock_sstable_store();
         let mut table_infos = vec![];
-        for sst_id in 0..3 {
-            let start_index = sst_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
-            let end_index = (sst_id + 1) * TEST_KEYS_COUNT;
+        for object_id in 0..3 {
+            let start_index = object_id * TEST_KEYS_COUNT + TEST_KEYS_COUNT / 2;
+            let end_index = (object_id + 1) * TEST_KEYS_COUNT;
             let table = gen_test_sstable(
                 default_builder_opt_for_test(),
-                sst_id as u64,
+                object_id as u64,
                 (start_index..end_index)
                     .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
                 sstable_store.clone(),

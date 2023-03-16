@@ -80,13 +80,14 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayDistinctExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for ArrayDistinctExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.array.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let array = self.array.eval_checked(input).await?;
         let mut builder = self.return_type.create_array_builder(array.len());
         for (vis, arr) in input.vis().iter().zip_eq_fast(array.iter()) {
             if !vis {
@@ -98,8 +99,8 @@ impl Expression for ArrayDistinctExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let array_data = self.array.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let array_data = self.array.eval_row(input).await?;
         Ok(self.evaluate(array_data.to_datum_ref()))
     }
 }
@@ -226,8 +227,8 @@ mod tests {
         .boxed()
     }
 
-    #[test]
-    fn test_array_distinct_array_of_primitives() {
+    #[tokio::test]
+    async fn test_array_distinct_array_of_primitives() {
         let array = make_i64_array_expr(vec![42, 43, 42]);
         let expr = ArrayDistinctExpression {
             return_type: DataType::List {
@@ -250,6 +251,7 @@ mod tests {
         ];
         let actual = expr
             .eval(&chunk)
+            .await
             .unwrap()
             .iter()
             .map(|v| v.map(|s| s.into_scalar_impl()))

@@ -217,10 +217,11 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
 
     /// Transform this vnode mapping to another type of vnode mapping, with the given mapping from
     /// items of this mapping to items of the other mapping.
-    pub fn transform<T2: VnodeMappingItem>(
-        &self,
-        to_map: &HashMap<T::Item, T2::Item>,
-    ) -> VnodeMapping<T2> {
+    pub fn transform<T2, M>(&self, to_map: &M) -> VnodeMapping<T2>
+    where
+        T2: VnodeMappingItem,
+        M: for<'a> Index<&'a T::Item, Output = T2::Item>,
+    {
         VnodeMapping {
             original_indices: self.original_indices.clone(),
             data: self.data.iter().map(|item| to_map[item]).collect(),

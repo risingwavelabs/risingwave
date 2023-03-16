@@ -24,13 +24,11 @@ use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::common::InfallibleExpression;
 
 pub struct HopWindowExecutor {
     ctx: ActorContextRef,
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,
-
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
@@ -145,18 +143,22 @@ impl HopWindowExecutor {
                     for i in 0..units {
                         let window_start_col = if output_indices.contains(&window_start_col_index) {
                             Some(
-                                self.window_start_exprs[i].eval_infallible(&data_chunk, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                }),
+                                self.window_start_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
                             )
                         } else {
                             None
                         };
                         let window_end_col = if output_indices.contains(&window_end_col_index) {
                             Some(
-                                self.window_end_exprs[i].eval_infallible(&data_chunk, |err| {
-                                    ctx.on_compute_error(err, &info.identity)
-                                }),
+                                self.window_end_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
                             )
                         } else {
                             None
@@ -227,8 +229,15 @@ mod tests {
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-        let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+        let window_offset = IntervalUnit::from_minutes(0);
+        let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
+            DataType::Timestamp,
+            2,
+            window_size,
+            window_slide,
+            window_offset,
+        )
+        .unwrap();
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
@@ -343,8 +352,10 @@ mod tests {
 
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
+        let offset = IntervalUnit::from_minutes(0);
         let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide, offset)
+                .unwrap();
 
         (
             tx,

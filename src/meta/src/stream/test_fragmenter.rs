@@ -209,7 +209,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_id: 2,
         node: Some(source_node),
         fragment_type_mask: FragmentTypeFlag::Source as u32,
-        is_singleton: false,
+        requires_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
     });
@@ -280,7 +280,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_id: 1,
         node: Some(simple_agg_node),
         fragment_type_mask: FragmentTypeFlag::FragmentUnspecified as u32,
-        is_singleton: false,
+        requires_singleton: false,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
     });
@@ -368,7 +368,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fragment_id: 0,
         node: Some(mview_node),
         fragment_type_mask: FragmentTypeFlag::Mview as u32,
-        is_singleton: true,
+        requires_singleton: true,
         table_ids_cnt: 0,
         upstream_table_ids: vec![],
     });

@@ -111,10 +111,14 @@ impl FunctionCall {
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(
-        child: ExprImpl,
+        mut child: ExprImpl,
         target: DataType,
         allows: CastContext,
     ) -> Result<ExprImpl, CastError> {
+        if let ExprImpl::Parameter(expr) = &mut child && !expr.has_infer() {
+            expr.cast_infer_type(target);
+            return Ok(child);
+        }
         if is_row_function(&child) {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct

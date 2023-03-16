@@ -15,6 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
+use risingwave_common::catalog::Field;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
 
@@ -125,21 +126,57 @@ impl StreamNode for StreamIndexScan {
 }
 
 impl StreamIndexScan {
+    // TODO: this method is almost the same as `StreamTableScan::adhoc_to_stream_prost`, we should
+    // avoid duplication.
     pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
-        use risingwave_pb::plan_common::*;
         use risingwave_pb::stream_plan::*;
+
+        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
+
+        // The required columns from the table (both scan and upstream).
+        let upstream_column_ids = match self.chain_type {
+            // For backfill, we additionally need the primary key columns.
+            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
+            ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
+                self.logical.output_column_ids()
+            }
+            ChainType::ChainUnspecified => unreachable!(),
+        }
+        .iter()
+        .map(ColumnId::get_id)
+        .collect_vec();
+
+        // The schema of the upstream table (both scan and upstream).
+        let upstream_schema = upstream_column_ids
+            .iter()
+            .map(|&id| {
+                let col = self
+                    .logical
+                    .table_desc()
+                    .columns
+                    .iter()
+                    .find(|c| c.column_id.get_id() == id)
+                    .unwrap();
+                Field::from(col).to_prost()
+            })
+            .collect_vec();
+
+        let output_indices = self
+            .logical
+            .output_column_ids()
+            .iter()
+            .map(|i| {
+                upstream_column_ids
+                    .iter()
+                    .position(|&x| x == i.get_id())
+                    .unwrap() as u32
+            })
+            .collect_vec();
 
         let batch_plan_node = BatchPlanNode {
             table_desc: Some(self.logical.table_desc().to_protobuf()),
-            column_ids: self
-                .logical
-                .output_column_ids()
-                .iter()
-                .map(ColumnId::get_id)
-                .collect(),
+            column_ids: upstream_column_ids.clone(),
         };
-
-        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
         ProstStreamPlan {
             fields: self.schema().to_prost(),
@@ -148,54 +185,25 @@ impl StreamIndexScan {
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: self
-                        .logical
-                        .table_desc()
-                        .columns
-                        .iter()
-                        .map(|c| risingwave_common::catalog::Field::from(c).to_prost())
-                        .collect(),
-                    stream_key: self
-                        .logical
-                        .table_desc()
-                        .stream_key
-                        .iter()
-                        .map(|i| *i as _)
-                        .collect(),
+                    fields: upstream_schema.clone(),
+                    stream_key: vec![], // not used
                     ..Default::default()
                 },
                 ProstStreamPlan {
                     node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
-                    stream_key: stream_key.clone(),
                     input: vec![],
-                    fields: vec![], // TODO: fill this later
+                    fields: upstream_schema,
+                    stream_key: vec![], // not used
                     append_only: true,
                 },
             ],
             node_body: Some(ProstStreamNode::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 chain_type: self.chain_type as i32,
-                // The fields from upstream
-                upstream_fields: self
-                    .logical
-                    .table_desc()
-                    .columns
-                    .iter()
-                    .map(|x| Field {
-                        data_type: Some(x.data_type.to_protobuf()),
-                        name: x.name.clone(),
-                    })
-                    .collect(),
-                // The column idxs need to be forwarded to the downstream
-                upstream_column_indices: self
-                    .logical
-                    .output_column_indices()
-                    .iter()
-                    .map(|&i| i as _)
-                    .collect(),
-                is_singleton: false,
+                output_indices,
+                upstream_column_ids,
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
             stream_key,

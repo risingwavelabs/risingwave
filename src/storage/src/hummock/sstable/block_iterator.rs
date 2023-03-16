@@ -17,9 +17,8 @@ use std::ops::Range;
 
 use bytes::BytesMut;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
-use super::KeyPrefix;
+use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
 
 /// [`BlockIterator`] is used to read kv pairs in a block.
@@ -36,6 +35,9 @@ pub struct BlockIterator {
     value_range: Range<usize>,
     /// Current entry len.
     entry_len: usize,
+
+    last_key_len_type: LenType,
+    last_value_len_type: LenType,
 }
 
 impl BlockIterator {
@@ -47,6 +49,8 @@ impl BlockIterator {
             key: BytesMut::default(),
             value_range: 0..0,
             entry_len: 0,
+            last_key_len_type: LenType::u8,
+            last_value_len_type: LenType::u8,
         }
     }
 
@@ -72,7 +76,8 @@ impl BlockIterator {
 
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        FullKey::decode(&self.key)
+
+        FullKey::from_slice_without_table_id(self.block.table_id(), &self.key[..])
     }
 
     pub fn value(&self) -> &[u8] {
@@ -94,19 +99,19 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        self.seek_restart_point_by_key(key);
+
+        self.next_until_key(key);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        self.seek_restart_point_by_key(key);
+
+        self.next_until_key(key);
         if !self.is_valid() {
             self.seek_to_last();
         }
-        self.prev_until_key(&full_key_encoded);
+        self.prev_until_key(key);
     }
 }
 
@@ -139,35 +144,42 @@ impl BlockIterator {
         if offset >= self.block.len() {
             return false;
         }
-        let prefix = self.decode_prefix_at(offset);
+
+        // after seek, offset meet a new restart point we need to update it
+        if self.restart_point_index + 1 < self.block.restart_point_len()
+            && offset
+                >= self
+                    .block
+                    .restart_point(self.restart_point_index + 1)
+                    .offset as usize
+        {
+            let new_restart_point_index = self.restart_point_index + 1;
+            self.update_restart_point(new_restart_point_index);
+        }
+
+        let prefix =
+            self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
+
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
-        if self.restart_point_index + 1 < self.block.restart_point_len()
-            && self.offset >= self.block.restart_point(self.restart_point_index + 1) as usize
-        {
-            self.restart_point_index += 1;
-        }
+
         true
     }
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
-    fn next_until_key(&mut self, key: &[u8]) {
-        while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
-        {
+    fn next_until_key(&mut self, key: FullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Less {
             self.next_inner();
         }
     }
 
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
-    fn prev_until_key(&mut self, key: &[u8]) {
-        while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Greater
-        {
+    fn prev_until_key(&mut self, key: FullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Greater {
             self.prev_inner();
         }
     }
@@ -198,7 +210,8 @@ impl BlockIterator {
         if self.offset == 0 {
             return false;
         }
-        if self.block.restart_point(self.restart_point_index) as usize == self.offset {
+
+        if self.block.restart_point(self.restart_point_index).offset as usize == self.offset {
             self.restart_point_index -= 1;
         }
         let origin_offset = self.offset;
@@ -208,40 +221,73 @@ impl BlockIterator {
     }
 
     /// Decodes [`KeyPrefix`] at given offset.
-    fn decode_prefix_at(&self, offset: usize) -> KeyPrefix {
-        KeyPrefix::decode(&mut &self.block.data()[offset..], offset)
+    fn decode_prefix_at(
+        &self,
+        offset: usize,
+        key_len_type: LenType,
+        value_len_type: LenType,
+    ) -> KeyPrefix {
+        KeyPrefix::decode(
+            &mut &self.block.data()[offset..],
+            offset,
+            key_len_type,
+            value_len_type,
+        )
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
+    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
-            .search_restart_partition_point(|&probe| {
-                let prefix = self.decode_prefix_at(probe as usize);
-                let probe_key = &self.block.data()[prefix.diff_key_range()];
-                match KeyComparator::compare_encoded_full_key(probe_key, key) {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
-                }
-            })
+            .search_restart_partition_point(
+                |&RestartPoint {
+                     offset: probe,
+                     key_len_type,
+                     value_len_type,
+                 }| {
+                    let prefix =
+                        self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
+                    let probe_key = &self.block.data()[prefix.diff_key_range()];
+                    let full_probe_key =
+                        FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
+                    match full_probe_key.cmp(&key) {
+                        Ordering::Less | Ordering::Equal => true,
+                        Ordering::Greater => false,
+                    }
+                },
+            )
             .saturating_sub(1) // Prevent from underflowing when given is smaller than the first.
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
-    fn seek_restart_point_by_key(&mut self, key: &[u8]) {
+    fn seek_restart_point_by_key(&mut self, key: FullKey<&[u8]>) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
 
     /// Seeks to the restart point by given restart point index.
     fn seek_restart_point_by_index(&mut self, index: usize) {
-        let offset = self.block.restart_point(index) as usize;
-        let prefix = self.decode_prefix_at(offset);
+        let restart_point = self.block.restart_point(index);
+        let offset = restart_point.offset as usize;
+        let prefix = self.decode_prefix_at(
+            offset,
+            restart_point.key_len_type,
+            restart_point.value_len_type,
+        );
+
         self.key = BytesMut::from(&self.block.data()[prefix.diff_key_range()]);
         self.value_range = prefix.value_range();
         self.offset = offset;
         self.entry_len = prefix.entry_len();
+        self.update_restart_point(index);
+    }
+
+    fn update_restart_point(&mut self, index: usize) {
         self.restart_point_index = index;
+        let restart_point = self.block.restart_point(index);
+
+        self.last_key_len_type = restart_point.key_len_type;
+        self.last_value_len_type = restart_point.value_len_type;
     }
 }
 

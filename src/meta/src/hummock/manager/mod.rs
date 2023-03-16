@@ -34,8 +34,8 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
-    HummockEpoch, HummockSstableId, HummockVersionId, SstIdRange, FIRST_VERSION_ID,
-    INVALID_VERSION_ID,
+    HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
+    FIRST_VERSION_ID, INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -469,10 +469,10 @@ where
             .collect();
 
         let checkpoint_id = versioning_guard.checkpoint_version.id;
-        versioning_guard.ssts_to_delete.clear();
-        versioning_guard.extend_ssts_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
+        versioning_guard.objects_to_delete.clear();
+        versioning_guard.extend_objects_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
         let preserved_deltas: HashSet<HummockVersionId> =
-            HashSet::from_iter(versioning_guard.ssts_to_delete.values().cloned());
+            HashSet::from_iter(versioning_guard.objects_to_delete.values().cloned());
         versioning_guard.deltas_to_delete = versioning_guard
             .hummock_version_deltas
             .keys()
@@ -1045,21 +1045,22 @@ where
 
     fn is_compact_task_expired(
         compact_task: &CompactTask,
-        branched_ssts: &BTreeMap<HummockSstableId, HashMap<CompactionGroupId, u64>>,
+        branched_ssts: &BTreeMap<
+            HummockSstableObjectId,
+            BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
+        >,
     ) -> bool {
         for input_level in compact_task.get_input_ssts() {
             for table_info in input_level.get_table_infos() {
-                if match branched_ssts.get(&table_info.id) {
-                    Some(mp) => match mp.get(&compact_task.compaction_group_id) {
-                        Some(divide_version) => *divide_version,
-                        None => {
-                            return true;
-                        }
-                    },
-                    None => 0,
-                } > table_info.divide_version
-                {
-                    return true;
+                if let Some(mp) = branched_ssts.get(&table_info.object_id) {
+                    if mp
+                        .get(&compact_task.compaction_group_id)
+                        .map_or(true, |sst_id_vec| {
+                            !sst_id_vec.iter().contains(&table_info.sst_id)
+                        })
+                    {
+                        return true;
+                    }
                 }
             }
         }
@@ -1324,7 +1325,7 @@ where
         &self,
         epoch: HummockEpoch,
         sstables: Vec<impl Into<ExtendedSstableInfo>>,
-        sst_to_context: HashMap<HummockSstableId, HummockContextId>,
+        sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     ) -> Result<Option<HummockSnapshot>> {
         let mut sstables = sstables.into_iter().map(|s| s.into()).collect_vec();
         let mut versioning_guard = write_lock!(self, versioning).await;
@@ -1358,22 +1359,22 @@ where
         new_version_delta.max_committed_epoch = epoch;
         let mut new_hummock_version = old_version.clone();
         new_hummock_version.id = new_version_delta.id;
-        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
-        let mut branch_sstables = vec![];
+        let mut incorrect_ssts = vec![];
+        let mut new_sst_id_number = 0;
         sstables.retain_mut(|local_sst_info| {
             let ExtendedSstableInfo {
                 compaction_group_id,
                 sst_info: sst,
                 ..
             } = local_sst_info;
-            let is_sst_belong_to_group_declared = match old_version.levels.get(compaction_group_id)
-            {
-                Some(compaction_group) => sst
-                    .table_ids
-                    .iter()
-                    .all(|t| compaction_group.member_table_ids.contains(t)),
-                None => false,
-            };
+            let mut is_sst_belong_to_group_declared =
+                match old_version.levels.get(compaction_group_id) {
+                    Some(compaction_group) => sst
+                        .table_ids
+                        .iter()
+                        .all(|t| compaction_group.member_table_ids.contains(t)),
+                    None => false,
+                };
             if !is_sst_belong_to_group_declared {
                 let mut group_table_ids: BTreeMap<_, Vec<_>> = BTreeMap::new();
                 for table_id in sst.get_table_ids() {
@@ -1391,7 +1392,7 @@ where
                             tracing::warn!(
                                 "table {} in SST {} doesn't belong to any compaction group",
                                 table_id,
-                                sst.get_id(),
+                                sst.get_object_id(),
                             );
                         }
                     }
@@ -1399,24 +1400,40 @@ where
                 let is_trivial_adjust = group_table_ids.len() == 1
                     && group_table_ids.first_key_value().unwrap().1.len()
                         == sst.get_table_ids().len();
-                if !is_trivial_adjust {
-                    sst.divide_version += 1;
-                }
-                let mut branch_groups = HashMap::new();
-                for (group_id, match_ids) in group_table_ids {
-                    let mut branch_sst = sst.clone();
-                    branch_sst.table_ids = match_ids;
-                    branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
-                        group_id, branch_sst,
-                    ));
-                    branch_groups.insert(group_id, sst.get_divide_version());
-                }
-                if !branch_groups.is_empty() && !is_trivial_adjust {
-                    branched_ssts.insert(sst.get_id(), branch_groups);
+                if is_trivial_adjust {
+                    *compaction_group_id = *group_table_ids.first_key_value().unwrap().0;
+                    is_sst_belong_to_group_declared = true;
+                } else {
+                    new_sst_id_number += group_table_ids.len();
+                    incorrect_ssts.push((std::mem::take(sst), group_table_ids));
                 }
             }
             is_sst_belong_to_group_declared
         });
+        let mut new_sst_id = self
+            .env
+            .id_gen_manager()
+            .generate_interval::<{ IdCategory::HummockSstableId }>(new_sst_id_number as u64)
+            .await?;
+        let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
+        let mut branch_sstables = Vec::with_capacity(new_sst_id_number);
+        for (sst, group_table_ids) in incorrect_ssts {
+            let mut branch_groups = BTreeMap::new();
+            for (group_id, match_ids) in group_table_ids {
+                let mut branch_sst = sst.clone();
+                branch_sst.sst_id = new_sst_id;
+                branch_sst.table_ids = match_ids;
+                branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
+                    group_id, branch_sst,
+                ));
+                branch_groups.insert(group_id, vec![new_sst_id]);
+                new_sst_id += 1;
+            }
+            if !branch_groups.is_empty() {
+                branched_ssts.insert(sst.get_object_id(), branch_groups);
+            }
+        }
+
         sstables.append(&mut branch_sstables);
 
         let mut modified_compaction_groups = vec![];
@@ -1551,13 +1568,13 @@ where
         }
     }
 
-    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    pub async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let start_id = self
             .env
             .id_gen_manager()
             .generate_interval::<{ IdCategory::HummockSstableId }>(number as u64)
             .await?;
-        Ok(SstIdRange::new(start_id, start_id + number as u64))
+        Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
     }
 
     /// Tries to checkpoint at min_pinned_version_id
@@ -1586,7 +1603,7 @@ where
             return Ok(0);
         }
         commit_multi_var!(self, None, Transaction::default(), checkpoint)?;
-        versioning.extend_ssts_to_delete_from_deltas(
+        versioning.extend_objects_to_delete_from_deltas(
             (Excluded(old_checkpoint_id), Included(new_checkpoint_id)),
             &self.metrics,
         );
@@ -2031,16 +2048,27 @@ where
 }
 
 fn drop_sst(
-    branched_ssts: &mut BTreeMapTransaction<'_, HummockSstableId, HashMap<CompactionGroupId, u64>>,
+    branched_ssts: &mut BTreeMapTransaction<
+        '_,
+        HummockSstableObjectId,
+        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
+    >,
     group_id: CompactionGroupId,
-    id: HummockSstableId,
+    object_id: HummockSstableObjectId,
+    sst_id: HummockSstableId,
 ) -> bool {
-    match branched_ssts.get_mut(id) {
+    match branched_ssts.get_mut(object_id) {
         Some(mut entry) => {
-            entry.remove(&group_id);
-            if entry.is_empty() {
-                branched_ssts.remove(id);
-                true
+            let sst_id_vec = entry.get_mut(&group_id).unwrap();
+            sst_id_vec.remove(sst_id_vec.iter().position(|id| *id == sst_id).unwrap());
+            if sst_id_vec.is_empty() {
+                entry.remove(&group_id);
+                if entry.is_empty() {
+                    branched_ssts.remove(object_id);
+                    true
+                } else {
+                    false
+                }
             } else {
                 false
             }
@@ -2051,7 +2079,11 @@ fn drop_sst(
 
 fn gen_version_delta<'a>(
     txn: &mut BTreeMapTransaction<'a, HummockVersionId, HummockVersionDelta>,
-    branched_ssts: &mut BTreeMapTransaction<'a, HummockSstableId, HashMap<CompactionGroupId, u64>>,
+    branched_ssts: &mut BTreeMapTransaction<
+        'a,
+        HummockSstableObjectId,
+        BTreeMap<CompactionGroupId, Vec<HummockSstableId>>,
+    >,
     old_version: &HummockVersion,
     compact_task: &CompactTask,
     trivial_move: bool,
@@ -2069,7 +2101,7 @@ fn gen_version_delta<'a>(
         .entry(compact_task.compaction_group_id)
         .or_default()
         .group_deltas;
-    let mut gc_sst_ids = vec![];
+    let mut gc_object_ids = vec![];
     for level in &compact_task.input_ssts {
         let group_delta = GroupDelta {
             delta_type: Some(DeltaType::IntraLevel(IntraLevelDelta {
@@ -2078,13 +2110,19 @@ fn gen_version_delta<'a>(
                     .table_infos
                     .iter()
                     .map(|sst| {
-                        let id = sst.id;
+                        let object_id = sst.get_object_id();
+                        let sst_id = sst.get_sst_id();
                         if !trivial_move
-                            && drop_sst(branched_ssts, compact_task.compaction_group_id, id)
+                            && drop_sst(
+                                branched_ssts,
+                                compact_task.compaction_group_id,
+                                object_id,
+                                sst_id,
+                            )
                         {
-                            gc_sst_ids.push(id);
+                            gc_object_ids.push(object_id);
                         }
-                        id
+                        sst_id
                     })
                     .collect_vec(),
                 ..Default::default()
@@ -2101,7 +2139,7 @@ fn gen_version_delta<'a>(
         })),
     };
     group_deltas.push(group_delta);
-    version_delta.gc_sst_ids.append(&mut gc_sst_ids);
+    version_delta.gc_object_ids.append(&mut gc_object_ids);
     version_delta.safe_epoch = std::cmp::max(old_version.safe_epoch, compact_task.watermark);
     // Don't persist version delta generated by compaction to meta store in deterministic mode.
     // Because it will override existing version delta that has same ID generated in the data

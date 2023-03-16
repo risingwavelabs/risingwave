@@ -21,13 +21,21 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::BoxedExpression;
 
-use super::{
-    ActorContextRef, Executor, ExecutorInfo, PkIndicesRef, SimpleExecutor, SimpleExecutorWrapper,
-    StreamExecutorResult, Watermark,
-};
-use crate::common::InfallibleExpression;
+use super::*;
 
-pub type FilterExecutor = SimpleExecutorWrapper<SimpleFilterExecutor>;
+/// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
+/// and returns a boolean array on whether each item should be retained. And then,
+/// `FilterExecutor` will insert, delete or update element into next executor according
+/// to the result of the expression.
+pub struct FilterExecutor {
+    ctx: ActorContextRef,
+    info: ExecutorInfo,
+    input: BoxedExecutor,
+
+    /// Expression of the current filter, note that the filter must always have the same output for
+    /// the same input.
+    expr: BoxedExpression,
+}
 
 impl FilterExecutor {
     pub fn new(
@@ -36,37 +44,10 @@ impl FilterExecutor {
         expr: BoxedExpression,
         executor_id: u64,
     ) -> Self {
-        let info = input.info();
-
-        SimpleExecutorWrapper {
-            input,
-            inner: SimpleFilterExecutor::new(ctx, info, expr, executor_id),
-        }
-    }
-}
-
-/// `FilterExecutor` filters data with the `expr`. The `expr` takes a chunk of data,
-/// and returns a boolean array on whether each item should be retained. And then,
-/// `FilterExecutor` will insert, delete or update element into next executor according
-/// to the result of the expression.
-pub struct SimpleFilterExecutor {
-    ctx: ActorContextRef,
-    info: ExecutorInfo,
-
-    /// Expression of the current filter, note that the filter must always have the same output for
-    /// the same input.
-    expr: BoxedExpression,
-}
-
-impl SimpleFilterExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        input_info: ExecutorInfo,
-        expr: BoxedExpression,
-        executor_id: u64,
-    ) -> Self {
+        let input_info = input.info();
         Self {
             ctx,
+            input,
             info: ExecutorInfo {
                 schema: input_info.schema,
                 pk_indices: input_info.pk_indices,
@@ -155,7 +136,7 @@ impl SimpleFilterExecutor {
     }
 }
 
-impl Debug for SimpleFilterExecutor {
+impl Debug for FilterExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FilterExecutor")
             .field("expr", &self.expr)
@@ -163,21 +144,7 @@ impl Debug for SimpleFilterExecutor {
     }
 }
 
-impl SimpleExecutor for SimpleFilterExecutor {
-    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
-
-        let pred_output = self.expr.eval_infallible(chunk.data_chunk(), |err| {
-            self.ctx.on_compute_error(err, self.identity())
-        });
-
-        Self::filter(chunk, pred_output)
-    }
-
-    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
-        Ok(vec![watermark])
-    }
-
+impl Executor for FilterExecutor {
     fn schema(&self) -> &Schema {
         &self.info.schema
     }
@@ -188,6 +155,40 @@ impl SimpleExecutor for SimpleFilterExecutor {
 
     fn identity(&self) -> &str {
         &self.info.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.execute_inner().boxed()
+    }
+}
+
+impl FilterExecutor {
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute_inner(self) {
+        let input = self.input.execute();
+        #[for_await]
+        for msg in input {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(w) => yield Message::Watermark(w),
+                Message::Chunk(chunk) => {
+                    let chunk = chunk.compact();
+
+                    let pred_output = self
+                        .expr
+                        .eval_infallible(chunk.data_chunk(), |err| {
+                            self.ctx.on_compute_error(err, &self.info.identity)
+                        })
+                        .await;
+
+                    match Self::filter(chunk, pred_output)? {
+                        Some(new_chunk) => yield Message::Chunk(new_chunk),
+                        None => continue,
+                    }
+                }
+                m => yield m,
+            }
+        }
     }
 }
 
