@@ -169,6 +169,8 @@ message Table {
   repeated int32 value_indices = 20;
   string definition = 21;
   HandleConflictBehavior handle_pk_conflict_behavior = 22;
+  // Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+  // for implementing the table's bloom filter or other storage optimization techniques.
   uint32 read_prefix_len_hint = 23;
   repeated int32 watermark_indices = 24;
   repeated int32 dist_key_in_pk = 25;
