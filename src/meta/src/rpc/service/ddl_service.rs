@@ -679,14 +679,28 @@ where
                 if let Some(info) = conn.info {
                     match info {
                         connection::Info::PrivateLinkService(svc) => {
-                            svc.dns_entries
-                                .get(&link.availability_zone)
-                                .map_or((), |dns_name| {
+                            if svc.dns_entries.is_empty() {
+                                return Err(MetaError::from(anyhow!(
+                                    "No available private link endpoints for Kafka broker {}",
+                                    broker
+                                )));
+                            }
+                            let default_dns = svc.dns_entries.values().next().unwrap();
+                            let target_dns = svc.dns_entries.get(&link.availability_zone);
+                            match target_dns {
+                                None => {
+                                    broker_rewrite_map.insert(
+                                        broker.to_string(),
+                                        format!("{}:{}", default_dns, link.port),
+                                    );
+                                }
+                                Some(dns_name) => {
                                     broker_rewrite_map.insert(
                                         broker.to_string(),
                                         format!("{}:{}", dns_name, link.port),
                                     );
-                                });
+                                }
+                            }
                         }
                     }
                 }
