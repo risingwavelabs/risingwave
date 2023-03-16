@@ -288,9 +288,7 @@ impl ConcatSstableIterator {
             };
 
             while start_index < end_index {
-                let start_block_table_id = FullKey::decode(&block_metas[start_index].smallest_key)
-                    .user_key
-                    .table_id;
+                let start_block_table_id = block_metas[start_index].table_id();
                 if table_info
                     .get_table_ids()
                     .binary_search(&start_block_table_id.table_id)
@@ -300,8 +298,7 @@ impl ConcatSstableIterator {
                 } else {
                     start_index +=
                         &block_metas[(start_index + 1)..].partition_point(|block_meta| {
-                            FullKey::decode(&block_meta.smallest_key).user_key.table_id
-                                == start_block_table_id
+                            block_meta.table_id() == start_block_table_id
                         }) + 1;
                 }
             }
