@@ -15,8 +15,11 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.proto.ConnectorServiceProto;
 import java.util.Iterator;
 
 public interface Deserializer {
-    Iterator<SinkRow> deserialize(Object payload);
+    Iterator<SinkRow> deserialize(ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch);
+
+    void close();
 }
