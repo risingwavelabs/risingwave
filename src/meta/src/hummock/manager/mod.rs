@@ -91,7 +91,7 @@ type Snapshot = ArcSwap<HummockSnapshot>;
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+    pub env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
@@ -112,7 +112,7 @@ pub struct HummockManager<S: MetaStore> {
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
     compaction_tasks_to_cancel: parking_lot::Mutex<Vec<HummockCompactionTaskId>>,
 
-    compactor_manager: CompactorManagerRef,
+    pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
 }
 

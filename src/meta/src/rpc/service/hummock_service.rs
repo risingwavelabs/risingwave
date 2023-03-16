@@ -23,9 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{
-    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
-};
+use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -35,7 +33,6 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -46,13 +43,11 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            compactor_manager,
             vacuum_manager: vacuum_trigger,
             fragment_manager,
         }
@@ -240,12 +235,16 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+        let max_compactor_task_multiplier =
+            self.hummock_manager.env.opts.max_compactor_task_multiplier;
 
-        let rx = self.compactor_manager.add_compactor(
-            context_id,
+        let max_task_num = std::cmp::min(
             req.max_concurrent_task_number,
-            req.cpu_core_num,
+            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
         );
+        let rx = compactor_manager.add_compactor(context_id, max_task_num, req.cpu_core_num);
+
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
             self.hummock_manager
@@ -262,11 +261,10 @@ where
         request: Request<CompactorHeartbeatRequest>,
     ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
         let req = request.into_inner();
-        self.compactor_manager
-            .update_task_heartbeats(req.context_id, &req.progress);
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
 
-        self.compactor_manager
-            .update_compactor_state(req.context_id, req.workload.unwrap());
+        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
+        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
 
         Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
@@ -484,8 +482,9 @@ where
         request: Request<SetCompactorRuntimeConfigRequest>,
     ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
         let request = request.into_inner();
-        self.compactor_manager
-            .set_compactor_config(request.context_id, request.config.unwrap().into());
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
 

@@ -244,6 +244,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
             },
             SystemParams {
                 barrier_interval_ms: Some(config.streaming.barrier_interval_ms),

@@ -68,10 +68,7 @@ impl Compactor {
         Self {
             context_id,
             sender,
-            max_concurrent_task_number: AtomicU64::new(std::cmp::min(
-                max_concurrent_task_number,
-                (cpu_core_num as f64 * 3.0 / 2.0).ceil() as u64,
-            )),
+            max_concurrent_task_number: AtomicU64::new(max_concurrent_task_number),
             cpu_ratio: AtomicU32::new(0),
             total_cpu_core: cpu_core_num,
         }
@@ -191,7 +188,7 @@ impl CompactorManager {
         &self,
         compactor_assigned_task_num: &HashMap<HummockContextId, u64>,
     ) -> Option<Arc<Compactor>> {
-        let policy = self.policy.write();
+        let policy = self.policy.read();
         policy.next_idle_compactor(compactor_assigned_task_num)
     }
 

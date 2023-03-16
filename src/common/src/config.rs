@@ -185,6 +185,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    #[serde(default = "default::meta::max_compactor_task_multiplier")]
+    pub max_compactor_task_multiplier: u32,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -552,6 +555,10 @@ mod default {
 
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
             1800 // 30mi
+        }
+
+        pub fn max_compactor_task_multiplier() -> u32 {
+            2
         }
     }
 
