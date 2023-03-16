@@ -20,7 +20,7 @@ use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, ToDatumRef};
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
-use crate::util::sort_util::{Direction, OrderType};
+use crate::util::sort_util::OrderType;
 
 /// `OrderedRowSerde` is responsible for serializing and deserializing Ordered Row.
 #[derive(Clone)]

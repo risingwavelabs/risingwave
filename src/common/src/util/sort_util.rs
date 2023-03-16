@@ -23,6 +23,7 @@ use crate::array::{Array, ArrayImpl, DataChunk};
 use crate::catalog::{FieldDisplay, Schema};
 use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
+use crate::types::ToDatumRef;
 
 // TODO(rc): to support `NULLS FIRST | LAST`, we may need to hide this enum, forcing developers use
 // `OrderType` instead.
@@ -346,7 +347,7 @@ impl PartialEq for HeapElem {
 
 impl Eq for HeapElem {}
 
-fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: &OrderType) -> Ordering
+fn compare_values<T>(lhs: Option<&T>, rhs: Option<&T>, order_type: OrderType) -> Ordering
 where
     T: Ord,
 {
@@ -370,7 +371,7 @@ fn compare_values_in_array<'a, T>(
     lhs_idx: usize,
     rhs_array: &'a T,
     rhs_idx: usize,
-    order_type: &'a OrderType,
+    order_type: OrderType,
 ) -> Ordering
 where
     T: Array,
@@ -396,7 +397,7 @@ pub fn compare_rows_in_chunk(
         macro_rules! gen_match {
             ( $( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
                 match (lhs_array.as_ref(), rhs_array.as_ref()) {
-                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, &column_order.order_type)),)*
+                    $((ArrayImpl::$variant_name(lhs_inner), ArrayImpl::$variant_name(rhs_inner)) => Ok(compare_values_in_array(lhs_inner, lhs_idx, rhs_inner, rhs_idx, column_order.order_type)),)*
                     (l_arr, r_arr) => Err(InternalError(format!("Unmatched array types, lhs array is: {}, rhs array is: {}", l_arr.get_ident(), r_arr.get_ident()))),
                 }?
             }
@@ -407,6 +408,18 @@ pub fn compare_rows_in_chunk(
         }
     }
     Ok(Ordering::Equal)
+}
+
+pub fn compare_datum(
+    lhs: impl ToDatumRef,
+    rhs: impl ToDatumRef,
+    order_type: OrderType,
+) -> Ordering {
+    compare_values(
+        lhs.to_datum_ref().as_ref(),
+        rhs.to_datum_ref().as_ref(),
+        order_type,
+    )
 }
 
 #[cfg(test)]
