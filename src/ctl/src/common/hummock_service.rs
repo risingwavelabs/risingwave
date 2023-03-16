@@ -158,7 +158,7 @@ For `./risedev apply-compose-deploy` users,
 
     pub async fn create_sstable_store(&self) -> Result<Arc<SstableStore>> {
         let object_store = parse_remote_object_store(
-            &self.hummock_url.strip_prefix("hummock+").unwrap(),
+            self.hummock_url.strip_prefix("hummock+").unwrap(),
             Arc::new(ObjectStoreMetrics::unused()),
             "Hummock",
         )

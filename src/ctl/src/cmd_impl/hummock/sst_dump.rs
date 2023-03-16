@@ -65,8 +65,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
     println!("Start sst dump with args: {:?}", args);
     let table_data = if args.print_entry && args.print_table {
         let meta_client = context.meta_client().await?;
-        let table_data = load_table_schemas(&meta_client).await?;
-        table_data
+        load_table_schemas(&meta_client).await?
     } else {
         TableData::default()
     };
@@ -108,7 +107,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             }
         }
     } else {
-        // Object information is retrieved from object store. Meta service is not required. 
+        // Object information is retrieved from object store. Meta service is not required.
         let hummock_service_opts = HummockServiceOpts::from_env(args.data_dir.clone())?;
         let sstable_store = hummock_service_opts.create_sstable_store().await?;
         if let Some(obj_id) = &args.object_id {
@@ -116,8 +115,7 @@ pub async fn sst_dump(context: &CtlContext, args: SstDumpArgs) -> anyhow::Result
             let obj_path = sstable_store.get_sst_data_path(*obj_id);
             let obj = &obj_store.list(&obj_path).await?[0];
             print_object(obj);
-            let meta_offset =
-                get_meta_offset_from_object(obj, obj_store.as_ref()).await?;
+            let meta_offset = get_meta_offset_from_object(obj, obj_store.as_ref()).await?;
             let obj_id = sstable_store.get_object_id_from_path(&obj.key);
             sst_dump_via_sstable_store(
                 &sstable_store,
@@ -175,7 +173,7 @@ async fn get_meta_offset_from_object(
         offset: obj.total_size
             - (
                 // version, magic
-                2 * std::mem::size_of::<u32>() + 
+                2 * std::mem::size_of::<u32>() +
                 // footer, checksum
                 2 * std::mem::size_of::<u64>()
             ),
@@ -223,7 +221,10 @@ pub async fn sst_dump_via_sstable_store(
     println!("Bloom Filter Size: {}", sstable_meta.bloom_filter.len());
     println!("Key Count: {}", sstable_meta.key_count);
     println!("Version: {}", sstable_meta.version);
-    println!("Range Tomestone Count: {}", sstable_meta.range_tombstone_list.len());
+    println!(
+        "Range Tomestone Count: {}",
+        sstable_meta.range_tombstone_list.len()
+    );
     for range_tomstone in &sstable_meta.range_tombstone_list {
         println!("\tstart: {:?}", range_tomstone.start_user_key);
         println!("\tend: {:?}", range_tomstone.end_user_key);
@@ -295,7 +296,7 @@ async fn print_block(
             block_data,
             table_data,
             block_meta.uncompressed_size as usize,
-            args
+            args,
         )?;
     }
 
@@ -307,7 +308,7 @@ fn print_kv_pairs(
     block_data: Bytes,
     table_data: &TableData,
     uncompressed_capacity: usize,
-    args: &SstDumpArgs
+    args: &SstDumpArgs,
 ) -> anyhow::Result<()> {
     println!("\tKV-Pairs:");
 
@@ -362,14 +363,13 @@ fn print_table_column(
         table_catalog.name,
         table_catalog.version()
     );
-    
 
     if let Some(user_val) = humm_val.into_user_value() {
         let column_desc = table_catalog
-        .value_indices
-        .iter()
-        .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
-        .collect_vec();
+            .value_indices
+            .iter()
+            .map(|idx| table_catalog.columns[*idx].column_desc.name.clone())
+            .collect_vec();
         let data_types = table_catalog
             .value_indices
             .iter()
@@ -378,7 +378,7 @@ fn print_table_column(
         let column_ids = table_catalog
             .value_indices
             .iter()
-            .map(|idx| table_catalog.columns[*idx].column_id().clone())
+            .map(|idx| table_catalog.columns[*idx].column_id())
             .collect_vec();
         let schema = Arc::from(data_types.into_boxed_slice());
         let row_deserializer: EitherSerde = if table_catalog.version().is_some() {

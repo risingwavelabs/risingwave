@@ -95,9 +95,9 @@ enum HummockCommands {
 
         #[clap(short, long = "table-id")]
         table_id: u32,
-        
+
         // data directory for hummock state store. None: use default
-        data_dir: Option<String>
+        data_dir: Option<String>,
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
@@ -162,14 +162,14 @@ enum TableCommands {
         /// name of the materialized view to operate on
         mv_name: String,
         // data directory for hummock state store. None: use default
-        data_dir: Option<String>
+        data_dir: Option<String>,
     },
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
         table_id: u32,
         // data directory for hummock state store. None: use default
-        data_dir: Option<String>
+        data_dir: Option<String>,
     },
     /// list all state tables
     List,
@@ -236,7 +236,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, table_id, data_dir }) => {
+        Commands::Hummock(HummockCommands::ListKv {
+            epoch,
+            table_id,
+            data_dir,
+        }) => {
             cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {

@@ -372,7 +372,7 @@ pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "TableKey {{ {} }}", hex::encode(&self.0.as_ref().to_vec()))
+        write!(f, "TableKey {{ {} }}", hex::encode(&self.0.as_ref()))
     }
 }
 
@@ -563,11 +563,7 @@ pub struct FullKey<T: AsRef<[u8]>> {
 
 impl<T: AsRef<[u8]>> Debug for FullKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "FullKey {{ {:?}, {} }}",
-            self.user_key, self.epoch
-        )
+        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
     }
 }
 

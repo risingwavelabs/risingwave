@@ -35,11 +35,9 @@ pub enum HummockValue<T> {
 impl<T: AsRef<[u8]>> Debug for HummockValue<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self {
-            HummockValue::Put(v) => write!(
-                f,
-                "HummockValue {{ PUT, {} }}",
-                hex::encode(v.as_ref().to_vec())
-            ),
+            HummockValue::Put(v) => {
+                write!(f, "HummockValue {{ PUT, {} }}", hex::encode(v.as_ref()))
+            }
             HummockValue::Delete => write!(f, "HummockValue {{ DELETE }}"),
         }
     }

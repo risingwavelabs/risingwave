@@ -37,16 +37,17 @@ impl CtlContext {
             .cloned()
     }
 
-    pub async fn hummock_store(&self, hummock_opts: HummockServiceOpts) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
-        let (hummock, _) = self
-            .hummock_store_with_metrics(hummock_opts)
-            .await?;
+    pub async fn hummock_store(
+        &self,
+        hummock_opts: HummockServiceOpts,
+    ) -> anyhow::Result<MonitoredStateStore<HummockStorage>> {
+        let (hummock, _) = self.hummock_store_with_metrics(hummock_opts).await?;
         Ok(hummock)
     }
 
     pub async fn hummock_store_with_metrics(
         &self,
-        mut hummock_opts: HummockServiceOpts
+        mut hummock_opts: HummockServiceOpts,
     ) -> anyhow::Result<(MonitoredStateStore<HummockStorage>, Metrics)> {
         let meta_client = self.meta_client().await?;
         self.hummock
