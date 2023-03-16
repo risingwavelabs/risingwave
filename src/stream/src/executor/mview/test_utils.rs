@@ -25,7 +25,10 @@ use crate::common::table::state_table::StateTable;
 pub async fn gen_basic_table(row_count: usize) -> StorageTable<MemoryStateStore> {
     let state_store = MemoryStateStore::new();
 
-    let order_types = vec![OrderType::default_ascending(), OrderType::default_descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
     let column_ids = vec![0.into(), 1.into(), 2.into()];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),

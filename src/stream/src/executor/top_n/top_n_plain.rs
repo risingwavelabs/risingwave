@@ -334,7 +334,10 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -430,7 +433,10 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -538,7 +544,10 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -645,7 +654,10 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -872,7 +884,10 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -949,7 +964,10 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
                 state_store.clone(),
             )
@@ -1001,7 +1019,10 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
                 state_store,
             )
@@ -1132,7 +1153,10 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
             )
             .await;
@@ -1277,7 +1301,10 @@ mod tests {
             let state_store = MemoryStateStore::new();
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
                 state_store.clone(),
             )
@@ -1330,7 +1357,10 @@ mod tests {
 
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::default_ascending(), OrderType::default_ascending()],
+                &[
+                    OrderType::default_ascending(),
+                    OrderType::default_ascending(),
+                ],
                 &pk_indices(),
                 state_store,
             )
