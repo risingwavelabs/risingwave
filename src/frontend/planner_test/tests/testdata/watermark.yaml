@@ -21,7 +21,7 @@
     │   └── StreamRowIdGen { row_id_index: 1 }
     │       └── StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
     │           └── StreamSource { source: "t", columns: ["v1", "_row_id"] } { source state table: 1 }
-    ├── Table 1 { columns: [ partition_id, offset ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
+    ├── Table 1 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
     └── Table 4294967294 { columns: [ v1, _row_id ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
 - name: watermark on append only table with source
   sql: |

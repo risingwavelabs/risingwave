@@ -6665,6 +6665,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "serde_json",
  "smallvec",
  "static_assertions",
  "task_stats_alloc",

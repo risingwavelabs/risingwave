@@ -624,7 +624,7 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
-    /// Construct a [`FullKey`] from a byte slice without  `table_id` encoded.
+    /// Construct a [`FullKey`] from a byte slice without `table_id` encoded.
     pub fn from_slice_without_table_id(
         table_id: TableId,
         slice_without_table_id: &'a [u8],
