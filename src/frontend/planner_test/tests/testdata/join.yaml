@@ -668,12 +668,36 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t_src, t_dst, t_src_0, t_dst_0, t__row_id, t__row_id_0], primary key: [$2 ASC, $0 ASC, $4 ASC, $5 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0] }
-     Table 1 { columns: [t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [1] }
-     Table 2 { columns: [t_dst, t__row_id], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0] }
-     Table 3 { columns: [t_dst, t_dst_0, t__row_id, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [1] }
-     Table 4 { columns: [t_src, t_dst, t__row_id], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [1] }
-     Table 5 { columns: [t_dst, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 6 { columns: [t_src, t_dst, t__row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0] }
-     Table 7 { columns: [t_src, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0] }
-     Table 4294967294 { columns: [p1, p2, p3, t._row_id, t._row_id#1, t.src, t._row_id#2], primary key: [$3 ASC, $4 ASC, $1 ASC, $6 ASC, $5 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0] }
+     Table 0 { columns: [t_src, t_dst, t_src_0, t_dst_0, t__row_id, t__row_id_0], primary key: [$2 ASC, $0 ASC, $4 ASC, $5 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0], read pk prefix len hint: 2 }
+     Table 1 { columns: [t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [1], read pk prefix len hint: 2 }
+     Table 2 { columns: [t_dst, t__row_id], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0], read pk prefix len hint: 2 }
+     Table 3 { columns: [t_dst, t_dst_0, t__row_id, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [1], read pk prefix len hint: 2 }
+     Table 4 { columns: [t_src, t_dst, t__row_id], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [1], read pk prefix len hint: 1 }
+     Table 5 { columns: [t_dst, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 6 { columns: [t_src, t_dst, t__row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 7 { columns: [t_src, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 4294967294 { columns: [p1, p2, p3, t._row_id, t._row_id#1, t.src, t._row_id#2], primary key: [$3 ASC, $4 ASC, $1 ASC, $6 ASC, $5 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0], read pk prefix len hint: 6 }
+- name: Fix hash join distribution key (https://github.com/risingwavelabs/risingwave/issues/8537)
+  sql: |
+    CREATE TABLE part (
+      p INTEGER,
+      c VARCHAR,
+      PRIMARY KEY (p)
+    );
+    CREATE TABLE B (
+      b INTEGER,
+      d VARCHAR,
+      PRIMARY KEY (b)
+    );
+    select B.* from part join B on part.c = B.d join part p1 on p1.p = part.p and p1.p = B.b;
+  stream_plan: |
+    StreamMaterialize { columns: [b, d, part.p(hidden), part.c(hidden), part.p#1(hidden)], pk_columns: [part.p, b, part.c, part.p#1], pk_conflict: "no check" }
+    └─StreamHashJoin { type: Inner, predicate: part.p = part.p AND b.b = part.p, output: [b.b, b.d, part.p, part.c, part.p] }
+      ├─StreamExchange { dist: HashShard(part.p, b.b) }
+      | └─StreamHashJoin { type: Inner, predicate: part.c = b.d, output: [part.p, b.b, b.d, part.c] }
+      |   ├─StreamExchange { dist: HashShard(part.c) }
+      |   | └─StreamTableScan { table: part, columns: [part.p, part.c], pk: [part.p], dist: UpstreamHashShard(part.p) }
+      |   └─StreamExchange { dist: HashShard(b.d) }
+      |     └─StreamTableScan { table: b, columns: [b.b, b.d], pk: [b.b], dist: UpstreamHashShard(b.b) }
+      └─StreamExchange { dist: HashShard(part.p, part.p) }
+        └─StreamTableScan { table: part, columns: [part.p], pk: [part.p], dist: UpstreamHashShard(part.p) }

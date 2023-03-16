@@ -50,6 +50,7 @@ message DataType {
     LIST = 16;
     BYTEA = 17;
     JSONB = 18;
+    SERIAL = 19;
   }
   TypeName type_name = 1;
   // Data length for char.

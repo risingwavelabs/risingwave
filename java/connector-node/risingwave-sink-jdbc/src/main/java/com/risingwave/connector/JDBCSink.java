@@ -20,7 +20,9 @@ import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import io.grpc.Status;
 import java.sql.*;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.slf4j.Logger;
@@ -30,10 +32,13 @@ public class JDBCSink extends SinkBase {
     public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
     private static final String DELETE_TEMPLATE = "DELETE FROM %s WHERE %s";
     private static final String UPDATE_TEMPLATE = "UPDATE %s SET %s WHERE %s";
+    private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final String tableName;
     private final Connection conn;
     private final String jdbcUrl;
+    private final List<String> pkColumnNames;
+    public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
     private String updateDeleteConditionBuffer;
     private Object[] updateDeleteValueBuffer;
@@ -48,9 +53,30 @@ public class JDBCSink extends SinkBase {
         try {
             this.conn = DriverManager.getConnection(jdbcUrl);
             this.conn.setAutoCommit(false);
+            this.pkColumnNames = getPkColumnNames(conn, tableName);
         } catch (SQLException e) {
-            throw Status.INTERNAL.withCause(e).asRuntimeException();
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
+    }
+
+    private static List<String> getPkColumnNames(Connection conn, String tableName) {
+        List<String> pkColumnNames = new ArrayList<>();
+        try {
+            var pks = conn.getMetaData().getPrimaryKeys(null, null, tableName);
+            while (pks.next()) {
+                pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
+            }
+        } catch (SQLException e) {
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
+        }
+        LOG.info("detected pk {}", pkColumnNames);
+        return pkColumnNames;
     }
 
     public JDBCSink(Connection conn, TableSchema tableSchema, String tableName) {
@@ -58,6 +84,7 @@ public class JDBCSink extends SinkBase {
         this.tableName = tableName;
         this.jdbcUrl = null;
         this.conn = conn;
+        this.pkColumnNames = getPkColumnNames(conn, tableName);
     }
 
     private PreparedStatement prepareStatement(SinkRow row) {
@@ -79,35 +106,75 @@ public class JDBCSink extends SinkBase {
                     }
                     return stmt;
                 } catch (SQLException e) {
-                    throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw io.grpc.Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             case DELETE:
-                String deleteCondition =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
+                String deleteCondition;
+                if (this.pkColumnNames.isEmpty()) {
+                    deleteCondition =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema().getColumnNames()[index]
+                                                            + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                } else {
+                    deleteCondition =
+                            this.pkColumnNames.stream()
+                                    .map(key -> key + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                }
                 String deleteStmt = String.format(DELETE_TEMPLATE, tableName, deleteCondition);
                 try {
                     int placeholderIdx = 1;
                     PreparedStatement stmt =
                             conn.prepareStatement(deleteStmt, Statement.RETURN_GENERATED_KEYS);
-                    for (String primaryKey : getTableSchema().getPrimaryKeys()) {
+                    for (String primaryKey : this.pkColumnNames) {
                         Object fromRow = getTableSchema().getFromRow(primaryKey, row);
                         stmt.setObject(placeholderIdx++, fromRow);
                     }
                     return stmt;
                 } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             case UPDATE_DELETE:
-                updateDeleteConditionBuffer =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> key + " = ?")
-                                .collect(Collectors.joining(" AND "));
-                updateDeleteValueBuffer =
-                        getTableSchema().getPrimaryKeys().stream()
-                                .map(key -> getTableSchema().getFromRow(key, row))
-                                .toArray();
+                if (this.pkColumnNames.isEmpty()) {
+                    updateDeleteConditionBuffer =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema().getColumnNames()[index]
+                                                            + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                    updateDeleteValueBuffer =
+                            IntStream.range(0, getTableSchema().getNumColumns())
+                                    .mapToObj(
+                                            index ->
+                                                    getTableSchema()
+                                                            .getFromRow(
+                                                                    getTableSchema()
+                                                                            .getColumnNames()[
+                                                                            index],
+                                                                    row))
+                                    .toArray();
+                } else {
+                    updateDeleteConditionBuffer =
+                            this.pkColumnNames.stream()
+                                    .map(key -> key + " = ?")
+                                    .collect(Collectors.joining(" AND "));
+                    updateDeleteValueBuffer =
+                            this.pkColumnNames.stream()
+                                    .map(key -> getTableSchema().getFromRow(key, row))
+                                    .toArray();
+                }
                 LOG.debug(
                         "update delete condition: {} on values {}",
                         updateDeleteConditionBuffer,
@@ -144,7 +211,11 @@ public class JDBCSink extends SinkBase {
                     updateDeleteValueBuffer = null;
                     return stmt;
                 } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             default:
                 throw Status.INVALID_ARGUMENT
@@ -163,10 +234,16 @@ public class JDBCSink extends SinkBase {
                 }
                 if (stmt != null) {
                     try {
-                        LOG.debug("Executing statement: " + stmt);
+                        LOG.debug("Executing statement: {}", stmt);
                         stmt.executeUpdate();
                     } catch (SQLException e) {
-                        throw Status.INTERNAL.withCause(e).asRuntimeException();
+                        throw Status.INTERNAL
+                                .withDescription(
+                                        String.format(
+                                                ERROR_REPORT_TEMPLATE,
+                                                e.getSQLState(),
+                                                e.getMessage()))
+                                .asRuntimeException();
                     }
                 } else {
                     throw Status.INTERNAL
@@ -190,7 +267,10 @@ public class JDBCSink extends SinkBase {
         try {
             conn.commit();
         } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
     }
 
@@ -199,7 +279,10 @@ public class JDBCSink extends SinkBase {
         try {
             conn.close();
         } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
     }
 

@@ -208,6 +208,19 @@ export interface Function {
   language: string;
   link: string;
   identifier: string;
+  kind?: { $case: "scalar"; scalar: Function_ScalarFunction } | { $case: "table"; table: Function_TableFunction } | {
+    $case: "aggregate";
+    aggregate: Function_AggregateFunction;
+  };
+}
+
+export interface Function_ScalarFunction {
+}
+
+export interface Function_TableFunction {
+}
+
+export interface Function_AggregateFunction {
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -250,6 +263,10 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflictBehavior: HandleConflictBehavior;
+  /**
+   * Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+   * for implementing the table's bloom filter or other storage optimization techniques.
+   */
   readPrefixLenHint: number;
   watermarkIndices: number[];
   distKeyInPk: number[];
@@ -814,6 +831,7 @@ function createBaseFunction(): Function {
     language: "",
     link: "",
     identifier: "",
+    kind: undefined,
   };
 }
 
@@ -832,6 +850,13 @@ export const Function = {
       language: isSet(object.language) ? String(object.language) : "",
       link: isSet(object.link) ? String(object.link) : "",
       identifier: isSet(object.identifier) ? String(object.identifier) : "",
+      kind: isSet(object.scalar)
+        ? { $case: "scalar", scalar: Function_ScalarFunction.fromJSON(object.scalar) }
+        : isSet(object.table)
+        ? { $case: "table", table: Function_TableFunction.fromJSON(object.table) }
+        : isSet(object.aggregate)
+        ? { $case: "aggregate", aggregate: Function_AggregateFunction.fromJSON(object.aggregate) }
+        : undefined,
     };
   },
 
@@ -852,6 +877,14 @@ export const Function = {
     message.language !== undefined && (obj.language = message.language);
     message.link !== undefined && (obj.link = message.link);
     message.identifier !== undefined && (obj.identifier = message.identifier);
+    message.kind?.$case === "scalar" &&
+      (obj.scalar = message.kind?.scalar ? Function_ScalarFunction.toJSON(message.kind?.scalar) : undefined);
+    message.kind?.$case === "table" &&
+      (obj.table = message.kind?.table ? Function_TableFunction.toJSON(message.kind?.table) : undefined);
+    message.kind?.$case === "aggregate" &&
+      (obj.aggregate = message.kind?.aggregate
+        ? Function_AggregateFunction.toJSON(message.kind?.aggregate)
+        : undefined);
     return obj;
   },
 
@@ -869,6 +902,75 @@ export const Function = {
     message.language = object.language ?? "";
     message.link = object.link ?? "";
     message.identifier = object.identifier ?? "";
+    if (object.kind?.$case === "scalar" && object.kind?.scalar !== undefined && object.kind?.scalar !== null) {
+      message.kind = { $case: "scalar", scalar: Function_ScalarFunction.fromPartial(object.kind.scalar) };
+    }
+    if (object.kind?.$case === "table" && object.kind?.table !== undefined && object.kind?.table !== null) {
+      message.kind = { $case: "table", table: Function_TableFunction.fromPartial(object.kind.table) };
+    }
+    if (object.kind?.$case === "aggregate" && object.kind?.aggregate !== undefined && object.kind?.aggregate !== null) {
+      message.kind = { $case: "aggregate", aggregate: Function_AggregateFunction.fromPartial(object.kind.aggregate) };
+    }
+    return message;
+  },
+};
+
+function createBaseFunction_ScalarFunction(): Function_ScalarFunction {
+  return {};
+}
+
+export const Function_ScalarFunction = {
+  fromJSON(_: any): Function_ScalarFunction {
+    return {};
+  },
+
+  toJSON(_: Function_ScalarFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(_: I): Function_ScalarFunction {
+    const message = createBaseFunction_ScalarFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_TableFunction(): Function_TableFunction {
+  return {};
+}
+
+export const Function_TableFunction = {
+  fromJSON(_: any): Function_TableFunction {
+    return {};
+  },
+
+  toJSON(_: Function_TableFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(_: I): Function_TableFunction {
+    const message = createBaseFunction_TableFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_AggregateFunction(): Function_AggregateFunction {
+  return {};
+}
+
+export const Function_AggregateFunction = {
+  fromJSON(_: any): Function_AggregateFunction {
+    return {};
+  },
+
+  toJSON(_: Function_AggregateFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_AggregateFunction>, I>>(_: I): Function_AggregateFunction {
+    const message = createBaseFunction_AggregateFunction();
     return message;
   },
 };
