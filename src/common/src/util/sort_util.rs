@@ -139,8 +139,7 @@ impl OrderType {
         }
     }
 
-    // TODO(): many places that call `default_ascending` should call `default`, need to revisit all
-    // calling spots later
+    // TODO(rc): Many places that call `default_ascending` should've call `default`.
     /// Create an ascending order type, with other options set to default.
     pub fn default_ascending() -> Self {
         Self::ascending(NullsAre::default())
