@@ -65,19 +65,13 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
 
-    /// Deprecated. But we keep it for backward compatibility.
-    #[clap(long, env = "RW_HOST")]
-    host: Option<String>,
-
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    /// TODO: After host is removed, we require that this parameter must be provided when using
-    /// etcd
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
-    advertise_addr: Option<String>,
+    advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
@@ -167,7 +161,6 @@ pub struct OverrideConfigOpts {
 }
 
 use std::future::Future;
-use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend, RwConfig};
@@ -183,13 +176,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-        let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let advertise_addr = opts
-            .advertise_addr
-            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
@@ -214,7 +203,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            advertise_addr,
+            advertise_addr: opts.advertise_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
