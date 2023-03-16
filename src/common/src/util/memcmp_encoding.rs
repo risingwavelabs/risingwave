@@ -132,15 +132,16 @@ fn deserialize_datum_not_null(
 pub(crate) fn calculate_encoded_size(
     ty: &DataType,
     order: OrderType,
-    deserializer: &mut memcomparable::Deserializer<impl Buf>, // TODO(): remove this param
+    encoded_data: &[u8],
 ) -> memcomparable::Result<usize> {
+    let mut deserializer = memcomparable::Deserializer::new(encoded_data);
     let (null_tag_none, null_tag_some) = if order.nulls_are_largest() {
         (1u8, 0u8) // None > Some
     } else {
         (0u8, 1u8) // None < Some
     };
     deserializer.set_reverse(order.is_descending());
-    calculate_encoded_size_inner(ty, null_tag_none, null_tag_some, deserializer)
+    calculate_encoded_size_inner(ty, null_tag_none, null_tag_some, &mut deserializer)
 }
 
 fn calculate_encoded_size_inner(
