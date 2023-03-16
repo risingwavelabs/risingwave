@@ -17,7 +17,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;

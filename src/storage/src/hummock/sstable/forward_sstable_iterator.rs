@@ -19,7 +19,6 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;

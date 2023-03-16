@@ -20,7 +20,6 @@ use std::time::Instant;
 
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -262,10 +261,9 @@ impl ConcatSstableIterator {
                 block_metas.len()
             } else {
                 block_metas.partition_point(|block| {
-                    KeyComparator::compare_encoded_full_key(
-                        &block.smallest_key,
-                        &self.key_range.right,
-                    ) != Ordering::Greater
+                    FullKey::decode(&block.smallest_key)
+                        .cmp(&FullKey::decode(&self.key_range.right))
+                        != Ordering::Greater
                 })
             };
             if end_index <= start_index {
@@ -341,14 +339,12 @@ impl HummockIterator for ConcatSstableIterator {
     /// Resets the iterator and seeks to the first position where the stored key >= `key`.
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let encoded_key = key.encode();
-            let key_slice = encoded_key.as_slice();
-            let seek_key: &[u8] = if self.key_range.left.is_empty() {
-                key_slice
+            let seek_key = if self.key_range.left.is_empty() {
+                key
             } else {
                 match key.cmp(&FullKey::decode(&self.key_range.left)) {
-                    Ordering::Less | Ordering::Equal => &self.key_range.left,
-                    Ordering::Greater => key_slice,
+                    Ordering::Less | Ordering::Equal => FullKey::decode(&self.key_range.left),
+                    Ordering::Greater => key,
                 }
             };
             let table_idx = self.tables.partition_point(|table| {
@@ -359,7 +355,7 @@ impl HummockIterator for ConcatSstableIterator {
                 // Note that we need to use `<` instead of `<=` to ensure that all keys in an SST
                 // (including its max. key) produce the same search result.
                 let max_sst_key = &table.key_range.as_ref().unwrap().right;
-                KeyComparator::compare_encoded_full_key(max_sst_key, seek_key) == Ordering::Less
+                FullKey::decode(max_sst_key).cmp(&seek_key) == Ordering::Less
             });
 
             self.seek_idx(table_idx, Some(key)).await
@@ -377,7 +373,6 @@ mod tests {
 
     use risingwave_hummock_sdk::key::{next_full_key, prev_full_key, FullKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::KeyComparator;
 
     use crate::hummock::compactor::ConcatSstableIterator;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
@@ -547,11 +542,9 @@ mod tests {
         let mut iter =
             ConcatSstableIterator::new(table_infos.clone(), kr.clone(), sstable_store.clone());
         // Use block_2_smallest_key as seek key and result in invalid iterator.
-        let seek_key = block_2_smallest_key.clone();
-        assert!(KeyComparator::compare_encoded_full_key(&seek_key, &kr.right) == Ordering::Greater);
-        iter.seek_idx(0, Some(FullKey::decode(&seek_key)))
-            .await
-            .unwrap();
+        let seek_key = FullKey::decode(&block_2_smallest_key);
+        assert!(seek_key.cmp(&FullKey::decode(&kr.right)) == Ordering::Greater);
+        iter.seek_idx(0, Some(seek_key)).await.unwrap();
         assert!(!iter.is_valid());
         // Use a small enough seek key and result in the second KV of block 1.
         let seek_key = test_key_of(0).encode();
