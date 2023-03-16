@@ -270,7 +270,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect();
         let pk_serializer = OrderedRowSerde::new(
             pk_data_types,
-            vec![OrderType::Ascending; state_pk_indices.len()],
+            vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
         let state = TableInner {
@@ -365,11 +365,14 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
         let mut entry_state = JoinEntryState::default();
 
         if self.need_degree_table {
-            let table_iter_fut = self.state.table.iter_key_and_val(&key, Default::default());
+            let table_iter_fut = self
+                .state
+                .table
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
             let degree_table_iter_fut = self
                 .degree_state
                 .table
-                .iter_key_and_val(&key, Default::default());
+                .iter_key_and_val(&key, PrefetchOptions::new_for_exhaust_iter());
 
             let (table_iter, degree_table_iter) =
                 try_join(table_iter_fut, degree_table_iter_fut).await?;

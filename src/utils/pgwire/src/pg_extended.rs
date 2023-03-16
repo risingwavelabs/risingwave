@@ -521,7 +521,7 @@ impl PreparedStatement {
                     };
                     format!("'{}'::JSONB", tmp)
                 }
-                DataType::Struct(_) | DataType::List { .. } => {
+                DataType::Serial | DataType::Struct(_) | DataType::List { .. } => {
                     return Err(PsqlError::Internal(anyhow!(
                         "Unsupported param type {:?}",
                         type_oid
@@ -557,7 +557,7 @@ impl PreparedStatement {
                 }
                 DataType::Interval => params.push("'2 months ago'::interval".to_string()),
                 DataType::Jsonb => params.push("'null'::JSONB".to_string()),
-                DataType::Struct(_) | DataType::List { .. } => {
+                DataType::Serial | DataType::Struct(_) | DataType::List { .. } => {
                     return Err(PsqlError::Internal(anyhow!(
                         "Unsupported param type {:?}",
                         oid

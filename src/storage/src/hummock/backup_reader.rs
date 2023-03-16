@@ -18,14 +18,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
 use futures::future::Shared;
 use futures::FutureExt;
 use risingwave_backup::error::BackupError;
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::{
-    DummyMetaSnapshotStorage, MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage,
+    BoxedMetaSnapshotStorage, DummyMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage,
 };
 use risingwave_backup::MetaSnapshotId;
+use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 
@@ -40,39 +42,48 @@ type VersionHolder = (
     tokio::sync::mpsc::UnboundedReceiver<PinVersionAction>,
 );
 
-pub async fn parse_meta_snapshot_storage(
-    storage_url: &str,
-    storage_directory: &str,
-) -> StorageResult<MetaSnapshotStorageRef> {
+async fn create_snapshot_store(config: &StoreConfig) -> StorageResult<BoxedMetaSnapshotStorage> {
     let backup_object_store = Arc::new(
         parse_remote_object_store(
-            storage_url,
+            &config.0,
             Arc::new(ObjectStoreMetrics::unused()),
             "Meta Backup",
         )
         .await,
     );
-    let store = Arc::new(
-        ObjectStoreMetaSnapshotStorage::new(storage_directory, backup_object_store).await?,
-    );
+    let store =
+        Box::new(ObjectStoreMetaSnapshotStorage::new(&config.1, backup_object_store).await?);
     Ok(store)
 }
 
 type InflightRequest = Shared<Pin<Box<dyn Future<Output = Result<PinnedVersion, String>> + Send>>>;
+/// (url, dir)
+type StoreConfig = (String, String);
 /// `BackupReader` helps to access historical hummock versions,
 /// which are persisted in meta snapshots (aka backups).
 pub struct BackupReader {
     versions: parking_lot::RwLock<HashMap<MetaSnapshotId, VersionHolder>>,
     inflight_request: parking_lot::Mutex<HashMap<MetaSnapshotId, InflightRequest>>,
-    store: MetaSnapshotStorageRef,
+    store: ArcSwap<(BoxedMetaSnapshotStorage, StoreConfig)>,
     refresh_tx: tokio::sync::mpsc::UnboundedSender<u64>,
 }
 
 impl BackupReader {
-    pub fn new(store: MetaSnapshotStorageRef) -> BackupReaderRef {
+    pub async fn new(storage_url: &str, storage_directory: &str) -> StorageResult<BackupReaderRef> {
+        let config = (storage_url.to_string(), storage_directory.to_string());
+        let store = create_snapshot_store(&config).await?;
+        tracing::info!(
+            "backup reader is initialized: url={}, dir={}",
+            config.0,
+            config.1
+        );
+        Ok(Self::with_store((store, config)))
+    }
+
+    fn with_store(store: (BoxedMetaSnapshotStorage, StoreConfig)) -> BackupReaderRef {
         let (refresh_tx, refresh_rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = Arc::new(Self {
-            store,
+            store: ArcSwap::from_pointee(store),
             versions: Default::default(),
             inflight_request: Default::default(),
             refresh_tx,
@@ -82,9 +93,24 @@ impl BackupReader {
     }
 
     pub fn unused() -> BackupReaderRef {
-        Self::new(Arc::new(DummyMetaSnapshotStorage::default()))
+        Self::with_store((
+            Box::<DummyMetaSnapshotStorage>::default(),
+            StoreConfig::default(),
+        ))
     }
 
+    async fn set_store(&self, config: StoreConfig) -> StorageResult<()> {
+        let new_store = create_snapshot_store(&config).await?;
+        tracing::info!(
+            "backup reader is updated: url={}, dir={}",
+            config.0,
+            config.1
+        );
+        self.store.store(Arc::new((new_store, config)));
+        Ok(())
+    }
+
+    /// Watches latest manifest id to keep local manifest update to date.
     async fn start_manifest_refresher(
         backup_reader: BackupReaderRef,
         mut refresh_rx: tokio::sync::mpsc::UnboundedReceiver<u64>,
@@ -95,11 +121,13 @@ impl BackupReader {
                 break;
             }
             let expect_manifest_id = expect_manifest_id.unwrap();
-            let previous_id = backup_reader.store.manifest().manifest_id;
+            // Use the same store throughout one run.
+            let current_store = backup_reader.store.load_full();
+            let previous_id = current_store.0.manifest().manifest_id;
             if expect_manifest_id <= previous_id {
                 continue;
             }
-            if let Err(e) = backup_reader.store.refresh_manifest().await {
+            if let Err(e) = current_store.0.refresh_manifest().await {
                 // reschedule refresh request
                 tracing::warn!("failed to refresh backup manifest, will retry. {}", e);
                 let backup_reader_clone = backup_reader.clone();
@@ -110,8 +138,8 @@ impl BackupReader {
                 continue;
             }
             // purge stale version cache
-            let manifest: HashSet<MetaSnapshotId> = backup_reader
-                .store
+            let manifest: HashSet<MetaSnapshotId> = current_store
+                .0
                 .manifest()
                 .snapshot_metadata
                 .iter()
@@ -138,9 +166,11 @@ impl BackupReader {
         self: &BackupReaderRef,
         epoch: u64,
     ) -> StorageResult<Option<PinnedVersion>> {
+        // Use the same store throughout the call.
+        let current_store = self.store.load_full();
         // 1. check manifest to locate snapshot, if any.
-        let snapshot_id = self
-            .store
+        let snapshot_id = current_store
+            .0
             .manifest()
             .snapshot_metadata
             .iter()
@@ -163,7 +193,7 @@ impl BackupReader {
             } else {
                 let this = self.clone();
                 let f = async move {
-                    let snapshot = this.store.get(snapshot_id).await.map_err(|e| {
+                    let snapshot = current_store.0.get(snapshot_id).await.map_err(|e| {
                         format!("failed to get meta snapshot {}. {}", snapshot_id, e)
                     })?;
                     let version_holder = build_version_holder(snapshot);
@@ -183,6 +213,34 @@ impl BackupReader {
             .map_err(|e| HummockError::read_backup_error(e).into());
         self.inflight_request.lock().remove(&snapshot_id);
         result
+    }
+
+    pub async fn watch_config_change(
+        &self,
+        mut rx: tokio::sync::watch::Receiver<SystemParamsReaderRef>,
+    ) {
+        loop {
+            if rx.changed().await.is_err() {
+                break;
+            }
+            let p = rx.borrow().load();
+            let config = (
+                p.backup_storage_url().to_string(),
+                p.backup_storage_directory().to_string(),
+            );
+            if config == self.store.load().1 {
+                continue;
+            }
+            if let Err(e) = self.set_store(config.clone()).await {
+                // Retry is driven by periodic system params notification.
+                tracing::warn!(
+                    "failed to update backup reader: url={}, dir={}, {:#?}",
+                    config.0,
+                    config.1,
+                    e
+                );
+            }
+        }
     }
 }
 

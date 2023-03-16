@@ -547,9 +547,11 @@ pub(crate) mod tests {
                 value_indices: vec![0, 1, 2],
                 read_prefix_len_hint: 0,
                 watermark_columns: FixedBitSet::with_capacity(3),
+                versioned: false,
             }),
             vec![],
             ctx,
+            false,
         )
         .to_batch()
         .unwrap()
@@ -658,6 +660,7 @@ pub(crate) mod tests {
         let fragmenter = BatchPlanFragmenter::new(
             worker_node_manager,
             catalog_reader,
+            None,
             batch_exchange_node.clone(),
         )
         .unwrap();

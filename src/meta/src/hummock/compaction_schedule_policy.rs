@@ -414,14 +414,14 @@ mod tests {
                 level_idx: 0,
                 level_type: 0,
                 table_infos: vec![SstableInfo {
-                    id: 0,
+                    object_id: 0,
+                    sst_id: 0,
                     key_range: None,
                     file_size: input_file_size,
                     table_ids: vec![],
                     meta_offset: 0,
                     stale_key_count: 0,
                     total_key_count: 0,
-                    divide_version: 0,
                     uncompressed_file_size: input_file_size,
                     min_epoch: 0,
                     max_epoch: 0,
@@ -443,6 +443,7 @@ mod tests {
             current_epoch_time: 0,
             target_sub_level_id: 0,
             task_type: compact_task::TaskType::Dynamic as i32,
+            split_by_state_table: false,
         }
     }
 

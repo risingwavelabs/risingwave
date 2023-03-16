@@ -166,6 +166,21 @@ where
                 self.source_manager.clone(),
             ));
 
+            #[cfg(not(all(test, feature = "failpoints")))]
+            {
+                use risingwave_common::util::epoch::INVALID_EPOCH;
+
+                let mce = self
+                    .hummock_manager
+                    .get_current_version()
+                    .await
+                    .max_committed_epoch;
+
+                if mce != INVALID_EPOCH {
+                    command_ctx.wait_epoch_commit(mce).await?;
+                }
+            }
+
             let (barrier_complete_tx, mut barrier_complete_rx) =
                 tokio::sync::mpsc::unbounded_channel();
             self.inject_barrier(command_ctx.clone(), barrier_complete_tx)

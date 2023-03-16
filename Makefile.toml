@@ -9,6 +9,7 @@ extend = [
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -370,7 +371,6 @@ description = "Download all available components at once"
 dependencies = [
   "download-connector",
   "download-maven",
-  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -414,6 +414,7 @@ dependencies = [
   "create-user-profiles-file",
   "download-all",
   "build-risingwave",
+  "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
   "export-dashboard-v2",
@@ -440,6 +441,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
+dependencies = ["download-connector"]
 script = '''
 #!/usr/bin/env bash
 
@@ -599,11 +601,18 @@ else
 fi
 
 ARTIFACT="risingwave-connector-1.0.0.tar.gz"
+TARGET_PATH="${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}"
 
-cd "${JAVA_DIR}"
-"${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+if [[ ! -f ${TARGET_PATH} ]] || [[ ! -z ${REBUILD_CONNECTOR_NODE} ]]; then
+  echo "Rebuild connector node"
+  cd "${JAVA_DIR}"
+  "${MAVEN_PATH}" --batch-mode --update-snapshots clean package -Dmaven.test.skip
+else
+  echo "Connector node was built already. Skipped. Set REBUILD_CONNECTOR_NODE=1 to enable rebuild"
+fi
+rm -rf ${PREFIX_BIN}/connector-node
 mkdir -p "${PREFIX_BIN}/connector-node"
-tar xf "${JAVA_DIR}/connector-node/assembly/target/${ARTIFACT}" -C "${PREFIX_BIN}/connector-node"
+tar xf ${TARGET_PATH} -C "${PREFIX_BIN}/connector-node"
 '''
 
 
@@ -693,7 +702,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation "$@"
+cargo check -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]

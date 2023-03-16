@@ -24,13 +24,11 @@ use risingwave_expr::ExprError;
 
 use super::error::StreamExecutorError;
 use super::{ActorContextRef, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::common::InfallibleExpression;
 
 pub struct HopWindowExecutor {
     ctx: ActorContextRef,
     pub input: BoxedExecutor,
     pub info: ExecutorInfo,
-
     pub time_col_idx: usize,
     pub window_slide: IntervalUnit,
     pub window_size: IntervalUnit,
@@ -85,6 +83,23 @@ impl Executor for HopWindowExecutor {
 }
 
 impl HopWindowExecutor {
+    fn derive_watermarks(
+        input_len: usize,
+        time_col_idx: usize,
+        output_indices: &[usize],
+    ) -> Vec<Vec<usize>> {
+        let mut watermark_derivations = vec![vec![]; input_len];
+        for (out_i, in_i) in output_indices.iter().enumerate() {
+            let in_i = *in_i;
+            if in_i >= input_len {
+                watermark_derivations[time_col_idx].push(out_i);
+            } else {
+                watermark_derivations[in_i].push(out_i);
+            }
+        }
+        watermark_derivations
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(self: Box<Self>) {
         let Self {
@@ -95,6 +110,7 @@ impl HopWindowExecutor {
             window_size,
             output_indices,
             info,
+            time_col_idx,
             ..
         } = *self;
         let units = window_size
@@ -111,55 +127,68 @@ impl HopWindowExecutor {
 
         let window_start_col_index = input.schema().len();
         let window_end_col_index = input.schema().len() + 1;
+        let watermark_derivations =
+            Self::derive_watermarks(input.schema().len(), time_col_idx, &output_indices);
         #[for_await]
         for msg in input.execute() {
             let msg = msg?;
-            if let Message::Chunk(chunk) = msg {
-                // TODO: compact may be not necessary here.
-                let chunk = chunk.compact();
-                let (data_chunk, ops) = chunk.into_parts();
-                // SAFETY: Already compacted.
-                assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
-                let _len = data_chunk.cardinality();
-                for i in 0..units {
-                    let window_start_col = if output_indices.contains(&window_start_col_index) {
-                        Some(
-                            self.window_start_exprs[i].eval_infallible(&data_chunk, |err| {
-                                ctx.on_compute_error(err, &info.identity)
-                            }),
-                        )
-                    } else {
-                        None
-                    };
-                    let window_end_col = if output_indices.contains(&window_end_col_index) {
-                        Some(
-                            self.window_end_exprs[i].eval_infallible(&data_chunk, |err| {
-                                ctx.on_compute_error(err, &info.identity)
-                            }),
-                        )
-                    } else {
-                        None
-                    };
-                    let new_cols = output_indices
-                        .iter()
-                        .filter_map(|&idx| {
-                            if idx < window_start_col_index {
-                                Some(data_chunk.column_at(idx).clone())
-                            } else if idx == window_start_col_index {
-                                Some(Column::new(window_start_col.clone().unwrap()))
-                            } else if idx == window_end_col_index {
-                                Some(Column::new(window_end_col.clone().unwrap()))
-                            } else {
-                                None
-                            }
-                        })
-                        .collect();
-                    let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
-                    yield Message::Chunk(new_chunk);
+            match msg {
+                Message::Chunk(chunk) => {
+                    // TODO: compact may be not necessary here.
+                    let chunk = chunk.compact();
+                    let (data_chunk, ops) = chunk.into_parts();
+                    // SAFETY: Already compacted.
+                    assert!(matches!(data_chunk.vis(), Vis::Compact(_)));
+                    let _len = data_chunk.cardinality();
+                    for i in 0..units {
+                        let window_start_col = if output_indices.contains(&window_start_col_index) {
+                            Some(
+                                self.window_start_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
+                            )
+                        } else {
+                            None
+                        };
+                        let window_end_col = if output_indices.contains(&window_end_col_index) {
+                            Some(
+                                self.window_end_exprs[i]
+                                    .eval_infallible(&data_chunk, |err| {
+                                        ctx.on_compute_error(err, &info.identity)
+                                    })
+                                    .await,
+                            )
+                        } else {
+                            None
+                        };
+                        let new_cols = output_indices
+                            .iter()
+                            .filter_map(|&idx| {
+                                if idx < window_start_col_index {
+                                    Some(data_chunk.column_at(idx).clone())
+                                } else if idx == window_start_col_index {
+                                    Some(Column::new(window_start_col.clone().unwrap()))
+                                } else if idx == window_end_col_index {
+                                    Some(Column::new(window_end_col.clone().unwrap()))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect();
+                        let new_chunk = StreamChunk::new(ops.clone(), new_cols, None);
+                        yield Message::Chunk(new_chunk);
+                    }
                 }
-            } else {
-                yield msg;
-                continue;
+                Message::Barrier(b) => {
+                    yield Message::Barrier(b);
+                }
+                Message::Watermark(w) => {
+                    for i in &watermark_derivations[w.col_idx] {
+                        yield Message::Watermark(w.clone().with_idx(*i));
+                    }
+                }
             };
         }
     }
@@ -170,12 +199,13 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{DataType, IntervalUnit};
     use risingwave_expr::expr::test_utils::make_hop_window_expression;
 
-    use crate::executor::test_utils::MockSource;
-    use crate::executor::{ActorContext, Executor, ExecutorInfo, StreamChunk};
-
+    use super::super::*;
+    use crate::executor::test_utils::{MessageSender, MockSource};
+    use crate::executor::{ActorContext, Executor, ExecutorInfo, ScalarImpl, StreamChunk};
     fn create_executor(output_indices: Vec<usize>) -> Box<dyn Executor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
@@ -199,8 +229,15 @@ mod tests {
             MockSource::with_chunks(schema.clone(), pk_indices.clone(), vec![chunk]).boxed();
         let window_slide = IntervalUnit::from_minutes(15);
         let window_size = IntervalUnit::from_minutes(30);
-        let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+        let window_offset = IntervalUnit::from_minutes(0);
+        let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
+            DataType::Timestamp,
+            2,
+            window_size,
+            window_slide,
+            window_offset,
+        )
+        .unwrap();
 
         super::HopWindowExecutor::new(
             ActorContext::create(123),
@@ -302,6 +339,230 @@ mod tests {
                 + ^11:30:00 3 8 ^11:02:00"
                     .replace('^', "2022-2-2T"),
             )
+        );
+    }
+
+    fn create_executor2(output_indices: Vec<usize>) -> (MessageSender, Box<dyn Executor>) {
+        let field1 = Field::unnamed(DataType::Int64);
+        let field2 = Field::unnamed(DataType::Int64);
+        let field3 = Field::with_name(DataType::Timestamp, "created_at");
+        let schema = Schema::new(vec![field1, field2, field3]);
+        let pk_indices = vec![0];
+        let (tx, source) = MockSource::channel(schema.clone(), pk_indices.clone());
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let offset = IntervalUnit::from_minutes(0);
+        let (window_start_exprs, window_end_exprs) =
+            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide, offset)
+                .unwrap();
+
+        (
+            tx,
+            super::HopWindowExecutor::new(
+                ActorContext::create(123),
+                Box::new(source),
+                ExecutorInfo {
+                    // TODO: the schema is incorrect, but it seems useless here.
+                    schema,
+                    pk_indices,
+                    identity: "test".to_string(),
+                },
+                2,
+                window_slide,
+                window_size,
+                window_start_exprs,
+                window_end_exprs,
+                output_indices,
+            )
+            .boxed(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_watermark_full_output() {
+        let (mut tx, hop) = create_executor2((0..5).collect());
+        let mut hop = hop.execute();
+
+        // TODO: the datatype is incorrect, but it seems useless here.
+        tx.push_int64_watermark(0, 100);
+        tx.push_int64_watermark(1, 100);
+        tx.push_int64_watermark(2, 100);
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 1,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 2,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 3,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 4,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_watermark_output_indices1() {
+        let (mut tx, hop) = create_executor2(vec![4, 1, 0, 2]);
+        let mut hop = hop.execute();
+
+        // TODO: the datatype is incorrect, but it seems useless here.
+        tx.push_int64_watermark(0, 100);
+        tx.push_int64_watermark(1, 100);
+        tx.push_int64_watermark(2, 100);
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 2,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 1,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 3,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_watermark_output_indices2() {
+        let (mut tx, hop) = create_executor2(vec![4, 1, 5, 0, 2]);
+        let mut hop = hop.execute();
+
+        // TODO: the datatype is incorrect, but it seems useless here.
+        tx.push_int64_watermark(0, 100);
+        tx.push_int64_watermark(1, 100);
+        tx.push_int64_watermark(2, 100);
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 3,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 1,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 0,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 2,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
+        );
+
+        let w = hop.next().await.unwrap().unwrap();
+        let w = w.as_watermark().unwrap();
+        assert_eq!(
+            w,
+            &Watermark {
+                col_idx: 4,
+                data_type: DataType::Int64,
+                val: ScalarImpl::Int64(100)
+            }
         );
     }
 }

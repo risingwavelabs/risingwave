@@ -42,7 +42,7 @@ use super::{
     ActorContextRef, BoxedExecutor, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 
 pub struct DynamicFilterExecutor<S: StateStore> {
@@ -93,7 +93,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         }
     }
 
-    fn apply_batch(
+    async fn apply_batch(
         &mut self,
         data_chunk: &DataChunk,
         ops: Vec<Op>,
@@ -104,11 +104,16 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         let mut last_res = false;
 
-        let eval_results = condition.map(|cond| {
-            cond.eval_infallible(data_chunk, |err| {
-                self.ctx.on_compute_error(err, self.identity())
-            })
-        });
+        let eval_results = if let Some(cond) = condition {
+            Some(
+                cond.eval_infallible(data_chunk, |err| {
+                    self.ctx.on_compute_error(err, &self.identity)
+                })
+                .await,
+            )
+        } else {
+            None
+        };
 
         for (idx, (row, op)) in data_chunk.rows().zip_eq_debug(ops.iter()).enumerate() {
             let left_val = row.datum_at(self.key_l).to_owned_datum();
@@ -323,7 +328,7 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     let condition = dynamic_cond(right_val).transpose()?;
 
                     let (new_ops, new_visibility) =
-                        self.apply_batch(&data_chunk, ops, condition)?;
+                        self.apply_batch(&data_chunk, ops, condition).await?;
 
                     let (columns, _) = data_chunk.into_parts();
 
@@ -501,7 +506,7 @@ mod tests {
             mem_state.clone(),
             TableId::new(0),
             vec![column_descs.clone()],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;
@@ -509,7 +514,7 @@ mod tests {
             mem_state,
             TableId::new(1),
             vec![column_descs],
-            vec![OrderType::Ascending],
+            vec![OrderType::ascending()],
             vec![0],
         )
         .await;

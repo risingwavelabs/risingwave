@@ -41,11 +41,10 @@ use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::hummock::{CompactionConfig, CompactionGroupInfo};
 use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::hummock::backup_reader::BackupReader;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableIdManager, SstableStore, TieredCache,
+    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
 };
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -185,7 +184,6 @@ async fn compaction_test(
     let store = HummockStorage::new(
         storage_opts.clone(),
         sstable_store.clone(),
-        BackupReader::unused(),
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node),
         state_store_metrics.clone(),
@@ -193,7 +191,7 @@ async fn compaction_test(
         compactor_metrics.clone(),
     )
     .await?;
-    let sstable_id_manager = store.sstable_id_manager().clone();
+    let sstable_object_id_manager = store.sstable_object_id_manager().clone();
     let filter_key_extractor_manager = store.filter_key_extractor_manager().clone();
     filter_key_extractor_manager.update(
         1,
@@ -213,7 +211,7 @@ async fn compaction_test(
         sstable_store,
         meta_client.clone(),
         filter_key_extractor_manager,
-        sstable_id_manager,
+        sstable_object_id_manager,
         compactor_metrics,
     );
     run_compare_result(&store, meta_client.clone(), test_range, test_count)
@@ -532,7 +530,7 @@ fn run_compactor_thread(
     sstable_store: SstableStoreRef,
     meta_client: Arc<MockHummockMetaClient>,
     filter_key_extractor_manager: Arc<FilterKeyExtractorManager>,
-    sstable_id_manager: Arc<SstableIdManager>,
+    sstable_object_id_manager: Arc<SstableObjectIdManager>,
     compactor_metrics: Arc<CompactorMetrics>,
 ) -> (
     tokio::task::JoinHandle<()>,
@@ -547,7 +545,7 @@ fn run_compactor_thread(
         compaction_executor: Arc::new(CompactionExecutor::new(None)),
         filter_key_extractor_manager,
         read_memory_limiter: MemoryLimiter::unlimit(),
-        sstable_id_manager,
+        sstable_object_id_manager,
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number: 4,

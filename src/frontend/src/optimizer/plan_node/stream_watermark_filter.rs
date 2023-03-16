@@ -132,12 +132,12 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
 
     let ordered_col_idx = builder.add_column(&key);
     builder.add_column(&value);
-    builder.add_order_column(ordered_col_idx, OrderType::Ascending);
+    builder.add_order_column(ordered_col_idx, OrderType::ascending());
 
     builder.set_vnode_col_idx(0);
     builder.set_value_indices(vec![1]);
 
-    builder.build(vec![0])
+    builder.build(vec![0], 1)
 }
 
 impl StreamNode for StreamWatermarkFilter {

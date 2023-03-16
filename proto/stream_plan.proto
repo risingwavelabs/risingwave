@@ -289,6 +289,20 @@ message HashJoinNode {
   bool is_append_only = 14;
 }
 
+message TemporalJoinNode {
+  plan_common.JoinType join_type = 1;
+  repeated int32 left_key = 2;
+  repeated int32 right_key = 3;
+  repeated bool null_safe = 4;
+  expr.ExprNode condition = 5;
+  // The output indices of current node
+  repeated uint32 output_indices = 6;
+  // The table desc of the lookup side table.
+  plan_common.StorageTableDesc table_desc = 7;
+  // The output indices of the lookup side table
+  repeated uint32 table_output_indices = 8;
+}
+
 message DynamicFilterNode {
   uint32 left_key = 1;
   // Must be one of <, <=, >, >=
@@ -369,23 +383,22 @@ enum ChainType {
 //   1. MergeNode (as a placeholder) for streaming read.
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
-  reserved 5;
-  reserved "same_worker_node";
-
   uint32 table_id = 1;
-  // The schema of input stream, which will be used to build a MergeNode
-  repeated plan_common.Field upstream_fields = 2;
-  // Which columns from upstream are used in this Chain node.
-  repeated uint32 upstream_column_indices = 3;
+
+  // The columns from the upstream table that'll be internally required by this chain node.
+  // - For non-backfill chain node, it's the same as the output columns.
+  // - For backfill chain node, there're additionally primary key columns.
+  repeated int32 upstream_column_ids = 2;
+  // The columns to be output by this chain node. The index is based on the internal required columns.
+  // - For non-backfill chain node, it's simply all the columns.
+  // - For backfill chain node, this strips the primary key columns if they're unnecessary.
+  repeated uint32 output_indices = 3;
+
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.
   // ChainType is used to decide which implementation for the ChainNode.
   ChainType chain_type = 4;
-  // Whether the upstream materialize is and this chain should be a singleton.
-  // FIXME: This is a workaround for fragmenter since the distribution info will be lost if there's only one
-  // fragment in the downstream mview. Remove this when we refactor the fragmenter.
-  bool is_singleton = 6;
 
   // The upstream materialized view info used by backfill.
   plan_common.StorageTableDesc table_desc = 7;
@@ -531,6 +544,7 @@ message StreamNode {
     RowIdGenNode row_id_gen = 128;
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
+    TemporalJoinNode temporal_join = 131;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -634,8 +648,10 @@ message StreamFragmentGraph {
     StreamNode node = 2;
     // Bitwise-OR of FragmentTypeFlags
     uint32 fragment_type_mask = 3;
-    // mark whether this fragment should only have one actor.
-    bool is_singleton = 4;
+    // Mark whether this fragment requires exactly one actor.
+    // Note: if this is `false`, the fragment may still be a singleton according to the scheduler.
+    // One should check `meta.Fragment.distribution_type` for the final result.
+    bool requires_singleton = 4;
     // Number of table ids (stateful states) for this fragment.
     uint32 table_ids_cnt = 5;
     // Mark the upstream table ids of this fragment, Used for fragments with `Chain`s.

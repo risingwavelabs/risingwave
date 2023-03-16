@@ -21,7 +21,7 @@ use risingwave_common::buffer::Bitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_source::row_id::RowIdGenerator;
+use risingwave_common::util::row_id::RowIdGenerator;
 
 use super::{
     expect_first_barrier, ActorContextRef, BoxedExecutor, Executor, PkIndices, PkIndicesRef,
