@@ -278,11 +278,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::ascending(),
+                order_type: OrderType::default_ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::ascending(),
+                order_type: OrderType::default_ascending(),
             },
         ];
         let top_n_executor = Box::new(TopNExecutor::new(
@@ -335,11 +335,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::ascending(),
+                order_type: OrderType::default_ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::ascending(),
+                order_type: OrderType::default_ascending(),
             },
         ];
         let top_n_executor = Box::new(TopNExecutor::new(

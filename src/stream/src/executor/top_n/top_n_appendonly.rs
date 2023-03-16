@@ -252,8 +252,8 @@ mod tests {
 
     fn order_by() -> Vec<ColumnOrder> {
         vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::ascending()),
+            ColumnOrder::new(0, OrderType::default_ascending()),
+            ColumnOrder::new(1, OrderType::default_ascending()),
         ]
     }
 
@@ -284,7 +284,10 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
+            &[
+                OrderType::default_ascending(),
+                OrderType::default_ascending(),
+            ],
             &pk_indices(),
         )
         .await;
@@ -366,7 +369,10 @@ mod tests {
         let source = create_source();
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::ascending(), OrderType::ascending()],
+            &[
+                OrderType::default_ascending(),
+                OrderType::default_ascending(),
+            ],
             &pk_indices(),
         )
         .await;

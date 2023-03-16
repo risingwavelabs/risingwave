@@ -14,10 +14,10 @@
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::bail;
-use risingwave_common::row::{Row};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
 use risingwave_common::util::memcmp_encoding;
-use risingwave_common::util::sort_util::{ColumnOrder};
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -183,6 +183,7 @@ mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ScalarRef;
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
 
@@ -269,8 +270,8 @@ mod tests {
             return_type.clone(),
             0,
             vec![
-                ColumnOrder::new(1, OrderType::ascending()),
-                ColumnOrder::new(0, OrderType::descending()),
+                ColumnOrder::new(1, OrderType::default_ascending()),
+                ColumnOrder::new(0, OrderType::default_descending()),
             ],
         )?;
         let mut builder = return_type.create_array_builder(0);

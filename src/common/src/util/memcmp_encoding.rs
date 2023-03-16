@@ -132,7 +132,7 @@ fn deserialize_datum_not_null(
 pub(crate) fn calculate_encoded_size(
     ty: &DataType,
     order: OrderType,
-    deserializer: &mut memcomparable::Deserializer<impl Buf>,
+    deserializer: &mut memcomparable::Deserializer<impl Buf>, // TODO(): remove this param
 ) -> memcomparable::Result<usize> {
     let (null_tag_none, null_tag_some) = if order.nulls_are_largest() {
         (1u8, 0u8) // None > Some
@@ -374,19 +374,19 @@ mod tests {
         let row1 = OwnedRow::new(vec![v10, v11, v12]);
         let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::descending()),
+            ColumnOrder::new(0, OrderType::default_ascending()),
+            ColumnOrder::new(1, OrderType::default_descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &column_orders);
         let encoded_v10 = encode_value(
             v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            OrderType::ascending(),
+            OrderType::default_ascending(),
         )
         .unwrap();
         let encoded_v11 = encode_value(
             v11_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            OrderType::descending(),
+            OrderType::default_descending(),
         )
         .unwrap();
         let concated_encoded_row1 = encoded_v10
@@ -415,8 +415,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::descending()),
+            ColumnOrder::new(0, OrderType::default_ascending()),
+            ColumnOrder::new(1, OrderType::default_descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &column_orders);

@@ -482,7 +482,10 @@ mod tests {
         let prost_table = build_table_with_prefix_column_num(1);
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
-        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
+        let order_types: Vec<OrderType> = vec![
+            OrderType::default_ascending(),
+            OrderType::default_ascending(),
+        ];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = OwnedRow::new(vec![
@@ -516,7 +519,10 @@ mod tests {
                 1,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
+            let order_types: Vec<OrderType> = vec![
+                OrderType::default_ascending(),
+                OrderType::default_ascending(),
+            ];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -538,7 +544,7 @@ mod tests {
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64];
-            let order_types = vec![OrderType::ascending()];
+            let order_types = vec![OrderType::default_ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
@@ -553,7 +559,10 @@ mod tests {
                 2,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
+            let order_types: Vec<OrderType> = vec![
+                OrderType::default_ascending(),
+                OrderType::default_ascending(),
+            ];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -575,7 +584,10 @@ mod tests {
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
-            let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+            let order_types = vec![
+                OrderType::default_ascending(),
+                OrderType::default_ascending(),
+            ];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();

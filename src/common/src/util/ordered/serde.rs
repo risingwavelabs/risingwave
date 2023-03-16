@@ -122,7 +122,10 @@ mod tests {
 
     #[test]
     fn test_ordered_row_serializer() {
-        let orders = vec![OrderType::descending(), OrderType::ascending()];
+        let orders = vec![
+            OrderType::default_descending(),
+            OrderType::default_ascending(),
+        ];
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let serializer = OrderedRowSerde::new(data_types, orders);
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
@@ -148,7 +151,10 @@ mod tests {
         use crate::types::ScalarImpl::{self, *};
         {
             // basic
-            let order_types = vec![OrderType::descending(), OrderType::ascending()];
+            let order_types = vec![
+                OrderType::default_descending(),
+                OrderType::default_ascending(),
+            ];
 
             let schema = vec![DataType::Varchar, DataType::Int16];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -170,7 +176,10 @@ mod tests {
         {
             // decimal
 
-            let order_types = vec![OrderType::descending(), OrderType::ascending()];
+            let order_types = vec![
+                OrderType::default_descending(),
+                OrderType::default_ascending(),
+            ];
 
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -201,7 +210,10 @@ mod tests {
 
     #[test]
     fn test_deserialize_with_column_indices() {
-        let order_types = vec![OrderType::descending(), OrderType::ascending()];
+        let order_types = vec![
+            OrderType::default_descending(),
+            OrderType::default_ascending(),
+        ];
 
         let schema = vec![DataType::Varchar, DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
@@ -218,7 +230,7 @@ mod tests {
             let row_0_idx_0_len = serde.deserialize_prefix_len(&array[0], 1).unwrap();
 
             let schema = vec![DataType::Varchar];
-            let order_types = vec![OrderType::descending()];
+            let order_types = vec![OrderType::default_descending()];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
@@ -230,7 +242,10 @@ mod tests {
         {
             let row_0_idx_1_len = serde.deserialize_prefix_len(&array[0], 2).unwrap();
 
-            let order_types = vec![OrderType::descending(), OrderType::ascending()];
+            let order_types = vec![
+                OrderType::default_descending(),
+                OrderType::default_ascending(),
+            ];
             let schema = vec![DataType::Varchar, DataType::Int16];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
@@ -245,9 +260,9 @@ mod tests {
         use crate::types::interval::IntervalUnit;
         use crate::types::OrderedF64;
 
-        let order_types = vec![OrderType::ascending()];
+        let order_types = vec![OrderType::default_ascending()];
         let schema = vec![DataType::Int16];
-        let serde = OrderedRowSerde::new(schema, order_types);
+        let serde = OrderedRowSerde::new(schema, order_types.clone());
 
         // test fixed_size
         {
@@ -257,8 +272,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Int16, &mut deserializer).unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Int16,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
                 assert_eq!(1, encoding_data_size);
             }
 
@@ -268,8 +287,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Float64, &mut deserializer).unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Float64,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
                 let data_size = size_of::<OrderedF64>();
                 assert_eq!(8, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
@@ -281,8 +304,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Boolean, &mut deserializer).unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Boolean,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
 
                 let data_size = size_of::<u8>();
                 assert_eq!(1, data_size);
@@ -297,9 +324,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Timestamp, &mut deserializer)
-                        .unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Timestamp,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
                 let data_size = size_of::<NaiveDateTimeWrapper>();
                 assert_eq!(12, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
@@ -311,9 +341,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Timestamptz, &mut deserializer)
-                        .unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Timestamptz,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
                 let data_size = size_of::<i64>();
                 assert_eq!(8, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
@@ -327,8 +360,12 @@ mod tests {
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
                 let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                let encoding_data_size =
-                    ScalarImpl::encoding_data_size(&DataType::Interval, &mut deserializer).unwrap();
+                let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                    &DataType::Interval,
+                    order_types[0],
+                    &mut deserializer,
+                )
+                .unwrap();
                 let data_size = size_of::<IntervalUnit>();
                 assert_eq!(16, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
@@ -347,9 +384,12 @@ mod tests {
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                    let encoding_data_size =
-                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
-                            .unwrap();
+                    let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                        &DataType::Decimal,
+                        order_types[0],
+                        &mut deserializer,
+                    )
+                    .unwrap();
                     // [nulltag, flag, decimal_chunk]
                     assert_eq!(17, encoding_data_size);
                 }
@@ -360,9 +400,12 @@ mod tests {
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                    let encoding_data_size =
-                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
-                            .unwrap();
+                    let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                        &DataType::Decimal,
+                        order_types[0],
+                        &mut deserializer,
+                    )
+                    .unwrap();
                     // [nulltag, flag, decimal_chunk]
                     assert_eq!(3, encoding_data_size);
                 }
@@ -373,9 +416,12 @@ mod tests {
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                    let encoding_data_size =
-                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
-                            .unwrap();
+                    let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                        &DataType::Decimal,
+                        order_types[0],
+                        &mut deserializer,
+                    )
+                    .unwrap();
 
                     assert_eq!(2, encoding_data_size); // [1, 35]
                 }
@@ -386,9 +432,12 @@ mod tests {
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                    let encoding_data_size =
-                        ScalarImpl::encoding_data_size(&DataType::Decimal, &mut deserializer)
-                            .unwrap();
+                    let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                        &DataType::Decimal,
+                        order_types[0],
+                        &mut deserializer,
+                    )
+                    .unwrap();
                     assert_eq!(2, encoding_data_size); // [1, 6]
                 }
 
@@ -403,9 +452,12 @@ mod tests {
                     let mut row_bytes = vec![];
                     serde.serialize(&row, &mut row_bytes);
                     let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                    let encoding_data_size =
-                        ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
-                            .unwrap();
+                    let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                        &DataType::Varchar,
+                        order_types[0],
+                        &mut deserializer,
+                    )
+                    .unwrap();
                     // [1, 1, 97, 98, 99, 100, 101, 102, 103, 104, 9, 105, 106, 107, 108, 109, 110,
                     // 0, 0, 6]
                     assert_eq!(6 + varchar.len(), encoding_data_size);
@@ -414,18 +466,20 @@ mod tests {
                 {
                     {
                         // test varchar Descending
-                        let order_types = vec![OrderType::descending()];
+                        let order_types = vec![OrderType::default_descending()];
                         let schema = vec![DataType::Varchar];
-                        let serde = OrderedRowSerde::new(schema, order_types);
+                        let serde = OrderedRowSerde::new(schema, order_types.clone());
                         let varchar = "abcdefghijklmnopq";
                         let row = OwnedRow::new(vec![Some(Utf8(varchar.into()))]);
                         let mut row_bytes = vec![];
                         serde.serialize(&row, &mut row_bytes);
                         let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                        deserializer.set_reverse(true); // TODO(): suspicious
-                        let encoding_data_size =
-                            ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
-                                .unwrap();
+                        let encoding_data_size = memcmp_encoding::calculate_encoded_size(
+                            &DataType::Varchar,
+                            order_types[0],
+                            &mut deserializer,
+                        )
+                        .unwrap();
 
                         // [254, 254, 158, 157, 156, 155, 154, 153, 152, 151, 246, 150, 149, 148,
                         // 147, 146, 145, 144, 143, 246, 142, 255, 255, 255, 255, 255, 255, 255,

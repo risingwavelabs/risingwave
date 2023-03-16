@@ -25,8 +25,8 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::types::ToDatumRef;
 
-// TODO(rc): to support `NULLS FIRST | LAST`, we may need to hide this enum, forcing developers use
-// `OrderType` instead.
+/// Sort direction.
+/// NOTE: Don't direct use this type, use [`OrderType`] instead.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 pub enum Direction {
     #[default]
@@ -53,6 +53,8 @@ impl Direction {
     }
 }
 
+/// Nulls are largest/smallest.
+/// NOTE: Don't direct use this type, use [`OrderType`] instead.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
 pub enum NullsAre {
     #[default]
@@ -79,6 +81,7 @@ impl NullsAre {
     }
 }
 
+/// Order type of a column.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Default)]
 pub struct OrderType {
     direction: Direction,
@@ -450,8 +453,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::ascending()),
-            ColumnOrder::new(1, OrderType::descending()),
+            ColumnOrder::new(0, OrderType::default_ascending()),
+            ColumnOrder::new(1, OrderType::default_descending()),
         ];
 
         assert_eq!(
@@ -512,7 +515,7 @@ mod tests {
         ]);
 
         let column_orders = (0..row1.len())
-            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
+            .map(|i| ColumnOrder::new(i, OrderType::default_ascending()))
             .collect_vec();
 
         let chunk = DataChunk::from_rows(

@@ -376,8 +376,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::ascending(), // for AggKind::Min
-                OrderType::ascending(),
+                OrderType::default_ascending(), // for AggKind::Min
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -485,8 +485,8 @@ mod tests {
             &input_schema,
             vec![2, 3],
             vec![
-                OrderType::descending(), // for AggKind::Max
-                OrderType::ascending(),
+                OrderType::default_descending(), // for AggKind::Max
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -595,8 +595,8 @@ mod tests {
             &input_schema,
             vec![0, 3],
             vec![
-                OrderType::ascending(), // for AggKind::Min
-                OrderType::ascending(),
+                OrderType::default_ascending(), // for AggKind::Min
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -604,8 +604,8 @@ mod tests {
             &input_schema,
             vec![1, 3],
             vec![
-                OrderType::descending(), // for AggKind::Max
-                OrderType::ascending(),
+                OrderType::default_descending(), // for AggKind::Max
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -704,9 +704,9 @@ mod tests {
             &input_schema,
             vec![2, 1, 3],
             vec![
-                OrderType::ascending(),  // c ASC
-                OrderType::descending(), // b DESC for AggKind::Max
-                OrderType::ascending(),  // _row_id ASC
+                OrderType::default_ascending(),  // c ASC
+                OrderType::default_descending(), // b DESC for AggKind::Max
+                OrderType::default_ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -811,8 +811,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::ascending(), // for AggKind::Min
-                OrderType::ascending(),
+                OrderType::default_ascending(), // for AggKind::Min
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -925,8 +925,8 @@ mod tests {
             &input_schema,
             vec![0, 1],
             vec![
-                OrderType::ascending(), // for AggKind::Min
-                OrderType::ascending(),
+                OrderType::default_ascending(), // for AggKind::Min
+                OrderType::default_ascending(),
             ],
         )
         .await;
@@ -1045,8 +1045,8 @@ mod tests {
             args: AggArgs::Binary([DataType::Varchar, DataType::Varchar], [0, 1]),
             return_type: DataType::Varchar,
             column_orders: vec![
-                ColumnOrder::new(2, OrderType::ascending()),  // b ASC
-                ColumnOrder::new(0, OrderType::descending()), // a DESC
+                ColumnOrder::new(2, OrderType::default_ascending()), // b ASC
+                ColumnOrder::new(0, OrderType::default_descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1058,9 +1058,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 4, 1],
             vec![
-                OrderType::ascending(),  // b ASC
-                OrderType::descending(), // a DESC
-                OrderType::ascending(),  // _row_id ASC
+                OrderType::default_ascending(),  // b ASC
+                OrderType::default_descending(), // a DESC
+                OrderType::default_ascending(),  // _row_id ASC
             ],
         )
         .await;
@@ -1147,8 +1147,8 @@ mod tests {
             args: AggArgs::Unary(DataType::Int32, 1), // array_agg(b)
             return_type: DataType::Int32,
             column_orders: vec![
-                ColumnOrder::new(2, OrderType::ascending()),  // c ASC
-                ColumnOrder::new(0, OrderType::descending()), // a DESC
+                ColumnOrder::new(2, OrderType::default_ascending()), // c ASC
+                ColumnOrder::new(0, OrderType::default_descending()), // a DESC
             ],
             append_only: false,
             filter: None,
@@ -1160,9 +1160,9 @@ mod tests {
             &input_schema,
             vec![2, 0, 3, 1],
             vec![
-                OrderType::ascending(),  // c ASC
-                OrderType::descending(), // a DESC
-                OrderType::ascending(),  // _row_id ASC
+                OrderType::default_ascending(),  // c ASC
+                OrderType::default_descending(), // a DESC
+                OrderType::default_ascending(),  // _row_id ASC
             ],
         )
         .await;

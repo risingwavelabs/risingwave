@@ -297,12 +297,12 @@ mod tests {
 
         fn storage_key() -> Vec<ColumnOrder> {
             let mut v = order_by();
-            v.extend([ColumnOrder::new(1, OrderType::ascending())]);
+            v.extend([ColumnOrder::new(1, OrderType::default_ascending())]);
             v
         }
 
         fn order_by() -> Vec<ColumnOrder> {
-            vec![ColumnOrder::new(0, OrderType::ascending())]
+            vec![ColumnOrder::new(0, OrderType::default_ascending())]
         }
 
         fn pk_indices() -> PkIndices {
@@ -334,7 +334,7 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -430,7 +430,7 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -538,7 +538,7 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -645,7 +645,7 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -853,8 +853,8 @@ mod tests {
 
         fn order_by() -> Vec<ColumnOrder> {
             vec![
-                ColumnOrder::new(0, OrderType::ascending()),
-                ColumnOrder::new(3, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::default_ascending()),
+                ColumnOrder::new(3, OrderType::default_ascending()),
             ]
         }
 
@@ -872,7 +872,7 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -949,7 +949,7 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
                 state_store.clone(),
             )
@@ -1001,7 +1001,7 @@ mod tests {
                     DataType::Int64,
                     DataType::Int64,
                 ],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
                 state_store,
             )
@@ -1115,12 +1115,12 @@ mod tests {
 
         fn storage_key() -> Vec<ColumnOrder> {
             let mut v = order_by();
-            v.push(ColumnOrder::new(1, OrderType::ascending()));
+            v.push(ColumnOrder::new(1, OrderType::default_ascending()));
             v
         }
 
         fn order_by() -> Vec<ColumnOrder> {
-            vec![ColumnOrder::new(0, OrderType::ascending())]
+            vec![ColumnOrder::new(0, OrderType::default_ascending())]
         }
 
         fn pk_indices() -> PkIndices {
@@ -1132,7 +1132,7 @@ mod tests {
             let source = create_source();
             let state_table = create_in_memory_state_table(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
             )
             .await;
@@ -1277,7 +1277,7 @@ mod tests {
             let state_store = MemoryStateStore::new();
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
                 state_store.clone(),
             )
@@ -1330,7 +1330,7 @@ mod tests {
 
             let state_table = create_in_memory_state_table_from_state_store(
                 &[DataType::Int64, DataType::Int64],
-                &[OrderType::ascending(), OrderType::ascending()],
+                &[OrderType::default_ascending(), OrderType::default_ascending()],
                 &pk_indices(),
                 state_store,
             )

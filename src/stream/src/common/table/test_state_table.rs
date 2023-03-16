@@ -40,7 +40,7 @@ async fn test_state_table_update_insert() {
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(4), DataType::Int32),
     ];
-    let order_types = vec![OrderType::ascending()];
+    let order_types = vec![OrderType::default_ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
     let table = gen_prost_table(
@@ -211,7 +211,10 @@ async fn test_state_table_iter_with_prefix() {
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -339,7 +342,10 @@ async fn test_state_table_iter_with_pk_range() {
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
@@ -480,7 +486,7 @@ async fn test_mem_table_assertion() {
         ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
         ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
     ];
-    let order_types = vec![OrderType::ascending()];
+    let order_types = vec![OrderType::default_ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 1;
     let table = gen_prost_table(
@@ -515,7 +521,10 @@ async fn test_state_table_iter_with_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -676,7 +685,10 @@ async fn test_state_table_iter_with_shuffle_value_indices() {
     const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
     let test_env = prepare_hummock_test_env().await;
 
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
         ColumnDesc::unnamed(column_ids[0], DataType::Int32),
@@ -918,7 +930,7 @@ async fn test_state_table_write_chunk() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::ascending()];
+    let order_types = vec![OrderType::default_ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -1047,7 +1059,7 @@ async fn test_state_table_write_chunk_visibility() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::ascending()];
+    let order_types = vec![OrderType::default_ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table(
@@ -1173,7 +1185,7 @@ async fn test_state_table_write_chunk_value_indices() {
         DataType::Boolean,
         DataType::Float32,
     ];
-    let order_types = vec![OrderType::ascending()];
+    let order_types = vec![OrderType::default_ascending()];
     let pk_index = vec![0_usize];
     let read_prefix_len_hint = 0;
     let table = gen_prost_table_with_value_indices(
@@ -1276,7 +1288,10 @@ async fn test_state_table_may_exist() {
     let test_env = prepare_hummock_test_env().await;
 
     // let pk_columns = vec![0, 1]; leave a message to indicate pk columns
-    let order_types = vec![OrderType::ascending(), OrderType::descending()];
+    let order_types = vec![
+        OrderType::default_ascending(),
+        OrderType::default_descending(),
+    ];
 
     let column_ids = vec![ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
     let column_descs = vec![
