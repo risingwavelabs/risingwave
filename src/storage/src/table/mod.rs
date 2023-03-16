@@ -54,6 +54,17 @@ impl Distribution {
         }
     }
 
+    pub fn fallback_vnodes() -> Arc<Bitmap> {
+        /// A bitmap that only the default vnode is set.
+        static FALLBACK_VNODES: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
+            let mut vnodes = BitmapBuilder::zeroed(VirtualNode::COUNT);
+            vnodes.set(DEFAULT_VNODE.to_index(), true);
+            vnodes.finish().into()
+        });
+
+        FALLBACK_VNODES.clone()
+    }
+
     /// Distribution that accesses all vnodes, mainly used for tests.
     pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.

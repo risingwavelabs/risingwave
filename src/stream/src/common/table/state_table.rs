@@ -198,15 +198,10 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let Distribution {
-            dist_key_indices,
-            vnodes,
-        } = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
+        let vnodes = match vnodes {
+            Some(vnodes) => vnodes,
+
+            None => Distribution::fallback_vnodes(),
         };
         let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
             let vnode_col_idx = *idx as usize;
