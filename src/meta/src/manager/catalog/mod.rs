@@ -995,9 +995,9 @@ where
             view_name.to_string(),
         ))?;
 
-        // 2. rename view and its definition.
+        // 2. rename view, note that there's no need to update its definition since only it only
+        // stores the query sql.
         view.name = view_name.to_string();
-        view.sql = alter_relation_rename(&view.sql, view_name);
 
         // 3. update all relations that depend on this view.
         self.alter_relation_name_refs_inner(

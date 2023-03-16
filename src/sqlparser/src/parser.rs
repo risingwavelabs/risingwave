@@ -24,7 +24,9 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
-use crate::ast::ddl::{AlterIndexOperation, SourceWatermark};
+use crate::ast::ddl::{
+    AlterIndexOperation, AlterSinkOperation, AlterViewOperation, SourceWatermark,
+};
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -2363,6 +2365,12 @@ impl Parser {
             self.parse_alter_table()
         } else if self.parse_keyword(Keyword::INDEX) {
             self.parse_alter_index()
+        } else if self.parse_keyword(Keyword::VIEW) {
+            self.parse_alter_view(false)
+        } else if self.parse_keywords(&[Keyword::MATERIALIZED, Keyword::VIEW]) {
+            self.parse_alter_view(true)
+        } else if self.parse_keyword(Keyword::SINK) {
+            self.parse_alter_sink()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
@@ -2478,6 +2486,51 @@ impl Parser {
 
         Ok(Statement::AlterIndex {
             name: index_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_view(&mut self, materialized: bool) -> Result<Statement, ParserError> {
+        let view_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let view_name = self.parse_object_name()?;
+                AlterViewOperation::RenameView { view_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected(
+                &format!(
+                    "RENAME after ALTER {}VIEW",
+                    if materialized { "MATERIALIZED " } else { "" }
+                ),
+                self.peek_token(),
+            );
+        };
+
+        Ok(Statement::AlterView {
+            materialized,
+            name: view_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_sink(&mut self) -> Result<Statement, ParserError> {
+        let sink_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let sink_name = self.parse_object_name()?;
+                AlterSinkOperation::RenameSink { sink_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER SINK", self.peek_token());
+        };
+
+        Ok(Statement::AlterSink {
+            name: sink_name,
             operation,
         })
     }

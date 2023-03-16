@@ -23,6 +23,7 @@ use crate::Binder;
 
 pub async fn handle_rename_table(
     handler_args: HandlerArgs,
+    table_type: TableType,
     table_name: ObjectName,
     new_table_name: ObjectName,
 ) -> Result<RwPgResponse> {
@@ -40,11 +41,12 @@ pub async fn handle_rename_table(
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_table_by_name(db_name, schema_path, &real_table_name)?;
-        match table.table_type {
-            TableType::Table => {}
-            _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                "\"{table_name}\" is not a table or cannot be altered"
-            )))?,
+        if table_type != table.table_type {
+            return Err(ErrorCode::InvalidInputSyntax(format!(
+                "\"{table_name}\" is not a {}",
+                table_type.to_prost().as_str_name()
+            ))
+            .into());
         }
 
         session.check_privilege_for_drop_alter(schema_name, &**table)?;
@@ -56,7 +58,12 @@ pub async fn handle_rename_table(
         .alter_table_name(table_id.table_id, &new_table_name)
         .await?;
 
-    Ok(PgResponse::empty_result(StatementType::ALTER_TABLE))
+    let stmt_type = match table_type {
+        TableType::Table => StatementType::ALTER_TABLE,
+        TableType::MaterializedView => StatementType::ALTER_MATERIALIZED_VIEW,
+        _ => unreachable!(),
+    };
+    Ok(PgResponse::empty_result(stmt_type))
 }
 
 pub async fn handle_rename_index(
@@ -88,6 +95,66 @@ pub async fn handle_rename_index(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::ALTER_INDEX))
+}
+
+pub async fn handle_rename_view(
+    handler_args: HandlerArgs,
+    view_name: ObjectName,
+    new_view_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, real_view_name) =
+        Binder::resolve_schema_qualified_name(db_name, view_name.clone())?;
+    let new_view_name = Binder::resolve_view_name(new_view_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let view_id = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (view, schema_name) = reader.get_view_by_name(db_name, schema_path, &real_view_name)?;
+        session.check_privilege_for_drop_alter(schema_name, &**view)?;
+        view.id
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .alter_view_name(view_id, &new_view_name)
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::ALTER_VIEW))
+}
+
+pub async fn handle_rename_sink(
+    handler_args: HandlerArgs,
+    sink_name: ObjectName,
+    new_sink_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+    let db_name = session.database();
+    let (schema_name, real_sink_name) =
+        Binder::resolve_schema_qualified_name(db_name, sink_name.clone())?;
+    let new_sink_name = Binder::resolve_sink_name(new_sink_name)?;
+    let search_path = session.config().get_search_path();
+    let user_name = &session.auth_context().user_name;
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+
+    let sink_id = {
+        let reader = session.env().catalog_reader().read_guard();
+        let (sink, schema_name) = reader.get_sink_by_name(db_name, schema_path, &real_sink_name)?;
+        session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+        sink.id
+    };
+
+    let catalog_writer = session.env().catalog_writer();
+    catalog_writer
+        .alter_sink_name(sink_id.sink_id, &new_sink_name)
+        .await?;
+
+    Ok(PgResponse::empty_result(StatementType::ALTER_SINK))
 }
 
 #[cfg(test)]

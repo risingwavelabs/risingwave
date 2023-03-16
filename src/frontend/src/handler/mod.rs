@@ -28,6 +28,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
+use crate::catalog::table_catalog::TableType;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -387,11 +388,40 @@ pub async fn handle(
         Statement::AlterTable {
             name,
             operation: AlterTableOperation::RenameTable { table_name },
-        } => alter_relation_rename::handle_rename_table(handler_args, name, table_name).await,
+        } => {
+            alter_relation_rename::handle_rename_table(
+                handler_args,
+                TableType::Table,
+                name,
+                table_name,
+            )
+            .await
+        }
         Statement::AlterIndex {
             name,
             operation: AlterIndexOperation::RenameIndex { index_name },
         } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::RenameView { view_name },
+        } => {
+            if materialized {
+                alter_relation_rename::handle_rename_table(
+                    handler_args,
+                    TableType::MaterializedView,
+                    name,
+                    view_name,
+                )
+                .await
+            } else {
+                alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
+            }
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::RenameSink { sink_name },
+        } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

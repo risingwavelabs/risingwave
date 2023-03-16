@@ -160,7 +160,7 @@ impl TableType {
         }
     }
 
-    fn to_prost(self) -> ProstTableType {
+    pub(crate) fn to_prost(self) -> ProstTableType {
         match self {
             Self::Table => ProstTableType::Table,
             Self::MaterializedView => ProstTableType::MaterializedView,
