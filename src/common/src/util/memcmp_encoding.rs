@@ -143,7 +143,7 @@ pub(crate) fn calculate_encoded_size(
     calculate_encoded_size_inner(ty, null_tag_none, null_tag_some, deserializer)
 }
 
-pub fn calculate_encoded_size_inner(
+fn calculate_encoded_size_inner(
     ty: &DataType,
     null_tag_none: u8,
     null_tag_some: u8,
@@ -180,7 +180,13 @@ pub fn calculate_encoded_size_inner(
                 .fields
                 .iter()
                 .map(|field| {
-                    calculate_encoded_size_inner(field, null_tag_none, null_tag_some, deserializer)
+                    // use default null tags inside composite type
+                    calculate_encoded_size_inner(
+                        field,
+                        DEFAULT_NULL_TAG_NONE,
+                        DEFAULT_NULL_TAG_SOME,
+                        deserializer,
+                    )
                 })
                 .try_fold(0, |a, b| b.map(|b| a + b))?,
             DataType::Jsonb => deserializer.skip_bytes()?,
