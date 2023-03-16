@@ -80,3 +80,19 @@ impl From<&SourceColumnDesc> for ColumnDesc {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_visible() {
+        let mut c = SourceColumnDesc::simple("a", DataType::Int32, ColumnId::new(0));
+        assert!(c.is_visible());
+        c.is_row_id = true;
+        assert!(!c.is_visible());
+        c.is_row_id = false;
+        c.is_meta = true;
+        assert!(!c.is_visible());
+    }
+}
