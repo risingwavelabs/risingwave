@@ -6139,6 +6139,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "iana-time-zone",
  "itertools",
  "lazy_static",
  "madsim-tokio",

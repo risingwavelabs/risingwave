@@ -264,6 +264,10 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflictBehavior: HandleConflictBehavior;
+  /**
+   * Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+   * for implementing the table's bloom filter or other storage optimization techniques.
+   */
   readPrefixLenHint: number;
   watermarkIndices: number[];
   distKeyInPk: number[];
