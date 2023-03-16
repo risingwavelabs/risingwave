@@ -104,7 +104,7 @@ impl OrderedRowSerde {
             let data = &key[len..];
             let mut deserializer = memcomparable::Deserializer::new(data);
             deserializer.set_reverse(order_type.direction() == Direction::Descending);
-            // TODO(): suspecious
+            // TODO(): suspicious
             len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
         }
 
