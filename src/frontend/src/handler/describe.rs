@@ -236,7 +236,7 @@ mod tests {
             "v3".into() => "Int32".into(),
             "v4".into() => "Int32".into(),
             "primary key".into() => "v3".into(),
-            "idx1".into() => "index(v1 DESC, v2, v3) include(v4) distributed by(v1, v2)".into(),
+            "idx1".into() => "index(v1 DESC NULLS FIRST, v2 ASC NULLS LAST, v3 ASC NULLS LAST) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);
