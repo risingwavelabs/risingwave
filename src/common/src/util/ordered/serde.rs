@@ -96,18 +96,17 @@ impl OrderedRowSerde {
         key: &[u8],
         prefix_len: usize,
     ) -> memcomparable::Result<usize> {
-        use crate::types::ScalarImpl;
         let mut len: usize = 0;
         for index in 0..prefix_len {
             let data_type = &self.schema[index];
-            let order_type = &self.order_types[index];
             let data = &key[len..];
             let mut deserializer = memcomparable::Deserializer::new(data);
-            deserializer.set_reverse(order_type.direction() == Direction::Descending);
-            // TODO(): suspicious
-            len += ScalarImpl::encoding_data_size(data_type, &mut deserializer)?;
+            len += memcmp_encoding::calculate_encoded_size(
+                data_type,
+                self.order_types[index],
+                &mut deserializer,
+            )?;
         }
-
         Ok(len)
     }
 }

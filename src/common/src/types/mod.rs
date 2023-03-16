@@ -1057,65 +1057,6 @@ impl ScalarImpl {
         })
     }
 
-    /// Deserialize the `data_size` of `input_data_type` in `storage_encoding`. This function will
-    /// consume the offset of deserializer then return the length (without memcopy, only length
-    /// calculation). The difference between `encoding_data_size` and `ScalarImpl::data_size` is
-    /// that `ScalarImpl::data_size` calculates the `memory_length` of type instead of
-    /// `storage_encoding`
-    pub fn encoding_data_size(
-        data_type: &DataType,
-        deserializer: &mut memcomparable::Deserializer<impl Buf>,
-    ) -> memcomparable::Result<usize> {
-        // TODO(): this function should be moved to `memcmp_encoding.rs`
-        let base_position = deserializer.position();
-        let null_tag = u8::deserialize(&mut *deserializer)?;
-        match null_tag {
-            1 => {}
-            0 => {
-                use std::mem::size_of;
-                let len = match data_type {
-                    DataType::Int16 => size_of::<i16>(),
-                    DataType::Int32 => size_of::<i32>(),
-                    DataType::Int64 => size_of::<i64>(),
-                    DataType::Serial => size_of::<Serial>(),
-                    DataType::Float32 => size_of::<OrderedF32>(),
-                    DataType::Float64 => size_of::<OrderedF64>(),
-                    DataType::Date => size_of::<NaiveDateWrapper>(),
-                    DataType::Time => size_of::<NaiveTimeWrapper>(),
-                    DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestamptz => size_of::<i64>(),
-                    DataType::Boolean => size_of::<u8>(),
-                    // IntervalUnit is serialized as (i32, i32, i64)
-                    DataType::Interval => size_of::<(i32, i32, i64)>(),
-                    DataType::Decimal => {
-                        deserializer.deserialize_decimal()?;
-                        0 // the len is not used since decimal is not a fixed length type
-                    }
-                    // these two types is var-length and should only be determine at runtime.
-                    // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { .. } => deserializer.skip_bytes()?,
-                    DataType::Struct(t) => t
-                        .fields
-                        .iter()
-                        .map(|field| Self::encoding_data_size(field, deserializer))
-                        .try_fold(0, |a, b| b.map(|b| a + b))?,
-                    DataType::Jsonb => deserializer.skip_bytes()?,
-                    DataType::Varchar => deserializer.skip_bytes()?,
-                    DataType::Bytea => deserializer.skip_bytes()?,
-                };
-
-                // consume offset of fixed_type
-                if deserializer.position() == base_position + 1 {
-                    // fixed type
-                    deserializer.advance(len);
-                }
-            }
-            _ => return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
-        }
-
-        Ok(deserializer.position() - base_position)
-    }
-
     pub fn as_integral(&self) -> i64 {
         match self {
             Self::Int16(v) => *v as i64,

@@ -17,10 +17,14 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::ZipEqFast;
+use crate::array::serial_array::Serial;
 use crate::array::{ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
 use crate::row::{OwnedRow, Row};
-use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ToDatumRef};
+use crate::types::{
+    DataType, Datum, DatumRef, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    OrderedF32, OrderedF64, ScalarImpl, ToDatumRef,
+};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
 // NULL > any non-NULL value by default
@@ -120,6 +124,80 @@ fn deserialize_datum_not_null(
 ) -> memcomparable::Result<Datum> {
     deserializer.set_reverse(order.is_descending());
     Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
+}
+
+/// Deserialize the `data_size` of `input_data_type` in `memcmp_encoding`. This function will
+/// consume the offset of deserializer then return the length (without memcopy, only length
+/// calculation).
+pub(crate) fn calculate_encoded_size(
+    ty: &DataType,
+    order: OrderType,
+    deserializer: &mut memcomparable::Deserializer<impl Buf>,
+) -> memcomparable::Result<usize> {
+    let (null_tag_none, null_tag_some) = if order.nulls_are_largest() {
+        (1u8, 0u8) // None > Some
+    } else {
+        (0u8, 1u8) // None < Some
+    };
+    deserializer.set_reverse(order.is_descending());
+    calculate_encoded_size_inner(ty, null_tag_none, null_tag_some, deserializer)
+}
+
+pub fn calculate_encoded_size_inner(
+    ty: &DataType,
+    null_tag_none: u8,
+    null_tag_some: u8,
+    deserializer: &mut memcomparable::Deserializer<impl Buf>,
+) -> memcomparable::Result<usize> {
+    let base_position = deserializer.position();
+    let null_tag = u8::deserialize(&mut *deserializer)?;
+    if null_tag == null_tag_none {
+        // deserialize nothing more
+    } else if null_tag == null_tag_some {
+        use std::mem::size_of;
+        let len = match ty {
+            DataType::Int16 => size_of::<i16>(),
+            DataType::Int32 => size_of::<i32>(),
+            DataType::Int64 => size_of::<i64>(),
+            DataType::Serial => size_of::<Serial>(),
+            DataType::Float32 => size_of::<OrderedF32>(),
+            DataType::Float64 => size_of::<OrderedF64>(),
+            DataType::Date => size_of::<NaiveDateWrapper>(),
+            DataType::Time => size_of::<NaiveTimeWrapper>(),
+            DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
+            DataType::Timestamptz => size_of::<i64>(),
+            DataType::Boolean => size_of::<u8>(),
+            // IntervalUnit is serialized as (i32, i32, i64)
+            DataType::Interval => size_of::<(i32, i32, i64)>(),
+            DataType::Decimal => {
+                deserializer.deserialize_decimal()?;
+                0 // the len is not used since decimal is not a fixed length type
+            }
+            // these two types is var-length and should only be determine at runtime.
+            // TODO: need some test for this case (e.g. e2e test)
+            DataType::List { .. } => deserializer.skip_bytes()?,
+            DataType::Struct(t) => t
+                .fields
+                .iter()
+                .map(|field| {
+                    calculate_encoded_size_inner(field, null_tag_none, null_tag_some, deserializer)
+                })
+                .try_fold(0, |a, b| b.map(|b| a + b))?,
+            DataType::Jsonb => deserializer.skip_bytes()?,
+            DataType::Varchar => deserializer.skip_bytes()?,
+            DataType::Bytea => deserializer.skip_bytes()?,
+        };
+
+        // consume offset of fixed_type
+        if deserializer.position() == base_position + 1 {
+            // fixed type
+            deserializer.advance(len);
+        }
+    } else {
+        return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _));
+    }
+
+    Ok(deserializer.position() - base_position)
 }
 
 pub fn encode_value(value: DatumRef<'_>, order: OrderType) -> Result<Vec<u8>> {
