@@ -423,7 +423,7 @@ mod tests {
                         let mut row_bytes = vec![];
                         serde.serialize(&row, &mut row_bytes);
                         let mut deserializer = memcomparable::Deserializer::new(&row_bytes[..]);
-                        deserializer.set_reverse(true); // TODO(): suspecious
+                        deserializer.set_reverse(true); // TODO(): suspicious
                         let encoding_data_size =
                             ScalarImpl::encoding_data_size(&DataType::Varchar, &mut deserializer)
                                 .unwrap();

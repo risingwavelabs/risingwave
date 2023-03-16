@@ -17,9 +17,9 @@ use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 
 use super::iter_util::ZipEqFast;
-use crate::array::{ArrayImpl, DataChunk};
+use crate::array::{ArrayImpl, DataChunk, RowRef};
 use crate::error::Result;
-use crate::row::OwnedRow;
+use crate::row::{OwnedRow, Row};
 use crate::types::{DataType, Datum, DatumRef, ScalarImpl, ToDatumRef};
 use crate::util::sort_util::{ColumnOrder, OrderType};
 
@@ -160,12 +160,23 @@ pub fn encode_chunk(chunk: &DataChunk, column_orders: &[ColumnOrder]) -> Vec<Vec
     encoded_chunk
 }
 
+/// Encode an owned row into memcomparable format.
 pub fn encode_row(row: &OwnedRow, column_orders: &[ColumnOrder]) -> Vec<u8> {
     let mut encoded_row = vec![];
     column_orders.iter().for_each(|o| {
         let value = row[o.column_index].as_ref();
         encoded_row
             .extend(encode_value(value.map(|x| x.as_scalar_ref_impl()), o.order_type).unwrap());
+    });
+    encoded_row
+}
+
+// TODO(): unittest
+/// Encode an `RowRef` into memcomparable format.
+pub fn encode_row_ref(row_ref: RowRef<'_>, column_orders: &[ColumnOrder]) -> Vec<u8> {
+    let mut encoded_row = vec![];
+    column_orders.iter().for_each(|o| {
+        encoded_row.extend(encode_value(row_ref.datum_at(o.column_index), o.order_type).unwrap());
     });
     encoded_row
 }
