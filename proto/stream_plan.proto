@@ -635,8 +635,9 @@ enum FragmentTypeFlag {
   SOURCE = 1;
   MVIEW = 2;
   SINK = 4;
-  NOW = 8;
+  NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
   CHAIN_NODE = 16;
+  BARRIER_RECV = 32;
 }
 
 // The environment associated with a stream plan
