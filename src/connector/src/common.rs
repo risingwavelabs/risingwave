@@ -19,6 +19,8 @@ use aws_sdk_kinesis::Client as KinesisClient;
 use http::Uri;
 use rdkafka::ClientConfig;
 use serde_derive::{Deserialize, Serialize};
+use serde_with::json::JsonString;
+use serde_with::serde_as;
 
 use crate::source::kinesis::config::AwsConfigInfo;
 
@@ -38,12 +40,14 @@ pub struct AwsPrivateLinks {
     pub infos: Vec<AwsPrivateLinkItem>,
 }
 
+#[serde_as]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KafkaCommon {
     #[serde(rename = "properties.bootstrap.server", alias = "kafka.brokers")]
     pub brokers: String,
 
     #[serde(rename = "broker.rewrite.endpoints")]
+    #[serde_as(as = "JsonString")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,
 
     #[serde(rename = "topic", alias = "kafka.topic")]

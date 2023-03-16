@@ -96,7 +96,7 @@ impl AwsEc2Client {
     ) -> MetaResult<Vec<(String, String, String)>> {
         let vpc_filter = Filter::builder().name("vpc-id").values(vpc_id).build();
         let az_filter = Filter::builder()
-            .name("availability-zone")
+            .name("availability-zone-id")
             .set_values(Some(Vec::from(az_ids)))
             .build();
         let output = self
