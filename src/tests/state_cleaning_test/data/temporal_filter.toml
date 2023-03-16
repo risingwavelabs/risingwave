@@ -1,5 +1,5 @@
 [[test]]
-name = "window_hash_join"
+name = "temporal_filter"
 init_sqls = [
     """
     CREATE TABLE clicks (
