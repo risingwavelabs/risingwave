@@ -199,7 +199,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
         switch (format) {
-            case Unspecified:
+            case UNSPECIFIED_FORMAT:
             case UNRECOGNIZED:
                 throw INVALID_ARGUMENT
                         .withDescription("should specify payload format in request")
