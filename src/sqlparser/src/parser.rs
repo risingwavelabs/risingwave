@@ -24,7 +24,7 @@ use core::fmt;
 
 use tracing::{debug, instrument};
 
-use crate::ast::ddl::SourceWatermark;
+use crate::ast::ddl::{AlterIndexOperation, SourceWatermark};
 use crate::ast::{ParseTo, *};
 use crate::keywords::{self, Keyword};
 use crate::tokenizer::*;
@@ -2361,6 +2361,8 @@ impl Parser {
     pub fn parse_alter(&mut self) -> Result<Statement, ParserError> {
         if self.parse_keyword(Keyword::TABLE) {
             self.parse_alter_table()
+        } else if self.parse_keyword(Keyword::INDEX) {
+            self.parse_alter_index()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
@@ -2457,6 +2459,25 @@ impl Parser {
         };
         Ok(Statement::AlterTable {
             name: table_name,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_index(&mut self) -> Result<Statement, ParserError> {
+        let index_name = self.parse_object_name()?;
+        let operation = if self.parse_keyword(Keyword::RENAME) {
+            if self.parse_keyword(Keyword::TO) {
+                let index_name = self.parse_object_name()?;
+                AlterIndexOperation::RenameIndex { index_name }
+            } else {
+                return self.expected("TO after RENAME", self.peek_token());
+            }
+        } else {
+            return self.expected("RENAME after ALTER INDEX", self.peek_token());
+        };
+
+        Ok(Statement::AlterIndex {
+            name: index_name,
             operation,
         })
     }

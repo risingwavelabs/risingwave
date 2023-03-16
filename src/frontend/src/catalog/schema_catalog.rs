@@ -140,6 +140,35 @@ impl SchemaCatalog {
         };
     }
 
+    pub fn update_index(&mut self, prost: &ProstIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let old_index = self.index_by_id.get(&id).unwrap();
+
+        let index: IndexCatalog =
+            IndexCatalog::build_from(prost, &old_index.index_table, &old_index.primary_table);
+        let index_ref = Arc::new(index);
+
+        // check if index name get updated.
+        if old_index.name != name {
+            self.index_by_name.remove(&old_index.name);
+        }
+        self.index_by_name.insert(name, index_ref.clone());
+        self.index_by_id.insert(id, index_ref.clone());
+        match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
+            Occupied(mut entry) => {
+                let pos = entry
+                    .get_mut()
+                    .iter()
+                    .position(|x| x.id == index_ref.id)
+                    .unwrap();
+                entry.get_mut().remove(pos);
+                entry.get_mut().push(index_ref);
+            }
+            Vacant(_entry) => unreachable!(),
+        };
+    }
+
     pub fn create_source(&mut self, prost: &ProstSource) {
         let name = prost.name.clone();
         let id = prost.id;

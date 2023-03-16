@@ -388,6 +388,10 @@ pub async fn handle(
             name,
             operation: AlterTableOperation::RenameTable { table_name },
         } => alter_relation_rename::handle_rename_table(handler_args, name, table_name).await,
+        Statement::AlterIndex {
+            name,
+            operation: AlterIndexOperation::RenameIndex { index_name },
+        } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

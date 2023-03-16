@@ -256,6 +256,14 @@ impl Catalog {
             .drop_index(index_id);
     }
 
+    pub fn update_index(&mut self, proto: &ProstIndex) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_index(proto);
+    }
+
     pub fn drop_view(&mut self, db_id: DatabaseId, schema_id: SchemaId, view_id: ViewId) {
         self.get_database_mut(db_id)
             .unwrap()

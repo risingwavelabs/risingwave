@@ -63,6 +63,7 @@ pub enum StatementType {
     DROP_SCHEMA,
     DROP_DATABASE,
     DROP_USER,
+    ALTER_INDEX,
     ALTER_TABLE,
     ALTER_SYSTEM,
     REVOKE_PRIVILEGE,

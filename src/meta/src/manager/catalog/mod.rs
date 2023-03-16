@@ -869,6 +869,16 @@ where
             table_name.to_string(),
         ))?;
 
+        let source = if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
+            table.optional_associated_source_id
+        {
+            let mut source = database_core.sources.get(&source_id).unwrap().clone();
+            source.name = table_name.to_string();
+            Some(source)
+        } else {
+            None
+        };
+
         // 2. rename table and its definition.
         table.name = table_name.to_string();
         table.definition = alter_relation_rename(&table.definition, table_name);
@@ -882,6 +892,7 @@ where
             vec![table],
             vec![],
             vec![],
+            source,
         )
         .await
     }
@@ -896,6 +907,7 @@ where
         mut to_update_tables: Vec<Table>,
         mut to_update_views: Vec<View>,
         mut to_update_sinks: Vec<Sink>,
+        to_update_source: Option<Source>,
     ) -> MetaResult<NotificationVersion> {
         for table in database_mgr.tables.values() {
             if table.dependent_relations.contains(&relation_id) {
@@ -927,6 +939,7 @@ where
         let mut tables = BTreeMapTransaction::new(&mut database_mgr.tables);
         let mut views = BTreeMapTransaction::new(&mut database_mgr.views);
         let mut sinks = BTreeMapTransaction::new(&mut database_mgr.sinks);
+        let mut sources = BTreeMapTransaction::new(&mut database_mgr.sources);
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
         });
@@ -938,7 +951,10 @@ where
         to_update_sinks.iter().for_each(|sink| {
             sinks.insert(sink.id, sink.clone());
         });
-        commit_meta!(self, tables, views, sinks)?;
+        if let Some(source) = to_update_source {
+            sources.insert(source.id, source);
+        }
+        commit_meta!(self, tables, views, sinks, sources)?;
 
         // 5. notify frontend.
         let mut version = 0;
@@ -992,6 +1008,7 @@ where
             vec![],
             vec![view],
             vec![],
+            None,
         )
         .await
     }
@@ -1045,15 +1062,25 @@ where
             index.schema_id,
             index_name.to_string(),
         ))?;
+        let mut index_table = database_core
+            .tables
+            .get(&index.index_table_id)
+            .unwrap()
+            .clone();
 
         // 2. rename index name.
         index.name = index_name.to_string();
-        let mut indexs = BTreeMapTransaction::new(&mut database_core.indexes);
-        indexs.insert(index_id, index.clone());
-        commit_meta!(self, indexs)?;
+        index_table.name = index_name.to_string();
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        indexes.insert(index_id, index.clone());
+        tables.insert(index.index_table_id, index_table.clone());
+        commit_meta!(self, indexes, tables)?;
 
+        self.notify_frontend(Operation::Update, Info::Index(index))
+            .await;
         let version = self
-            .notify_frontend(Operation::Update, Info::Index(index))
+            .notify_frontend(Operation::Update, Info::Table(index_table))
             .await;
 
         Ok(version)

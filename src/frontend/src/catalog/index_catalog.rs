@@ -23,8 +23,9 @@ use risingwave_pb::catalog::Index as ProstIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
-use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
+use crate::catalog::{DatabaseId, RelationCatalog, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
+use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
@@ -150,5 +151,11 @@ impl IndexCatalog {
                 .collect_vec(),
             original_columns: self.original_columns.iter().map(Into::into).collect_vec(),
         }
+    }
+}
+
+impl RelationCatalog for IndexCatalog {
+    fn owner(&self) -> UserId {
+        self.index_table.owner
     }
 }

@@ -138,8 +138,11 @@ export interface CreateTableResponse {
 }
 
 export interface AlterRelationNameRequest {
-  tableId: number;
-  newTableName: string;
+  relation?: { $case: "tableId"; tableId: number } | { $case: "viewId"; viewId: number } | {
+    $case: "indexId";
+    indexId: number;
+  } | { $case: "sinkId"; sinkId: number };
+  newName: string;
 }
 
 export interface AlterRelationNameResponse {
@@ -981,28 +984,62 @@ export const CreateTableResponse = {
 };
 
 function createBaseAlterRelationNameRequest(): AlterRelationNameRequest {
-  return { tableId: 0, newTableName: "" };
+  return { relation: undefined, newName: "" };
 }
 
 export const AlterRelationNameRequest = {
   fromJSON(object: any): AlterRelationNameRequest {
     return {
-      tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
-      newTableName: isSet(object.newTableName) ? String(object.newTableName) : "",
+      relation: isSet(object.tableId)
+        ? { $case: "tableId", tableId: Number(object.tableId) }
+        : isSet(object.viewId)
+        ? { $case: "viewId", viewId: Number(object.viewId) }
+        : isSet(object.indexId)
+        ? { $case: "indexId", indexId: Number(object.indexId) }
+        : isSet(object.sinkId)
+        ? { $case: "sinkId", sinkId: Number(object.sinkId) }
+        : undefined,
+      newName: isSet(object.newName) ? String(object.newName) : "",
     };
   },
 
   toJSON(message: AlterRelationNameRequest): unknown {
     const obj: any = {};
-    message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
-    message.newTableName !== undefined && (obj.newTableName = message.newTableName);
+    message.relation?.$case === "tableId" && (obj.tableId = Math.round(message.relation?.tableId));
+    message.relation?.$case === "viewId" && (obj.viewId = Math.round(message.relation?.viewId));
+    message.relation?.$case === "indexId" && (obj.indexId = Math.round(message.relation?.indexId));
+    message.relation?.$case === "sinkId" && (obj.sinkId = Math.round(message.relation?.sinkId));
+    message.newName !== undefined && (obj.newName = message.newName);
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<AlterRelationNameRequest>, I>>(object: I): AlterRelationNameRequest {
     const message = createBaseAlterRelationNameRequest();
-    message.tableId = object.tableId ?? 0;
-    message.newTableName = object.newTableName ?? "";
+    if (
+      object.relation?.$case === "tableId" &&
+      object.relation?.tableId !== undefined &&
+      object.relation?.tableId !== null
+    ) {
+      message.relation = { $case: "tableId", tableId: object.relation.tableId };
+    }
+    if (
+      object.relation?.$case === "viewId" && object.relation?.viewId !== undefined && object.relation?.viewId !== null
+    ) {
+      message.relation = { $case: "viewId", viewId: object.relation.viewId };
+    }
+    if (
+      object.relation?.$case === "indexId" &&
+      object.relation?.indexId !== undefined &&
+      object.relation?.indexId !== null
+    ) {
+      message.relation = { $case: "indexId", indexId: object.relation.indexId };
+    }
+    if (
+      object.relation?.$case === "sinkId" && object.relation?.sinkId !== undefined && object.relation?.sinkId !== null
+    ) {
+      message.relation = { $case: "sinkId", sinkId: object.relation.sinkId };
+    }
+    message.newName = object.newName ?? "";
     return message;
   },
 };
