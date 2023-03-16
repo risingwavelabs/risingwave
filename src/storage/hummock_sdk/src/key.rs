@@ -438,6 +438,10 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         buf.put_slice(self.table_key.as_ref());
     }
 
+    pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
+        buf.put_slice(self.table_key.as_ref());
+    }
+
     /// Encode in to a buffer.
     pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
@@ -583,6 +587,12 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    // Encode in to a buffer.
+    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
+        self.user_key.encode_table_key_into(buf);
+        buf.put_u64(self.epoch);
+    }
+
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
@@ -610,6 +620,20 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch,
+        }
+    }
+
+    /// Construct a [`FullKey`] from a byte slice without  `table_id` encoded.
+    pub fn from_slice_without_table_id(
+        table_id: TableId,
+        slice_without_table_id: &'a [u8],
+    ) -> Self {
+        let epoch_pos = slice_without_table_id.len() - EPOCH_LEN;
+        let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
             epoch,
         }
     }
