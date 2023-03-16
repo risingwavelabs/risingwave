@@ -694,7 +694,7 @@ mod tests {
     use std::collections::{BTreeMap, HashMap, HashSet};
 
     use anyhow::anyhow;
-    use bytes::Bytes;
+    use risingwave_common::array::JsonbVal;
     use risingwave_connector::source::{SplitId, SplitMetaData};
     use serde::{Deserialize, Serialize};
 
@@ -711,12 +711,12 @@ mod tests {
             format!("{}", self.id).into()
         }
 
-        fn encode_to_bytes(&self) -> Bytes {
-            Bytes::from(serde_json::to_string(self).unwrap())
+        fn encode_to_json(&self) -> JsonbVal {
+            serde_json::to_value(*self).unwrap().into()
         }
 
-        fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-            serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+        fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+            serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
         }
     }
 
