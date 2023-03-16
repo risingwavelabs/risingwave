@@ -105,8 +105,6 @@ impl OrderType {
 }
 
 impl OrderType {
-    // TODO(): unittest
-
     pub fn new(direction: Direction, nulls_are: NullsAre) -> Self {
         Self {
             direction,
@@ -431,11 +429,60 @@ mod tests {
 
     use itertools::Itertools;
 
-    use super::{ColumnOrder, OrderType};
+    use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, Row};
     use crate::types::{DataType, ScalarImpl};
-    use crate::util::sort_util::compare_rows_in_chunk;
+
+    #[test]
+    fn test_order_type() {
+        assert_eq!(OrderType::default(), OrderType::default_ascending());
+        assert_eq!(
+            OrderType::default(),
+            OrderType::new(Direction::Ascending, NullsAre::Largest)
+        );
+        assert_eq!(
+            OrderType::default(),
+            OrderType::from_bools(Some(true), Some(false))
+        );
+        assert_eq!(OrderType::default(), OrderType::from_bools(None, None));
+
+        assert_eq!(
+            OrderType::default_ascending(),
+            OrderType::ascending(NullsAre::Largest)
+        );
+        assert_eq!(
+            OrderType::default_descending(),
+            OrderType::descending(NullsAre::Largest)
+        );
+
+        assert_eq!(
+            OrderType::nulls_first(Direction::Ascending),
+            OrderType::nulls_smallest(Direction::Ascending)
+        );
+        assert_eq!(
+            OrderType::nulls_first(Direction::Descending),
+            OrderType::nulls_largest(Direction::Descending)
+        );
+        assert_eq!(
+            OrderType::nulls_last(Direction::Ascending),
+            OrderType::nulls_largest(Direction::Ascending)
+        );
+        assert_eq!(
+            OrderType::nulls_last(Direction::Descending),
+            OrderType::nulls_smallest(Direction::Descending)
+        );
+
+        assert_eq!(OrderType::default().direction(), Direction::default());
+        assert_eq!(OrderType::default().nulls_are(), NullsAre::default());
+
+        assert!(OrderType::default_ascending().is_ascending());
+        assert!(OrderType::default_descending().is_descending());
+        assert!(OrderType::default_ascending().nulls_are_largest());
+        assert!(OrderType::default_ascending().nulls_are_last());
+        assert!(OrderType::default_descending().nulls_are_largest());
+        assert!(OrderType::default_descending().nulls_are_first());
+    }
 
     #[test]
     fn test_compare_rows_in_chunk() {
