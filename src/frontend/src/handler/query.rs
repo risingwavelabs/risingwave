@@ -162,6 +162,7 @@ pub async fn handle_query(
         let plan_fragmenter = BatchPlanFragmenter::new(
             session.env().worker_node_manager_ref(),
             session.env().catalog_reader().clone(),
+            session.config().get_batch_parallelism(),
             plan,
         )?;
         context.append_notice(&mut notice);
