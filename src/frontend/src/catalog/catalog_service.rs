@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_rpc_client::MetaClient;
 use tokio::sync::watch::Receiver;
@@ -86,8 +87,6 @@ pub trait CatalogWriter: Send + Sync {
         mapping: ColIndexMapping,
     ) -> Result<()>;
 
-    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
-
     async fn create_index(
         &self,
         index: ProstIndex,
@@ -118,6 +117,14 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_index(&self, index_id: IndexId) -> Result<()>;
 
     async fn drop_function(&self, function_id: FunctionId) -> Result<()>;
+
+    async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()>;
+
+    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()>;
+
+    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()>;
+
+    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -272,7 +279,31 @@ impl CatalogWriter for CatalogWriterImpl {
     async fn alter_table_name(&self, table_id: u32, table_name: &str) -> Result<()> {
         let version = self
             .meta_client
-            .alter_table_name(table_id, table_name)
+            .alter_relation_name(Relation::TableId(table_id), table_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_view_name(&self, view_id: u32, view_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::ViewId(view_id), view_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_index_name(&self, index_id: u32, index_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::IndexId(index_id), index_name)
+            .await?;
+        self.wait_version(version).await
+    }
+
+    async fn alter_sink_name(&self, sink_id: u32, sink_name: &str) -> Result<()> {
+        let version = self
+            .meta_client
+            .alter_relation_name(Relation::SinkId(sink_id), sink_name)
             .await?;
         self.wait_version(version).await
     }

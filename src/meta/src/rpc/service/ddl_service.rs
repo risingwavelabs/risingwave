@@ -527,18 +527,16 @@ where
         }
     }
 
-    async fn alter_table_name(
+    async fn alter_relation_name(
         &self,
-        request: Request<AlterTableNameRequest>,
-    ) -> Result<Response<AlterTableNameResponse>, Status> {
-        let req = request.into_inner();
-        let table_id = req.get_table_id();
-        let new_table_name = req.get_new_table_name().clone();
+        request: Request<AlterRelationNameRequest>,
+    ) -> Result<Response<AlterRelationNameResponse>, Status> {
+        let AlterRelationNameRequest { relation, new_name } = request.into_inner();
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::AlterTableName(table_id, new_table_name))
+            .run_command(DdlCommand::AlterRelationName(relation.unwrap(), new_name))
             .await?;
-        Ok(Response::new(AlterTableNameResponse {
+        Ok(Response::new(AlterRelationNameResponse {
             status: None,
             version,
         }))

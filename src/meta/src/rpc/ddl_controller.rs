@@ -15,6 +15,7 @@
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
@@ -65,7 +66,7 @@ pub enum DdlCommand {
     CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
-    AlterTableName(TableId, String),
+    AlterRelationName(Relation, String),
 }
 
 #[derive(Clone)]
@@ -142,8 +143,8 @@ where
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
-                DdlCommand::AlterTableName(table_id, name) => {
-                    ctrl.alter_rename_table(table_id, &name).await
+                DdlCommand::AlterRelationName(relation, name) => {
+                    ctrl.alter_relation_table(relation, &name).await
                 }
             }
         });
@@ -697,13 +698,32 @@ where
             .await
     }
 
-    async fn alter_rename_table(
+    async fn alter_relation_table(
         &self,
-        table_id: TableId,
-        table_name: &str,
+        relation: Relation,
+        new_name: &str,
     ) -> MetaResult<NotificationVersion> {
-        self.catalog_manager
-            .alter_table_name(table_id, table_name)
-            .await
+        match relation {
+            Relation::TableId(table_id) => {
+                self.catalog_manager
+                    .alter_table_name(table_id, new_name)
+                    .await
+            }
+            Relation::ViewId(view_id) => {
+                self.catalog_manager
+                    .alter_view_name(view_id, new_name)
+                    .await
+            }
+            Relation::IndexId(index_id) => {
+                self.catalog_manager
+                    .alter_index_name(index_id, new_name)
+                    .await
+            }
+            Relation::SinkId(sink_id) => {
+                self.catalog_manager
+                    .alter_sink_name(sink_id, new_name)
+                    .await
+            }
+        }
     }
 }

@@ -44,6 +44,7 @@ use risingwave_pb::catalog::{
     View as ProstView,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -330,12 +331,16 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
-    pub async fn alter_table_name(&self, table_id: u32, name: &str) -> Result<CatalogVersion> {
-        let request = AlterTableNameRequest {
-            table_id,
-            new_table_name: name.to_string(),
+    pub async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        name: &str,
+    ) -> Result<CatalogVersion> {
+        let request = AlterRelationNameRequest {
+            relation: Some(relation),
+            new_name: name.to_string(),
         };
-        let resp = self.inner.alter_table_name(request).await?;
+        let resp = self.inner.alter_relation_name(request).await?;
         Ok(resp.version)
     }
 
@@ -1347,7 +1352,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
-             ,{ ddl_client, alter_table_name, AlterTableNameRequest, AlterTableNameResponse }
+             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }

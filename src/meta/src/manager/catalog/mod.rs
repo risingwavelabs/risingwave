@@ -417,41 +417,40 @@ where
     pub async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.ensure_view_id(view_id)?;
+
         let user_core = &mut core.user;
         let mut views = BTreeMapTransaction::new(&mut database_core.views);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let view = views.remove(view_id);
-        if let Some(view) = view {
-            match database_core.relation_ref_count.get(&view_id) {
-                Some(ref_count) => Err(MetaError::permission_denied(format!(
-                    "Fail to delete view `{}` because {} other relation(s) depend on it",
-                    view.name, ref_count
-                ))),
-                None => {
-                    let users_need_update =
-                        Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
-                    commit_meta!(self, views, users)?;
+        let view = views.remove(view_id).unwrap();
 
-                    user_core.decrease_ref(view.owner);
+        match database_core.relation_ref_count.get(&view_id) {
+            Some(ref_count) => Err(MetaError::permission_denied(format!(
+                "Fail to delete view `{}` because {} other relation(s) depend on it",
+                view.name, ref_count
+            ))),
+            None => {
+                let users_need_update =
+                    Self::update_user_privileges(&mut users, &[Object::ViewId(view_id)]);
+                commit_meta!(self, views, users)?;
 
-                    for &dependent_relation_id in &view.dependent_relations {
-                        database_core.decrease_ref_count(dependent_relation_id);
-                    }
+                user_core.decrease_ref(view.owner);
 
-                    for user in users_need_update {
-                        self.notify_frontend(Operation::Update, Info::User(user))
-                            .await;
-                    }
-                    let version = self
-                        .notify_frontend(Operation::Delete, Info::View(view))
-                        .await;
-
-                    Ok(version)
+                for &dependent_relation_id in &view.dependent_relations {
+                    database_core.decrease_ref_count(dependent_relation_id);
                 }
+
+                for user in users_need_update {
+                    self.notify_frontend(Operation::Update, Info::User(user))
+                        .await;
+                }
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::View(view))
+                    .await;
+
+                Ok(version)
             }
-        } else {
-            Err(MetaError::catalog_id_not_found("view", view_id))
         }
     }
 
@@ -794,63 +793,61 @@ where
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.ensure_index_id(index_id)?;
+
         let user_core = &mut core.user;
         let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let index = indexes.remove(index_id);
-        if let Some(index) = index {
-            assert_eq!(index_table_id, index.index_table_id);
+        let index = indexes.remove(index_id).unwrap();
+        assert_eq!(index_table_id, index.index_table_id);
 
-            // drop index table
-            let table = tables.remove(index_table_id);
-            if let Some(table) = table {
-                match database_core
-                    .relation_ref_count
-                    .get(&index_table_id)
-                    .cloned()
-                {
-                    Some(ref_count) => Err(MetaError::permission_denied(format!(
-                        "Fail to delete table `{}` because {} other relation(s) depend on it",
-                        table.name, ref_count
-                    ))),
-                    None => {
-                        let dependent_relations = table.dependent_relations.clone();
+        // drop index table
+        let table = tables.remove(index_table_id);
+        if let Some(table) = table {
+            match database_core
+                .relation_ref_count
+                .get(&index_table_id)
+                .cloned()
+            {
+                Some(ref_count) => Err(MetaError::permission_denied(format!(
+                    "Fail to delete table `{}` because {} other relation(s) depend on it",
+                    table.name, ref_count
+                ))),
+                None => {
+                    let dependent_relations = table.dependent_relations.clone();
 
-                        let objects = &[Object::TableId(table.id)];
+                    let objects = &[Object::TableId(table.id)];
 
-                        let users_need_update = Self::update_user_privileges(&mut users, objects);
+                    let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                        commit_meta!(self, tables, indexes, users)?;
+                    commit_meta!(self, tables, indexes, users)?;
 
-                        // index table and index.
-                        user_core.decrease_ref_count(index.owner, 2);
+                    // index table and index.
+                    user_core.decrease_ref_count(index.owner, 2);
 
-                        for user in users_need_update {
-                            self.notify_frontend(Operation::Update, Info::User(user))
-                                .await;
-                        }
-
-                        self.notify_frontend(Operation::Delete, Info::Table(table))
+                    for user in users_need_update {
+                        self.notify_frontend(Operation::Update, Info::User(user))
                             .await;
-
-                        for dependent_relation_id in dependent_relations {
-                            database_core.decrease_ref_count(dependent_relation_id);
-                        }
-
-                        let version = self
-                            .notify_frontend(Operation::Delete, Info::Index(index))
-                            .await;
-
-                        Ok(version)
                     }
+
+                    self.notify_frontend(Operation::Delete, Info::Table(table))
+                        .await;
+
+                    for dependent_relation_id in dependent_relations {
+                        database_core.decrease_ref_count(dependent_relation_id);
+                    }
+
+                    let version = self
+                        .notify_frontend(Operation::Delete, Info::Index(index))
+                        .await;
+
+                    Ok(version)
                 }
-            } else {
-                bail!("index table doesn't exist",)
             }
         } else {
-            bail!("index doesn't exist",)
+            bail!("index table doesn't exist",)
         }
     }
 
@@ -865,61 +862,71 @@ where
 
         // 1. validate new table name.
         let mut table = database_core.tables.get(&table_id).unwrap().clone();
+        let old_name = table.name.clone();
         database_core.check_relation_name_duplicated(&(
             table.database_id,
             table.schema_id,
             table_name.to_string(),
         ))?;
-        let old_name = table.name.clone();
 
         // 2. rename table and its definition.
         table.name = table_name.to_string();
         table.definition = alter_relation_rename(&table.definition, table_name);
 
         // 3. update all relations that depend on this table, note that indexes are not included.
-        // TODO: refactor dependency cache in catalog manager for better performance.
-        let mut to_update_tables = vec![table.clone()];
-        for table in database_core.tables.values() {
-            if table.dependent_relations.contains(&table_id) {
+        self.alter_relation_name_refs_inner(
+            database_core,
+            table_id,
+            &old_name,
+            table_name,
+            vec![table],
+            vec![],
+            vec![],
+        )
+        .await
+    }
+
+    // TODO: refactor dependency cache in catalog manager for better performance.
+    async fn alter_relation_name_refs_inner(
+        &self,
+        database_mgr: &mut DatabaseManager,
+        relation_id: RelationId,
+        from: &str,
+        to: &str,
+        mut to_update_tables: Vec<Table>,
+        mut to_update_views: Vec<View>,
+        mut to_update_sinks: Vec<Sink>,
+    ) -> MetaResult<NotificationVersion> {
+        for table in database_mgr.tables.values() {
+            if table.dependent_relations.contains(&relation_id) {
                 let mut table = table.clone();
-                table.definition = alter_relation_rename_refs(
-                    &table.name,
-                    &table.definition,
-                    &old_name,
-                    table_name,
-                )?;
+                table.definition =
+                    alter_relation_rename_refs(&table.name, &table.definition, from, to)?;
                 to_update_tables.push(table);
             }
         }
 
-        let mut to_update_views = vec![];
-        for view in database_core.views.values() {
-            if view.dependent_relations.contains(&table_id) {
+        for view in database_mgr.views.values() {
+            if view.dependent_relations.contains(&relation_id) {
                 let mut view = view.clone();
-                view.sql =
-                    alter_relation_rename_refs(&view.name, &view.sql, &old_name, table_name)?;
+                view.sql = alter_relation_rename_refs(&view.name, &view.sql, from, to)?;
                 to_update_views.push(view);
             }
         }
 
-        let mut to_update_sinks = vec![];
-        for sink in database_core.sinks.values() {
-            if sink.dependent_relations.contains(&table_id) {
+        for sink in database_mgr.sinks.values() {
+            if sink.dependent_relations.contains(&relation_id) {
                 let mut sink = sink.clone();
-                sink.definition = alter_relation_rename_refs(
-                    &sink.name,
-                    &sink.definition,
-                    &old_name,
-                    table_name,
-                )?;
+                sink.definition =
+                    alter_relation_rename_refs(&sink.name, &sink.definition, from, to)?;
                 to_update_sinks.push(sink);
             }
         }
 
-        // 4. commit meta.
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut views = BTreeMapTransaction::new(&mut database_core.views);
-        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        // commit meta.
+        let mut tables = BTreeMapTransaction::new(&mut database_mgr.tables);
+        let mut views = BTreeMapTransaction::new(&mut database_mgr.views);
+        let mut sinks = BTreeMapTransaction::new(&mut database_mgr.sinks);
         to_update_tables.iter().for_each(|table| {
             tables.insert(table.id, table.clone());
         });
@@ -950,6 +957,104 @@ where
                 .notify_frontend(Operation::Update, Info::Sink(sink))
                 .await;
         }
+
+        Ok(version)
+    }
+
+    pub async fn alter_view_name(
+        &self,
+        view_id: ViewId,
+        view_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_view_id(view_id)?;
+
+        // 1. validate new view name.
+        let mut view = database_core.views.get(&view_id).unwrap().clone();
+        let old_name = view.name.clone();
+        database_core.check_relation_name_duplicated(&(
+            view.database_id,
+            view.schema_id,
+            view_name.to_string(),
+        ))?;
+
+        // 2. rename view and its definition.
+        view.name = view_name.to_string();
+        view.sql = alter_relation_rename(&view.sql, view_name);
+
+        // 3. update all relations that depend on this view.
+        self.alter_relation_name_refs_inner(
+            database_core,
+            view_id,
+            &old_name,
+            view_name,
+            vec![],
+            vec![view],
+            vec![],
+        )
+        .await
+    }
+
+    pub async fn alter_sink_name(
+        &self,
+        sink_id: SinkId,
+        sink_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_sink_id(sink_id)?;
+
+        // 1. validate new sink name.
+        let mut sink = database_core.sinks.get(&sink_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            sink.database_id,
+            sink.schema_id,
+            sink_name.to_string(),
+        ))?;
+
+        // 2. rename sink and its definition.
+        sink.name = sink_name.to_string();
+        sink.definition = alter_relation_rename(&sink.definition, sink_name);
+
+        // 3. commit meta.
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        sinks.insert(sink_id, sink.clone());
+        commit_meta!(self, sinks)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Sink(sink))
+            .await;
+
+        Ok(version)
+    }
+
+    pub async fn alter_index_name(
+        &self,
+        index_id: IndexId,
+        index_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_index_id(index_id)?;
+
+        // 1. validate new index name.
+        let mut index = database_core.indexes.get(&index_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            index.database_id,
+            index.schema_id,
+            index_name.to_string(),
+        ))?;
+
+        // 2. rename index name.
+        index.name = index_name.to_string();
+        let mut indexs = BTreeMapTransaction::new(&mut database_core.indexes);
+        indexs.insert(index_id, index.clone());
+        commit_meta!(self, indexs)?;
+
+        let version = self
+            .notify_frontend(Operation::Update, Info::Index(index))
+            .await;
 
         Ok(version)
     }
@@ -1018,37 +1123,36 @@ where
     pub async fn drop_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
         let user_core = &mut core.user;
         let mut sources = BTreeMapTransaction::new(&mut database_core.sources);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let source = sources.remove(source_id);
-        if let Some(source) = source {
-            match database_core.relation_ref_count.get(&source_id) {
-                Some(ref_count) => Err(MetaError::permission_denied(format!(
-                    "Fail to delete source `{}` because {} other relation(s) depend on it",
-                    source.name, ref_count
-                ))),
-                None => {
-                    let users_need_update =
-                        Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
-                    commit_meta!(self, sources, users)?;
+        let source = sources.remove(source_id).unwrap();
 
-                    user_core.decrease_ref(source.owner);
+        match database_core.relation_ref_count.get(&source_id) {
+            Some(ref_count) => Err(MetaError::permission_denied(format!(
+                "Fail to delete source `{}` because {} other relation(s) depend on it",
+                source.name, ref_count
+            ))),
+            None => {
+                let users_need_update =
+                    Self::update_user_privileges(&mut users, &[Object::SourceId(source_id)]);
+                commit_meta!(self, sources, users)?;
 
-                    for user in users_need_update {
-                        self.notify_frontend(Operation::Update, Info::User(user))
-                            .await;
-                    }
-                    let version = self
-                        .notify_frontend(Operation::Delete, Info::Source(source))
+                user_core.decrease_ref(source.owner);
+
+                for user in users_need_update {
+                    self.notify_frontend(Operation::Update, Info::User(user))
                         .await;
-
-                    Ok(version)
                 }
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Source(source))
+                    .await;
+
+                Ok(version)
             }
-        } else {
-            Err(MetaError::catalog_id_not_found("source", source_id))
         }
     }
 
@@ -1484,66 +1588,64 @@ where
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
+        database_core.ensure_sink_id(sink_id)?;
+
         let user_core = &mut core.user;
         let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
         let mut users = BTreeMapTransaction::new(&mut user_core.user_info);
 
-        let sink = sinks.remove(sink_id);
-        if let Some(sink) = sink {
-            match database_core.relation_ref_count.get(&sink_id).cloned() {
-                Some(_) => bail!("No relation should depend on Sink"),
-                None => {
-                    let dependent_relations = sink.dependent_relations.clone();
+        let sink = sinks.remove(sink_id).unwrap();
+        match database_core.relation_ref_count.get(&sink_id).cloned() {
+            Some(_) => bail!("No relation should depend on Sink"),
+            None => {
+                let dependent_relations = sink.dependent_relations.clone();
 
-                    let objects = &[Object::SinkId(sink.id)]
-                        .into_iter()
-                        .chain(
-                            internal_table_ids
-                                .iter()
-                                .map(|table_id| Object::TableId(*table_id))
-                                .collect_vec(),
-                        )
-                        .collect_vec();
+                let objects = &[Object::SinkId(sink.id)]
+                    .into_iter()
+                    .chain(
+                        internal_table_ids
+                            .iter()
+                            .map(|table_id| Object::TableId(*table_id))
+                            .collect_vec(),
+                    )
+                    .collect_vec();
 
-                    let internal_tables = internal_table_ids
-                        .iter()
-                        .map(|internal_table_id| {
-                            tables
-                                .remove(*internal_table_id)
-                                .expect("internal table should exist")
-                        })
-                        .collect_vec();
+                let internal_tables = internal_table_ids
+                    .iter()
+                    .map(|internal_table_id| {
+                        tables
+                            .remove(*internal_table_id)
+                            .expect("internal table should exist")
+                    })
+                    .collect_vec();
 
-                    let users_need_update = Self::update_user_privileges(&mut users, objects);
+                let users_need_update = Self::update_user_privileges(&mut users, objects);
 
-                    commit_meta!(self, sinks, tables, users)?;
+                commit_meta!(self, sinks, tables, users)?;
 
-                    user_core.decrease_ref(sink.owner);
+                user_core.decrease_ref(sink.owner);
 
-                    for user in users_need_update {
-                        self.notify_frontend(Operation::Update, Info::User(user))
-                            .await;
-                    }
-
-                    for dependent_relation_id in dependent_relations {
-                        database_core.decrease_ref_count(dependent_relation_id);
-                    }
-
-                    for internal_table in internal_tables {
-                        self.notify_frontend(Operation::Delete, Info::Table(internal_table))
-                            .await;
-                    }
-
-                    let version = self
-                        .notify_frontend(Operation::Delete, Info::Sink(sink))
+                for user in users_need_update {
+                    self.notify_frontend(Operation::Update, Info::User(user))
                         .await;
-
-                    Ok(version)
                 }
+
+                for dependent_relation_id in dependent_relations {
+                    database_core.decrease_ref_count(dependent_relation_id);
+                }
+
+                for internal_table in internal_tables {
+                    self.notify_frontend(Operation::Delete, Info::Table(internal_table))
+                        .await;
+                }
+
+                let version = self
+                    .notify_frontend(Operation::Delete, Info::Sink(sink))
+                    .await;
+
+                Ok(version)
             }
-        } else {
-            Err(MetaError::catalog_id_not_found("sink", sink_id))
         }
     }
 

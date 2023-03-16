@@ -405,6 +405,18 @@ impl CatalogWriter for MockCatalogWriter {
             .alter_table_name_by_id(&table_id.into(), table_name);
         Ok(())
     }
+
+    async fn alter_view_name(&self, _view_id: u32, _view_name: &str) -> Result<()> {
+        todo!()
+    }
+
+    async fn alter_index_name(&self, _index_id: u32, _index_name: &str) -> Result<()> {
+        todo!()
+    }
+
+    async fn alter_sink_name(&self, _sink_id: u32, _sink_name: &str) -> Result<()> {
+        todo!()
+    }
 }
 
 impl MockCatalogWriter {

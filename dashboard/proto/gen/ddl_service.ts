@@ -137,12 +137,12 @@ export interface CreateTableResponse {
   version: number;
 }
 
-export interface AlterTableNameRequest {
+export interface AlterRelationNameRequest {
   tableId: number;
   newTableName: string;
 }
 
-export interface AlterTableNameResponse {
+export interface AlterRelationNameResponse {
   status: Status | undefined;
   version: number;
 }
@@ -980,54 +980,54 @@ export const CreateTableResponse = {
   },
 };
 
-function createBaseAlterTableNameRequest(): AlterTableNameRequest {
+function createBaseAlterRelationNameRequest(): AlterRelationNameRequest {
   return { tableId: 0, newTableName: "" };
 }
 
-export const AlterTableNameRequest = {
-  fromJSON(object: any): AlterTableNameRequest {
+export const AlterRelationNameRequest = {
+  fromJSON(object: any): AlterRelationNameRequest {
     return {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       newTableName: isSet(object.newTableName) ? String(object.newTableName) : "",
     };
   },
 
-  toJSON(message: AlterTableNameRequest): unknown {
+  toJSON(message: AlterRelationNameRequest): unknown {
     const obj: any = {};
     message.tableId !== undefined && (obj.tableId = Math.round(message.tableId));
     message.newTableName !== undefined && (obj.newTableName = message.newTableName);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<AlterTableNameRequest>, I>>(object: I): AlterTableNameRequest {
-    const message = createBaseAlterTableNameRequest();
+  fromPartial<I extends Exact<DeepPartial<AlterRelationNameRequest>, I>>(object: I): AlterRelationNameRequest {
+    const message = createBaseAlterRelationNameRequest();
     message.tableId = object.tableId ?? 0;
     message.newTableName = object.newTableName ?? "";
     return message;
   },
 };
 
-function createBaseAlterTableNameResponse(): AlterTableNameResponse {
+function createBaseAlterRelationNameResponse(): AlterRelationNameResponse {
   return { status: undefined, version: 0 };
 }
 
-export const AlterTableNameResponse = {
-  fromJSON(object: any): AlterTableNameResponse {
+export const AlterRelationNameResponse = {
+  fromJSON(object: any): AlterRelationNameResponse {
     return {
       status: isSet(object.status) ? Status.fromJSON(object.status) : undefined,
       version: isSet(object.version) ? Number(object.version) : 0,
     };
   },
 
-  toJSON(message: AlterTableNameResponse): unknown {
+  toJSON(message: AlterRelationNameResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     message.version !== undefined && (obj.version = Math.round(message.version));
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<AlterTableNameResponse>, I>>(object: I): AlterTableNameResponse {
-    const message = createBaseAlterTableNameResponse();
+  fromPartial<I extends Exact<DeepPartial<AlterRelationNameResponse>, I>>(object: I): AlterRelationNameResponse {
+    const message = createBaseAlterRelationNameResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;

@@ -139,12 +139,17 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
-message AlterTableNameRequest {
-  uint32 table_id = 1;
-  string new_table_name = 2;
+message AlterRelationNameRequest {
+  oneof relation {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+  }
+  string new_name = 20;
 }
 
-message AlterTableNameResponse {
+message AlterRelationNameResponse {
   common.Status status = 1;
   uint64 version = 2;
 }
@@ -259,7 +264,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
-  rpc AlterTableName(AlterTableNameRequest) returns (AlterTableNameResponse);
+  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
