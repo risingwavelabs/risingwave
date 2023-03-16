@@ -644,7 +644,9 @@ export function exprNode_TypeToJSON(object: ExprNode_Type): string {
 export interface TableFunction {
   functionType: TableFunction_Type;
   args: ExprNode[];
-  returnTypes: DataType[];
+  returnType:
+    | DataType
+    | undefined;
   /** optional. only used when the type is UDTF. */
   udtf: UserDefinedTableFunction | undefined;
 }
@@ -961,7 +963,7 @@ export const ExprNode = {
 };
 
 function createBaseTableFunction(): TableFunction {
-  return { functionType: TableFunction_Type.UNSPECIFIED, args: [], returnTypes: [], udtf: undefined };
+  return { functionType: TableFunction_Type.UNSPECIFIED, args: [], returnType: undefined, udtf: undefined };
 }
 
 export const TableFunction = {
@@ -973,7 +975,7 @@ export const TableFunction = {
       args: Array.isArray(object?.args)
         ? object.args.map((e: any) => ExprNode.fromJSON(e))
         : [],
-      returnTypes: Array.isArray(object?.returnTypes) ? object.returnTypes.map((e: any) => DataType.fromJSON(e)) : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       udtf: isSet(object.udtf) ? UserDefinedTableFunction.fromJSON(object.udtf) : undefined,
     };
   },
@@ -986,11 +988,8 @@ export const TableFunction = {
     } else {
       obj.args = [];
     }
-    if (message.returnTypes) {
-      obj.returnTypes = message.returnTypes.map((e) => e ? DataType.toJSON(e) : undefined);
-    } else {
-      obj.returnTypes = [];
-    }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.udtf !== undefined && (obj.udtf = message.udtf ? UserDefinedTableFunction.toJSON(message.udtf) : undefined);
     return obj;
   },
@@ -999,7 +998,9 @@ export const TableFunction = {
     const message = createBaseTableFunction();
     message.functionType = object.functionType ?? TableFunction_Type.UNSPECIFIED;
     message.args = object.args?.map((e) => ExprNode.fromPartial(e)) || [];
-    message.returnTypes = object.returnTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
     message.udtf = (object.udtf !== undefined && object.udtf !== null)
       ? UserDefinedTableFunction.fromPartial(object.udtf)
       : undefined;

@@ -91,6 +91,7 @@ impl SstableStreamIterator {
 
         if let (Some(block_iter), Some(seek_key)) = (self.block_iter.as_mut(), seek_key) {
             block_iter.seek(seek_key);
+
             if !block_iter.is_valid() {
                 // `seek_key` is larger than everything in the first block.
                 self.next_block().await?;

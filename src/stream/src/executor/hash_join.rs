@@ -922,19 +922,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                     {
                         yield chunk;
                     }
@@ -990,19 +990,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                     {
                         yield chunk;
                     }

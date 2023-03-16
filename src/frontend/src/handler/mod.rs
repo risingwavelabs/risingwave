@@ -28,6 +28,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
+use self::variable::handle_set_time_zone;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -58,6 +59,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
+pub mod extended_handle;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;
@@ -351,6 +353,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
+        Statement::SetTimeZone { local: _, value } => handle_set_time_zone(handler_args, value),
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,

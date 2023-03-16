@@ -384,14 +384,16 @@ enum ChainType {
 //   2. BatchPlanNode for snapshot read.
 message ChainNode {
   uint32 table_id = 1;
-  // The schema of input stream, which will be used to build a MergeNode
-  repeated plan_common.Field upstream_fields = 2;
-  // The columns from the upstream table to output.
-  // TODO: rename this field.
-  repeated uint32 upstream_column_indices = 3;
+
   // The columns from the upstream table that'll be internally required by this chain node.
-  // TODO: This is currently only used by backfill table scan. We should also apply it to the upstream dispatcher (#4529).
-  repeated int32 upstream_column_ids = 8;
+  // - For non-backfill chain node, it's the same as the output columns.
+  // - For backfill chain node, there're additionally primary key columns.
+  repeated int32 upstream_column_ids = 2;
+  // The columns to be output by this chain node. The index is based on the internal required columns.
+  // - For non-backfill chain node, it's simply all the columns.
+  // - For backfill chain node, this strips the primary key columns if they're unnecessary.
+  repeated uint32 output_indices = 3;
+
   // Generally, the barrier needs to be rearranged during the MV creation process, so that data can
   // be flushed to shared buffer periodically, instead of making the first epoch from batch query extra
   // large. However, in some cases, e.g., shared state, the barrier cannot be rearranged in ChainNode.

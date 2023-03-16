@@ -397,12 +397,28 @@ impl SysCatalogReaderImpl {
                     })
                     .collect_vec();
 
+                let internal_tables = schema
+                    .iter_internal_table()
+                    .map(|table| {
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int32(table.id.table_id() as i32)),
+                            Some(ScalarImpl::Utf8(table.name.clone().into())),
+                            Some(ScalarImpl::Int32(schema_info.id as i32)),
+                            Some(ScalarImpl::Int32(table.owner as i32)),
+                            Some(ScalarImpl::Utf8("n".into())),
+                            Some(ScalarImpl::Int32(0)),
+                            Some(ScalarImpl::Int32(0)),
+                        ])
+                    })
+                    .collect_vec();
+
                 rows.into_iter()
                     .chain(mvs.into_iter())
                     .chain(indexes.into_iter())
                     .chain(sources.into_iter())
                     .chain(sys_tables.into_iter())
                     .chain(views.into_iter())
+                    .chain(internal_tables.into_iter())
                     .collect_vec()
             })
             .collect_vec())

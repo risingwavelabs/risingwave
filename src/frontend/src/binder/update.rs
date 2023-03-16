@@ -91,6 +91,11 @@ impl Binder {
             Self::resolve_schema_qualified_name(&self.db_name, name.clone())?;
 
         let table_catalog = self.resolve_dml_table(schema_name.as_deref(), &table_name, false)?;
+        let pk_indices = table_catalog
+            .pk()
+            .iter()
+            .map(|column_order| column_order.column_index)
+            .collect_vec();
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
@@ -131,6 +136,18 @@ impl Binder {
 
             for (id, value) in assignments {
                 let id_expr = self.bind_expr(Expr::Identifier(id.clone()))?;
+                if let Some(id_input_ref) = id_expr.clone().as_input_ref() {
+                    let id_index = id_input_ref.index;
+                    for &pk in &pk_indices {
+                        if id_index == pk {
+                            return Err(ErrorCode::BindError(
+                                "update modifying the PK column is banned".to_owned(),
+                            )
+                            .into());
+                        }
+                    }
+                }
+
                 let value_expr = self.bind_expr(value)?.cast_assign(id_expr.return_type())?;
 
                 match assignment_exprs.entry(id_expr) {

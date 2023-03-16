@@ -19,6 +19,7 @@ use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
 use tokio::sync::watch::{channel, Receiver, Sender};
 
+use super::default_system_params;
 use super::reader::SystemParamsReader;
 
 pub type SystemParamsReaderRef = Arc<ArcSwap<SystemParamsReader>>;
@@ -29,6 +30,7 @@ pub type LocalSystemParamsManagerRef = Arc<LocalSystemParamsManager>;
 /// - `get_params` returns a reference to the latest parameters that is atomically updated.
 /// - `watch_params` returns a channel on which calling `recv` will get the latest parameters.
 ///   Compared with `get_params`, the caller can be explicitly notified of parameter change.
+#[derive(Debug)]
 pub struct LocalSystemParamsManager {
     /// The latest parameters.
     params: SystemParamsReaderRef,
@@ -42,6 +44,10 @@ impl LocalSystemParamsManager {
         let params = Arc::new(ArcSwap::from_pointee(params));
         let (tx, _) = channel(params.clone());
         Self { params, tx }
+    }
+
+    pub fn for_test() -> Self {
+        Self::new(default_system_params().into())
     }
 
     pub fn get_params(&self) -> SystemParamsReaderRef {
