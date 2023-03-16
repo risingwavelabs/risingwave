@@ -45,9 +45,9 @@ pub struct IntervalUnit {
     usecs: i64,
 }
 
-const USECS_PER_SEC: i64 = 1_000_000;
-const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
-const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
+pub const USECS_PER_SEC: i64 = 1_000_000;
+pub const USECS_PER_DAY: i64 = 86400 * USECS_PER_SEC;
+pub const USECS_PER_MONTH: i64 = 30 * USECS_PER_DAY;
 
 impl IntervalUnit {
     /// Smallest interval value.
