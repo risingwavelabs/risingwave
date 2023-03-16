@@ -15,13 +15,13 @@
 use std::collections::HashSet;
 use std::ops::{Bound, Deref};
 
-use bytes::Bytes;
 use futures::{pin_mut, StreamExt};
+use risingwave_common::array::JsonbVal;
 use risingwave_common::catalog::{DatabaseId, SchemaId};
 use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{ScalarImpl, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
@@ -96,8 +96,8 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         pin_mut!(iter);
         while let Some(row) = iter.next().await {
             let row = row?;
-            if let Some(ScalarRefImpl::Bytea(bytes)) = row.datum_at(1) {
-                let split = SplitImpl::restore_from_bytes(bytes)?;
+            if let Some(ScalarRefImpl::Jsonb(jsonb_ref)) = row.datum_at(1) {
+                let split = SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?;
                 let fs = split
                     .as_fs()
                     .unwrap_or_else(|| panic!("split {:?} is not fs", split));
@@ -110,14 +110,14 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(set)
     }
 
-    async fn set_complete(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
+    async fn set_complete(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(format!(
                 "{}{}",
                 COMPLETE_SPLIT_PREFIX,
                 key.deref()
             ))),
-            Some(ScalarImpl::Bytea(Box::from(value.as_ref()))),
+            Some(ScalarImpl::Jsonb(value)),
         ];
         if let Some(prev_row) = self.get(key).await? {
             self.state_store.delete(prev_row);
@@ -137,17 +137,17 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             bail!("states require not null");
         } else {
             for split in states {
-                self.set_complete(split.id(), split.encode_to_bytes())
+                self.set_complete(split.id(), split.encode_to_json())
                     .await?;
             }
         }
         Ok(())
     }
 
-    async fn set(&mut self, key: SplitId, value: Bytes) -> StreamExecutorResult<()> {
+    async fn set(&mut self, key: SplitId, value: JsonbVal) -> StreamExecutorResult<()> {
         let row = [
             Some(Self::string_to_scalar(key.deref())),
-            Some(ScalarImpl::Bytea(Vec::from(value).into_boxed_slice())),
+            Some(ScalarImpl::Jsonb(value)),
         ];
         match self.get(key).await? {
             Some(prev_row) => {
@@ -173,7 +173,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
             bail!("states require not null");
         } else {
             for split_impl in states {
-                self.set(split_impl.id(), split_impl.encode_to_bytes())
+                self.set(split_impl.id(), split_impl.encode_to_json())
                     .await?;
             }
         }
@@ -188,7 +188,9 @@ impl<S: StateStore> SourceStateTableHandler<S> {
         Ok(match self.get(stream_source_split.id()).await? {
             None => None,
             Some(row) => match row.datum_at(1) {
-                Some(ScalarRefImpl::Bytea(bytes)) => Some(SplitImpl::restore_from_bytes(bytes)?),
+                Some(ScalarRefImpl::Jsonb(jsonb_ref)) => {
+                    Some(SplitImpl::restore_from_json(jsonb_ref.to_owned_scalar())?)
+                }
                 _ => unreachable!(),
             },
         })
@@ -280,6 +282,7 @@ pub(crate) mod tests {
         .await;
         let split_impl = SplitImpl::Kafka(KafkaSplit::new(0, Some(0), None, "test".into()));
         let serialized = split_impl.encode_to_bytes();
+        let serialized_json = split_impl.encode_to_json();
 
         let epoch_1 = EpochPair::new_test_epoch(1);
         let epoch_2 = EpochPair::new_test_epoch(2);
@@ -299,6 +302,7 @@ pub(crate) mod tests {
         {
             Some(s) => {
                 assert_eq!(s.encode_to_bytes(), serialized);
+                assert_eq!(s.encode_to_json(), serialized_json);
             }
             None => unreachable!(),
         }
