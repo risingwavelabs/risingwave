@@ -119,7 +119,21 @@ def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType
         result_type: Union[str, pa.DataType],
         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
-    Annotation for creating a user-defined function.
+    Annotation for creating a user-defined scalar function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_type: A string or an Arrow data type that specifies the return value type.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udf(input_types=['INT', 'INT'], result_type='INT')
+    def gcd(x, y):
+        while y != 0:
+            (x, y) = (y, x % y)
+        return x
+    ```
     """
 
     return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
@@ -130,6 +144,19 @@ def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataTyp
          name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
     Annotation for creating a user-defined table function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_types A list of strings or Arrow data types that specifies the return value types.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udtf(input_types='INT', result_types='INT')
+    def series(n):
+        for i in range(n):
+            yield i
+    ```
     """
 
     return lambda f: UserDefinedTableFunctionWrapper(f, input_types, result_types, name)
@@ -137,13 +164,22 @@ def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataTyp
 
 class UdfServer(pa.flight.FlightServerBase):
     """
-    UDF server based on Apache Arrow Flight protocol.
-    Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+    A server that provides user-defined functions to clients.
+
+    Example:
+    ```
+    server = UdfServer(location="0.0.0.0:8815")
+    server.add_function(my_udf)
+    server.serve()
+    ```
     """
+    # UDF server based on Apache Arrow Flight protocol.
+    # Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+
     _functions: Dict[str, UserDefinedFunction]
 
-    def __init__(self, location="grpc://0.0.0.0:8815", **kwargs):
-        super(UdfServer, self).__init__(location, **kwargs)
+    def __init__(self, location="0.0.0.0:8815", **kwargs):
+        super(UdfServer, self).__init__('grpc://' + location, **kwargs)
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
