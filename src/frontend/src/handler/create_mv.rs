@@ -87,7 +87,18 @@ pub fn gen_create_mv_plan(
 
     let bound = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        // Here we don't allow MV to contain views, which appears to be no need for real scenarios.
+        // Even it's supported naturally now. Also in the current implementation, it is difficult to
+        // maintain dependency relationships and rename views when they have mviews that depend on
+        // them.
+        if !binder.shared_views().is_empty() {
+            return Err(ErrorCode::PermissionDenied(
+                "Materialized view cannot contain views".to_string(),
+            )
+            .into());
+        }
+        bound
     };
 
     let col_names = get_column_names(&bound, session, columns)?;
