@@ -48,6 +48,11 @@ impl SourceColumnDesc {
             is_meta: false,
         }
     }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        !self.is_row_id && !self.is_meta
+    }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {

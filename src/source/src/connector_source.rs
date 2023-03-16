@@ -101,6 +101,7 @@ impl ConnectorSource {
             let data_gen_columns = Some(
                 columns
                     .iter()
+                    .filter(|col| col.is_visible())
                     .cloned()
                     .map(|col| Column {
                         name: col.name,
