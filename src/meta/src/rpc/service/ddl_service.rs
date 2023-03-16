@@ -533,10 +533,10 @@ where
     ) -> Result<Response<AlterTableNameResponse>, Status> {
         let req = request.into_inner();
         let table_id = req.get_table_id();
-        let new_table_name = req.get_new_table_name();
+        let new_table_name = req.get_new_table_name().clone();
         let version = self
-            .catalog_manager
-            .alter_table_name(table_id, new_table_name)
+            .ddl_controller
+            .run_command(DdlCommand::AlterTableName(table_id, new_table_name))
             .await?;
         Ok(Response::new(AlterTableNameResponse {
             status: None,

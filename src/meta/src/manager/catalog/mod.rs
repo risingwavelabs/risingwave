@@ -15,6 +15,7 @@
 mod database;
 mod fragment;
 mod user;
+mod utils;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::iter;

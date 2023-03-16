@@ -65,6 +65,7 @@ pub enum DdlCommand {
     CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    AlterTableName(TableId, String),
 }
 
 #[derive(Clone)]
@@ -140,6 +141,9 @@ where
                 DdlCommand::ReplaceTable(stream_job, fragment_graph, table_col_index_mapping) => {
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
+                }
+                DdlCommand::AlterTableName(table_id, name) => {
+                    ctrl.alter_rename_table(table_id, &name).await
                 }
             }
         });
@@ -690,6 +694,16 @@ where
 
         self.catalog_manager
             .cancel_replace_table_procedure(table)
+            .await
+    }
+
+    async fn alter_rename_table(
+        &self,
+        table_id: TableId,
+        table_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        self.catalog_manager
+            .alter_table_name(table_id, table_name)
             .await
     }
 }

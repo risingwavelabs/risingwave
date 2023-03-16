@@ -1358,7 +1358,7 @@ impl fmt::Display for Statement {
                 if_not_exists = if *if_not_exists { "IF NOT EXISTS " } else { "" },
                 name = name,
                 table_name = table_name,
-                columns = display_separated(columns, ","),
+                columns = display_comma_separated(columns),
                 include = if include.is_empty() {
                     "".to_string()
                 } else {
