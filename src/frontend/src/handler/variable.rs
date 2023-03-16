@@ -16,10 +16,9 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Row;
-use risingwave_common::error::Result;
+use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{Ident, SetTimeZoneValue, SetVariableValue, Value};
-use tracing::warn;
 
 use super::RwPgResponse;
 use crate::handler::HandlerArgs;
@@ -55,15 +54,12 @@ pub(super) fn handle_set_time_zone(
 ) -> Result<RwPgResponse> {
     let tz_info = match value {
         SetTimeZoneValue::Local => iana_time_zone::get_timezone()
-            .inspect_err(|e| {
-                warn!(?e, "get IANA timezone failed, will use UTC as substitute");
-            })
-            .unwrap_or("UTC".to_string()),
-        SetTimeZoneValue::Default => "UTC".to_string(),
+            .map_err(|e| ErrorCode::InternalError(format!("Failed to get local time zone: {}", e))),
+        SetTimeZoneValue::Default => Ok("UTC".to_string()),
         SetTimeZoneValue::Literal(Value::DoubleQuotedString(s))
-        | SetTimeZoneValue::Literal(Value::SingleQuotedString(s)) => s,
-        _ => value.to_string(),
-    };
+        | SetTimeZoneValue::Literal(Value::SingleQuotedString(s)) => Ok(s),
+        _ => Ok(value.to_string()),
+    }?;
 
     handler_args.session.set_config("timezone", vec![tz_info])?;
 
