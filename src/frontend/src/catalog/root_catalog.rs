@@ -240,6 +240,14 @@ impl Catalog {
             .drop_sink(sink_id);
     }
 
+    pub fn update_sink(&mut self, proto: &ProstSink) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_sink(proto);
+    }
+
     pub fn drop_index(&mut self, db_id: DatabaseId, schema_id: SchemaId, index_id: IndexId) {
         self.get_database_mut(db_id)
             .unwrap()
@@ -254,6 +262,14 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_view(view_id);
+    }
+
+    pub fn update_view(&mut self, proto: &ProstView) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_view(proto);
     }
 
     pub fn drop_function(

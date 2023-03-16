@@ -200,7 +200,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateSinkResponse {
@@ -243,7 +243,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateMaterializedViewResponse {
@@ -292,7 +292,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateIndexResponse {
@@ -400,7 +400,7 @@ where
 
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::CreatingStreamingJob(stream_job, fragment_graph))
+            .run_command(DdlCommand::CreateStreamingJob(stream_job, fragment_graph))
             .await?;
 
         Ok(Response::new(CreateTableResponse {

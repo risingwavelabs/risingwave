@@ -62,7 +62,7 @@ pub enum DdlCommand {
     DropFunction(FunctionId),
     CreateView(View),
     DropView(ViewId),
-    CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
+    CreateStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterTableName(TableId, String),
@@ -134,7 +134,7 @@ where
                 DdlCommand::DropFunction(function_id) => ctrl.drop_function(function_id).await,
                 DdlCommand::CreateView(view) => ctrl.create_view(view).await,
                 DdlCommand::DropView(view_id) => ctrl.drop_view(view_id).await,
-                DdlCommand::CreatingStreamingJob(stream_job, fragment_graph) => {
+                DdlCommand::CreateStreamingJob(stream_job, fragment_graph) => {
                     ctrl.create_streaming_job(stream_job, fragment_graph).await
                 }
                 DdlCommand::DropStreamingJob(job_id) => ctrl.drop_streaming_job(job_id).await,

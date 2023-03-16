@@ -213,6 +213,7 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_sink(sink.database_id, sink.schema_id, sink.id)
                 }
+                Operation::Update => catalog_guard.update_sink(sink),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Index(index) => match resp.operation() {
@@ -227,6 +228,7 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                 }
+                Operation::Update => catalog_guard.update_view(view),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::Function(function) => match resp.operation() {

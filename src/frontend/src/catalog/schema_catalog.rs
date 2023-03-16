@@ -174,6 +174,22 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
     }
 
+    pub fn update_sink(&mut self, prost: &ProstSink) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let sink = SinkCatalog::from(prost);
+        let sink_ref = Arc::new(sink);
+
+        let old_sink = self.sink_by_id.get(&id).unwrap();
+        // check if sink name get updated.
+        if old_sink.name != name {
+            self.sink_by_name.remove(&old_sink.name);
+        }
+
+        self.sink_by_name.insert(name, sink_ref.clone());
+        self.sink_by_id.insert(id, sink_ref);
+    }
+
     pub fn create_view(&mut self, prost: &ProstView) {
         let name = prost.name.clone();
         let id = prost.id;
@@ -189,6 +205,22 @@ impl SchemaCatalog {
     pub fn drop_view(&mut self, id: ViewId) {
         let view_ref = self.view_by_id.remove(&id).unwrap();
         self.view_by_name.remove(&view_ref.name).unwrap();
+    }
+
+    pub fn update_view(&mut self, prost: &ProstView) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let view = ViewCatalog::from(prost);
+        let view_ref = Arc::new(view);
+
+        let old_view = self.view_by_id.get(&id).unwrap();
+        // check if view name get updated.
+        if old_view.name != name {
+            self.view_by_name.remove(&old_view.name);
+        }
+
+        self.view_by_name.insert(name, view_ref.clone());
+        self.view_by_id.insert(id, view_ref);
     }
 
     pub fn create_function(&mut self, prost: &ProstFunction) {

@@ -14,9 +14,9 @@
 
 use itertools::Itertools;
 use risingwave_sqlparser::ast::{
-    Array, CreateSink, CreateSinkStatement, Distinct, Expr, Function, FunctionArg, FunctionArgExpr,
-    Ident, ObjectName, Query, SelectItem, SetExpr, Statement, TableAlias, TableFactor,
-    TableWithJoins,
+    Array, CreateSink, CreateSinkStatement, CreateSourceStatement, Distinct, Expr, Function,
+    FunctionArg, FunctionArgExpr, Ident, ObjectName, Query, SelectItem, SetExpr, Statement,
+    TableAlias, TableFactor, TableWithJoins,
 };
 use risingwave_sqlparser::parser::Parser;
 
@@ -26,17 +26,30 @@ use crate::{MetaError, MetaResult};
 /// the updated definition raw sql. Note that the `definition` must be a `Create` statement and the
 /// `new_name` must be a valid identifier, it should be validated before calling this function. To
 /// update all relations that depend on the renamed one, use `alter_relation_rename_refs`.
-pub fn alter_relation_rename(definition: String, new_name: String) -> String {
-    let ast = Parser::parse_sql(&definition).expect("failed to parse relation definition");
+pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
+    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt = ast
         .into_iter()
         .exactly_one()
         .expect("should contains only one statement");
 
     match &mut stmt {
-        Statement::CreateTable { name, .. } => replace_table_name(name, new_name),
+        Statement::CreateTable { name, .. }
+        | Statement::CreateView { name, .. }
+        | Statement::CreateIndex { name, .. }
+        | Statement::CreateSource {
+            stmt: CreateSourceStatement {
+                source_name: name, ..
+            },
+        }
+        | Statement::CreateSink {
+            stmt: CreateSinkStatement {
+                sink_name: name, ..
+            },
+        } => replace_table_name(name, new_name),
         _ => unreachable!(),
     };
+
     stmt.to_string()
 }
 
@@ -47,11 +60,12 @@ pub fn alter_relation_rename(definition: String, new_name: String) -> String {
 /// error in the future.
 pub fn alter_relation_rename_refs(
     relation: &str,
-    definition: String,
+    definition: &str,
     from: &str,
     to: &str,
 ) -> MetaResult<String> {
-    let ast = Parser::parse_sql(&definition).expect("failed to parse relation definition");
+    tracing::info!("alter_relation_rename_refs: {} {} {} {}", relation, definition, from, to);
+    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt = ast
         .into_iter()
         .exactly_one()
@@ -62,6 +76,7 @@ pub fn alter_relation_rename_refs(
             query: Some(query), ..
         }
         | Statement::CreateView { query, .. }
+        | Statement::Query(query) // Used by view, actually we store a query as the definition of view.
         | Statement::CreateSink {
             stmt:
                 CreateSinkStatement {
@@ -78,7 +93,7 @@ pub fn alter_relation_rename_refs(
                     sink_from: CreateSink::From(table_name),
                     ..
                 },
-        } => replace_table_name(table_name, to.to_string()),
+        } => replace_table_name(table_name, to),
         _ => unreachable!(),
     };
     Ok(stmt.to_string())
@@ -93,7 +108,7 @@ fn ambiguous_error(relation: &str, from: &str, to: &str) -> MetaError {
 
 /// Replace the last ident in the `table_name` with the given name, the object name is ensured to be
 /// non-empty. e.g. `schema.table` or `database.schema.table`.
-fn replace_table_name(table_name: &mut ObjectName, to: String) {
+fn replace_table_name(table_name: &mut ObjectName, to: &str) {
     let idx = table_name.0.len() - 1;
     table_name.0[idx] = Ident::new_unchecked(to);
 }
@@ -349,7 +364,7 @@ mod tests {
         let definition = "CREATE TABLE foo (a int, b int)";
         let new_name = "bar";
         let expected = "CREATE TABLE bar (a INT, b INT)";
-        let actual = alter_relation_rename(definition.to_string(), new_name.to_string());
+        let actual = alter_relation_rename(definition, new_name.to_string());
         assert_eq!(expected, actual);
     }
 
@@ -359,7 +374,7 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected = "CREATE INDEX idx1 ON bar(v1 DESC, v2)";
-        let actual = alter_relation_rename_refs("idx1", definition.to_string(), from, to).unwrap();
+        let actual = alter_relation_rename_refs("idx1", definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -371,8 +386,7 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE SINK sink_t FROM bar WITH (connector = 'kafka', format = 'append_only')";
-        let actual =
-            alter_relation_rename_refs("sink_t", definition.to_string(), from, to).unwrap();
+        let actual = alter_relation_rename_refs("sink_t", definition, from, to).unwrap();
         assert_eq!(expected, actual);
     }
 
@@ -384,17 +398,17 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, bar.v2 AS m2v FROM bar";
-        let actual = alter_relation_rename_refs("mv1", definition.to_string(), from, to).unwrap();
+        let actual = alter_relation_rename_refs("mv1", definition, from, to).unwrap();
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar WHERE bar.v1 = 1 AND (bar.v2).v3 IS TRUE";
-        let actual = alter_relation_rename_refs("mv1", definition.to_string(), from, to).unwrap();
+        let actual = alter_relation_rename_refs("mv1", definition, from, to).unwrap();
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo as bar WHERE bar.v1 = 1";
         let expected = ambiguous_error("mv1", "foo", "bar").to_string();
-        let actual = alter_relation_rename_refs("mv1", definition.to_string(), from, to)
+        let actual = alter_relation_rename_refs("mv1", definition, from, to)
             .err()
             .unwrap()
             .to_string();

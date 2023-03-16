@@ -86,6 +86,8 @@ macro_rules! commit_meta {
 pub(crate) use commit_meta;
 use risingwave_pb::meta::CreatingJobInfo;
 
+use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
+
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
 
 /// `CatalogManager` manages database catalog information and user information, including
@@ -860,28 +862,93 @@ where
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         database_core.ensure_table_id(table_id)?;
-        let views = database_core
-            .views
-            .values()
-            .filter(|view| view.dependent_relations.iter().any(|&r| r == table_id))
-            .map(|view| view.name.clone())
-            .collect_vec();
-        if !views.is_empty() {
-            return Err(MetaError::permission_denied(format!(
-                "Fail to alter table with new name `{}` because views {:?} depend on it",
-                table_name, views
-            )));
-        };
 
-        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
-        let mut table = tables.get_mut(table_id).unwrap();
+        // 1. validate new table name.
+        let mut table = database_core.tables.get(&table_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            table.database_id,
+            table.schema_id,
+            table_name.to_string(),
+        ))?;
+        let old_name = table.name.clone();
+
+        // 2. rename table and its definition.
         table.name = table_name.to_string();
-        let new_table = table.clone();
-        commit_meta!(self, tables)?;
+        table.definition = alter_relation_rename(&table.definition, table_name);
 
-        let version = self
-            .notify_frontend(Operation::Update, Info::Table(new_table))
-            .await;
+        // 3. update all relations that depend on this table, note that indexes are not included.
+        // TODO: refactor dependency cache in catalog manager for better performance.
+        let mut to_update_tables = vec![table.clone()];
+        for table in database_core.tables.values() {
+            if table.dependent_relations.contains(&table_id) {
+                let mut table = table.clone();
+                table.definition = alter_relation_rename_refs(
+                    &table.name,
+                    &table.definition,
+                    &old_name,
+                    table_name,
+                )?;
+                to_update_tables.push(table);
+            }
+        }
+
+        let mut to_update_views = vec![];
+        for view in database_core.views.values() {
+            if view.dependent_relations.contains(&table_id) {
+                let mut view = view.clone();
+                view.sql =
+                    alter_relation_rename_refs(&view.name, &view.sql, &old_name, table_name)?;
+                to_update_views.push(view);
+            }
+        }
+
+        let mut to_update_sinks = vec![];
+        for sink in database_core.sinks.values() {
+            if sink.dependent_relations.contains(&table_id) {
+                let mut sink = sink.clone();
+                sink.definition = alter_relation_rename_refs(
+                    &sink.name,
+                    &sink.definition,
+                    &old_name,
+                    table_name,
+                )?;
+                to_update_sinks.push(sink);
+            }
+        }
+
+        // 4. commit meta.
+        let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut views = BTreeMapTransaction::new(&mut database_core.views);
+        let mut sinks = BTreeMapTransaction::new(&mut database_core.sinks);
+        to_update_tables.iter().for_each(|table| {
+            tables.insert(table.id, table.clone());
+        });
+        to_update_views.iter().for_each(|view| {
+            views.insert(view.id, view.clone());
+        });
+        to_update_sinks.iter().for_each(|sink| {
+            sinks.insert(sink.id, sink.clone());
+        });
+        commit_meta!(self, tables, views, sinks)?;
+
+        // 5. notify frontend.
+        let mut version = 0;
+        for table in to_update_tables.into_iter() {
+            version = self
+                .notify_frontend(Operation::Update, Info::Table(table))
+                .await;
+        }
+        for view in to_update_views.into_iter() {
+            version = self
+                .notify_frontend(Operation::Update, Info::View(view))
+                .await;
+        }
+        for sink in to_update_sinks.into_iter() {
+            version = self
+                .notify_frontend(Operation::Update, Info::Sink(sink))
+                .await;
+        }
+
         Ok(version)
     }
 
