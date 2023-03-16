@@ -41,13 +41,13 @@ pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
 use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
-use risingwave_hummock_sdk::{HummockEpoch, HummockSstableId};
+use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
 
 mod delete_range_aggregator;
 mod filter;
-mod sstable_id_manager;
+mod sstable_object_id_manager;
 mod utils;
 
 pub use delete_range_aggregator::{
@@ -55,7 +55,7 @@ pub use delete_range_aggregator::{
     RangeTombstonesCollector, SstableDeleteRangeIterator,
 };
 pub use filter::FilterBuilder;
-pub use sstable_id_manager::*;
+pub use sstable_object_id_manager::*;
 pub use utils::CompressionAlgorithm;
 use utils::{get_length_prefixed_slice, put_length_prefixed_slice};
 use xxhash_rust::{xxh32, xxh64};
@@ -125,7 +125,7 @@ impl DeleteRangeTombstone {
 /// [`Sstable`] is a handle for accessing SST.
 #[derive(Clone)]
 pub struct Sstable {
-    pub id: HummockSstableId,
+    pub id: HummockSstableObjectId,
     pub meta: SstableMeta,
     pub filter_reader: XorFilterReader,
 }
@@ -140,7 +140,7 @@ impl Debug for Sstable {
 }
 
 impl Sstable {
-    pub fn new(id: HummockSstableId, mut meta: SstableMeta) -> Self {
+    pub fn new(id: HummockSstableObjectId, mut meta: SstableMeta) -> Self {
         let filter_data = std::mem::take(&mut meta.bloom_filter);
         let filter_reader = XorFilterReader::new(filter_data);
         Self {
@@ -196,7 +196,8 @@ impl Sstable {
     #[cfg(test)]
     pub fn get_sstable_info(&self) -> SstableInfo {
         SstableInfo {
-            id: self.id,
+            object_id: self.id,
+            sst_id: self.id,
             key_range: Some(KeyRange {
                 left: self.meta.smallest_key.clone(),
                 right: self.meta.largest_key.clone(),
@@ -207,7 +208,6 @@ impl Sstable {
             meta_offset: self.meta.meta_offset,
             stale_key_count: 0,
             total_key_count: self.meta.key_count as u64,
-            divide_version: 0,
             uncompressed_file_size: self.meta.estimated_size as u64,
             min_epoch: 0,
             max_epoch: 0,
@@ -280,6 +280,7 @@ impl SstableMeta {
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
+    /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
     /// ```
     pub fn encode_to_bytes(&self) -> Vec<u8> {
@@ -299,11 +300,11 @@ impl SstableMeta {
         buf.put_u32_le(self.key_count);
         put_length_prefixed_slice(buf, &self.smallest_key);
         put_length_prefixed_slice(buf, &self.largest_key);
-        buf.put_u64_le(self.meta_offset);
         buf.put_u32_le(self.range_tombstone_list.len() as u32);
         for tombstone in &self.range_tombstone_list {
             tombstone.encode(buf);
         }
+        buf.put_u64_le(self.meta_offset);
         let checksum = xxhash64_checksum(&buf[start_offset..]);
         buf.put_u64_le(checksum);
         buf.put_u32_le(VERSION);
@@ -340,13 +341,13 @@ impl SstableMeta {
         let key_count = buf.get_u32_le();
         let smallest_key = get_length_prefixed_slice(buf);
         let largest_key = get_length_prefixed_slice(buf);
-        let meta_offset = buf.get_u64_le();
         let range_del_count = buf.get_u32_le() as usize;
         let mut range_tombstone_list = Vec::with_capacity(range_del_count);
         for _ in 0..range_del_count {
             let tombstone = DeleteRangeTombstone::decode(buf);
             range_tombstone_list.push(tombstone);
         }
+        let meta_offset = buf.get_u64_le();
 
         Ok(Self {
             block_metas,

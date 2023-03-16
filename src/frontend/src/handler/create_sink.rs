@@ -37,6 +37,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
+        for_system_time_as_of_now: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,

@@ -22,8 +22,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_sqlparser::ast::{Cte, Expr, Fetch, OrderByExpr, Query, Value, With};
 
 use super::derive_order_type_from_order_by_expr;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::expr::{CorrelatedId, Depth, ExprImpl};
+use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
 /// An example of its relationship with `BoundSetExpr` and `BoundSelect` can be found here: <https://bit.ly/3GQwgPz>
@@ -94,6 +95,18 @@ impl BoundQuery {
         // TODO: collect `correlated_input_ref` in `extra_order_exprs`.
         self.body
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+    }
+}
+
+impl RewriteExprsRecursive for BoundQuery {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter) {
+        let new_extra_order_exprs = std::mem::take(&mut self.extra_order_exprs)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.extra_order_exprs = new_extra_order_exprs;
+
+        self.body.rewrite_exprs_recursive(rewriter);
     }
 }
 

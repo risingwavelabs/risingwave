@@ -34,19 +34,20 @@ impl CountStar {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for CountStar {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         if let (_, true) = input.row_at(row_id) {
             self.result += 1;
         }
         Ok(())
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,

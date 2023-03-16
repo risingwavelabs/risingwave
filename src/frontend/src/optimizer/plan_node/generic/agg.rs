@@ -27,6 +27,7 @@ use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::expr::{Expr, ExprRewriter, InputRef, InputRefDisplay};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay, IndexRewriter,
@@ -46,11 +47,30 @@ pub struct Agg<PlanRef> {
     pub input: PlanRef,
 }
 
-impl<PlanRef> Agg<PlanRef> {
+impl<PlanRef: GenericPlanRef> Agg<PlanRef> {
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         self.agg_calls.iter_mut().for_each(|call| {
             call.filter = call.filter.clone().rewrite_expr(r);
         });
+    }
+
+    fn output_len(&self) -> usize {
+        self.group_key.len() + self.agg_calls.len()
+    }
+
+    /// get the Mapping of columnIndex from input column index to output column index,if a input
+    /// column corresponds more than one out columns, mapping to any one
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        let mut map = vec![None; self.output_len()];
+        for (i, key) in self.group_key.iter().enumerate() {
+            map[i] = Some(*key);
+        }
+        ColIndexMapping::with_target_size(map, self.input.schema().len())
+    }
+
+    /// get the Mapping of columnIndex from input column index to out column index
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        self.o2i_col_mapping().inverse()
     }
 }
 
@@ -79,6 +99,21 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Agg<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let output_len = self.output_len();
+        let _input_len = self.input.schema().len();
+        let mut fd_set =
+            FunctionalDependencySet::with_key(output_len, &(0..self.group_key.len()).collect_vec());
+        // take group keys from input_columns, then grow the target size to column_cnt
+        let i2o = self.i2o_col_mapping();
+        for fd in self.input.functional_dependency().as_dependencies() {
+            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
+                fd_set.add_functional_dependency(fd);
+            }
+        }
+        fd_set
     }
 }
 
@@ -319,24 +354,6 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                 }
             })
             .collect()
-    }
-
-    /// get the Mapping of columnIndex from input column index to output column index,if a input
-    /// column corresponds more than one out columns, mapping to any one
-    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
-        let input_len = self.input.schema().len();
-        let agg_cal_num = self.agg_calls.len();
-        let group_key = &self.group_key;
-        let mut map = vec![None; agg_cal_num + group_key.len()];
-        for (i, key) in group_key.iter().enumerate() {
-            map[i] = Some(*key);
-        }
-        ColIndexMapping::with_target_size(map, input_len)
-    }
-
-    /// get the Mapping of columnIndex from input column index to out column index
-    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
-        self.o2i_col_mapping().inverse()
     }
 
     pub fn infer_result_table(

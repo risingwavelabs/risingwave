@@ -57,13 +57,6 @@ impl Rule for MinMaxOnIndexRule {
             if !logical_scan.predicate().always_true() {
                 return None;
             }
-            let output_col_map = logical_scan
-                .output_col_idx()
-                .iter()
-                .cloned()
-                .enumerate()
-                .map(|(id, col)| (col, id))
-                .collect::<BTreeMap<_, _>>();
             let order = Order {
                 column_orders: vec![ColumnOrder::new(
                     calls.first()?.inputs.first()?.index(),
@@ -74,12 +67,10 @@ impl Rule for MinMaxOnIndexRule {
                     },
                 )],
             };
-            if let Some(p) =
-                self.try_on_index(logical_agg, logical_scan.clone(), &order, &output_col_map)
-            {
+            if let Some(p) = self.try_on_index(logical_agg, logical_scan.clone(), &order) {
                 Some(p)
             } else {
-                self.try_on_pk(logical_agg, logical_scan, &order, &output_col_map)
+                self.try_on_pk(logical_agg, logical_scan, &order)
             }
         } else {
             None
@@ -96,84 +87,49 @@ impl MinMaxOnIndexRule {
         &self,
         logical_agg: &LogicalAgg,
         logical_scan: LogicalScan,
-        order: &Order,
-        output_col_map: &BTreeMap<usize, usize>,
+        required_order: &Order,
     ) -> Option<PlanRef> {
-        let unmatched_idx = output_col_map.len();
-        let index = logical_scan.indexes().iter().find(|idx| {
-            let s2p_mapping = idx.secondary_to_primary_mapping();
-            Order {
-                column_orders: idx
-                    .index_table
-                    .pk()
-                    .iter()
-                    .map(|idx_item| {
-                        ColumnOrder::new(
-                            *output_col_map
-                                .get(
-                                    s2p_mapping
-                                        .get(&idx_item.column_index)
-                                        .expect("should be in s2p mapping"),
-                                )
-                                .unwrap_or(&unmatched_idx),
-                            idx_item.order_type,
-                        )
-                    })
-                    .collect(),
+        let order_satisfied_index = logical_scan.indexes_satisfy_order(required_order);
+        for index in order_satisfied_index {
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
+                let non_null_filter = LogicalFilter::create_with_expr(
+                    index_scan.into(),
+                    FunctionCall::new_unchecked(
+                        ExprType::IsNotNull,
+                        vec![ExprImpl::InputRef(Box::new(InputRef::new(
+                            0,
+                            logical_agg.schema().fields[0].data_type.clone(),
+                        )))],
+                        DataType::Boolean,
+                    )
+                    .into(),
+                );
+
+                let limit = LogicalLimit::create(non_null_filter, 1, 0);
+
+                let formatting_agg = LogicalAgg::new(
+                    vec![PlanAggCall {
+                        agg_kind: logical_agg.agg_calls().first()?.agg_kind,
+                        return_type: logical_agg.schema().fields[0].data_type.clone(),
+                        inputs: vec![InputRef::new(
+                            0,
+                            logical_agg.schema().fields[0].data_type.clone(),
+                        )],
+                        order_by: vec![],
+                        distinct: false,
+                        filter: Condition {
+                            conjunctions: vec![],
+                        },
+                    }],
+                    vec![],
+                    limit,
+                );
+
+                return Some(formatting_agg.into());
             }
-            .satisfies(order)
-        })?;
+        }
 
-        let p2s_mapping = index.primary_to_secondary_mapping();
-
-        let index_scan = if logical_scan
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            Some(logical_scan.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-            ))
-        } else {
-            None
-        }?;
-
-        let non_null_filter = LogicalFilter::create_with_expr(
-            index_scan.into(),
-            FunctionCall::new_unchecked(
-                ExprType::IsNotNull,
-                vec![ExprImpl::InputRef(Box::new(InputRef::new(
-                    0,
-                    logical_agg.schema().fields[0].data_type.clone(),
-                )))],
-                DataType::Boolean,
-            )
-            .into(),
-        );
-
-        let limit = LogicalLimit::create(non_null_filter, 1, 0);
-
-        let formatting_agg = LogicalAgg::new(
-            vec![PlanAggCall {
-                agg_kind: logical_agg.agg_calls().first()?.agg_kind,
-                return_type: logical_agg.schema().fields[0].data_type.clone(),
-                inputs: vec![InputRef::new(
-                    0,
-                    logical_agg.schema().fields[0].data_type.clone(),
-                )],
-                order_by: vec![],
-                distinct: false,
-                filter: Condition {
-                    conjunctions: vec![],
-                },
-            }],
-            vec![],
-            limit,
-        );
-
-        Some(formatting_agg.into())
+        None
     }
 
     fn try_on_pk(
@@ -181,8 +137,14 @@ impl MinMaxOnIndexRule {
         logical_agg: &LogicalAgg,
         logical_scan: LogicalScan,
         order: &Order,
-        output_col_map: &BTreeMap<usize, usize>,
     ) -> Option<PlanRef> {
+        let output_col_map = logical_scan
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
         let unmatched_idx = output_col_map.len();
         let primary_key = logical_scan.primary_key();
         let primary_key_order = Order {

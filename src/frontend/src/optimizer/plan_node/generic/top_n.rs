@@ -20,7 +20,7 @@ use risingwave_common::util::sort_util::OrderType;
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::Order;
+use crate::optimizer::property::{FunctionalDependencySet, Order};
 use crate::TableCatalog;
 /// `TopN` sorts the input data and fetches up to `limit` rows from `offset`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -98,5 +98,9 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
+    }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        self.input.functional_dependency().clone()
     }
 }

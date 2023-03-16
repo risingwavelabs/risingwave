@@ -19,7 +19,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use risingwave_common::system_param::reader::SystemParamsReader;
-use risingwave_common::system_param::{default, set_system_param};
+use risingwave_common::system_param::set_system_param;
 use risingwave_common::{for_all_undeprecated_params, key_of};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SystemParams;
@@ -145,7 +145,7 @@ impl<S: MetaStore> SystemParamsManager<S> {
 // 2. Some, Some: Check equality and warn if they differ.
 // 3. None, Some: A new version of RW cluster is launched for the first time and newly introduced
 // params are not set. Use init value.
-// 4. None, None: Same as 3, but the init param is not from CLI. Use default value.
+// 4. None, None: Impossible.
 macro_rules! impl_merge_params {
     ($({ $field:ident, $type:ty, $default:expr },)*) => {
         fn merge_params(mut persisted: SystemParams, init: SystemParams) -> SystemParams {
@@ -157,7 +157,7 @@ macro_rules! impl_merge_params {
                         }
                     },
                     (None, Some(init)) => persisted.$field = Some(init),
-                    (None, None) => { persisted.$field = Some(default::$field()) },
+                    (None, None) => unreachable!(),
                     _ => {},
                 }
             )*

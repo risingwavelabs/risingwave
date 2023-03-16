@@ -359,6 +359,10 @@ mod tests {
     };
     use crate::key::TABLE_PREFIX_LEN;
 
+    const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
+        VirtualNode::from_index(233).to_be_bytes()
+    }
+
     #[test]
     fn test_default_filter_key_extractor() {
         let dummy_filter_key_extractor = DummyFilterKeyExtractor::default();
@@ -494,8 +498,7 @@ mod tests {
             buf.to_vec()
         };
 
-        let vnode_prefix = "v".as_bytes();
-        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+        let vnode_prefix = &dummy_vnode()[..];
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
@@ -529,8 +532,7 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
@@ -567,8 +569,7 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);

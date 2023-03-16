@@ -1,4 +1,5 @@
-from risingwave.udf import udf, UdfServer
+from typing import Iterator
+from risingwave.udf import udf, udtf, UdfServer
 import random
 
 
@@ -19,9 +20,23 @@ def gcd3(x: int, y: int, z: int) -> int:
     return gcd(gcd(x, y), z)
 
 
+@udtf(input_types='INT', result_types='INT')
+def series(n: int) -> Iterator[int]:
+    for i in range(n):
+        yield i
+
+
+@udtf(input_types=['INT'], result_types=['INT', 'VARCHAR'])
+def series2(n: int) -> Iterator[tuple[int, str]]:
+    for i in range(n):
+        yield i, str(i)
+
+
 if __name__ == '__main__':
     server = UdfServer()
     server.add_function(random_int)
     server.add_function(gcd)
     server.add_function(gcd3)
+    server.add_function(series)
+    server.add_function(series2)
     server.serve()

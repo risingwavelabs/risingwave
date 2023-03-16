@@ -26,7 +26,7 @@ bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-csv-core = "0.1.10"
+csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }

@@ -33,7 +33,6 @@ pub use self::csv_parser::CsvParserConfig;
 use crate::parser::maxwell::MaxwellParser;
 use crate::source::{
     BoxSourceStream, BoxSourceWithStateStream, SourceColumnDesc, SourceContextRef, SourceFormat,
-    StreamChunkWithState,
 };
 
 mod avro;

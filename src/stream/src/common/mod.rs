@@ -14,9 +14,7 @@
 
 pub use builder::*;
 pub use column_mapping::*;
-pub use infallible_expr::*;
 
 mod builder;
 mod column_mapping;
-mod infallible_expr;
 pub mod table;

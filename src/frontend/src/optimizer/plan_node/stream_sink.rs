@@ -26,6 +26,7 @@ use risingwave_connector::sink::{
     SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
 use super::utils::IndicesDisplay;
@@ -72,10 +73,22 @@ impl StreamSink {
         let required_dist = match input.distribution() {
             Distribution::Single => RequiredDist::single(),
             _ => {
-                assert_matches!(user_distributed_by, RequiredDist::Any);
-                RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                match properties.get("connector") {
+                    Some(s) if s == "iceberg" => {
+                        // iceberg with multiple parallelism will fail easily with concurrent commit
+                        // on metadata
+                        // TODO: reset iceberg sink to have multiple parallelism
+                        info!("setting iceberg sink parallelism to singleton");
+                        RequiredDist::single()
+                    }
+                    _ => {
+                        assert_matches!(user_distributed_by, RequiredDist::Any);
+                        RequiredDist::shard_by_key(input.schema().len(), input.logical_pk())
+                    }
+                }
             }
         };
+
         let input = required_dist.enforce_if_not_satisfies(input, &Order::any())?;
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
 

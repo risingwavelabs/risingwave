@@ -21,7 +21,6 @@ import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingS
 import com.risingwave.sourcenode.common.DebeziumCdcUtils;
 import io.debezium.heartbeat.Heartbeat;
 import java.time.Duration;
-import java.util.Map;
 import java.util.Properties;
 
 /** Postgres Source Config */
@@ -32,7 +31,7 @@ public class PostgresSourceConfig implements SourceConfig {
     private final String sourceName;
     private static final long DEFAULT_HEARTBEAT_MS = Duration.ofMinutes(5).toMillis();
 
-    public PostgresSourceConfig(long sourceId, String startOffset, Map<String, String> userProps) {
+    public PostgresSourceConfig(long sourceId, String startOffset, ConnectorConfig userProps) {
         id = sourceId;
         props.setProperty("connector.class", "io.debezium.connector.postgresql.PostgresConnector");
         props.setProperty(
@@ -46,12 +45,16 @@ public class PostgresSourceConfig implements SourceConfig {
             props.setProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
         }
 
+        String dbName = userProps.getNonNull(ConnectorConfig.DB_NAME);
+        String schema = userProps.getNonNull(ConnectorConfig.PG_SCHEMA_NAME);
+        String table = userProps.getNonNull(ConnectorConfig.TABLE_NAME);
+
         // Begin of connector configs
         props.setProperty("database.hostname", userProps.get(ConnectorConfig.HOST));
         props.setProperty("database.port", userProps.get(ConnectorConfig.PORT));
         props.setProperty("database.user", userProps.get(ConnectorConfig.USER));
         props.setProperty("database.password", userProps.get(ConnectorConfig.PASSWORD));
-        props.setProperty("database.dbname", userProps.get(ConnectorConfig.DB_NAME));
+        props.setProperty("database.dbname", dbName);
         // The name of the PostgreSQL logical decoding plug-in installed on the PostgreSQL server.
         // Supported values are decoderbufs, and pgoutput.
         // The wal2json plug-in is deprecated and scheduled for removal.
@@ -77,24 +80,21 @@ public class PostgresSourceConfig implements SourceConfig {
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.name(),
                 Heartbeat.HEARTBEAT_TOPICS_PREFIX.defaultValueAsString());
 
-        String tableFilter =
-                userProps.get(ConnectorConfig.PG_SCHEMA_NAME)
-                        + "."
-                        + userProps.get(ConnectorConfig.TABLE_NAME);
+        String tableFilter = schema + "." + table;
         props.setProperty("table.include.list", tableFilter);
         props.setProperty("database.server.name", DB_SERVER_NAME_PREFIX + tableFilter);
 
         // host:port:database.schema.table
         sourceName =
-                userProps.get(ConnectorConfig.HOST)
+                userProps.getNonNull(ConnectorConfig.HOST)
                         + ":"
-                        + userProps.get(ConnectorConfig.PORT)
+                        + userProps.getNonNull(ConnectorConfig.PORT)
                         + ":"
-                        + userProps.get(ConnectorConfig.DB_NAME)
+                        + dbName
                         + "."
-                        + userProps.get(ConnectorConfig.PG_SCHEMA_NAME)
+                        + schema
                         + "."
-                        + userProps.get(ConnectorConfig.TABLE_NAME);
+                        + table;
         props.setProperty("name", sourceName);
 
         // pass through debezium properties if any
