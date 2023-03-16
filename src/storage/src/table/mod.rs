@@ -16,6 +16,7 @@ pub mod batch_table;
 
 use std::sync::{Arc, LazyLock};
 
+use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
@@ -124,14 +125,19 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
 /// Get vnode values with `indices` on the given `chunk`.
 pub fn compute_chunk_vnode(
     chunk: &DataChunk,
-    indices: &[usize],
+    dist_key_in_pk_indices: &[usize],
+    pk_indices: &[usize],
     vnodes: &Bitmap,
 ) -> Vec<VirtualNode> {
-    if indices.is_empty() {
+    if dist_key_in_pk_indices.is_empty() {
         vec![DEFAULT_VNODE; chunk.capacity()]
     } else {
+        let dist_key_indices = dist_key_in_pk_indices
+            .iter()
+            .map(|idx| pk_indices[*idx])
+            .collect_vec();
         chunk
-            .get_hash_values(indices, Crc32FastBuilder)
+            .get_hash_values(&dist_key_indices, Crc32FastBuilder)
             .into_iter()
             .zip_eq_fast(chunk.vis().iter())
             .map(|(h, vis)| {

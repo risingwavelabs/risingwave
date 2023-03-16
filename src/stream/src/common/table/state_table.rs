@@ -84,7 +84,7 @@ pub struct StateTableInner<
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    // dist_key_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
@@ -251,7 +251,6 @@ where
             pk_serde,
             row_serde,
             pk_indices: pk_indices.to_vec(),
-            dist_key_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -452,7 +451,6 @@ where
             pk_serde,
             row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -475,7 +473,7 @@ where
         if self.vnode_col_idx_in_pk.is_some() {
             false
         } else {
-            self.dist_key_indices.is_empty()
+            self.dist_key_in_pk_indices.is_empty()
         }
     }
 
@@ -503,8 +501,13 @@ where
     }
 
     /// Get the vnode value of the given row
-    pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
-        compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+    //     compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // }
+
+    /// Get the vnode value of the given row
+    pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -516,9 +519,9 @@ where
         &self.pk_serde
     }
 
-    pub fn dist_key_indices(&self) -> &[usize] {
-        &self.dist_key_indices
-    }
+    // pub fn dist_key_indices(&self) -> &[usize] {
+    //     &self.dist_key_indices
+    // }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
@@ -724,7 +727,12 @@ where
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes);
+        let vnodes = compute_chunk_vnode(
+            &chunk,
+            &self.dist_key_in_pk_indices,
+            &self.pk_indices,
+            &self.vnodes,
+        );
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
             chunk.clone().reorder_columns(value_indices)
@@ -984,7 +992,7 @@ where
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
-            dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
+             ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 
