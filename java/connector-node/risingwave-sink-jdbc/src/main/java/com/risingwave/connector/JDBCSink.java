@@ -32,6 +32,7 @@ public class JDBCSink extends SinkBase {
     public static final String INSERT_TEMPLATE = "INSERT INTO %s (%s) VALUES (%s)";
     private static final String DELETE_TEMPLATE = "DELETE FROM %s WHERE %s";
     private static final String UPDATE_TEMPLATE = "UPDATE %s SET %s WHERE %s";
+    private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
     private final String tableName;
     private final Connection conn;
@@ -54,7 +55,10 @@ public class JDBCSink extends SinkBase {
             this.conn.setAutoCommit(false);
             this.pkColumnNames = getPkColumnNames(conn, tableName);
         } catch (SQLException e) {
-            throw Status.INTERNAL.withCause(e).asRuntimeException();
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
     }
 
@@ -66,7 +70,10 @@ public class JDBCSink extends SinkBase {
                 pkColumnNames.add(pks.getString(JDBC_COLUMN_NAME_KEY));
             }
         } catch (SQLException e) {
-            throw Status.INTERNAL.withCause(e).asRuntimeException();
+            throw Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
         LOG.info("detected pk {}", pkColumnNames);
         return pkColumnNames;
@@ -99,7 +106,11 @@ public class JDBCSink extends SinkBase {
                     }
                     return stmt;
                 } catch (SQLException e) {
-                    throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw io.grpc.Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             case DELETE:
                 String deleteCondition;
@@ -128,7 +139,11 @@ public class JDBCSink extends SinkBase {
                     }
                     return stmt;
                 } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             case UPDATE_DELETE:
                 if (this.pkColumnNames.isEmpty()) {
@@ -196,7 +211,11 @@ public class JDBCSink extends SinkBase {
                     updateDeleteValueBuffer = null;
                     return stmt;
                 } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             default:
                 throw Status.INVALID_ARGUMENT
@@ -215,10 +234,14 @@ public class JDBCSink extends SinkBase {
             }
             if (stmt != null) {
                 try {
-                    LOG.debug("Executing statement: " + stmt);
+                    LOG.debug("Executing statement: {}", stmt);
                     stmt.executeUpdate();
                 } catch (SQLException e) {
-                    throw Status.INTERNAL.withCause(e).asRuntimeException();
+                    throw Status.INTERNAL
+                            .withDescription(
+                                    String.format(
+                                            ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                            .asRuntimeException();
                 }
             } else {
                 throw Status.INTERNAL
@@ -239,7 +262,10 @@ public class JDBCSink extends SinkBase {
         try {
             conn.commit();
         } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
     }
 
@@ -248,7 +274,10 @@ public class JDBCSink extends SinkBase {
         try {
             conn.close();
         } catch (SQLException e) {
-            throw io.grpc.Status.INTERNAL.withCause(e).asRuntimeException();
+            throw io.grpc.Status.INTERNAL
+                    .withDescription(
+                            String.format(ERROR_REPORT_TEMPLATE, e.getSQLState(), e.getMessage()))
+                    .asRuntimeException();
         }
     }
 
