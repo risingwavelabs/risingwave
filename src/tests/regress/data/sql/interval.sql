@@ -69,10 +69,10 @@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES
   ('-2147483648 days 2147483647 months'),
   ('-2147483648 days -2147483648 months');
 -- these should fail as out-of-range
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
 
 -- Test edge-case overflow detection in interval multiplication
 --@ select extract(epoch from '256 microseconds'::interval * (2^55)::float8);

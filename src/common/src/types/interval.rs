@@ -1095,11 +1095,19 @@ impl IntervalUnit {
 
         (|| match leading_field {
             Year => {
-                let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
+                let months = num.checked_mul(12)?.try_into().ok()?;
+                Some(IntervalUnit::from_month_day_usec(months, 0, 0))
             }
-            Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
-            Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
+            Month => Some(IntervalUnit::from_month_day_usec(
+                num.try_into().ok()?,
+                0,
+                0,
+            )),
+            Day => Some(IntervalUnit::from_month_day_usec(
+                0,
+                num.try_into().ok()?,
+                0,
+            )),
             Hour => {
                 let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
                 Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
@@ -1132,11 +1140,11 @@ impl IntervalUnit {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
                     result = result + (|| match interval_unit {
                         Year => {
-                            let months = num.checked_mul(12)?;
-                            Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
+                            let months = num.checked_mul(12)?.try_into().ok()?;
+                            Some(IntervalUnit::from_month_day_usec(months, 0, 0))
                         }
-                        Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
-                        Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
+                        Month => Some(IntervalUnit::from_month_day_usec(num.try_into().ok()?, 0, 0)),
+                        Day => Some(IntervalUnit::from_month_day_usec(0, num.try_into().ok()?, 0)),
                         Hour => {
                             let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
                             Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
