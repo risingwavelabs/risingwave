@@ -81,7 +81,7 @@ statement ok
 update t set (v1, v3) = (v1+v2, v3||v3);
 
 query IIT
-select * from t;
+select * from t order by v1;
 ----
 1 1 aa
 3 2 bb
