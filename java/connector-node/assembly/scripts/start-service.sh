@@ -24,4 +24,4 @@ if [ -z "${port}" ]; then
     port=$PORT
 fi
 
-java -classpath "${DIR}/libs/*" $MAIN --port ${port}
+java -classpath "${DIR}/libs/*" -Djava.library.path="${RW_JAVA_BINDING_LIB_PATH}" $MAIN --port ${port}

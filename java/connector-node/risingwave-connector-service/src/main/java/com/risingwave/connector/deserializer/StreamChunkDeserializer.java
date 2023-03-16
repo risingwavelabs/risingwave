@@ -17,7 +17,6 @@ package com.risingwave.connector.deserializer;
 import static io.grpc.Status.INVALID_ARGUMENT;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.connector.api.sink.CloseableIterator;
 import com.risingwave.connector.api.sink.Deserializer;
 import com.risingwave.connector.api.sink.SinkRow;
@@ -28,10 +27,93 @@ import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.S
 import com.risingwave.proto.Data;
 
 public class StreamChunkDeserializer implements Deserializer {
-    private final TableSchema tableSchema;
+    interface ValueGetter {
+        Object get(StreamChunkRow row);
+    }
+
+    private final ValueGetter[] valueGetters;
 
     public StreamChunkDeserializer(TableSchema tableSchema) {
-        this.tableSchema = tableSchema;
+        this.valueGetters = buildValueGetter(tableSchema);
+    }
+
+    static ValueGetter[] buildValueGetter(TableSchema tableSchema) {
+        String[] colNames = tableSchema.getColumnNames();
+        ValueGetter[] ret = new ValueGetter[colNames.length];
+        for (int i = 0; i < colNames.length; i++) {
+            int index = i;
+            Data.DataType.TypeName typeName = tableSchema.getColumnType(colNames[i]);
+            switch (typeName) {
+                case INT16:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getShort(index);
+                            };
+                    break;
+                case INT32:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getInt(index);
+                            };
+                    break;
+                case INT64:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getLong(index);
+                            };
+                    break;
+                case FLOAT:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getFloat(index);
+                            };
+                    break;
+                case DOUBLE:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getDouble(index);
+                            };
+                    break;
+                case BOOLEAN:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getBoolean(index);
+                            };
+                    break;
+                case VARCHAR:
+                    ret[i] =
+                            row -> {
+                                if (row.isNull(index)) {
+                                    return null;
+                                }
+                                return row.getString(index);
+                            };
+                    break;
+                default:
+                    throw io.grpc.Status.INVALID_ARGUMENT
+                            .withDescription("unsupported type " + typeName)
+                            .asRuntimeException();
+            }
+        }
+        return ret;
     }
 
     @Override
@@ -45,69 +127,89 @@ public class StreamChunkDeserializer implements Deserializer {
         }
         StreamChunkPayload streamChunkPayload = writeBatch.getStreamChunkPayload();
         return new StreamChunkIteratorWrapper(
-                tableSchema,
-                new StreamChunkIterator(streamChunkPayload.getBinaryData().toByteArray()));
+                new StreamChunkIterator(streamChunkPayload.getBinaryData().toByteArray()),
+                valueGetters);
     }
 
-    private static Object validateStreamChunkDataTypes(
-            Data.DataType.TypeName typeName, int columnIdx, StreamChunkRow row) {
-        if (row.isNull(columnIdx)) {
-            return null;
+    static class StreamChunkRowWrapper implements SinkRow {
+
+        private boolean isClosed;
+        private final StreamChunkRow inner;
+        private final ValueGetter[] valueGetters;
+
+        StreamChunkRowWrapper(StreamChunkRow inner, ValueGetter[] valueGetters) {
+            this.inner = inner;
+            this.valueGetters = valueGetters;
+            this.isClosed = false;
         }
-        switch (typeName) {
-            case INT16:
-                return row.getShort(columnIdx);
-            case INT32:
-                return row.getInt(columnIdx);
-            case INT64:
-                return row.getLong(columnIdx);
-            case FLOAT:
-                return row.getFloat(columnIdx);
-            case DOUBLE:
-                return row.getDouble(columnIdx);
-            case BOOLEAN:
-                return row.getBoolean(columnIdx);
-            case VARCHAR:
-                return row.getString(columnIdx);
-            default:
-                throw io.grpc.Status.INVALID_ARGUMENT
-                        .withDescription("unsupported type " + typeName)
-                        .asRuntimeException();
+
+        @Override
+        public Object get(int index) {
+            return valueGetters[index].get(inner);
+        }
+
+        @Override
+        public Data.Op getOp() {
+            return inner.getOp();
+        }
+
+        @Override
+        public int size() {
+            return valueGetters.length;
+        }
+
+        @Override
+        public void close() {
+            if (!isClosed) {
+                this.isClosed = true;
+                inner.close();
+            }
         }
     }
 
     static class StreamChunkIteratorWrapper implements CloseableIterator<SinkRow> {
-        private final TableSchema tableSchema;
         private final StreamChunkIterator iter;
-        private StreamChunkRow row;
+        private final ValueGetter[] valueGetters;
+        private StreamChunkRowWrapper row;
 
-        public StreamChunkIteratorWrapper(TableSchema tableSchema, StreamChunkIterator iter) {
-            this.tableSchema = tableSchema;
+        public StreamChunkIteratorWrapper(StreamChunkIterator iter, ValueGetter[] valueGetters) {
             this.iter = iter;
+            this.valueGetters = valueGetters;
             this.row = null;
         }
 
         @Override
         public void close() {
             iter.close();
+            try {
+                if (row != null) {
+                    row.close();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
 
         @Override
         public boolean hasNext() {
-            row = iter.next();
-            return row != null;
+            if (this.row != null) {
+                throw new RuntimeException(
+                        "cannot call hasNext again when there is row not consumed by next");
+            }
+            StreamChunkRow row = iter.next();
+            if (row == null) {
+                return false;
+            }
+            this.row = new StreamChunkRowWrapper(row, valueGetters);
+            return true;
         }
 
         @Override
         public SinkRow next() {
-            Object[] values = new Object[tableSchema.getNumColumns()];
-            for (String columnName : tableSchema.getColumnNames()) {
-                int columnIdx = tableSchema.getColumnIndex(columnName);
-                Data.DataType.TypeName typeName = tableSchema.getColumnType(columnName);
-                values[tableSchema.getColumnIndex(columnName)] =
-                        validateStreamChunkDataTypes(typeName, columnIdx, row);
-            }
-            return new ArraySinkRow(row.getOp(), values);
+            // Move the sink row outside
+            SinkRow ret = this.row;
+            this.row = null;
+            return ret;
         }
     }
 }
