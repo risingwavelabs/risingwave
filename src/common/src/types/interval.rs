@@ -24,7 +24,6 @@ use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
 use risingwave_pb::data::IntervalUnit as IntervalUnitProto;
-use static_assertions::const_assert;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -80,58 +79,6 @@ impl IntervalUnit {
 
     pub fn get_usecs_of_day(&self) -> u64 {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
-    }
-
-    /// Justify interval, convert 24 hours to 1 day and 30 days to 1 month.
-    /// Also makes signs of all fields to be the same.
-    ///
-    /// <https://github.com/postgres/postgres/blob/REL_15_2/src/backend/utils/adt/timestamp.c#L2740>
-    ///
-    /// Be careful when using this as the normalized form, as it is not a total function and may not
-    /// exist for certain values (e.g. [`Self::MIN`]). See [`IntervalCmpValue`] for details.
-    pub fn justify_interval(&self) -> Option<Self> {
-        let mut v = *self;
-        // When `days` and `usecs` have the same sign, `usecs` could potentially push `days` over
-        // `i32::MAX` or `i32::MIN`, for example in (0, i32::MIN, i64::MIN). So we attempt to
-        // restrict `abs(days) < 30` first.
-        // When they have different signs, restricting `days` first could lead to false positive of
-        // overflow, for example in (i32::MIN, -60, i64::MAX). So this step should be skipped.
-        if v.days > 0 && v.usecs > 0 || v.days < 0 && v.usecs < 0 {
-            v.months = v.months.checked_add(v.days / 30)?;
-            v.days %= 30;
-        }
-
-        // Either `days` and `usecs` are of different signs, or we have already limited
-        // `abs(days) < 30` above. It is impossible to overflow here because
-        // `-29 + i64::MIN / USECS_PER_DAY > i32::MIN`
-        const_assert!(29 + i64::MAX / USECS_PER_DAY <= (i32::MAX as i64));
-        const_assert!(-29 + i64::MIN / USECS_PER_DAY >= (i32::MIN as i64));
-        v.days += (v.usecs / USECS_PER_DAY) as i32;
-        v.usecs %= USECS_PER_DAY;
-
-        // Unfortunately this could still generate false positive of overflow due to lack of sign
-        // adjustment below, for example in (i32::MIN, -30, 1). This is the same behavior as
-        // PostgreSQL, but I believe we (and they) would like to have it fixed.
-        v.months = v.months.checked_add(v.days / 30)?;
-        v.days %= 30;
-
-        if v.months > 0 && (v.days < 0 || v.days == 0 && v.usecs < 0) {
-            v.days += 30;
-            v.months -= 1;
-        } else if v.months < 0 && (v.days > 0 || v.days == 0 && v.usecs > 0) {
-            v.days -= 30;
-            v.months += 1;
-        }
-
-        if v.days > 0 && v.usecs < 0 {
-            v.usecs += USECS_PER_DAY;
-            v.days -= 1;
-        } else if v.days < 0 && v.usecs > 0 {
-            v.usecs -= USECS_PER_DAY;
-            v.days += 1;
-        }
-
-        Some(v)
     }
 
     #[deprecated]
@@ -539,11 +486,12 @@ impl std::fmt::Debug for IntervalUnitDisplay<'_> {
 ///
 /// For simplicity we will assume there are only `months` and `days` and ignore `usecs` below.
 ///
-/// The justified interval is more human friendly. However, it may overflow. In the 2 examples
-/// above, '-1 months -15 days' is the justified interval of the first equivalence class, but there
-/// is no justified interval in the second one. It would be '-2147483653 months' but this overflows
-/// `i32`. A lot of bits are wasted in a justified interval because `months` is using `i32` for
-/// `-29..=29` only.
+/// The justified interval is more human friendly. It requires all units to have the same sign, and
+/// that `0 <= abs(usecs) < USECS_PER_DAY && 0 <= abs(days) < 30`. However, it may overflow. In the
+/// 2 examples above, '-1 months -15 days' is the justified interval of the first equivalence class,
+/// but there is no justified interval in the second one. It would be '-2147483653 months' but this
+/// overflows `i32`. A lot of bits are wasted in a justified interval because `days` is using
+/// `i32` for `-29..=29` only.
 ///
 /// The alternate representative interval aims to avoid this overflow. It still requires all units
 /// to have the same sign, but maximizes `abs` of smaller unit rather than limit it to `29`. The
@@ -1460,7 +1408,7 @@ mod tests {
     }
 
     #[test]
-    fn test_justify() {
+    fn test_deserialize_justify() {
         let cases = [
             (
                 (0, 0, USECS_PER_MONTH * 2 + USECS_PER_DAY * 3 + 4),
@@ -1489,37 +1437,29 @@ mod tests {
         ];
         for ((lhs_months, lhs_days, lhs_usecs), rhs) in cases {
             let input = IntervalUnit::from_month_day_usec(lhs_months, lhs_days, lhs_usecs);
-            let actual = input.justify_interval();
             let actual_deserialize = IntervalCmpValue::from(input).as_justified();
 
             match rhs {
                 None => {
-                    assert_eq!(actual, None);
                     assert_eq!(actual_deserialize, None);
                 }
                 Some((rhs_months, rhs_days, rhs_usecs, rhs_str)) => {
                     // We should test individual fields rather than using custom `Eq`
-                    assert_eq!(actual.unwrap().get_months(), rhs_months);
-                    assert_eq!(actual.unwrap().get_days(), rhs_days);
-                    assert_eq!(actual.unwrap().get_usecs(), rhs_usecs);
                     assert_eq!(actual_deserialize.unwrap().get_months(), rhs_months);
                     assert_eq!(actual_deserialize.unwrap().get_days(), rhs_days);
                     assert_eq!(actual_deserialize.unwrap().get_usecs(), rhs_usecs);
-                    assert_eq!(actual.unwrap().to_string(), rhs_str);
+                    assert_eq!(actual_deserialize.unwrap().to_string(), rhs_str);
                 }
             }
         }
 
-        // A false positive overflow that is buggy in PostgreSQL 15.2 as well.
+        // A false positive overflow that is buggy in PostgreSQL 15.2.
         let input = IntervalUnit::from_month_day_usec(i32::MIN, -30, 1);
-        let actual = input.justify_interval();
         let actual_deserialize = IntervalCmpValue::from(input).as_justified();
         // It has a justified interval within range, and can be obtained by our deserialization.
         assert_eq!(actual_deserialize.unwrap().get_months(), i32::MIN);
         assert_eq!(actual_deserialize.unwrap().get_days(), -29);
         assert_eq!(actual_deserialize.unwrap().get_usecs(), -USECS_PER_DAY + 1);
-        // But the PostgreSQL `justify_interval` function reports overflow.
-        assert_eq!(actual, None);
     }
 
     #[test]
