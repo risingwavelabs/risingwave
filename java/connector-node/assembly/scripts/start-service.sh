@@ -15,7 +15,7 @@ while getopts ":h:p:" o; do
 done
 shift $((OPTIND-1))
 
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DIR="$( cd "$( dirname $0 )" && pwd )"
 MAIN='com.risingwave.connector.ConnectorService'
 PORT=50051
 
