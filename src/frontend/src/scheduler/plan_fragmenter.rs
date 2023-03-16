@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -120,6 +122,12 @@ pub struct BatchPlanFragmenter {
     worker_node_manager: WorkerNodeManagerRef,
     catalog_reader: CatalogReader,
 
+    /// if batch_parallelism is None, it means no limit, we will use the available nodes count as
+    /// parallelism.
+    /// if batch_parallelism is Some(num), we will use the min(num, the available
+    /// nodes count) as parallelism.
+    batch_parallelism: Option<NonZeroU64>,
+
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
 }
@@ -136,6 +144,7 @@ impl BatchPlanFragmenter {
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         catalog_reader: CatalogReader,
+        batch_parallelism: Option<NonZeroU64>,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
         let mut plan_fragmenter = Self {
@@ -144,6 +153,7 @@ impl BatchPlanFragmenter {
             next_stage_id: 0,
             worker_node_manager,
             catalog_reader,
+            batch_parallelism,
             stage_graph: None,
         };
         plan_fragmenter.split_into_stage(batch_node)?;
@@ -751,6 +761,11 @@ impl BatchPlanFragmenter {
                     lookup_join_parallelism
                 } else if source_info.is_some() {
                     0
+                } else if let Some(num) = self.batch_parallelism {
+                    min(
+                        num.get() as usize,
+                        self.worker_node_manager.schedule_unit_count(),
+                    )
                 } else {
                     self.worker_node_manager.worker_node_count()
                 }
