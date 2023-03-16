@@ -1,0 +1,203 @@
+---
+version: '3'
+services:
+  compactor-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compactor-0
+  compute-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: compute-node-0
+  etcd-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: etcd-0
+  frontend-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: frontend-node-0
+  grafana-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: grafana-0
+  meta-node-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: meta-node-0
+  minio-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: minio-0
+  prometheus-0:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: prometheus-0
+
+  #=================== TiDB & TiCDC components ==================
+  ticdc-controller:
+    image: pingcap/ticdc:v6.6.0
+    entrypoint: "/cdc cli"
+    command:
+      - changefeed
+      - create
+      - --server
+      - http://ticdc-capturer0:8300
+      - --sink-uri
+      - "kafka://kafka:9092/ticdc_default?protocol=canal-json&kafka-version=2.4.0&partition-num=3&max-message-bytes=67108864&replication-factor=1"
+      - --changefeed-id
+      - "ticdc-replication-task"
+      - --config
+      - "/changefeed.toml"
+    volumes:
+      - ./config/changefeed.toml:/changefeed.toml:ro
+    depends_on:
+      - "pd"
+      - "kafka"
+      - "ticdc-capturer0"
+    restart: on-failure
+
+  ticdc-capturer0:
+    image: pingcap/ticdc:v6.6.0
+    entrypoint: "/cdc server"
+    ports:
+      - "8300:8300"
+    command:
+      - --addr=0.0.0.0:8300
+      - --pd=http://pd:2379
+      - --advertise-addr=ticdc-capturer0:8300
+    depends_on:
+      - pd
+      - "tidb"
+      - "kafka"
+    restart: on-failure
+
+  pd:
+    image: pingcap/pd:v6.6.0
+    ports:
+      - "2379:2379"
+    volumes:
+      - ./config/pd.toml:/pd.toml:ro
+    command:
+      - --name=pd
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+      - --advertise-client-urls=http://pd:2379
+      - --advertise-peer-urls=http://pd:2380
+      - --initial-cluster=pd=http://pd:2380
+      - --data-dir=/data/pd
+      - --config=/pd.toml
+    restart: on-failure
+
+  tikv0:
+    image: pingcap/tikv:v6.6.0
+    volumes:
+      - ./config/tikv.toml:/tikv.toml:ro
+      - /data
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv0:20160
+      - --data-dir=/data/tikv0
+      - --pd=pd:2379
+      - --config=/tikv.toml
+    depends_on:
+      - "pd"
+    restart: on-failure
+
+  tikv1:
+    image: pingcap/tikv:v6.6.0
+    volumes:
+      - ./config/tikv.toml:/tikv.toml:ro
+      - /data
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv1:20160
+      - --data-dir=/data/tikv1
+      - --pd=pd:2379
+      - --config=/tikv.toml
+    depends_on:
+      - "pd"
+    restart: on-failure
+
+  tikv2:
+    image: pingcap/tikv:v6.6.0
+    volumes:
+      - ./config/tikv.toml:/tikv.toml:ro
+      - /data
+    command:
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv2:20160
+      - --data-dir=/data/tikv2
+      - --pd=pd:2379
+      - --config=/tikv.toml
+    depends_on:
+      - "pd"
+    restart: on-failure
+
+  tidb:
+    image: pingcap/tidb:v6.6.0
+    ports:
+      - "4000:4000"
+      - "10080:10080"
+    volumes:
+      - ./config/tidb.toml:/tidb.toml:ro
+    command:
+      - --store=tikv
+      - --path=pd:2379
+      - --config=/tidb.toml
+      - --advertise-address=tidb
+    depends_on:
+      - "tikv0"
+      - "tikv1"
+      - "tikv2"
+    restart: on-failure
+
+  #=================== Kakfa ==================
+
+  # Adapted from https://github.com/confluentinc/demo-scene/blob/master/connect-jdbc/docker-compose.yml
+  zookeeper:
+    image: confluentinc/cp-zookeeper:5.5.1
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-enterprise-kafka:5.5.1
+    container_name: kafka
+    depends_on:
+      - "zookeeper"
+    ports:
+      # Exposes 9092 for external connections to the broker
+      # Use kafka:29092 for connections internal on the docker network
+      # See https://rmoff.net/2018/08/02/kafka-listeners-explained/ for details
+      - 9092:9092
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://kafka:9092
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_METRIC_REPORTERS: io.confluent.metrics.reporter.ConfluentMetricsReporter
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 100
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_ZOOKEEPER_CONNECT: zookeeper:2181
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+
+volumes:
+  compute-node-0:
+    external: false
+  etcd-0:
+    external: false
+  grafana-0:
+    external: false
+  minio-0:
+    external: false
+  prometheus-0:
+    external: false
+  message_queue:
+    external: false
