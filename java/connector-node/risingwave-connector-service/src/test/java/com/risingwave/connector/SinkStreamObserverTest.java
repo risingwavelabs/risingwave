@@ -15,8 +15,8 @@
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Catalog.SinkType;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkConfig;
 import com.risingwave.proto.Data.Op;
 import io.grpc.stub.StreamObserver;
