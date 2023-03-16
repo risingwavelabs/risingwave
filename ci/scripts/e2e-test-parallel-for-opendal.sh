@@ -42,27 +42,21 @@ cargo make link-all-in-one-binaries
 
 host_args="-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567"
 
-echo "--- e2e, ci-3cn-3fe, streaming"
+echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, streaming"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
-sqllogictest ${host_args} -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}"
+cargo make ci-start ci-3cn-3fe-opendal-fs-backend
+sqllogictest ${host_args} -d dev  './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-${profile}"
 
 echo "--- Kill cluster"
+sudo rm -rf /tmp/rw_ci
 cargo make ci-kill
 
-echo "--- e2e, ci-3cn-3fe, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
-sqllogictest ${host_args} -d dev './e2e_test/ddl/**/*.slt' --junit "parallel-batch-ddl-${profile}"
-sqllogictest ${host_args} -d dev './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-batch-${profile}"
+
+echo "--- e2e, ci-3cn-3fe-opendal-fs-backend, batch"
+cargo make ci-start ci-3cn-3fe-opendal-fs-backend
+sqllogictest ${host_args} -d dev  './e2e_test/ddl/**/*.slt' --junit "parallel-opendal-fs-backend-ddl-${profile}"
+sqllogictest ${host_args} -d dev  './e2e_test/batch/**/*.slt' -j 16 --junit "parallel-opendal-fs-backend-batch-${profile}"
 
 echo "--- Kill cluster"
-cargo make ci-kill
-
-echo "--- e2e, ci-3cn-3fe, generated"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
-cargo make ci-start ci-3cn-3fe
-sqllogictest ${host_args} -d dev './e2e_test/generated/**/*.slt' -j 16 --junit "parallel-generated-${profile}"
-
-echo "--- Kill cluster"
+sudo rm -rf /tmp/rw_ci
 cargo make ci-kill
