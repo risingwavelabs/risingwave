@@ -245,6 +245,7 @@ pub(crate) mod tests {
     use risingwave_common::util::epoch::EpochPair;
     use risingwave_connector::source::kafka::KafkaSplit;
     use risingwave_storage::memory::MemoryStateStore;
+    use serde_json::Value;
 
     use super::*;
 
@@ -256,8 +257,8 @@ pub(crate) mod tests {
                 .await;
         let a: Arc<str> = String::from("a").into();
         let a: Datum = Some(ScalarImpl::Utf8(a.as_ref().into()));
-        let b: Arc<str> = String::from("b").into();
-        let b: Datum = Some(ScalarImpl::Utf8(b.as_ref().into()));
+        let b: JsonbVal = serde_json::from_str::<Value>("{\"k1\": \"v1\", \"k2\": 11}").unwrap().into();
+        let b: Datum = Some(ScalarImpl::Jsonb(b));
 
         let init_epoch_num = 100100;
         let init_epoch = EpochPair::new_test_epoch(init_epoch_num);
