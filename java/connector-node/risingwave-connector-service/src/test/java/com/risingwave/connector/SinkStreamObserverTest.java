@@ -31,7 +31,6 @@ public class SinkStreamObserverTest {
                     .setTableSchema(TableSchema.getMockTableProto())
                     .setConnectorType("file")
                     .putAllProperties(Map.of("output.path", "/tmp/rw-connector"))
-                    .setSinkType(SinkType.APPEND_ONLY)
                     .build();
 
     @Test
