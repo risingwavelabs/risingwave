@@ -113,7 +113,7 @@ impl ArrayAggOrdered {
     }
 
     fn push_row(&mut self, row: RowRef<'_>) {
-        let key = memcmp_encoding::encode_row_ref(row, &self.column_orders);
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
         let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
         self.unordered_values.push((key, datum));
     }

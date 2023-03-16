@@ -139,7 +139,7 @@ impl StringAggOrdered {
     }
 
     fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
-        let key = memcmp_encoding::encode_row_ref(row, &self.column_orders);
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
         self.unordered_values.push((
             key,
             StringAggData {
