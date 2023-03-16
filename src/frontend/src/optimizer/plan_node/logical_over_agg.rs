@@ -252,9 +252,15 @@ impl fmt::Display for LogicalOverAgg {
 }
 
 impl ColPrunable for LogicalOverAgg {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_input = {
+            let input = self.input();
+            let input_schema = input.schema();
+            let required = (0..input.schema().len()).collect_vec();
+            input.prune_col(&required, ctx)
+        };
+        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
     }
 }
 
