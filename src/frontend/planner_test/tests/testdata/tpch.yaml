@@ -2126,7 +2126,7 @@
         StreamProject { exprs: [(partsupp.ps_supplycost * partsupp.ps_availqty) as $expr2, partsupp.ps_partkey, partsupp.ps_suppkey, supplier.s_suppkey, nation.n_nationkey, supplier.s_nationkey] }
           StreamExchange Hash([5]) from 2
 
-     Table 0 { columns: [partsupp_ps_partkey, sum($expr1)], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [0], read pk prefix len hint: 0 }
+     Table 0 { columns: [partsupp_ps_partkey, sum($expr1)], primary key: [$1 ASC, $0 ASC], value indices: [0, 1], distribution key: [0], read pk prefix len hint: 1 }
      Table 1 { columns: [$expr3], primary key: [], value indices: [0], distribution key: [], read pk prefix len hint: 0 }
      Table 2 { columns: [partsupp_ps_partkey, sum($expr1), count], primary key: [$0 ASC], value indices: [1, 2], distribution key: [0], read pk prefix len hint: 1 }
      Table 3 { columns: [partsupp_ps_partkey, partsupp_ps_availqty, partsupp_ps_supplycost, supplier_s_nationkey, partsupp_ps_suppkey, supplier_s_suppkey], primary key: [$3 ASC, $0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [3], read pk prefix len hint: 1 }
@@ -2714,7 +2714,7 @@
             BatchPlanNode
 
      Table 0 { columns: [part_p_brand, part_p_type, part_p_size, count(distinct partsupp_ps_suppkey), count], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3, 4], distribution key: [0, 1, 2], read pk prefix len hint: 3 }
-     Table 1 { columns: [part_p_brand, part_p_type, part_p_size, partsupp_ps_suppkey, count_for_agg_call_0], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1, 2], read pk prefix len hint: 0 }
+     Table 1 { columns: [part_p_brand, part_p_type, part_p_size, partsupp_ps_suppkey, count_for_agg_call_0], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC], value indices: [4], distribution key: [0, 1, 2], read pk prefix len hint: 4 }
      Table 2 { columns: [partsupp_ps_suppkey, part_p_brand, part_p_type, part_p_size, partsupp_ps_partkey, part_p_partkey], primary key: [$0 ASC, $4 ASC, $5 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0], read pk prefix len hint: 1 }
      Table 3 { columns: [partsupp_ps_suppkey, partsupp_ps_partkey, part_p_partkey, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [0], read pk prefix len hint: 1 }
      Table 4 { columns: [supplier_s_suppkey], primary key: [$0 ASC], value indices: [0], distribution key: [0], read pk prefix len hint: 1 }

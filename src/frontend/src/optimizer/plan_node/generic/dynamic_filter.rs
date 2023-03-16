@@ -66,6 +66,8 @@ pub fn infer_left_internal_table_catalog(
 
     // The pk of dynamic filter internal table should be left_key + input_pk.
     let mut pk_indices = vec![left_key_index];
+    let read_prefix_len_hint = pk_indices.len();
+
     // TODO(yuhao): dedup the dist key and pk.
     pk_indices.extend(me.logical_pk());
 
@@ -80,7 +82,7 @@ pub fn infer_left_internal_table_catalog(
         internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
     });
 
-    internal_table_catalog_builder.build(dist_keys)
+    internal_table_catalog_builder.build(dist_keys, read_prefix_len_hint)
 }
 
 pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) -> TableCatalog {
@@ -100,5 +102,5 @@ pub fn infer_right_internal_table_catalog(input: &impl stream::StreamPlanRef) ->
     });
 
     // No distribution keys
-    internal_table_catalog_builder.build(vec![])
+    internal_table_catalog_builder.build(vec![], 0)
 }

@@ -17,6 +17,7 @@ mod search_path;
 mod transaction_isolation_level;
 mod visibility_mode;
 
+use std::num::NonZeroU64;
 use std::ops::Deref;
 
 use chrono_tz::Tz;
@@ -24,6 +25,7 @@ use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -32,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 20] = [
+const CONFIG_KEYS: [&str; 21] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -53,6 +55,7 @@ const CONFIG_KEYS: [&str; 20] = [
     "RW_FORCE_TWO_PHASE_AGG",
     "RW_ENABLE_SHARE_PLAN",
     "INTERVALSTYLE",
+    "BATCH_PARALLELISM",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -77,6 +80,7 @@ const ENABLE_TWO_PHASE_AGG: usize = 16;
 const FORCE_TWO_PHASE_AGG: usize = 17;
 const RW_ENABLE_SHARE_PLAN: usize = 18;
 const INTERVAL_STYLE: usize = 19;
+const BATCH_PARALLELISM: usize = 20;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -277,6 +281,7 @@ type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 type IntervalStyle = ConfigString<INTERVAL_STYLE>;
+type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -353,10 +358,13 @@ pub struct ConfigMap {
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
     interval_style: IntervalStyle,
+
+    batch_parallelism: BatchParallelism,
 }
 
 impl ConfigMap {
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+        info!(%key, ?val, "set config");
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             self.implicit_flush = val.as_slice().try_into()?;
@@ -408,6 +416,8 @@ impl ConfigMap {
             self.enable_share_plan = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
             self.interval_style = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
+            self.batch_parallelism = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -456,6 +466,8 @@ impl ConfigMap {
             Ok(self.enable_share_plan.to_string())
         } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
             Ok(self.interval_style.to_string())
+        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
+            Ok(self.batch_parallelism.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -558,6 +570,11 @@ impl ConfigMap {
                 setting : self.interval_style.to_string(),
                 description : String::from("It is typically set by an application upon connection to the server.")
             },
+            VariableInfo{
+                name : BatchParallelism::entry_name().to_lowercase(),
+                setting : self.batch_parallelism.to_string(),
+                description: String::from("Sets the parallelism for batch. If 0, use default value.")
+            },
         ]
     }
 
@@ -645,5 +662,12 @@ impl ConfigMap {
 
     pub fn get_interval_style(&self) -> &str {
         &self.interval_style
+    }
+
+    pub fn get_batch_parallelism(&self) -> Option<NonZeroU64> {
+        if self.batch_parallelism.0 != 0 {
+            return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
+        }
+        None
     }
 }
