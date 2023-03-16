@@ -90,11 +90,6 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     pk_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the all columns of the table, instead of the output ones.
-    // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
-
-    /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
@@ -266,7 +261,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             mapping: Arc::new(mapping),
             row_serde: Arc::new(row_serde),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
             table_option,
@@ -592,23 +586,21 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
-                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
                     self.table_id,
                     pk_prefix,
-                    self.dist_key_indices,
                     pk_prefix_indices
                 );
             None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}" ,
             self.table_id,
             prefix_hint,
             start_key,
             end_key,
             pk_prefix,
-            self.dist_key_indices,
             pk_prefix_indices
         );
 
