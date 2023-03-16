@@ -14,14 +14,13 @@
 
 package com.risingwave.connector;
 
-import com.google.common.collect.Lists;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.sql.*;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -42,7 +41,8 @@ public class JDBCSinkFactory implements SinkFactory {
     }
 
     @Override
-    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         if (!tableProperties.containsKey(JDBC_URL_PROP)
                 || !tableProperties.containsKey(TABLE_NAME_PROP)) {
             throw Status.INVALID_ARGUMENT
@@ -86,17 +86,22 @@ public class JDBCSinkFactory implements SinkFactory {
             }
         }
 
-        List<String> sinkPk = tableSchema.getPrimaryKeys();
-        if (sinkPk.isEmpty()) {
-            // The user doesn't specify sink pk. We use the primary key of the JDBC table as sink
-            // pk.
-            LOG.info(
-                    "user-defined sink pk is empty, use jdbc table {}'s pk: {}",
-                    tableName,
-                    jdbcPk.toString());
-            return new TableSchema(tableSchema, Lists.newArrayList(jdbcPk));
-        } else {
-            return tableSchema;
+        if (sinkType == SinkType.UPSERT) {
+            // For JDBC sink, we enforce the primary key as that of the JDBC table's. The JDBC table
+            // must have primary key.
+            if (jdbcPk.isEmpty()) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription("JDBC table has no primary key")
+                        .asRuntimeException();
+            }
+            // The user is not allowed to define the primary key for upsert JDBC sink.
+            if (!tableSchema.getPrimaryKeys().isEmpty()) {
+                throw Status.INVALID_ARGUMENT
+                        .withDescription(
+                                "should not define primary key on upsert JDBC sink, find downstream primary key: "
+                                        + jdbcPk.toString())
+                        .asRuntimeException();
+            }
         }
     }
 }

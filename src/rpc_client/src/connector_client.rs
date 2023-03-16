@@ -19,12 +19,12 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::get_event_stream_request::{
     Request as SourceRequest, StartSource, ValidateProperties,
 };
 use risingwave_pb::connector_service::sink_stream_request::{Request as SinkRequest, StartSink};
-use risingwave_pb::connector_service::validate_sink_response::ResposeInner;
 use risingwave_pb::connector_service::*;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -117,7 +117,7 @@ impl ConnectorClient {
 
     pub async fn start_sink_stream(
         &self,
-        sink_type: String,
+        connector_type: String,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
     ) -> Result<(UnboundedSender<SinkStreamRequest>, Streaming<SinkResponse>)> {
@@ -128,7 +128,7 @@ impl ConnectorClient {
             .send(SinkStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
                     sink_config: Some(SinkConfig {
-                        sink_type,
+                        connector_type,
                         properties,
                         table_schema,
                     }),
@@ -152,30 +152,33 @@ impl ConnectorClient {
         connector_type: String,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        sink_type: SinkType,
     ) -> Result<()> {
         let response = self
             .0
             .to_owned()
             .validate_sink(ValidateSinkRequest {
                 sink_config: Some(SinkConfig {
-                    sink_type: connector_type,
+                    connector_type,
                     properties,
                     table_schema,
                 }),
+                sink_type: sink_type as i32,
             })
             .await
             .inspect_err(|err| {
                 tracing::error!("failed to validate sink properties: {}", err.message())
             })?
             .into_inner();
-        match response.respose_inner.unwrap() {
-            // TODO(Yuanxin): Use the returned schema as the sink schema.
-            ResposeInner::Schema(_) => Ok(()),
-            ResposeInner::Error(err) => Err(RpcError::Internal(anyhow!(format!(
-                "sink cannot pass validation: {}",
-                err.error_message
-            )))),
-        }
+        response.error.map_or_else(
+            || Ok(()), // If there is no error message, return Ok here.
+            |err| {
+                Err(RpcError::Internal(anyhow!(format!(
+                    "sink cannot pass validation: {}",
+                    err.error_message
+                ))))
+            },
+        )
     }
 }
 

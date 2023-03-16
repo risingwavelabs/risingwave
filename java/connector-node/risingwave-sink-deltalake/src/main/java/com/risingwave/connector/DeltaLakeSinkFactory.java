@@ -20,8 +20,10 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.java.utils.MinioUrlParser;
+import com.risingwave.proto.Catalog.SinkType;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.types.StructType;
+import io.grpc.Status;
 import java.nio.file.Paths;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -49,7 +51,14 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     }
 
     @Override
-    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
+        if (sinkType != SinkType.APPEND_ONLY && sinkType != SinkType.FORCE_APPEND_ONLY) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("only append-only delta lake sink is supported")
+                    .asRuntimeException();
+        }
+
         if (!tableProperties.containsKey(LOCATION_PROP)
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
             throw INVALID_ARGUMENT
@@ -69,8 +78,6 @@ public class DeltaLakeSinkFactory implements SinkFactory {
         StructType schema = log.snapshot().getMetadata().getSchema();
         DeltaLakeSinkUtil.checkSchema(tableSchema, schema);
         DeltaLakeSinkUtil.convertSchema(log, tableSchema);
-
-        return tableSchema;
     }
 
     private String getConfig(String location, String locationType, Configuration hadoopConf) {

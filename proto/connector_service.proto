@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package connector_service;
 
+import "catalog.proto";
 import "data.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
@@ -23,7 +24,7 @@ message ValidationError {
 /* Sink Service */
 
 message SinkConfig {
-  string sink_type = 1;
+  string connector_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
 }
@@ -92,16 +93,12 @@ message SinkResponse {
 
 message ValidateSinkRequest {
   SinkConfig sink_config = 1;
+  catalog.SinkType sink_type = 2;
 }
 
 message ValidateSinkResponse {
-  oneof respose_inner {
-    // On validation success, we return the schema which should be used by the sink 
-    // executor and might differ from the schema passed in before. 
-    TableSchema schema = 1;
-    // On validation failure, we return the error.
-    ValidationError error = 2;
-  }
+  // On validation failure, we return the error.
+  ValidationError error = 1;
 }
 
 /* Source Service */

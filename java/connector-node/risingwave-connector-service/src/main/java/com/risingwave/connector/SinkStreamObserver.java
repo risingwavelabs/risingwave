@@ -210,8 +210,8 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
 
     private void bindSink(SinkConfig sinkConfig) {
         tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
+        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
-        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");
+        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getConnectorType(), "node1");
     }
 }

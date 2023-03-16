@@ -21,6 +21,7 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.java.utils.MinioUrlParser;
+import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.util.Map;
 import java.util.Set;
@@ -80,7 +81,8 @@ public class IcebergSinkFactory implements SinkFactory {
     }
 
     @Override
-    public TableSchema validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         if (!tableProperties.containsKey(SINK_MODE_PROP) // only append-only, upsert
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP) // only local, s3, minio
                 || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
@@ -143,16 +145,21 @@ public class IcebergSinkFactory implements SinkFactory {
             throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
         }
 
-        if (mode.equals("upsert")) {
-            // For upsert iceberg sink, the user must specify its primary key explicitly.
-            if (tableSchema.getPrimaryKeys().isEmpty()) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription("no primary keys for upsert mode")
-                        .asRuntimeException();
-            }
+        switch (sinkType) {
+            case UPSERT:
+                // For upsert iceberg sink, the user must specify its primary key explicitly.
+                if (tableSchema.getPrimaryKeys().isEmpty()) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("please define primary key for upsert iceberg sink")
+                            .asRuntimeException();
+                }
+                break;
+            case APPEND_ONLY:
+            case FORCE_APPEND_ONLY:
+                break;
+            default:
+                throw Status.INTERNAL.asRuntimeException();
         }
-
-        return tableSchema;
     }
 
     private HadoopCatalog createHadoopCatalog(String location, String warehousePath) {

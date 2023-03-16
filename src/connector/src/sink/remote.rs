@@ -196,12 +196,14 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
                 .collect_vec(),
         };
 
-        // We validate a remote sink in the following steps:
-        // 1. Ensure the accesibility of the remote sink.
-        // 2. If the user does not specify pk for the sink, we simply use the downstream pk as its
-        // pk (if exists).
+        // We validate a remote sink's accessibility as well as the pk.
         client
-            .validate_sink_properties(config.connector_type, config.properties, Some(table_schema))
+            .validate_sink_properties(
+                config.connector_type,
+                config.properties,
+                Some(table_schema),
+                sink_catalog.sink_type.to_proto(),
+            )
             .await
             .map_err(SinkError::from)
     }
