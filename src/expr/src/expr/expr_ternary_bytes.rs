@@ -119,15 +119,15 @@ mod tests {
     use super::*;
     use crate::expr::LiteralExpression;
 
-    fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
-        let res = expr.eval(&DataChunk::new_dummy(1));
+    async fn test_evals_dummy(expr: BoxedExpression, expected: Datum, is_negative_len: bool) {
+        let res = expr.eval(&DataChunk::new_dummy(1)).await;
         if is_negative_len {
             assert!(res.is_err());
         } else {
             assert_eq!(res.unwrap().to_datum(), expected);
         }
 
-        let res = expr.eval_row(&OwnedRow::new(vec![]));
+        let res = expr.eval_row(&OwnedRow::new(vec![])).await;
         if is_negative_len {
             assert!(res.is_err());
         } else {
@@ -135,8 +135,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_substr_start_end() {
+    #[tokio::test]
+    async fn test_substr_start_end() {
         let text = "quick brown";
         let cases = [
             (
@@ -186,12 +186,12 @@ mod tests {
                 DataType::Varchar,
             );
 
-            test_evals_dummy(expr, expected, is_negative_len);
+            test_evals_dummy(expr, expected, is_negative_len).await;
         }
     }
 
-    #[test]
-    fn test_replace() {
+    #[tokio::test]
+    async fn test_replace() {
         let cases = [
             ("hello, word", "我的", "world", "hello, word"),
             ("hello, word", "", "world", "hello, word"),
@@ -224,12 +224,12 @@ mod tests {
                 DataType::Varchar,
             );
 
-            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false).await;
         }
     }
 
-    #[test]
-    fn test_overlay() {
+    #[tokio::test]
+    async fn test_overlay() {
         let cases = vec![
             ("aaa__aaa", "XY", 4, "aaaXYaaa"),
             ("aaa", "XY", 3, "aaXY"),
@@ -255,7 +255,7 @@ mod tests {
                 DataType::Varchar,
             );
 
-            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false);
+            test_evals_dummy(expr, Some(ScalarImpl::from(String::from(expected))), false).await;
         }
     }
 }

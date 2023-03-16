@@ -54,7 +54,7 @@ impl TableFunctionExecutor {
             .return_type()
             .create_array_builder(self.chunk_size);
         let mut len = 0;
-        for array in self.table_function.eval(&dummy_chunk)? {
+        for array in self.table_function.eval(&dummy_chunk).await? {
             len += array.len();
             builder.append_array(&array);
         }

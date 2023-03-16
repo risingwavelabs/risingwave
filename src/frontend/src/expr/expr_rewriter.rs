@@ -75,6 +75,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         } = table_func;
         let args = args
             .into_iter()
@@ -84,6 +85,7 @@ pub trait ExprRewriter {
             args,
             return_type,
             function_type,
+            udtf_catalog,
         }
         .into()
     }

@@ -118,18 +118,19 @@ impl ApproxCountDistinct {
     }
 }
 
+#[async_trait::async_trait]
 impl Aggregator for ApproxCountDistinct {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()> {
         let array = input.column_at(self.input_col_idx).array_ref();
         self.add_datum(array.value_at(row_id));
         Ok(())
     }
 
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -176,8 +177,8 @@ mod tests {
         DataChunk::new(vec![col1], size)
     }
 
-    #[test]
-    fn test_update_single() {
+    #[tokio::test]
+    async fn test_update_single() {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
@@ -187,7 +188,7 @@ mod tests {
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
             for row_id in 0..data_chunk.cardinality() {
-                agg.update_single(&data_chunk, row_id).unwrap();
+                agg.update_single(&data_chunk, row_id).await.unwrap();
             }
             agg.output(&mut builder).unwrap();
         }
@@ -196,8 +197,8 @@ mod tests {
         assert_eq!(array.len(), 3);
     }
 
-    #[test]
-    fn test_update_multi() {
+    #[tokio::test]
+    async fn test_update_multi() {
         let inputs_size: [usize; 3] = [20000, 10000, 5000];
         let inputs_start: [i32; 3] = [0, 20000, 30000];
 
@@ -207,6 +208,7 @@ mod tests {
         for i in 0..3 {
             let data_chunk = generate_data_chunk(inputs_size[i], inputs_start[i]);
             agg.update_multi(&data_chunk, 0, data_chunk.cardinality())
+                .await
                 .unwrap();
             agg.output(&mut builder).unwrap();
         }

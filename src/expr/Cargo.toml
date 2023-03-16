@@ -19,10 +19,12 @@ aho-corasick = "0.7"
 anyhow = "1"
 arrow-array = "34"
 arrow-schema = "34"
+async-trait = "0.1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 dyn-clone = "1"
 either = "1"
+futures-util = "0.3"
 itertools = "0.10"
 md5 = "0.7.0"
 num-traits = "0.2"
@@ -34,6 +36,7 @@ risingwave_common = { path = "../common" }
 risingwave_pb = { path = "../prost" }
 risingwave_udf = { path = "../udf" }
 speedate = "0.7.0"
+static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
 

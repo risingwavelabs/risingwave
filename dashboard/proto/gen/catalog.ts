@@ -204,10 +204,24 @@ export interface Function {
   name: string;
   owner: number;
   argTypes: DataType[];
-  returnType: DataType | undefined;
   language: string;
   link: string;
   identifier: string;
+  kind?: { $case: "scalar"; scalar: Function_ScalarFunction } | { $case: "table"; table: Function_TableFunction } | {
+    $case: "aggregate";
+    aggregate: Function_AggregateFunction;
+  };
+}
+
+export interface Function_ScalarFunction {
+  returnType: DataType | undefined;
+}
+
+export interface Function_TableFunction {
+  returnTypes: DataType[];
+}
+
+export interface Function_AggregateFunction {
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -814,10 +828,10 @@ function createBaseFunction(): Function {
     name: "",
     owner: 0,
     argTypes: [],
-    returnType: undefined,
     language: "",
     link: "",
     identifier: "",
+    kind: undefined,
   };
 }
 
@@ -832,10 +846,16 @@ export const Function = {
       argTypes: Array.isArray(object?.argTypes)
         ? object.argTypes.map((e: any) => DataType.fromJSON(e))
         : [],
-      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       language: isSet(object.language) ? String(object.language) : "",
       link: isSet(object.link) ? String(object.link) : "",
       identifier: isSet(object.identifier) ? String(object.identifier) : "",
+      kind: isSet(object.scalar)
+        ? { $case: "scalar", scalar: Function_ScalarFunction.fromJSON(object.scalar) }
+        : isSet(object.table)
+        ? { $case: "table", table: Function_TableFunction.fromJSON(object.table) }
+        : isSet(object.aggregate)
+        ? { $case: "aggregate", aggregate: Function_AggregateFunction.fromJSON(object.aggregate) }
+        : undefined,
     };
   },
 
@@ -851,11 +871,17 @@ export const Function = {
     } else {
       obj.argTypes = [];
     }
-    message.returnType !== undefined &&
-      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.language !== undefined && (obj.language = message.language);
     message.link !== undefined && (obj.link = message.link);
     message.identifier !== undefined && (obj.identifier = message.identifier);
+    message.kind?.$case === "scalar" &&
+      (obj.scalar = message.kind?.scalar ? Function_ScalarFunction.toJSON(message.kind?.scalar) : undefined);
+    message.kind?.$case === "table" &&
+      (obj.table = message.kind?.table ? Function_TableFunction.toJSON(message.kind?.table) : undefined);
+    message.kind?.$case === "aggregate" &&
+      (obj.aggregate = message.kind?.aggregate
+        ? Function_AggregateFunction.toJSON(message.kind?.aggregate)
+        : undefined);
     return obj;
   },
 
@@ -867,12 +893,91 @@ export const Function = {
     message.name = object.name ?? "";
     message.owner = object.owner ?? 0;
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
-    message.returnType = (object.returnType !== undefined && object.returnType !== null)
-      ? DataType.fromPartial(object.returnType)
-      : undefined;
     message.language = object.language ?? "";
     message.link = object.link ?? "";
     message.identifier = object.identifier ?? "";
+    if (object.kind?.$case === "scalar" && object.kind?.scalar !== undefined && object.kind?.scalar !== null) {
+      message.kind = { $case: "scalar", scalar: Function_ScalarFunction.fromPartial(object.kind.scalar) };
+    }
+    if (object.kind?.$case === "table" && object.kind?.table !== undefined && object.kind?.table !== null) {
+      message.kind = { $case: "table", table: Function_TableFunction.fromPartial(object.kind.table) };
+    }
+    if (object.kind?.$case === "aggregate" && object.kind?.aggregate !== undefined && object.kind?.aggregate !== null) {
+      message.kind = { $case: "aggregate", aggregate: Function_AggregateFunction.fromPartial(object.kind.aggregate) };
+    }
+    return message;
+  },
+};
+
+function createBaseFunction_ScalarFunction(): Function_ScalarFunction {
+  return { returnType: undefined };
+}
+
+export const Function_ScalarFunction = {
+  fromJSON(object: any): Function_ScalarFunction {
+    return { returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined };
+  },
+
+  toJSON(message: Function_ScalarFunction): unknown {
+    const obj: any = {};
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(object: I): Function_ScalarFunction {
+    const message = createBaseFunction_ScalarFunction();
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
+    return message;
+  },
+};
+
+function createBaseFunction_TableFunction(): Function_TableFunction {
+  return { returnTypes: [] };
+}
+
+export const Function_TableFunction = {
+  fromJSON(object: any): Function_TableFunction {
+    return {
+      returnTypes: Array.isArray(object?.returnTypes) ? object.returnTypes.map((e: any) => DataType.fromJSON(e)) : [],
+    };
+  },
+
+  toJSON(message: Function_TableFunction): unknown {
+    const obj: any = {};
+    if (message.returnTypes) {
+      obj.returnTypes = message.returnTypes.map((e) => e ? DataType.toJSON(e) : undefined);
+    } else {
+      obj.returnTypes = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(object: I): Function_TableFunction {
+    const message = createBaseFunction_TableFunction();
+    message.returnTypes = object.returnTypes?.map((e) => DataType.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseFunction_AggregateFunction(): Function_AggregateFunction {
+  return {};
+}
+
+export const Function_AggregateFunction = {
+  fromJSON(_: any): Function_AggregateFunction {
+    return {};
+  },
+
+  toJSON(_: Function_AggregateFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_AggregateFunction>, I>>(_: I): Function_AggregateFunction {
+    const message = createBaseFunction_AggregateFunction();
     return message;
   },
 };

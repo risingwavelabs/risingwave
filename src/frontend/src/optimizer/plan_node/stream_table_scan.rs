@@ -236,7 +236,6 @@ impl StreamTableScan {
                     .map(|&i| i as _)
                     .collect(),
                 upstream_column_ids: upstream_column_ids.iter().map(|i| i.get_id()).collect(),
-                is_singleton: *self.distribution() == Distribution::Single,
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),
