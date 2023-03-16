@@ -133,12 +133,7 @@ impl StreamGraphFormatter {
                 let upstream_fragment_id = edge.upstream_id;
                 let dist = edge.dispatch_strategy.as_ref().unwrap();
                 format!(
-                    "{}StreamExchange {} from {}",
-                    if let Some(id) = fragment_id {
-                        format!("Fragment {} ", id)
-                    } else {
-                        "".to_string()
-                    },
+                    "StreamExchange {} from {}",
                     match dist.r#type() {
                         DispatcherType::Unspecified => unreachable!(),
                         DispatcherType::Hash => format!("Hash({:?})", dist.dist_key_indices),
@@ -150,6 +145,11 @@ impl StreamGraphFormatter {
                 )
             }
             _ => node.identity.clone(),
+        };
+        let one_line_explain = if let Some(id) = fragment_id {
+            format!("Fragment {} {}", id, one_line_explain)
+        } else {
+            one_line_explain
         };
 
         let mut fields = Vec::with_capacity(7);
