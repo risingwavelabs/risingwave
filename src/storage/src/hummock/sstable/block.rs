@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::mem::size_of;
 use std::ops::Range;
@@ -137,7 +137,7 @@ impl RestartPoint {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub struct EpochDictionary {
     epoch_group: Vec<Vec<u16>>,
     dictionary: Vec<HummockEpoch>,
@@ -344,7 +344,7 @@ impl Block {
     }
 
     pub fn decode_epoch(&self, group_index: usize, key_index: usize) -> HummockEpoch {
-        let epoch_index = (self.epoch_dictionary.epoch_group[group_index][key_index] - 1) as usize;
+        let epoch_index = (self.epoch_dictionary.epoch_group[group_index][key_index]) as usize;
         self.epoch_dictionary.dictionary[epoch_index]
     }
 }
@@ -467,8 +467,11 @@ pub struct BlockBuilder {
     restart_points_type_index: Vec<RestartPoint>,
 
     // epoch group by RestartPoint
-    epoch_group: Vec<Vec<HummockEpoch>>,
-    epoch_dictionary: BTreeSet<HummockEpoch>,
+    epoch_group: Vec<Vec<u16>>,
+    epoch_dictionary: HashMap<HummockEpoch, u16>,
+
+    // last_epoch: HummockEpoch,
+    last_epoch_index: u16,
 }
 
 impl BlockBuilder {
@@ -486,7 +489,10 @@ impl BlockBuilder {
             table_id: None,
             restart_points_type_index: Vec::default(),
             epoch_group: Vec::default(),
-            epoch_dictionary: BTreeSet::default(),
+            epoch_dictionary: HashMap::default(),
+
+            // last_epoch: 0,
+            last_epoch_index: 0,
         }
     }
 
@@ -513,7 +519,21 @@ impl BlockBuilder {
         self.debug_valid();
 
         let epoch = full_key.epoch;
-        self.epoch_dictionary.insert(epoch);
+        let contain_epoch = self.epoch_dictionary.get(&epoch);
+        let epoch_index = match contain_epoch {
+            Some(epoch_index) => *epoch_index,
+            None => {
+                let epoch_index = if self.epoch_dictionary.is_empty() {
+                    0
+                } else {
+                    self.last_epoch_index += 1;
+                    self.last_epoch_index
+                };
+
+                self.epoch_dictionary.insert(epoch, epoch_index);
+                epoch_index
+            }
+        };
 
         let mut key: BytesMut = Default::default();
         full_key.encode_into_without_table_id(&mut key);
@@ -568,7 +588,7 @@ impl BlockBuilder {
             bytes_diff_below_max_key_length(last_block_key, block_key)
         };
 
-        self.epoch_group.last_mut().unwrap().push(epoch);
+        self.epoch_group.last_mut().unwrap().push(epoch_index);
         let prefix = KeyPrefix::new_without_len(
             block_key.len() - diff_key.len(),
             diff_key.len(),
@@ -603,6 +623,7 @@ impl BlockBuilder {
 
         self.epoch_dictionary.clear();
         self.epoch_group.clear();
+        self.last_epoch_index = 0;
     }
 
     /// Calculate block size without compression.
@@ -660,33 +681,25 @@ impl BlockBuilder {
         self.buf
             .put_u32_le(self.restart_points_type_index.len() as u32);
 
-        let mut epoch_index: usize = 0;
-        let epoch_dictionary = self
-            .epoch_dictionary
-            .iter()
-            .cloned()
-            .map(|epoch| {
-                epoch_index += 1;
-                (epoch, epoch_index)
-            })
-            .collect::<BTreeMap<HummockEpoch, usize>>();
-
         // encode epoch_group
         for group in &self.epoch_group {
             let group_len = group.len();
             self.buf.put_u16_le(group_len as u16);
-            for epoch in group {
-                let epoch_index = epoch_dictionary.get(epoch).unwrap();
-                self.buf.put_u16_le(*epoch_index as u16);
+            for epoch_index in group {
+                self.buf.put_u16_le(*epoch_index);
             }
         }
 
-        // epoch_group == resatrt_points count , not need to record
         self.buf.put_u32_le(self.entry_count as u32);
         self.buf.put_u16_le(self.epoch_group.len() as u16);
 
         // encode epoch_dictionary
-        for (epoch, _) in epoch_dictionary {
+        let mut epoch_group_vec: Vec<u64> = vec![0; self.epoch_dictionary.len()];
+        for (epoch, index) in &self.epoch_dictionary {
+            epoch_group_vec[*index as usize] = *epoch;
+        }
+
+        for epoch in epoch_group_vec {
             self.buf.put_u64_le(epoch);
         }
 
@@ -749,6 +762,7 @@ impl BlockBuilder {
             debug_assert!(self.restart_points.is_empty());
             debug_assert!(self.restart_points_type_index.is_empty());
             debug_assert!(self.last_key.is_empty());
+            debug_assert!(self.last_epoch_index == 0);
         }
     }
 }

@@ -23,10 +23,11 @@ use risingwave_storage::hummock::{
 };
 
 const TABLES_PER_SSTABLE: u32 = 10;
-const KEYS_PER_TABLE: u64 = 100;
+const KEYS_PER_TABLE: u64 = 10000;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
-const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL / 2;
+const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL;
+const EPOCH_COUNT: usize = 500;
 
 fn block_iter_next(block: BlockHolder) {
     let mut iter = BlockIterator::new(block);
@@ -103,8 +104,8 @@ fn bench_block_iter(c: &mut Criterion) {
                 ext_index = (ext_index + 1) % DATA_LEN_SET.len();
                 (k_ext, v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
             }
-
-            assert_eq!(iter.key(), FullKey::decode(&key(t, i, k_ext)));
+            let epoch = (item_count % EPOCH_COUNT) as u64;
+            assert_eq!(iter.key(), FullKey::decode(&key(t, i, k_ext, epoch)));
             assert_eq!(iter.value(), value(i, v_ext).to_vec());
             iter.next();
         }
@@ -117,15 +118,15 @@ criterion_main!(benches);
 
 static DATA_LEN_SET: LazyLock<Vec<(Vec<u8>, Vec<u8>)>> = LazyLock::new(|| {
     vec![
-        (vec![b'a'; 100], vec![b'a'; 100]),     // U8U8
-        (vec![b'a'; 100], vec![b'a'; 300]),     // U8U16
-        (vec![b'a'; 100], vec![b'a'; 65550]),   // U8U32
-        (vec![b'a'; 300], vec![b'a'; 100]),     // U16U8
-        (vec![b'a'; 300], vec![b'a'; 300]),     // U16U16
-        (vec![b'a'; 300], vec![b'a'; 65550]),   // U16U32
-        (vec![b'a'; 65550], vec![b'a'; 100]),   // U32U8
-        (vec![b'a'; 65550], vec![b'a'; 300]),   // U32U16
-        (vec![b'a'; 65550], vec![b'a'; 65550]), // U32U32
+        (vec![b'a'; 80], vec![b'a'; 100]), // U8U8
+        (vec![b'a'; 80], vec![b'a'; 300]), /* U8U16
+                                            * (vec![b'a'; 100], vec![b'a'; 65550]),   // U8U32
+                                            * (vec![b'a'; 300], vec![b'a'; 100]),     // U16U8
+                                            * (vec![b'a'; 300], vec![b'a'; 300]),     // U16U16
+                                            * (vec![b'a'; 300], vec![b'a'; 65550]),   // U16U32
+                                            * (vec![b'a'; 65550], vec![b'a'; 100]),   // U32U8
+                                            * (vec![b'a'; 65550], vec![b'a'; 300]),   // U32U16
+                                            * (vec![b'a'; 65550], vec![b'a'; 65550]), // U32U32 */
     ]
 });
 
@@ -143,23 +144,29 @@ fn build_block_data(t: u32, i: u64) -> Bytes {
     for tt in 1..=t {
         for ii in 1..=i {
             item_count += 1;
+            let epoch = (item_count % EPOCH_COUNT) as u64;
 
             if item_count % EXCHANGE_INTERVAL == 0 {
                 ext_index = (ext_index + 1) % DATA_LEN_SET.len();
                 (k_ext, v_ext) = (&DATA_LEN_SET[ext_index].0, &DATA_LEN_SET[ext_index].1);
             }
 
-            builder.add(FullKey::decode(&key(tt, ii, k_ext)), &value(ii, v_ext));
+            builder.add(
+                FullKey::decode(&key(tt, ii, k_ext, epoch)),
+                &value(ii, v_ext),
+            );
         }
     }
     Bytes::from(builder.build().to_vec())
 }
 
-fn key(t: u32, i: u64, ext: &[u8]) -> Bytes {
+fn key(t: u32, i: u64, ext: &[u8], epoch: u64) -> Bytes {
     let mut buf = BytesMut::new();
+    buf.put_u32(1);
     buf.put_slice(ext);
     buf.put_u32(t);
     buf.put_u64(i);
+    buf.put_u64(epoch);
     buf.freeze()
 }
 

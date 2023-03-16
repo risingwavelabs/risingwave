@@ -166,15 +166,15 @@ impl BlockIterator {
             self.key_index_in_restart_point += 1;
         }
 
+        self.epoch = self
+            .block
+            .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
+
         let prefix =
             self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
-
-        self.epoch = self
-            .block
-            .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
 
         self.value_range = prefix.value_range();
         self.offset = offset;
