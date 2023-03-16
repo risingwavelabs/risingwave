@@ -20,6 +20,7 @@ import com.risingwave.connector.Deserializer;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkrow;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.StreamChunkPayload;
 import com.risingwave.proto.Data;
 import java.util.Iterator;
@@ -32,17 +33,23 @@ public class StreamChunkDeserializer implements Deserializer {
     }
 
     @Override
-    public Iterator<SinkRow> deserialize(Object payload) {
-        if (!(payload instanceof StreamChunkPayload)) {
+    public Iterator<SinkRow> deserialize(
+            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+        if (!writeBatch.hasStreamChunkPayload()) {
             throw INVALID_ARGUMENT
                     .withDescription(
-                            "expected StreamChunkPayload, got " + payload.getClass().getName())
+                            "expected StreamChunkPayload, got " + writeBatch.getPayloadCase())
                     .asRuntimeException();
         }
-        StreamChunkPayload streamChunkPayload = (StreamChunkPayload) payload;
+        StreamChunkPayload streamChunkPayload = writeBatch.getStreamChunkPayload();
         return new MyIterator(
                 tableSchema,
                 new StreamChunkIterator(streamChunkPayload.getBinaryData().toByteArray()));
+    }
+
+    @Override
+    public void close() {
+        // TODO: implement it
     }
 
     private static Object validateStreamChunkDataTypes(

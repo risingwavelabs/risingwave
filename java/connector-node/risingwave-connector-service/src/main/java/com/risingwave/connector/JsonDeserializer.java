@@ -20,6 +20,7 @@ import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.ArraySinkrow;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import java.util.Iterator;
@@ -33,13 +34,14 @@ public class JsonDeserializer implements Deserializer {
     }
 
     @Override
-    public Iterator<SinkRow> deserialize(Object payload) {
-        if (!(payload instanceof JsonPayload)) {
+    public Iterator<SinkRow> deserialize(
+            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+        if (!writeBatch.hasJsonPayload()) {
             throw INVALID_ARGUMENT
-                    .withDescription("expected JsonPayload, got " + payload.getClass().getName())
+                    .withDescription("expected JsonPayload, got " + writeBatch.getPayloadCase())
                     .asRuntimeException();
         }
-        JsonPayload jsonPayload = (JsonPayload) payload;
+        JsonPayload jsonPayload = writeBatch.getJsonPayload();
         return jsonPayload.getRowOpsList().stream()
                 .map(
                         rowOp -> {
@@ -141,4 +143,7 @@ public class JsonDeserializer implements Deserializer {
                         .asRuntimeException();
         }
     }
+
+    @Override
+    public void close() {}
 }

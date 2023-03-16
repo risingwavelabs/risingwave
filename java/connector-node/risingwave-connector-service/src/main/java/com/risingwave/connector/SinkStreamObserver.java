@@ -63,7 +63,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Sink is already initialized")
                             .asRuntimeException();
                 }
-                bindSink(sinkTask.getStart().getSinkConfig());
+                bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
                 LOG.debug("Sink initialized");
                 responseObserver.onNext(
                         ConnectorServiceProto.SinkResponse.newBuilder()
@@ -123,47 +123,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 }
 
                 Iterator<SinkRow> rows;
-                switch (sinkTask.getWrite().getPayloadCase()) {
-                    case JSON_PAYLOAD:
-                        if (deserializer == null) {
-                            deserializer = new JsonDeserializer(tableSchema);
-                        }
-
-                        if (deserializer instanceof JsonDeserializer) {
-                            rows = deserializer.deserialize(sinkTask.getWrite().getJsonPayload());
-                        } else {
-                            throw INTERNAL.withDescription(
-                                            "invalid payload type: expected JSON, got "
-                                                    + deserializer.getClass().getName())
-                                    .asRuntimeException();
-                        }
-                        break;
-                        //                    case STREAM_CHUNK_PAYLOAD:
-                        //                        if (deserializer == null) {
-                        //                            deserializer = new
-                        // StreamChunkDeserializer(tableSchema);
-                        //                        }
-                        //
-                        //                        if (deserializer instanceof
-                        // StreamChunkDeserializer) {
-                        //                            rows =
-                        //                                    deserializer.deserialize(
-                        //
-                        // sinkTask.getWrite().getStreamChunkPayload());
-                        //                        } else {
-                        //                            throw INTERNAL.withDescription(
-                        //                                            "invalid payload type:
-                        // expected StreamChunk, got "
-                        //                                                    +
-                        // deserializer.getClass().getName())
-                        //                                    .asRuntimeException();
-                        //                        }
-                        //                        break;
-                    default:
-                        throw INVALID_ARGUMENT
-                                .withDescription("invalid payload type")
-                                .asRuntimeException();
-                }
+                rows = deserializer.deserialize(sinkTask.getWrite());
                 sink.write(new MonitoredRowIterator(rows));
 
                 currentBatchId = sinkTask.getWrite().getBatchId();
@@ -214,25 +174,40 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
     @Override
     public void onError(Throwable throwable) {
         LOG.error("sink task error: ", throwable);
-        if (sink != null) {
-            sink.drop();
-        }
+        cleanup();
         responseObserver.onError(throwable);
     }
 
     @Override
     public void onCompleted() {
         LOG.debug("sink task completed");
-        if (sink != null) {
-            sink.drop();
-        }
+        cleanup();
         responseObserver.onCompleted();
     }
 
-    private void bindSink(SinkConfig sinkConfig) {
+    private void cleanup() {
+        if (sink != null) {
+            sink.drop();
+        }
+        if (deserializer != null) {
+            deserializer.close();
+        }
+    }
+
+    private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
         tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
         SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
+        switch (format) {
+            case Unspecified:
+            case UNRECOGNIZED:
+                throw INVALID_ARGUMENT
+                        .withDescription("should specify payload format in request")
+                        .asRuntimeException();
+            case JSON:
+                deserializer = new JsonDeserializer(tableSchema);
+                break;
+        }
         ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");
     }
 }

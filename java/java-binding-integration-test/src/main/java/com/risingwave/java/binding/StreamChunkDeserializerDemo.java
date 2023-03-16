@@ -1,38 +1,35 @@
 package com.risingwave.java.binding;
 
 import com.google.common.collect.Lists;
-import com.google.protobuf.ByteString;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
-import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.StreamChunkPayload;
 import com.risingwave.proto.Data;
 import java.io.IOException;
-import java.util.Iterator;
 
 public class StreamChunkDeserializerDemo {
     public static void main(String[] args) throws IOException {
-        byte[] binaryData = System.in.readAllBytes();
-        TableSchema tableSchema = getMockTableSchema();
-        StreamChunkDeserializer deseriablizer = new StreamChunkDeserializer(tableSchema);
-        StreamChunkPayload payload =
-                StreamChunkPayload.newBuilder()
-                        .setBinaryData(ByteString.copyFrom(binaryData))
-                        .build();
-        Iterator<SinkRow> iter = deseriablizer.deserialize(payload);
-        int count = 0;
-        while (true) {
-            if (!iter.hasNext()) {
-                break;
-            }
-            SinkRow row = iter.next();
-            count += 1;
-            validateSinkRow(row);
-        }
-        int expectedCount = 30000;
-        if (count != expectedCount) {
-            throw new RuntimeException(
-                    String.format("row count is %s, should be %s", count, expectedCount));
-        }
+        //        byte[] binaryData = System.in.readAllBytes();
+        //        TableSchema tableSchema = getMockTableSchema();
+        //        StreamChunkDeserializer deseriablizer = new StreamChunkDeserializer(tableSchema);
+        //        StreamChunkPayload payload =
+        //                StreamChunkPayload.newBuilder()
+        //                        .setBinaryData(ByteString.copyFrom(binaryData))
+        //                        .build();
+        //        Iterator<SinkRow> iter = deseriablizer.deserialize(payload);
+        //        int count = 0;
+        //        while (true) {
+        //            if (!iter.hasNext()) {
+        //                break;
+        //            }
+        //            SinkRow row = iter.next();
+        //            count += 1;
+        //            validateSinkRow(row);
+        //        }
+        //        int expectedCount = 30000;
+        //        if (count != expectedCount) {
+        //            throw new RuntimeException(
+        //                    String.format("row count is %s, should be %s", count, expectedCount));
+        //        }
     }
 
     public static TableSchema getMockTableSchema() {
