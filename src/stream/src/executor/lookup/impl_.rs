@@ -20,7 +20,7 @@ use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -54,7 +54,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// should contain all 3 columns.
     pub arrangement_col_descs: Vec<ColumnDesc>,
 
-    /// Should only contain [`OrderPair`] for arrange in the arrangement.
+    /// Should only contain [`ColumnOrder`] for arrange in the arrangement.
     ///
     /// Still using the above `a, b, _row_id` example. If we create an arrangement with join key
     /// `a`, there will be 3 elements in `arrangement_col_descs`, and only 1 element in
@@ -65,7 +65,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     ///
     /// For the MV pk, they will only be contained in `arrangement_col_descs`, without being part
     /// of this `arrangement_order_rules`.
-    pub arrangement_order_rules: Vec<OrderPair>,
+    pub arrangement_order_rules: Vec<ColumnOrder>,
 
     /// Primary key indices of the lookup result (after reordering).
     ///
@@ -161,7 +161,7 @@ impl<S: StateStore> LookupExecutor<S> {
             arrange_join_key_indices.sort_unstable();
             let mut arrangement_order_types_indices = arrangement_order_rules
                 .iter()
-                .map(|x| x.column_idx)
+                .map(|x| x.column_index)
                 .collect_vec();
             arrangement_order_types_indices.sort_unstable();
             assert_eq!(
@@ -182,7 +182,7 @@ impl<S: StateStore> LookupExecutor<S> {
         // resolve mapping from join keys in stream row -> joins keys for arrangement.
         let key_indices_mapping = arrangement_order_rules
             .iter()
-            .map(|x| x.column_idx) // the required column idx in this position
+            .map(|x| x.column_index) // the required column idx in this position
             .filter_map(|x| arrange_join_key_indices.iter().position(|y| *y == x)) // the position of the item in join keys
             .map(|x| stream_join_key_indices[x]) // the actual column idx in stream
             .collect_vec();

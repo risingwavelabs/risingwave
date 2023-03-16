@@ -30,6 +30,7 @@ echo_err() {
 }
 
 ################## EXTRACT
+# TODO(kwannoel): Write tests for these
 
 # Get reason for generation crash.
 get_failure_reason() {
@@ -67,7 +68,7 @@ extract_failing_query() {
   grep "\[EXECUTING .*\]: " | tail -n 1 | sed -E 's/^.*\[EXECUTING .*\]: (.*)$/\1;/' || true
 }
 
-# Extract fail info from logs in log dir
+# Extract fail info from [`generate-*.log`] in log dir
 extract_fail_info_from_logs() {
   for LOGFILENAME in $(ls "$LOGDIR" | grep "generate")
   do
@@ -86,13 +87,16 @@ extract_fail_info_from_logs() {
       FAIL_DIR="$OUTDIR/failed/$SEED"
       mkdir -p "$FAIL_DIR"
       echo -e "$DDL" "\n$GLOBAL_SESSION" "\n$DML" "\n$TEST_SESSION" "\n$QUERY" > "$FAIL_DIR/queries.sql"
-      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.log"
+      echo_err "[INFO] WROTE FAIL QUERY to $FAIL_DIR/queries.sql"
       echo -e "$REASON" > "$FAIL_DIR/fail.log"
       echo_err "[INFO] WROTE FAIL REASON to $FAIL_DIR/fail.log"
+
       cp "$LOGFILE" "$FAIL_DIR/$LOGFILENAME"
     fi
   done
 }
+
+################# Generate
 
 # Prefer to use [`generate_deterministic`], it is faster since
 # runs with all-in-one binary.
@@ -123,6 +127,8 @@ generate_sqlsmith() {
     --generate "$OUTDIR/$1"
 }
 
+############################# Checks
+
 # Check that queries are different
 check_different_queries() {
   if [[ -z $(diff "$OUTDIR/1/queries.sql" "$OUTDIR/2/queries.sql") ]]; then
@@ -142,20 +148,6 @@ check_failed_to_generate_queries() {
   fi
 }
 
-# Upload step
-upload_queries() {
-  set +x
-  pushd "$OUTDIR"
-  git checkout -b stage
-  git add .
-  git commit -m 'update queries'
-  git push -f origin stage
-  git checkout -
-  git branch -D stage
-  popd
-  set -x
-}
-
 # Run it to make sure it should have no errors
 run_queries() {
   echo "" > $LOGDIR/run_deterministic.stdout.log
@@ -166,6 +158,7 @@ run_queries() {
       && rm $LOGDIR/fuzzing-{}.log"
 }
 
+# Generated query sets should not fail.
 check_failed_to_run_queries() {
   FAILED_LOGS=$(ls "$LOGDIR" | grep fuzzing || true)
   if [[ -n "$FAILED_LOGS" ]]; then
@@ -209,6 +202,39 @@ validate() {
   echo_err "[INFO] Passed checks"
 }
 
+# sync step
+# Some queries maybe be added
+sync_queries() {
+  set +x
+  pushd $OUTDIR
+  git checkout main
+  git pull
+  set +e
+  git branch -D stage
+  set -e
+  git checkout -b stage
+  popd
+  set -x
+}
+
+sync() {
+  sync_queries
+  echo_err "[INFO] Synced"
+}
+
+# Upload step
+upload_queries() {
+  set +x
+  pushd "$OUTDIR"
+  git add .
+  git commit -m 'update queries'
+  git push -f origin stage
+  git checkout -
+  git branch -D stage
+  popd
+  set -x
+}
+
 upload() {
   upload_queries
   echo_err "[INFO] Uploaded"
@@ -219,10 +245,13 @@ cleanup() {
   echo_err "[INFO] Success!"
 }
 
+################### MAIN
+
 main() {
   setup
 
   build
+  sync
   generate
   validate
   upload

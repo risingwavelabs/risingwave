@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 
 use crate::binder::{
     BoundBaseTable, BoundJoin, BoundShare, BoundSource, BoundSystemTable, BoundWatermark,
@@ -55,6 +55,7 @@ impl Planner {
             Rc::new(sys_table.sys_table_catalog.table_desc()),
             vec![],
             self.ctx(),
+            false,
         )
         .into())
     }
@@ -70,6 +71,7 @@ impl Planner {
                 .map(|x| x.as_ref().clone().into())
                 .collect(),
             self.ctx(),
+            base_table.for_system_time_as_of_now,
         )
         .into())
     }
@@ -193,8 +195,8 @@ impl Planner {
         let mut args = args.into_iter();
         let col_data_types: Vec<_> = Self::collect_col_data_types_for_tumble_window(&input)?;
 
-        match (args.next(), args.next()) {
-            (Some(window_size @ ExprImpl::Literal(_)), None) => {
+        match (args.next(), args.next(), args.next()) {
+            (Some(window_size @ ExprImpl::Literal(_)), None, None) => {
                 let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
                 for (idx, col_dt) in col_data_types.iter().enumerate() {
                     exprs.push(InputRef::new(idx, col_dt.clone()).into());
@@ -202,6 +204,36 @@ impl Planner {
                 let window_start: ExprImpl = FunctionCall::new(
                     ExprType::TumbleStart,
                     vec![ExprImpl::InputRef(Box::new(time_col)), window_size.clone()],
+                )?
+                .into();
+                // TODO: `window_end` may be optimized to avoid double calculation of
+                // `tumble_start`, or we can depends on common expression
+                // optimization.
+                let window_end =
+                    FunctionCall::new(ExprType::Add, vec![window_start.clone(), window_size])?
+                        .into();
+                exprs.push(window_start);
+                exprs.push(window_end);
+                let base = self.plan_relation(input)?;
+                let project = LogicalProject::create(base, exprs);
+                Ok(project)
+            }
+            (
+                Some(window_size @ ExprImpl::Literal(_)),
+                Some(window_offset @ ExprImpl::Literal(_)),
+                None,
+            ) => {
+                let mut exprs = Vec::with_capacity(col_data_types.len() + 2);
+                for (idx, col_dt) in col_data_types.iter().enumerate() {
+                    exprs.push(InputRef::new(idx, col_dt.clone()).into());
+                }
+                let window_start: ExprImpl = FunctionCall::new(
+                    ExprType::TumbleStart,
+                    vec![
+                        ExprImpl::InputRef(Box::new(time_col)),
+                        window_size.clone(),
+                        window_offset,
+                    ],
                 )?
                 .into();
                 // TODO: `window_end` may be optimized to avoid double calculation of
@@ -231,11 +263,21 @@ impl Planner {
         let Some((ExprImpl::Literal(window_slide), ExprImpl::Literal(window_size))) = args.next_tuple() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
+
         let Some(ScalarImpl::Interval(window_slide)) = *window_slide.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
         };
         let Some(ScalarImpl::Interval(window_size)) = *window_size.get_data() else {
             return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into());
+        };
+
+        let window_offset = match (args.next(), args.next()) {
+            (Some(ExprImpl::Literal(window_offset)), None) => match *window_offset.get_data() {
+                Some(ScalarImpl::Interval(window_offset)) => window_offset,
+                _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
+            },
+            (None, None) => IntervalUnit::from_month_day_usec(0, 0, 0),
+            _ => return Err(ErrorCode::BindError(ERROR_WINDOW_SIZE_ARG.to_string()).into()),
         };
 
         if !window_size.is_positive() || !window_slide.is_positive() {
@@ -249,11 +291,13 @@ impl Planner {
         if window_size.exact_div(&window_slide).is_none() {
             return Err(ErrorCode::BindError(format!("Invalid arguments for HOP window function: window_size {} cannot be divided by window_slide {}",window_size, window_slide)).into());
         }
+
         Ok(LogicalHopWindow::create(
             input,
             time_col,
             window_slide,
             window_size,
+            window_offset,
         ))
     }
 }

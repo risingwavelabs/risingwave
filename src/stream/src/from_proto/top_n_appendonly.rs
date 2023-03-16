@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::stream_plan::TopNNode;
 
 use super::*;
@@ -41,9 +41,13 @@ impl ExecutorBuilder for AppendOnlyTopNExecutorBuilder {
         let storage_key = table
             .get_pk()
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
-        let order_by = node.order_by.iter().map(OrderPair::from_protobuf).collect();
+        let order_by = node
+            .order_by
+            .iter()
+            .map(ColumnOrder::from_protobuf)
+            .collect();
 
         assert_eq!(&params.pk_indices, input.pk_indices());
         if node.with_ties {

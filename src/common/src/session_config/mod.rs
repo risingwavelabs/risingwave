@@ -24,6 +24,7 @@ use derivative::{self, Derivative};
 use itertools::Itertools;
 pub use query_mode::QueryMode;
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
+use tracing::info;
 
 use crate::error::{ErrorCode, RwError};
 use crate::session_config::transaction_isolation_level::IsolationLevel;
@@ -357,6 +358,7 @@ pub struct ConfigMap {
 
 impl ConfigMap {
     pub fn set(&mut self, key: &str, val: Vec<String>) -> Result<(), RwError> {
+        info!(%key, ?val, "set config");
         let val = val.iter().map(AsRef::as_ref).collect_vec();
         if key.eq_ignore_ascii_case(ImplicitFlush::entry_name()) {
             self.implicit_flush = val.as_slice().try_into()?;

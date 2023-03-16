@@ -18,11 +18,8 @@ use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
-use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -426,31 +423,17 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
                 .await
                 .expect("list_table_fragments"),
         )
-        .await
-        .unwrap();
+        .await?;
 
     // Initialize services.
-    let backup_object_store = Arc::new(
-        parse_remote_object_store(
-            system_params_reader.backup_storage_url(),
-            Arc::new(ObjectStoreMetrics::unused()),
-            "Meta Backup",
-        )
-        .await,
-    );
-    let backup_storage = Arc::new(
-        ObjectStoreMetaSnapshotStorage::new(
-            system_params_reader.backup_storage_directory(),
-            backup_object_store,
-        )
-        .await?,
-    );
-    let backup_manager = Arc::new(BackupManager::new(
+    let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        backup_storage,
         meta_metrics.registry().clone(),
-    ));
+        system_params_reader.backup_storage_url(),
+        system_params_reader.backup_storage_directory(),
+    )
+    .await?;
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),

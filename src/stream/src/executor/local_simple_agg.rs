@@ -52,7 +52,7 @@ impl Executor for LocalSimpleAggExecutor {
 }
 
 impl LocalSimpleAggExecutor {
-    fn apply_chunk(
+    async fn apply_chunk(
         ctx: &ActorContextRef,
         identity: &str,
         agg_calls: &[AggCall],
@@ -61,19 +61,19 @@ impl LocalSimpleAggExecutor {
     ) -> StreamExecutorResult<()> {
         let capacity = chunk.capacity();
         let (ops, columns, visibility) = chunk.into_inner();
-        let visibilities: Vec<_> = agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    ctx,
-                    identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut visibilities = Vec::with_capacity(agg_calls.len());
+        for agg_call in agg_calls {
+            let result = agg_call_filter_res(
+                ctx,
+                identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            visibilities.push(result)
+        }
         agg_calls
             .iter()
             .zip_eq_fast(visibilities)
@@ -118,7 +118,8 @@ impl LocalSimpleAggExecutor {
             match msg {
                 Message::Watermark(_) => {}
                 Message::Chunk(chunk) => {
-                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)?;
+                    Self::apply_chunk(&ctx, &info.identity, &agg_calls, &mut aggregators, chunk)
+                        .await?;
                     is_dirty = true;
                 }
                 m @ Message::Barrier(_) => {
@@ -203,7 +204,7 @@ mod tests {
             kind: AggKind::Count,
             args: AggArgs::None,
             return_type: DataType::Int64,
-            order_pairs: vec![],
+            column_orders: vec![],
             append_only: false,
             filter: None,
             distinct: false,
@@ -262,7 +263,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -271,7 +272,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -280,7 +281,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,

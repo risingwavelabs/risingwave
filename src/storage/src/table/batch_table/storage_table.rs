@@ -287,6 +287,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
     }
+
+    pub fn output_indices(&self) -> &[usize] {
+        &self.output_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
+    }
 }
 
 /// Point get

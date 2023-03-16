@@ -47,7 +47,10 @@ impl MetaMemberService for MetaMemberServiceImpl {
             Either::Left(election_client) => {
                 let mut members = vec![];
                 for member in election_client.get_members().await? {
-                    let host_addr = member.id.parse::<HostAddr>()?;
+                    let host_addr = member
+                        .id
+                        .parse::<HostAddr>()
+                        .map_err(|err| Status::from_error(err.into()))?;
                     members.push(MetaMember {
                         address: Some(HostAddress {
                             host: host_addr.host,
@@ -60,7 +63,10 @@ impl MetaMemberService for MetaMemberServiceImpl {
                 members
             }
             Either::Right(self_as_leader) => {
-                let host_addr = self_as_leader.advertise_addr.parse::<HostAddr>()?;
+                let host_addr = self_as_leader
+                    .advertise_addr
+                    .parse::<HostAddr>()
+                    .map_err(|err| Status::from_error(err.into()))?;
                 vec![MetaMember {
                     address: Some(HostAddress {
                         host: host_addr.host,

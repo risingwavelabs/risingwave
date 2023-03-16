@@ -19,6 +19,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::bind_context::BindContext;
+use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, Relation, COLUMN_GROUP_PREFIX};
 use crate::expr::ExprImpl;
 
@@ -28,6 +29,15 @@ pub struct BoundJoin {
     pub left: Relation,
     pub right: Relation,
     pub cond: ExprImpl,
+}
+
+impl RewriteExprsRecursive for BoundJoin {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.left.rewrite_exprs_recursive(rewriter);
+        self.right.rewrite_exprs_recursive(rewriter);
+        let dummy = ExprImpl::literal_bool(true);
+        self.cond = rewriter.rewrite_expr(std::mem::replace(&mut self.cond, dummy));
+    }
 }
 
 impl Binder {

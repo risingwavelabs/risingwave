@@ -18,7 +18,7 @@ use itertools::Itertools;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
@@ -29,7 +29,7 @@ use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
-use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -99,6 +99,10 @@ impl generic::GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.0.ctx.clone()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.0.functional_dependency()
+    }
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -112,6 +116,10 @@ impl generic::GenericPlanRef for PlanBase {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        todo!()
     }
 }
 
@@ -262,7 +270,7 @@ impl HashJoin {
             internal_table_catalog_builder.add_column(field);
         });
         pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
         // Build degree table.
@@ -273,21 +281,18 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-
         internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
         degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
 
         (
-            internal_table_catalog_builder.build(internal_table_dist_keys),
-            degree_table_catalog_builder.build(degree_table_dist_keys),
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
             deduped_input_pk_indices,
         )
     }
@@ -671,7 +676,7 @@ pub fn to_stream_prost_body(
                 // We don't need table id for materialize node in frontend. The id will be generated
                 // on meta catalog service.
                 table_id: 0,
-                column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
+                column_orders: me.table.pk().iter().map(ColumnOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
                 handle_pk_conflict_behavior: 0,
             })

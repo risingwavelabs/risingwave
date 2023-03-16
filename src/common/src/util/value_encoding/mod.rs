@@ -24,7 +24,7 @@ use either::{for_both, Either};
 use enum_as_inner::EnumAsInner;
 use itertools::Itertools;
 
-use crate::array::{JsonbVal, ListRef, ListValue, StructRef, StructValue};
+use crate::array::{serial_array, JsonbVal, ListRef, ListValue, StructRef, StructValue};
 use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
@@ -35,6 +35,7 @@ use crate::types::{
 
 pub mod error;
 use error::ValueEncodingError;
+use serial_array::Serial;
 
 use self::column_aware_row_encoding::ColumnAwareSerde;
 pub mod column_aware_row_encoding;
@@ -254,7 +255,7 @@ fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
 fn serialize_interval(interval: &IntervalUnit, buf: &mut impl BufMut) {
     buf.put_i32_le(interval.get_months());
     buf.put_i32_le(interval.get_days());
-    buf.put_i64_le(interval.get_ms());
+    buf.put_i64_le(interval.get_usecs());
 }
 
 fn serialize_naivedate(days: i32, buf: &mut impl BufMut) {
@@ -280,6 +281,7 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Int16 => ScalarImpl::Int16(data.get_i16_le()),
         DataType::Int32 => ScalarImpl::Int32(data.get_i32_le()),
         DataType::Int64 => ScalarImpl::Int64(data.get_i64_le()),
+        DataType::Serial => ScalarImpl::Serial(Serial::from(data.get_i64_le())),
         DataType::Float32 => ScalarImpl::Float32(OrderedF32::from(data.get_f32_le())),
         DataType::Float64 => ScalarImpl::Float64(OrderedF64::from(data.get_f64_le())),
         DataType::Varchar => ScalarImpl::Utf8(deserialize_str(data)?),
@@ -348,8 +350,8 @@ fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
 fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
     let months = data.get_i32_le();
     let days = data.get_i32_le();
-    let ms = data.get_i64_le();
-    Ok(IntervalUnit::new(months, days, ms))
+    let usecs = data.get_i64_le();
+    Ok(IntervalUnit::from_month_day_usec(months, days, usecs))
 }
 
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {

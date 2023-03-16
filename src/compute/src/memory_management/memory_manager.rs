@@ -14,12 +14,15 @@
 
 use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use risingwave_batch::task::BatchManager;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::task::LocalStreamManager;
 
-use super::policy::MemoryControlPolicy;
+use super::MemoryControlPolicy;
+use crate::memory_management::MemoryControlStats;
 
 /// The minimal memory requirement of computing tasks in megabytes.
 pub const MIN_COMPUTE_MEMORY_MB: usize = 512;
@@ -29,7 +32,6 @@ pub const SYSTEM_RESERVED_MEMORY_MB: usize = 512;
 
 /// When `enable_managed_cache` is set, compute node will launch a [`GlobalMemoryManager`] to limit
 /// the memory usage.
-#[cfg_attr(not(target_os = "linux"), expect(dead_code))]
 pub struct GlobalMemoryManager {
     /// All cached data before the watermark should be evicted.
     watermark_epoch: Arc<AtomicU64>,
@@ -74,28 +76,13 @@ impl GlobalMemoryManager {
         self.watermark_epoch.clone()
     }
 
-    // FIXME: remove such limitation after #7180
-    /// Jemalloc is not supported on Windows, because of tikv-jemalloc's own reasons.
-    /// See the comments for the macro `enable_jemalloc_on_linux!()`
-    #[cfg(not(target_os = "linux"))]
-    #[expect(clippy::unused_async)]
-    pub async fn run(self: Arc<Self>, _: Arc<BatchManager>, _: Arc<LocalStreamManager>) {}
-
-    /// Memory manager will get memory usage from batch and streaming, and do some actions.
-    /// 1. if batch exceeds, kill running query.
-    /// 2. if streaming exceeds, evict cache by watermark.
-    #[cfg(target_os = "linux")]
+    /// Memory manager will get memory usage statistics from batch and streaming and perform memory
+    /// control accordingly.
     pub async fn run(
         self: Arc<Self>,
         batch_manager: Arc<BatchManager>,
         stream_manager: Arc<LocalStreamManager>,
     ) {
-        use std::time::Duration;
-
-        use risingwave_common::util::epoch::Epoch;
-
-        use crate::memory_management::policy::MemoryControlStats;
-
         let mut tick_interval =
             tokio::time::interval(Duration::from_millis(self.barrier_interval_ms as u64));
         let mut memory_control_stats = MemoryControlStats {

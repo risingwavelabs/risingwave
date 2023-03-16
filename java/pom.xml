@@ -16,6 +16,7 @@
         <module>connector-node/risingwave-sink-deltalake</module>
         <module>connector-node/risingwave-sink-jdbc</module>
         <module>connector-node/risingwave-source-cdc</module>
+        <module>connector-node/risingwave-source-test</module>
         <module>connector-node/risingwave-connector-service</module>
         <module>connector-node/assembly</module>
     </modules>
@@ -30,7 +31,6 @@
         <gson.version>2.10</gson.version>
         <module.version>1.0-SNAPSHOT</module.version>
         <spotless.version>2.27.1</spotless.version>
-        <slf4j.version>1.7.36</slf4j.version>
         <log4j.version>2.20.0</log4j.version>
         <commons.cli.version>1.5.0</commons.cli.version>
         <debezium.version>1.9.7.Final</debezium.version>
@@ -41,9 +41,9 @@
     <dependencyManagement>
         <dependencies>
             <dependency>
-                <groupId>org.slf4j</groupId>
-                <artifactId>slf4j-api</artifactId>
-                <version>${slf4j.version}</version>
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-api</artifactId>
+                <version>${log4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>

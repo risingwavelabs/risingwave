@@ -189,6 +189,7 @@ impl RegexpMatchExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for RegexpMatchExpression {
     fn return_type(&self) -> DataType {
         DataType::List {
@@ -196,8 +197,8 @@ impl Expression for RegexpMatchExpression {
         }
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let text_arr = self.child.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let text_arr = self.child.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
         let mut output = ListArrayBuilder::with_meta(
             input.capacity(),
@@ -220,8 +221,8 @@ impl Expression for RegexpMatchExpression {
         Ok(Arc::new(output.finish().into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let text = self.child.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let text = self.child.eval_row(input).await?;
         Ok(if let Some(ScalarImpl::Utf8(text)) = text {
             self.match_one(Some(&text)).map(Into::into)
         } else {

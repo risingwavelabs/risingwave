@@ -205,7 +205,7 @@ impl TierCompactionPicker {
             }
 
             for sst in &level.table_infos {
-                if level_handler.is_pending_compact(&sst.id) {
+                if level_handler.is_pending_compact(&sst.sst_id) {
                     continue;
                 }
             }
@@ -235,7 +235,7 @@ impl TierCompactionPicker {
                     let mut cur_level_size = 0;
                     for sst in &other.table_infos {
                         if *table_id == sst.table_ids[0] {
-                            if level_handler.is_pending_compact(&sst.id) {
+                            if level_handler.is_pending_compact(&sst.sst_id) {
                                 pending_compact = true;
                                 break;
                             }

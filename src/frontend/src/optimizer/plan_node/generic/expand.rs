@@ -15,9 +15,11 @@
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 /// [`Expand`] expand one row multiple times according to `column_subsets` and also keep
 /// original columns of input. It can be used to implement distinct aggregation and group set.
@@ -33,6 +35,16 @@ pub struct Expand<PlanRef> {
     // reserved and other columns will be filled with NULL.
     pub column_subsets: Vec<Vec<usize>>,
     pub input: PlanRef,
+}
+
+impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
+    fn output_len(&self) -> usize {
+        self.input.schema().len() * 2 + 1
+    }
+
+    fn flag_index(&self) -> usize {
+        self.output_len() - 1
+    }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
@@ -59,6 +71,31 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Expand<PlanRef> {
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let input_fd = self
+            .input
+            .functional_dependency()
+            .clone()
+            .into_dependencies();
+        let output_len = self.output_len();
+        let flag_index = self.flag_index();
+
+        self.input
+            .functional_dependency()
+            .as_dependencies()
+            .iter()
+            .map(|_input_fd| {})
+            .collect_vec();
+
+        let mut current_fd = FunctionalDependencySet::new(output_len);
+        for mut fd in input_fd {
+            fd.grow(output_len);
+            fd.set_from(flag_index, true);
+            current_fd.add_functional_dependency(fd);
+        }
+        current_fd
+    }
 }
 
 impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
@@ -72,5 +109,17 @@ impl<PlanRef: GenericPlanRef> Expand<PlanRef> {
                     .collect_vec()
             })
             .collect_vec()
+    }
+
+    pub fn i2o_col_mapping(&self) -> ColIndexMapping {
+        let input_len = self.input.schema().len();
+        let map = (0..input_len)
+            .map(|source| Some(source + input_len))
+            .collect_vec();
+        ColIndexMapping::with_target_size(map, self.output_len())
+    }
+
+    pub fn o2i_col_mapping(&self) -> ColIndexMapping {
+        self.i2o_col_mapping().inverse()
     }
 }

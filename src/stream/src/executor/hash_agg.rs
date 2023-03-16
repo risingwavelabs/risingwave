@@ -310,20 +310,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let call_visibilities: Vec<_> = this
-            .agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    &this.actor_ctx,
-                    &this.info.identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
+        for agg_call in &this.agg_calls {
+            let agg_call_filter_res = agg_call_filter_res(
+                &this.actor_ctx,
+                &this.info.identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            call_visibilities.push(agg_call_filter_res);
+        }
 
         // Materialize input chunk if needed.
         this.storages
@@ -757,7 +756,7 @@ mod tests {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -766,7 +765,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -775,7 +774,7 @@ mod tests {
                 kind: AggKind::Count,
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -862,7 +861,7 @@ mod tests {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -871,7 +870,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -881,7 +880,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 2),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -969,7 +968,7 @@ mod tests {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -978,7 +977,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only: false,
                 filter: None,
                 distinct: false,
@@ -1071,7 +1070,7 @@ mod tests {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -1080,7 +1079,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,

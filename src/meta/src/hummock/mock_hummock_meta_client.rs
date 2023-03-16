@@ -23,8 +23,8 @@ use futures::StreamExt;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_stats::{to_prost_table_stats_map, TableStatsMap};
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    HummockContextId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    SstObjectIdRange,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -121,7 +121,7 @@ impl HummockMetaClient for MockHummockMetaClient {
             .map_err(mock_err)
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         fail_point!("get_new_sst_ids_err", |_| Err(anyhow!(
             "failpoint get_new_sst_ids_err"
         )
@@ -155,7 +155,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     ) -> Result<()> {
         let sst_to_worker = sstables
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, self.context_id))
+            .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), self.context_id))
             .collect();
         self.hummock_manager
             .commit_epoch(epoch, sstables, sst_to_worker)
@@ -257,7 +257,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         todo!()
     }
 
-    async fn report_full_scan_task(&self, _sst_ids: Vec<HummockSstableId>) -> Result<()> {
+    async fn report_full_scan_task(&self, _object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
         unimplemented!()
     }
 

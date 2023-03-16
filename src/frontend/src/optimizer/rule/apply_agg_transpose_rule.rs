@@ -130,7 +130,7 @@ impl Rule for ApplyAggTransposeRule {
                 agg_call
                     .order_by
                     .iter_mut()
-                    .for_each(|o| o.input.shift_with_offset(offset));
+                    .for_each(|o| o.shift_with_offset(offset));
                 agg_call.filter = agg_call.filter.clone().rewrite_expr(&mut shift_index);
             });
             if is_scalar_agg {

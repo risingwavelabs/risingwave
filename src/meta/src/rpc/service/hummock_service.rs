@@ -358,7 +358,7 @@ where
         // RPC immediately.
         tokio::spawn(async move {
             match vacuum_manager
-                .complete_full_gc(request.into_inner().sst_ids)
+                .complete_full_gc(request.into_inner().object_ids)
                 .await
             {
                 Ok(number) => {
