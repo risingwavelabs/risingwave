@@ -117,8 +117,8 @@ criterion_main!(benches);
 
 static DATA_LEN_SET: LazyLock<Vec<(Vec<u8>, Vec<u8>)>> = LazyLock::new(|| {
     vec![
-        (vec![b'a'; 10], vec![b'a'; 10]),       // U8U8
-        (vec![b'a'; 10], vec![b'a'; 300]),      // U8U16
+        (vec![b'a'; 100], vec![b'a'; 100]),     // U8U8
+        (vec![b'a'; 100], vec![b'a'; 300]),     // U8U16
         (vec![b'a'; 100], vec![b'a'; 65550]),   // U8U32
         (vec![b'a'; 300], vec![b'a'; 100]),     // U16U8
         (vec![b'a'; 300], vec![b'a'; 300]),     // U16U16

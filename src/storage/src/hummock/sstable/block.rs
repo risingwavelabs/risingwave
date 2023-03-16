@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Write};
 use std::mem::size_of;
@@ -21,7 +20,7 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
+use risingwave_hummock_sdk::HummockEpoch;
 use {lz4, zstd};
 
 use super::utils::{bytes_diff_below_max_key_length, xxhash64_verify, CompressionAlgorithm};
@@ -521,6 +520,9 @@ impl BlockBuilder {
         if self.entry_count > 0 {
             #[cfg(debug_assertions)]
             {
+                use std::cmp::Ordering;
+
+                use risingwave_hummock_sdk::KeyComparator;
                 debug_assert!(!key.is_empty());
                 debug_assert_eq!(
                     KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
