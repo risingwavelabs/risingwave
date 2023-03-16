@@ -410,7 +410,7 @@ pub fn compare_rows_in_chunk(
     Ok(Ordering::Equal)
 }
 
-/// Compare two `Datum`s with specifed order type.
+/// Compare two `Datum`s with specified order type.
 pub fn compare_datum(
     lhs: impl ToDatumRef,
     rhs: impl ToDatumRef,
