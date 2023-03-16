@@ -362,9 +362,8 @@ mod tests {
                             make_i32_literal(i32::MAX),
                             make_i32_literal(1),
                         ],
-                        // This is a bit hacky as we want to make sure the task lasts long enough
-                        // for us to abort it.
                         return_type: Some(DataType::Int32.to_protobuf()),
+                        udtf: None,
                     }),
                 })),
             }),

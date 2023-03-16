@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use hytra::TrAdder;
 use risingwave_common::config::StreamingConfig;
+use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::ConnectorParams;
@@ -48,6 +49,9 @@ pub struct StreamEnvironment {
     /// Manages dml information.
     dml_manager: DmlManagerRef,
 
+    /// Read the latest system parameters.
+    system_params_manager: LocalSystemParamsManagerRef,
+
     /// Metrics for source.
     source_metrics: Arc<SourceMetrics>,
 
@@ -56,6 +60,7 @@ pub struct StreamEnvironment {
 }
 
 impl StreamEnvironment {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         server_addr: HostAddr,
         connector_params: ConnectorParams,
@@ -63,6 +68,7 @@ impl StreamEnvironment {
         worker_id: WorkerNodeId,
         state_store: StateStoreImpl,
         dml_manager: DmlManagerRef,
+        system_params_manager: LocalSystemParamsManagerRef,
         source_metrics: Arc<SourceMetrics>,
     ) -> Self {
         StreamEnvironment {
@@ -72,6 +78,7 @@ impl StreamEnvironment {
             worker_id,
             state_store,
             dml_manager,
+            system_params_manager,
             source_metrics,
             total_mem_val: Arc::new(TrAdder::new()),
         }
@@ -80,6 +87,7 @@ impl StreamEnvironment {
     // Create an instance for testing purpose.
     #[cfg(test)]
     pub fn for_test() -> Self {
+        use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
         use risingwave_source::dml_manager::DmlManager;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
         StreamEnvironment {
@@ -91,6 +99,7 @@ impl StreamEnvironment {
                 MonitoredStorageMetrics::unused(),
             )),
             dml_manager: Arc::new(DmlManager::default()),
+            system_params_manager: Arc::new(LocalSystemParamsManager::for_test()),
             source_metrics: Arc::new(SourceMetrics::default()),
             total_mem_val: Arc::new(TrAdder::new()),
         }
@@ -118,6 +127,10 @@ impl StreamEnvironment {
 
     pub fn dml_manager_ref(&self) -> DmlManagerRef {
         self.dml_manager.clone()
+    }
+
+    pub fn system_params_manager_ref(&self) -> LocalSystemParamsManagerRef {
+        self.system_params_manager.clone()
     }
 
     pub fn source_metrics(&self) -> Arc<SourceMetrics> {
