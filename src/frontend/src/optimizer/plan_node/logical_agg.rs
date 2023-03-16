@@ -333,18 +333,14 @@ impl LogicalAgg {
                 .group_key()
                 .iter()
                 .map(|group_by_idx| {
-                    // TODO(): revisit here
-                    let order_type = if required_order.column_orders.contains(&ColumnOrder::new(
-                        *group_by_idx,
-                        OrderType::default_descending(),
-                    )) {
-                        // If output requires descending order, use descending order
-                        OrderType::default_descending()
-                    } else {
-                        // In all other cases use ascending order
-                        OrderType::default_ascending()
-                    };
-                    ColumnOrder::new(*group_by_idx, order_type)
+                    required_order
+                        .column_orders
+                        .iter()
+                        .find(|o| o.column_index == *group_by_idx)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            ColumnOrder::new(*group_by_idx, OrderType::default_ascending())
+                        })
                 })
                 .collect(),
         };
