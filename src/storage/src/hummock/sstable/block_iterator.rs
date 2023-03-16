@@ -18,7 +18,6 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, EPOCH_LEN};
-use risingwave_hummock_sdk::KeyComparator;
 
 use super::KeyPrefix;
 use crate::hummock::BlockHolder;
@@ -99,31 +98,19 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        match key.user_key.table_id.table_id().cmp(&self.block.table_id()) {
-            Ordering::Less => self.seek_to_last(),
-            Ordering::Equal => {
-                self.seek_restart_point_by_key(key);
+        self.seek_restart_point_by_key(key);
 
-                self.next_until_key(key);
-            }
-            Ordering::Greater => self.invalidate(),
-        }
+        self.next_until_key(key);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        match key.user_key.table_id.table_id().cmp(&self.block.table_id()) {
-            Ordering::Less => self.invalidate(),
-            Ordering::Equal => {
-                self.seek_restart_point_by_key(key);
+        self.seek_restart_point_by_key(key);
 
-                self.next_until_key(key);
-                if !self.is_valid() {
-                    self.seek_to_last();
-                }
-                self.prev_until_key(key);
-            }
-            Ordering::Greater => self.seek_to_last(),
+        self.next_until_key(key);
+        if !self.is_valid() {
+            self.seek_to_last();
         }
+        self.prev_until_key(key);
     }
 }
 
@@ -173,19 +160,14 @@ impl BlockIterator {
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
     fn next_until_key(&mut self, key: FullKey<&[u8]>) {
-        while self.is_valid()
-            && KeyComparator::compare_full_key_without_table_id(self.key(), key) == Ordering::Less
-        {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Less {
             self.next_inner();
         }
     }
 
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
     fn prev_until_key(&mut self, key: FullKey<&[u8]>) {
-        while self.is_valid()
-            && KeyComparator::compare_full_key_without_table_id(self.key(), key)
-                == Ordering::Greater
-        {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Greater {
             self.prev_inner();
         }
     }
@@ -241,7 +223,7 @@ impl BlockIterator {
                 buf.put_u32(self.block.table_id());
                 buf.put_slice(probe_key);
                 let full_probe_key = FullKey::decode(&buf[..]);
-                match KeyComparator::compare_full_key_without_table_id(full_probe_key, key) {
+                match full_probe_key.cmp(&key) {
                     Ordering::Less | Ordering::Equal => true,
                     Ordering::Greater => false,
                 }
