@@ -411,6 +411,7 @@ pub fn compare_rows_in_chunk(
     Ok(Ordering::Equal)
 }
 
+/// Compare two `Datum`s with specifed order type.
 pub fn compare_datum(
     lhs: impl ToDatumRef,
     rhs: impl ToDatumRef,
@@ -432,7 +433,7 @@ mod tests {
     use super::*;
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::{OwnedRow, Row};
-    use crate::types::{DataType, ScalarImpl};
+    use crate::types::{DataType, Datum, ScalarImpl};
 
     #[test]
     fn test_order_type() {
@@ -593,6 +594,62 @@ mod tests {
         assert_eq!(
             Ordering::Less,
             compare_rows_in_chunk(&chunk, 0, &chunk, 1, &column_orders).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_compare_datum() {
+        assert_eq!(
+            Ordering::Equal,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                Some(ScalarImpl::from(42)),
+                OrderType::default(),
+            )
+        );
+        assert_eq!(
+            Ordering::Equal,
+            compare_datum(None as Datum, None as Datum, OrderType::default(),)
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                Some(ScalarImpl::from(100)),
+                OrderType::default_ascending(),
+            )
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::nulls_largest(Direction::Ascending),
+            )
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::nulls_largest(Direction::Descending),
+            )
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::nulls_smallest(Direction::Ascending),
+            )
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::nulls_smallest(Direction::Descending),
+            )
         );
     }
 }

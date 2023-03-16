@@ -327,6 +327,122 @@ mod tests {
     }
 
     #[test]
+    fn test_memcomparable_structs() {
+        // NOTE: `NULL`s inside composite type values are always the largest.
+
+        let struct_none = None;
+        let struct_1 = Some(
+            StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into(),
+        );
+        let struct_2 = Some(
+            StructValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into(),
+        );
+        let struct_3 = Some(StructValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+
+        {
+            // ASC NULLS FIRST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
+            let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
+            let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
+            let memcmp_struct_3 = encode_value(&struct_3, order_type).unwrap();
+            assert!(memcmp_struct_none < memcmp_struct_1);
+            assert!(memcmp_struct_1 < memcmp_struct_2);
+            assert!(memcmp_struct_2 < memcmp_struct_3);
+        }
+        {
+            // ASC NULLS LAST (NULLS LARGEST)
+            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
+            let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
+            let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
+            let memcmp_struct_3 = encode_value(&struct_3, order_type).unwrap();
+            assert!(memcmp_struct_1 < memcmp_struct_2);
+            assert!(memcmp_struct_2 < memcmp_struct_3);
+            assert!(memcmp_struct_3 < memcmp_struct_none);
+        }
+        {
+            // DESC NULLS FIRST (NULLS LARGEST)
+            let order_type = OrderType::nulls_first(Direction::Descending);
+            let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
+            let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
+            let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
+            let memcmp_struct_3 = encode_value(&struct_3, order_type).unwrap();
+            assert!(memcmp_struct_none < memcmp_struct_3);
+            assert!(memcmp_struct_3 < memcmp_struct_2);
+            assert!(memcmp_struct_2 < memcmp_struct_1);
+        }
+        {
+            // DESC NULLS LAST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_last(Direction::Descending);
+            let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
+            let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
+            let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
+            let memcmp_struct_3 = encode_value(&struct_3, order_type).unwrap();
+            assert!(memcmp_struct_3 < memcmp_struct_2);
+            assert!(memcmp_struct_2 < memcmp_struct_1);
+            assert!(memcmp_struct_1 < memcmp_struct_none);
+        }
+    }
+
+    #[test]
+    fn test_memcomparable_lists() {
+        // NOTE: `NULL`s inside composite type values are always the largest.
+
+        let list_none = None;
+        let list_1 =
+            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(2))]).into());
+        let list_2 =
+            Some(ListValue::new(vec![Some(ScalarImpl::from(1)), Some(ScalarImpl::from(3))]).into());
+        let list_3 = Some(ListValue::new(vec![Some(ScalarImpl::from(1)), None]).into());
+
+        {
+            // ASC NULLS FIRST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
+            let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
+            let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
+            let memcmp_list_3 = encode_value(&list_3, order_type).unwrap();
+            assert!(memcmp_list_none < memcmp_list_1);
+            assert!(memcmp_list_1 < memcmp_list_2);
+            assert!(memcmp_list_2 < memcmp_list_3);
+        }
+        {
+            // ASC NULLS LAST (NULLS LARGEST)
+            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
+            let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
+            let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
+            let memcmp_list_3 = encode_value(&list_3, order_type).unwrap();
+            assert!(memcmp_list_1 < memcmp_list_2);
+            assert!(memcmp_list_2 < memcmp_list_3);
+            assert!(memcmp_list_3 < memcmp_list_none);
+        }
+        {
+            // DESC NULLS FIRST (NULLS LARGEST)
+            let order_type = OrderType::nulls_first(Direction::Descending);
+            let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
+            let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
+            let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
+            let memcmp_list_3 = encode_value(&list_3, order_type).unwrap();
+            assert!(memcmp_list_none < memcmp_list_3);
+            assert!(memcmp_list_3 < memcmp_list_2);
+            assert!(memcmp_list_2 < memcmp_list_1);
+        }
+        {
+            // DESC NULLS LAST (NULLS SMALLEST)
+            let order_type = OrderType::nulls_last(Direction::Descending);
+            let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
+            let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
+            let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
+            let memcmp_list_3 = encode_value(&list_3, order_type).unwrap();
+            assert!(memcmp_list_3 < memcmp_list_2);
+            assert!(memcmp_list_2 < memcmp_list_1);
+            assert!(memcmp_list_1 < memcmp_list_none);
+        }
+    }
+
+    #[test]
     fn test_issue_legacy_2057_ordered_float_memcomparable() {
         use num_traits::*;
         use rand::seq::SliceRandom;
