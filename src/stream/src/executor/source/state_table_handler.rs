@@ -216,7 +216,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
 
     let columns = vec![
         make_column(TypeName::Varchar, 0),
-        make_column(TypeName::Bytea, 1),
+        make_column(TypeName::Jsonb, 1),
     ];
     ProstTable {
         id,
