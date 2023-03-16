@@ -38,6 +38,8 @@ pub struct BlockIterator {
 
     last_key_len_type: LenType,
     last_value_len_type: LenType,
+
+    key_index_in_restart_point: usize,
 }
 
 impl BlockIterator {
@@ -51,6 +53,7 @@ impl BlockIterator {
             entry_len: 0,
             last_key_len_type: LenType::u8,
             last_value_len_type: LenType::u8,
+            key_index_in_restart_point: 0,
         }
     }
 
@@ -162,6 +165,11 @@ impl BlockIterator {
         self.key.truncate(prefix.overlap_len());
         self.key
             .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
+
+        let _epoch = self
+            .block
+            .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
+        self.key_index_in_restart_point += 1;
 
         self.value_range = prefix.value_range();
         self.offset = offset;
@@ -284,6 +292,7 @@ impl BlockIterator {
 
     fn update_restart_point(&mut self, index: usize) {
         self.restart_point_index = index;
+        self.key_index_in_restart_point = 0;
         let restart_point = self.block.restart_point(index);
 
         self.last_key_len_type = restart_point.key_len_type;
