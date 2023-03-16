@@ -44,14 +44,14 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
-      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0 }
+      └─LogicalTopN { order: "[t.x ASC NULLS LAST]", limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalJoin { type: LeftOuter, on: true, output: all }
       ├─LogicalScan { table: t, columns: [] }
-      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0 }
+      └─LogicalTopN { order: "[t.x ASC NULLS LAST]", limit: 1, offset: 0 }
         └─LogicalScan { table: t, columns: [t.x] }
 - sql: |
     create table t(x int);
@@ -60,7 +60,7 @@
     LogicalProject { exprs: [t.x, 1:Int32] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
       ├─LogicalScan { table: t, columns: [t.x, t._row_id] }
-      └─LogicalTopN { order: "[t.x ASC]", limit: 1, offset: 0, with_ties: true }
+      └─LogicalTopN { order: "[t.x ASC NULLS LAST]", limit: 1, offset: 0, with_ties: true }
         └─LogicalProject { exprs: [t.x] }
           └─LogicalScan { table: t, columns: [t.x, t._row_id] }
   optimizer_error: 'internal error: Scalar subquery might produce more than one row.'
@@ -108,7 +108,7 @@
     LogicalJoin { type: LeftOuter, on: true, output: all }
     ├─LogicalScan { table: t1, columns: [t1.x] }
     └─LogicalLimit { limit: 2, offset: 0 }
-      └─LogicalTopN { order: "[t2.y DESC]", limit: 1, offset: 3 }
+      └─LogicalTopN { order: "[t2.y DESC NULLS FIRST]", limit: 1, offset: 3 }
         └─LogicalScan { table: t2, columns: [t2.y] }
 - sql: |
     select (select 1, 2);

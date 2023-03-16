@@ -50,12 +50,12 @@
     select v3 from (select * from t order by v3, v2 limit 2) as s;
   logical_plan: |
     LogicalProject { exprs: [t.v3] }
-    └─LogicalTopN { order: "[t.v3 ASC, t.v2 ASC]", limit: 2, offset: 0 }
+    └─LogicalTopN { order: "[t.v3 ASC NULLS LAST, t.v2 ASC NULLS LAST]", limit: 2, offset: 0 }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v3] }
-    └─LogicalTopN { order: "[t.v3 ASC, t.v2 ASC]", limit: 2, offset: 0 }
+    └─LogicalTopN { order: "[t.v3 ASC NULLS LAST, t.v2 ASC NULLS LAST]", limit: 2, offset: 0 }
       └─LogicalScan { table: t, columns: [t.v2, t.v3] }
 - name: constant
   sql: |

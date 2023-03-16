@@ -492,8 +492,8 @@
           └─LogicalScan { table: b, columns: [b.x, b._row_id] }
   batch_plan: |
     BatchProject { exprs: [$expr1, $expr2] }
-    └─BatchExchange { order: [$expr3 ASC], dist: Single }
-      └─BatchSort { order: [$expr3 ASC] }
+    └─BatchExchange { order: [$expr3 ASC NULLS LAST], dist: Single }
+      └─BatchSort { order: [$expr3 ASC NULLS LAST] }
         └─BatchProject { exprs: [(2:Int32 * Coalesce(a.x, b.x)) as $expr1, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr2, (Coalesce(a.x, b.x) + Coalesce(a.x, b.x)) as $expr3] }
           └─BatchFilter { predicate: ((2:Int32 * Coalesce(a.x, b.x)) < 10:Int32) }
             └─BatchHashJoin { type: FullOuter, predicate: a.x = b.x, output: all }
@@ -530,9 +530,9 @@
       └─LogicalScan { table: test2, columns: [test2.a, test2.c] }
   batch_plan: |
     BatchProject { exprs: [test.a, test.b, test2.c] }
-    └─BatchExchange { order: [test.a ASC], dist: Single }
+    └─BatchExchange { order: [test.a ASC NULLS LAST], dist: Single }
       └─BatchProject { exprs: [test.a, test.b, test2.c, test.a] }
-        └─BatchSort { order: [test.a ASC] }
+        └─BatchSort { order: [test.a ASC NULLS LAST] }
           └─BatchHashJoin { type: Inner, predicate: test.a = test2.a AND (test.b <> test2.c), output: [test.a, test.b, test2.c] }
             ├─BatchExchange { order: [], dist: HashShard(test.a) }
             | └─BatchScan { table: test, columns: [test.a, test.b], distribution: SomeShard }
@@ -668,12 +668,12 @@
         Upstream
         BatchPlanNode
 
-     Table 0 { columns: [t_src, t_dst, t_src_0, t_dst_0, t__row_id, t__row_id_0], primary key: [$2 ASC, $0 ASC, $4 ASC, $5 ASC, $1 ASC], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0], read pk prefix len hint: 2 }
-     Table 1 { columns: [t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC], value indices: [5], distribution key: [1], read pk prefix len hint: 2 }
-     Table 2 { columns: [t_dst, t__row_id], primary key: [$0 ASC, $0 ASC, $1 ASC], value indices: [0, 1], distribution key: [0], read pk prefix len hint: 2 }
-     Table 3 { columns: [t_dst, t_dst_0, t__row_id, _degree], primary key: [$0 ASC, $1 ASC, $2 ASC], value indices: [3], distribution key: [1], read pk prefix len hint: 2 }
-     Table 4 { columns: [t_src, t_dst, t__row_id], primary key: [$1 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [1], read pk prefix len hint: 1 }
-     Table 5 { columns: [t_dst, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
-     Table 6 { columns: [t_src, t_dst, t__row_id], primary key: [$0 ASC, $2 ASC], value indices: [0, 1, 2], distribution key: [0], read pk prefix len hint: 1 }
-     Table 7 { columns: [t_src, t__row_id, _degree], primary key: [$0 ASC, $1 ASC], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
-     Table 4294967294 { columns: [p1, p2, p3, t._row_id, t._row_id#1, t.src, t._row_id#2], primary key: [$3 ASC, $4 ASC, $1 ASC, $6 ASC, $5 ASC, $0 ASC], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0], read pk prefix len hint: 6 }
+     Table 0 { columns: [t_src, t_dst, t_src_0, t_dst_0, t__row_id, t__row_id_0], primary key: [$2 ASC NULLS LAST, $0 ASC NULLS LAST, $4 ASC NULLS LAST, $5 ASC NULLS LAST, $1 ASC NULLS LAST], value indices: [0, 1, 2, 3, 4, 5], distribution key: [0], read pk prefix len hint: 2 }
+     Table 1 { columns: [t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree], primary key: [$0 ASC NULLS LAST, $1 ASC NULLS LAST, $2 ASC NULLS LAST, $3 ASC NULLS LAST, $4 ASC NULLS LAST], value indices: [5], distribution key: [1], read pk prefix len hint: 2 }
+     Table 2 { columns: [t_dst, t__row_id], primary key: [$0 ASC NULLS LAST, $0 ASC NULLS LAST, $1 ASC NULLS LAST], value indices: [0, 1], distribution key: [0], read pk prefix len hint: 2 }
+     Table 3 { columns: [t_dst, t_dst_0, t__row_id, _degree], primary key: [$0 ASC NULLS LAST, $1 ASC NULLS LAST, $2 ASC NULLS LAST], value indices: [3], distribution key: [1], read pk prefix len hint: 2 }
+     Table 4 { columns: [t_src, t_dst, t__row_id], primary key: [$1 ASC NULLS LAST, $2 ASC NULLS LAST], value indices: [0, 1, 2], distribution key: [1], read pk prefix len hint: 1 }
+     Table 5 { columns: [t_dst, t__row_id, _degree], primary key: [$0 ASC NULLS LAST, $1 ASC NULLS LAST], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 6 { columns: [t_src, t_dst, t__row_id], primary key: [$0 ASC NULLS LAST, $2 ASC NULLS LAST], value indices: [0, 1, 2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 7 { columns: [t_src, t__row_id, _degree], primary key: [$0 ASC NULLS LAST, $1 ASC NULLS LAST], value indices: [2], distribution key: [0], read pk prefix len hint: 1 }
+     Table 4294967294 { columns: [p1, p2, p3, t._row_id, t._row_id#1, t.src, t._row_id#2], primary key: [$3 ASC NULLS LAST, $4 ASC NULLS LAST, $1 ASC NULLS LAST, $6 ASC NULLS LAST, $5 ASC NULLS LAST, $0 ASC NULLS LAST], value indices: [0, 1, 2, 3, 4, 5, 6], distribution key: [0], read pk prefix len hint: 6 }

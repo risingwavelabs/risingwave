@@ -35,17 +35,17 @@
     select mv1.v from mv mv1, mv mv2 where mv1.v = mv2.v order by mv1.v limit 10;
   batch_plan: |
     BatchProject { exprs: [mv.v] }
-    └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
+    └─BatchTopN { order: "[mv.v ASC NULLS LAST]", limit: 10, offset: 0 }
       └─BatchExchange { order: [], dist: Single }
-        └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
+        └─BatchTopN { order: "[mv.v ASC NULLS LAST]", limit: 10, offset: 0 }
           └─BatchProject { exprs: [mv.v, mv.v] }
             └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
               └─BatchExchange { order: [], dist: UpstreamHashShard(mv.v) }
                 └─BatchScan { table: mv, columns: [mv.v], distribution: Single }
   batch_local_plan: |
     BatchProject { exprs: [mv.v] }
-    └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
-      └─BatchTopN { order: "[mv.v ASC]", limit: 10, offset: 0 }
+    └─BatchTopN { order: "[mv.v ASC NULLS LAST]", limit: 10, offset: 0 }
+      └─BatchTopN { order: "[mv.v ASC NULLS LAST]", limit: 10, offset: 0 }
         └─BatchProject { exprs: [mv.v, mv.v] }
           └─BatchLookupJoin { type: Inner, predicate: mv.v = mv.v, output: [mv.v] }
             └─BatchExchange { order: [], dist: Single }

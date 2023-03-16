@@ -187,9 +187,9 @@
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 3, correlated_id: 1 } = pg_user.usesysid) }
           └─LogicalScan { table: pg_user, columns: [pg_user.usesysid, pg_user.name, pg_user.usecreatedb, pg_user.usesuper, pg_user.passwd] }
   batch_plan: |
-    BatchExchange { order: [pg_namespace.nspname ASC, pg_class.relname ASC], dist: Single }
+    BatchExchange { order: [pg_namespace.nspname ASC NULLS LAST, pg_class.relname ASC NULLS LAST], dist: Single }
     └─BatchProject { exprs: [pg_namespace.nspname, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, pg_user.name] }
-      └─BatchSort { order: [pg_namespace.nspname ASC, pg_class.relname ASC] }
+      └─BatchSort { order: [pg_namespace.nspname ASC NULLS LAST, pg_class.relname ASC NULLS LAST] }
         └─BatchHashJoin { type: LeftOuter, predicate: pg_class.relowner = pg_user.usesysid, output: [pg_class.relname, pg_class.relkind, pg_namespace.nspname, pg_user.name] }
           ├─BatchExchange { order: [], dist: HashShard(pg_class.relowner) }
           | └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = pg_namespace.oid, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, pg_namespace.nspname] }

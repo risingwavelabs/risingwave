@@ -36,12 +36,12 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
     └─LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
       └─LogicalShare { id = 3 }
-        └─LogicalTopN { order: "[t.v1 ASC]", limit: 10, offset: 0 }
+        └─LogicalTopN { order: "[t.v1 ASC NULLS LAST]", limit: 10, offset: 0 }
           └─LogicalProject { exprs: [t.v1, t.v2, t.v3, t.v4] }
             └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
   optimized_logical_plan_for_batch: |
     LogicalFilter { predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) }
-    └─LogicalTopN { order: "[t.v1 ASC]", limit: 10, offset: 0 }
+    └─LogicalTopN { order: "[t.v1 ASC NULLS LAST]", limit: 10, offset: 0 }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4] }
 - name: filter hop transpose
   sql: |

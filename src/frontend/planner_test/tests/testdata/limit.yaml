@@ -47,7 +47,7 @@
     create table t (v int);
     select * from t order by v fetch next 2 rows with ties;
   logical_plan: |
-    LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }
+    LogicalTopN { order: "[t.v ASC NULLS LAST]", limit: 2, offset: 0, with_ties: true }
     └─LogicalProject { exprs: [t.v] }
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
 - sql: |
@@ -58,7 +58,7 @@
     where rank <= 2;
   optimized_logical_plan_for_batch: |
     LogicalProject { exprs: [t.v] }
-    └─LogicalTopN { order: "[t.v ASC]", limit: 2, offset: 0, with_ties: true }
+    └─LogicalTopN { order: "[t.v ASC NULLS LAST]", limit: 2, offset: 0, with_ties: true }
       └─LogicalScan { table: t, columns: [t.v, t._row_id] }
 - sql: |
     create table t (v int);

@@ -190,39 +190,39 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
-      └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
+      └─BatchExchange { order: [mv.v1 DESC NULLS FIRST], dist: HashShard(mv.v1) }
         └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
 - name: Use BatchSortAgg, when output requires order
   sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
-    BatchExchange { order: [t.v1 DESC], dist: Single }
+    BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: Single }
     └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-      └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-        └─BatchSort { order: [t.v1 DESC] }
+      └─BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: HashShard(t.v1) }
+        └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
           └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - name: Use BatchSortAgg, when required order satisfies input order
   sql: |
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   batch_plan: |
-    BatchExchange { order: [t.k1 ASC], dist: Single }
+    BatchExchange { order: [t.k1 ASC NULLS LAST], dist: Single }
     └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
       └─BatchSortAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
-        └─BatchExchange { order: [t.k1 ASC, t.k2 ASC], dist: HashShard(t.k1, t.k2) }
-          └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+        └─BatchExchange { order: [t.k1 ASC NULLS LAST, t.k2 ASC NULLS LAST], dist: HashShard(t.k1, t.k2) }
+          └─BatchSort { order: [t.k1 ASC NULLS LAST, t.k2 ASC NULLS LAST] }
             └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
 - name: Use BatchSortAgg, when output requires order with swapped output
   sql: |
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |
-    BatchExchange { order: [t.v1 DESC], dist: Single }
+    BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: Single }
     └─BatchProject { exprs: [max(t.v2), t.v1] }
       └─BatchSortAgg { group_key: [t.v1], aggs: [max(t.v2)] }
-        └─BatchExchange { order: [t.v1 DESC], dist: HashShard(t.v1) }
-          └─BatchSort { order: [t.v1 DESC] }
+        └─BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: HashShard(t.v1) }
+          └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
             └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - name: Not use BatchSortAgg, when input provides order
   sql: |
@@ -241,11 +241,11 @@
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
   batch_plan: |
-    BatchExchange { order: [t.v1 DESC], dist: Single }
-    └─BatchSort { order: [t.v1 DESC] }
+    BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: Single }
+    └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
       └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
-          └─BatchSort { order: [t.v1 DESC] }
+          └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
             └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
@@ -254,12 +254,12 @@
     create table t(k1 int, k2 int, v1 int);
     SELECT max(v1), k1, k2 from t group by k1, k2 order by k1;
   batch_plan: |
-    BatchExchange { order: [t.k1 ASC], dist: Single }
+    BatchExchange { order: [t.k1 ASC NULLS LAST], dist: Single }
     └─BatchProject { exprs: [max(t.v1), t.k1, t.k2] }
-      └─BatchSort { order: [t.k1 ASC] }
+      └─BatchSort { order: [t.k1 ASC NULLS LAST] }
         └─BatchHashAgg { group_key: [t.k1, t.k2], aggs: [max(t.v1)] }
           └─BatchExchange { order: [], dist: HashShard(t.k1, t.k2) }
-            └─BatchSort { order: [t.k1 ASC, t.k2 ASC] }
+            └─BatchSort { order: [t.k1 ASC NULLS LAST, t.k2 ASC NULLS LAST] }
               └─BatchScan { table: t, columns: [t.k1, t.k2, t.v1], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
@@ -268,12 +268,12 @@
     create table t(v1 int, v2 int);
     select max(v2), v1 from t group by v1 order by v1 desc;
   batch_plan: |
-    BatchExchange { order: [t.v1 DESC], dist: Single }
+    BatchExchange { order: [t.v1 DESC NULLS FIRST], dist: Single }
     └─BatchProject { exprs: [max(t.v2), t.v1] }
-      └─BatchSort { order: [t.v1 DESC] }
+      └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
         └─BatchHashAgg { group_key: [t.v1], aggs: [max(t.v2)] }
           └─BatchExchange { order: [], dist: HashShard(t.v1) }
-            └─BatchSort { order: [t.v1 DESC] }
+            └─BatchSort { order: [t.v1 DESC NULLS FIRST] }
               └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
   with_config_map:
     RW_BATCH_ENABLE_SORT_AGG: 'false'
@@ -335,13 +335,13 @@
     select distinct on (v1, v3) v1, v2 from t order by v3, v1;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-    └─LogicalTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─LogicalTopN { order: "[t.v3 ASC NULLS LAST, t.v1 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [0, 2] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
-    └─BatchExchange { order: [t.v3 ASC, t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v3 ASC, t.v1 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─BatchExchange { order: [t.v3 ASC NULLS LAST, t.v1 ASC NULLS LAST], dist: Single }
+      └─BatchGroupTopN { order: "[t.v3 ASC NULLS LAST, t.v1 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [0, 2] }
         └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
@@ -350,13 +350,13 @@
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
   logical_plan: |
     LogicalProject { exprs: [t.v1, t.v2] }
-    └─LogicalTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─LogicalTopN { order: "[t.v1 ASC NULLS LAST, t.v3 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [0, 2] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [t.v1, t.v2] }
-    └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC, t.v3 ASC]", limit: 1, offset: 0, group_key: [0, 2] }
+    └─BatchExchange { order: [t.v1 ASC NULLS LAST, t.v3 ASC NULLS LAST], dist: Single }
+      └─BatchGroupTopN { order: "[t.v1 ASC NULLS LAST, t.v3 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [0, 2] }
         └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
           └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
 - name: distinct on
@@ -364,7 +364,7 @@
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
   logical_plan: |
-    LogicalTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [0] }
+    LogicalTopN { order: "[t.v1 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [0] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
       └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
 - name: distinct on
@@ -373,13 +373,13 @@
     select distinct on(v1) v2 + v3 from t order by v1;
   logical_plan: |
     LogicalProject { exprs: [$expr1] }
-    └─LogicalTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
+    └─LogicalTopN { order: "[t.v1 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [1] }
       └─LogicalProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
   batch_plan: |
     BatchProject { exprs: [$expr1] }
-    └─BatchExchange { order: [t.v1 ASC], dist: Single }
-      └─BatchGroupTopN { order: "[t.v1 ASC]", limit: 1, offset: 0, group_key: [1] }
+    └─BatchExchange { order: [t.v1 ASC NULLS LAST], dist: Single }
+      └─BatchGroupTopN { order: "[t.v1 ASC NULLS LAST]", limit: 1, offset: 0, group_key: [1] }
         └─BatchExchange { order: [], dist: HashShard(t.v1) }
           └─BatchProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
@@ -1237,7 +1237,7 @@
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a asc;
   batch_plan: |
-    BatchExchange { order: [idx_asc.a ASC], dist: Single }
+    BatchExchange { order: [idx_asc.a ASC NULLS LAST], dist: Single }
     └─BatchSortAgg { group_key: [idx_asc.a], aggs: [count] }
       └─BatchScan { table: idx_asc, columns: [idx_asc.a], distribution: UpstreamHashShard(idx_asc.a) }
 - name: sort agg on a descending index
@@ -1247,6 +1247,6 @@
     create index idx_desc on t(a desc);
     select a, count(*) cnt from t group by a order by a desc;
   batch_plan: |
-    BatchExchange { order: [idx_desc.a DESC], dist: Single }
+    BatchExchange { order: [idx_desc.a DESC NULLS FIRST], dist: Single }
     └─BatchSortAgg { group_key: [idx_desc.a], aggs: [count] }
       └─BatchScan { table: idx_desc, columns: [idx_desc.a], distribution: UpstreamHashShard(idx_desc.a) }
