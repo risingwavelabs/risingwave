@@ -16,7 +16,8 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
+use risingwave_hummock_sdk::HummockEpoch;
 
 use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
@@ -40,6 +41,8 @@ pub struct BlockIterator {
     last_value_len_type: LenType,
 
     key_index_in_restart_point: usize,
+
+    epoch: HummockEpoch,
 }
 
 impl BlockIterator {
@@ -54,6 +57,7 @@ impl BlockIterator {
             last_key_len_type: LenType::u8,
             last_value_len_type: LenType::u8,
             key_index_in_restart_point: 0,
+            epoch: 0,
         }
     }
 
@@ -80,7 +84,7 @@ impl BlockIterator {
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
 
-        FullKey::from_slice_without_table_id(self.block.table_id(), &self.key[..])
+        FullKey::from_slice(self.block.table_id(), self.epoch, &self.key[..])
     }
 
     pub fn value(&self) -> &[u8] {
@@ -101,20 +105,20 @@ impl BlockIterator {
         self.next_until_prev_offset(self.block.len());
     }
 
-    pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        self.seek_restart_point_by_key(key);
+    pub fn seek(&mut self, full_key: FullKey<&[u8]>) {
+        self.seek_restart_point_by_key(full_key.user_key.table_key);
 
-        self.next_until_key(key);
+        self.next_until_key(full_key);
     }
 
-    pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        self.seek_restart_point_by_key(key);
+    pub fn seek_le(&mut self, full_key: FullKey<&[u8]>) {
+        self.seek_restart_point_by_key(full_key.user_key.table_key);
 
-        self.next_until_key(key);
+        self.next_until_key(full_key);
         if !self.is_valid() {
             self.seek_to_last();
         }
-        self.prev_until_key(key);
+        self.prev_until_key(full_key);
     }
 }
 
@@ -158,6 +162,8 @@ impl BlockIterator {
         {
             let new_restart_point_index = self.restart_point_index + 1;
             self.update_restart_point(new_restart_point_index);
+        } else {
+            self.key_index_in_restart_point += 1;
         }
 
         let prefix =
@@ -166,10 +172,9 @@ impl BlockIterator {
         self.key
             .extend_from_slice(&self.block.data()[prefix.diff_key_range()]);
 
-        let _epoch = self
+        self.epoch = self
             .block
             .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
-        self.key_index_in_restart_point += 1;
 
         self.value_range = prefix.value_range();
         self.offset = offset;
@@ -244,7 +249,7 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
+    fn search_restart_point_index_by_key(&self, key: TableKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
             .search_restart_partition_point(
@@ -256,9 +261,8 @@ impl BlockIterator {
                     let prefix =
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
-                    let full_probe_key =
-                        FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
-                    match full_probe_key.cmp(&key) {
+
+                    match TableKey(probe_key).cmp(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
                     }
@@ -268,7 +272,7 @@ impl BlockIterator {
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
-    fn seek_restart_point_by_key(&mut self, key: FullKey<&[u8]>) {
+    fn seek_restart_point_by_key(&mut self, key: TableKey<&[u8]>) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }
@@ -297,6 +301,7 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
+        self.epoch = self.block.decode_epoch(index, 0)
     }
 }
 

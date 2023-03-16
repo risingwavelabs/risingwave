@@ -638,6 +638,13 @@ impl<'a> FullKey<&'a [u8]> {
         }
     }
 
+    pub fn from_slice(table_id: TableId, epoch: HummockEpoch, table_key_slice: &'a [u8]) -> Self {
+        Self {
+            user_key: UserKey::new(table_id, TableKey(table_key_slice)),
+            epoch,
+        }
+    }
+
     /// Construct a [`FullKey`] from a byte slice.
     pub fn decode_reverse_epoch(slice: &'a [u8]) -> Self {
         let epoch_pos = slice.len() - EPOCH_LEN;

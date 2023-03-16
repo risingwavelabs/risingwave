@@ -216,9 +216,6 @@ impl Block {
         // decode epoch dictionary
         // 1. get epoch_dictionary_len
         let epoch_dictionary_len = ((&buf[buf_len - 2..]).get_u16_le()) as usize;
-
-        // println!("epoch_group_len {:?}", epoch_dictionary_len);
-
         let epoch_dictionary_begin = buf_len - 2 - 8 * epoch_dictionary_len;
         let epoch_dictionary_end = buf_len - 2;
         let mut epoch_dictionary_buf = &buf[epoch_dictionary_begin..epoch_dictionary_end];
@@ -229,12 +226,8 @@ impl Block {
             epoch_dictionary.push(epoch)
         }
 
-        // println!("decode  {:?}", epoch_dictionary);
-
         let epoch_group_len = (&buf[epoch_dictionary_begin - 2..]).get_u16_le() as usize;
-        // println!("decode epoch_group_len {}", epoch_group_len);
         let entry_count = (&buf[epoch_dictionary_begin - 6..]).get_u32_le() as usize;
-        // println!("decode entry_count {}", entry_count);
         let epoch_group_begin = epoch_dictionary_begin - 6 - entry_count * 2 - epoch_group_len * 2;
         let epoch_group_end = epoch_dictionary_begin - 6;
         let mut epoch_group_buf = &buf[epoch_group_begin..epoch_group_end];
@@ -250,8 +243,6 @@ impl Block {
                 group.push(epoch_index);
             }
         }
-
-        // println!("epoch_group {:?}", epoch_group);
 
         // decode restart_points_type_index
         let buf_len = epoch_group_begin;
@@ -283,7 +274,6 @@ impl Block {
         let mut restart_points_buf = &buf[data_len..restarts_end];
 
         let mut type_index: usize = 0;
-
         for _ in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
             if type_index < index_key_vec.len() - 1
@@ -355,13 +345,8 @@ impl Block {
     }
 
     pub fn decode_epoch(&self, group_index: usize, key_index: usize) -> HummockEpoch {
-        // println!("group_index {} key_index {}", group_index, key_index);
-        let epoch_index = self.epoch_dictionary.epoch_group[group_index][key_index];
-        // println!(
-        //     "epoch_index {} epoch_group {:?} epoch_dictionary {:?}",
-        //     epoch_index, self.epoch_group, self.epoch_dictionary
-        // );
-        self.epoch_dictionary.dictionary[epoch_index as usize - 1]
+        let epoch_index = (self.epoch_dictionary.epoch_group[group_index][key_index] - 1) as usize;
+        self.epoch_dictionary.dictionary[epoch_index]
     }
 }
 
@@ -534,14 +519,20 @@ impl BlockBuilder {
         let mut key: BytesMut = Default::default();
         full_key.encode_into_without_table_id(&mut key);
         if self.entry_count > 0 {
-            debug_assert!(!key.is_empty());
-            debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
-                Ordering::Less
-            );
+            #[cfg(debug_assertions)]
+            {
+                debug_assert!(!key.is_empty());
+                debug_assert_eq!(
+                    KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
+                    Ordering::Less
+                );
+            }
         }
+
+        let block_key = &key[..key.len() - 8];
+
         // Update restart point if needed and calculate diff key.
-        let k_type = LenType::new(key.len());
+        let k_type = LenType::new(block_key.len());
         let v_type = LenType::new(value.len());
 
         let type_mismatch = if let Some(RestartPoint {
@@ -569,14 +560,15 @@ impl BlockBuilder {
                 });
             }
 
-            key.as_ref()
+            block_key
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, &key[..])
+            let last_block_key = &self.last_key[..&self.last_key.len() - 8];
+            bytes_diff_below_max_key_length(last_block_key, block_key)
         };
 
         self.epoch_group.last_mut().unwrap().push(epoch);
         let prefix = KeyPrefix::new_without_len(
-            key.len() - diff_key.len(),
+            block_key.len() - diff_key.len(),
             diff_key.len(),
             value.len(),
             self.buf.len(),
@@ -683,7 +675,6 @@ impl BlockBuilder {
             self.buf.put_u16_le(group_len as u16);
             for epoch in group {
                 let epoch_index = epoch_dictionary.get(epoch).unwrap();
-                // println!("epoch {} -> {}", epoch, epoch_index);
                 self.buf.put_u16_le(*epoch_index as u16);
             }
         }
@@ -697,10 +688,6 @@ impl BlockBuilder {
             self.buf.put_u64_le(epoch);
         }
 
-        println!(
-            "encode epoch_dictionary_len {}",
-            self.epoch_dictionary.len()
-        );
         self.buf.put_u16_le(self.epoch_dictionary.len() as u16);
 
         self.buf.put_u32_le(self.table_id.unwrap());
@@ -783,6 +770,7 @@ mod tests {
         let capacity = builder.uncompressed_block_size();
         assert_eq!(capacity, builder.approximate_len() - 9);
         let buf = builder.build().to_vec();
+
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
@@ -881,12 +869,6 @@ mod tests {
         let block = Box::new(Block::decode(buf.into(), capacity).unwrap());
         let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
 
-        // println!("dictionary {:?}", builder.epoch_dictionary);
-        // println!(
-        //     "epoch_group {:?} {:?}",
-        //     builder.epoch_group, builder.restart_points
-        // );
-
         bi.seek_to_first();
         assert!(bi.is_valid());
         assert_eq!(construct_full_key_struct(0, &medium_key, 10), bi.key());
@@ -938,9 +920,6 @@ mod tests {
             let mut bi = BlockIterator::new(BlockHolder::from_owned_block(block));
             bi.seek_to_first();
             assert!(bi.is_valid());
-
-            // println!("dictionary {:?}", builder.epoch_dictionary);
-            // println!("epoch_group {:?}", builder.epoch_group);
 
             for index in 0..KEY_COUNT {
                 if index < 50 {
