@@ -59,7 +59,7 @@ apt-get -y install postgresql-client
 export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
-psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
+psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
 node_port=50051
