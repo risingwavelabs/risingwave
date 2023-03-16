@@ -131,9 +131,9 @@ message StreamSource {
   string source_name = 8;
 }
 
-message BarrierRecvNode {
-
-}
+// The executor only for receiving barrier from the meta service. It always resides in the leaves
+// of the streaming graph.
+message BarrierRecvNode {}
 
 message SourceNode {
   // The source node can contain either a stream source or nothing. So here we extract all

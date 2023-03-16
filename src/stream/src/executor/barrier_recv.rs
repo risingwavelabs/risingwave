@@ -22,11 +22,13 @@ use super::{
     StreamExecutorError,
 };
 
+/// The executor only for receiving barrier from the meta service. It always resides in the leaves
+/// of the streaming graph.
 pub struct BarrierRecvExecutor {
     _ctx: ActorContextRef,
-
     identity: String,
 
+    /// The barrier receiver registered in the local barrier manager.
     barrier_receiver: UnboundedReceiver<Barrier>,
 }
 
@@ -53,6 +55,8 @@ impl Executor for BarrierRecvExecutor {
         UnboundedReceiverStream::new(self.barrier_receiver)
             .map(|barrier| Ok(Message::Barrier(barrier)))
             .chain(futures::stream::once(async {
+                // We do not use the stream termination as the control message, and this line should
+                // never be reached in normal cases. So we just return an error here.
                 Err(StreamExecutorError::channel_closed("barrier receiver"))
             }))
             .boxed()
