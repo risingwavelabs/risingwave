@@ -439,7 +439,6 @@ where
                 .collect_vec(),
             None => table_columns.iter().map(|c| c.column_id).collect_vec(),
         };
-        // let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             local_store: local_state_store,
