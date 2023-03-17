@@ -25,7 +25,7 @@ use tracing::error;
 use super::MonitoredStorageMetrics;
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockStorage, SstableIdManagerRef};
+use crate::hummock::{HummockStorage, SstableObjectIdManagerRef};
 use crate::store::*;
 use crate::{
     define_local_state_store_associated_type, define_state_store_associated_type,
@@ -143,12 +143,7 @@ impl<S: StateStoreRead> StateStoreRead for MonitoredStateStore<S> {
 
     define_state_store_read_associated_type!();
 
-    fn get<'a>(
-        &'a self,
-        key: &'a [u8],
-        epoch: u64,
-        read_options: ReadOptions,
-    ) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
         let table_id = read_options.table_id;
         let key_len = key.len();
         self.monitored_get(self.inner.get(key, epoch, read_options), table_id, key_len)
@@ -195,7 +190,7 @@ impl<S: LocalStateStore> LocalStateStore for MonitoredStateStore<S> {
         }
     }
 
-    fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+    fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
         let table_id = read_options.table_id;
         let key_len = key.len();
         // TODO: may collect the metrics as local
@@ -324,8 +319,8 @@ impl MonitoredStateStore<HummockStorage> {
         self.inner.sstable_store()
     }
 
-    pub fn sstable_id_manager(&self) -> SstableIdManagerRef {
-        self.inner.sstable_id_manager().clone()
+    pub fn sstable_object_id_manager(&self) -> SstableObjectIdManagerRef {
+        self.inner.sstable_object_id_manager().clone()
     }
 }
 

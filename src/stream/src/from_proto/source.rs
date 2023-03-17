@@ -43,6 +43,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
             .context
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
+        let barrier_interval_ms = params
+            .env
+            .system_params_manager_ref()
+            .get_params()
+            .load()
+            .barrier_interval_ms() as u64;
 
         if let Some(source) = &node.source_inner {
             let source_id = TableId::new(source.source_id);
@@ -52,7 +58,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 source.columns.clone(),
                 params.env.source_metrics(),
                 source.pk_column_ids.clone(),
-                source.row_id_index.clone(),
+                source.row_id_index.map(|x| x as _),
                 source.properties.clone(),
                 source.get_info()?.clone(),
                 params.env.connector_params(),
@@ -108,7 +114,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     stream_source_core,
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    barrier_interval_ms,
                     params.executor_id,
                 )?))
             } else {
@@ -119,7 +125,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     Some(stream_source_core),
                     params.executor_stats,
                     barrier_receiver,
-                    stream.config.barrier_interval_ms as u64,
+                    barrier_interval_ms,
                     params.executor_id,
                 )))
             }
@@ -133,7 +139,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 None,
                 params.executor_stats,
                 barrier_receiver,
-                stream.config.barrier_interval_ms as u64,
+                barrier_interval_ms,
                 params.executor_id,
             )))
         }

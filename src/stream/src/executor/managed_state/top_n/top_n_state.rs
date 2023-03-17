@@ -15,6 +15,7 @@
 use futures::{pin_mut, StreamExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use crate::common::table::state_table::StateTable;
@@ -81,7 +82,10 @@ impl<S: StateStore> ManagedTopNState<S> {
         offset: usize,
         limit: Option<usize>,
     ) -> StreamExecutorResult<Vec<TopNStateRow>> {
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(&group_key, Default::default())
+            .await?;
         pin_mut!(state_table_iter);
 
         // here we don't expect users to have large OFFSET.
@@ -115,7 +119,15 @@ impl<S: StateStore> ManagedTopNState<S> {
         cache_size_limit: usize,
     ) -> StreamExecutorResult<()> {
         let cache = &mut topn_cache.high;
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(
+                &group_key,
+                PrefetchOptions {
+                    exhaust_iter: cache_size_limit == usize::MAX,
+                },
+            )
+            .await?;
         pin_mut!(state_table_iter);
         while let Some(item) = state_table_iter.next().await {
             // Note(bugen): should first compare with start key before constructing TopNStateRow.
@@ -155,7 +167,15 @@ impl<S: StateStore> ManagedTopNState<S> {
         assert!(topn_cache.middle.is_empty());
         assert!(topn_cache.high.is_empty());
 
-        let state_table_iter = self.state_table.iter_with_pk_prefix(&group_key).await?;
+        let state_table_iter = self
+            .state_table
+            .iter_with_pk_prefix(
+                &group_key,
+                PrefetchOptions {
+                    exhaust_iter: topn_cache.limit == usize::MAX,
+                },
+            )
+            .await?;
         pin_mut!(state_table_iter);
         if topn_cache.offset > 0 {
             while let Some(item) = state_table_iter.next().await {
@@ -231,7 +251,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     // use std::collections::BTreeMap;
     use super::*;
@@ -244,11 +264,11 @@ mod tests {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let schema = Schema::new(data_types.into_iter().map(Field::unnamed).collect());
         let storage_key = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
         ];
         let pk = vec![0, 1];
-        let order_by = vec![OrderPair::new(0, OrderType::Ascending)];
+        let order_by = vec![ColumnOrder::new(0, OrderType::ascending())];
 
         create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
     }
@@ -258,7 +278,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;
@@ -337,7 +357,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;

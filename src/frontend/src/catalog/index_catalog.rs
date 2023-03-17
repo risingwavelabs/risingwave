@@ -18,13 +18,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::types::DataType;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::Index as ProstIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
-use crate::optimizer::property::FieldOrder;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
@@ -58,8 +58,8 @@ impl IndexCatalog {
             .index_item
             .iter()
             .map(|x| match x.rex_node.as_ref().unwrap() {
-                RexNode::InputRef(input_ref_expr) => InputRef {
-                    index: input_ref_expr.column_idx as usize,
+                RexNode::InputRef(input_col_idx) => InputRef {
+                    index: *input_col_idx as usize,
                     data_type: DataType::from(x.return_type.as_ref().unwrap()),
                 },
                 RexNode::FuncCall(_) => unimplemented!(),
@@ -98,16 +98,13 @@ impl IndexCatalog {
         }
     }
 
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<FieldOrder> {
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| FieldOrder {
-                index: *mapping.get(&x.index).unwrap(),
-                direct: x.direct,
-            })
+            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
             .collect_vec()
     }
 
@@ -125,12 +122,14 @@ impl IndexCatalog {
         self.index_table.columns.len() == self.primary_table.columns.len()
     }
 
-    /// a mapping maps column index of secondary index to column index of primary table
+    /// A mapping maps the column index of the secondary index to the column index of the primary
+    /// table.
     pub fn secondary_to_primary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.secondary_to_primary_mapping
     }
 
-    /// a mapping maps column index of primary table to column index of secondary index
+    /// A mapping maps the column index of the primary table to the column index of the secondary
+    /// index.
     pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.primary_to_secondary_mapping
     }

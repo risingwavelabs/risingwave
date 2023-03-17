@@ -1,14 +1,8 @@
 /* eslint-disable */
+import { ColumnOrder } from "./common";
 import { DataType } from "./data";
 import { ExprNode } from "./expr";
-import {
-  ColumnCatalog,
-  ColumnOrder,
-  Field,
-  RowFormatType,
-  rowFormatTypeFromJSON,
-  rowFormatTypeToJSON,
-} from "./plan_common";
+import { ColumnCatalog, Field, RowFormatType, rowFormatTypeFromJSON, rowFormatTypeToJSON } from "./plan_common";
 
 export const protobufPackage = "catalog";
 
@@ -100,15 +94,6 @@ export function handleConflictBehaviorToJSON(object: HandleConflictBehavior): st
   }
 }
 
-/**
- * The rust prost library always treats uint64 as required and message as
- * optional. In order to allow `row_id_index` as an optional field, we wrap
- * uint64 inside this message.
- */
-export interface ColumnIndex {
-  index: number;
-}
-
 /** A mapping of column indices. */
 export interface ColIndexMapping {
   /** The size of the target space. */
@@ -146,8 +131,8 @@ export interface Source {
    * The column index of row ID. If the primary key is specified by the user,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /** Columns of the source. */
   columns: ColumnCatalog[];
@@ -196,6 +181,23 @@ export interface Sink_PropertiesEntry {
   value: string;
 }
 
+export interface Connection {
+  id: number;
+  name: string;
+  info?: { $case: "privateLinkService"; privateLinkService: Connection_PrivateLinkService };
+}
+
+export interface Connection_PrivateLinkService {
+  provider: string;
+  endpointId: string;
+  dnsEntries: { [key: string]: string };
+}
+
+export interface Connection_PrivateLinkService_DnsEntriesEntry {
+  key: string;
+  value: string;
+}
+
 export interface Index {
   id: number;
   schemaId: number;
@@ -223,6 +225,19 @@ export interface Function {
   language: string;
   link: string;
   identifier: string;
+  kind?: { $case: "scalar"; scalar: Function_ScalarFunction } | { $case: "table"; table: Function_TableFunction } | {
+    $case: "aggregate";
+    aggregate: Function_AggregateFunction;
+  };
+}
+
+export interface Function_ScalarFunction {
+}
+
+export interface Function_TableFunction {
+}
+
+export interface Function_AggregateFunction {
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -247,15 +262,15 @@ export interface Table {
    * an optional column index which is the vnode of each row computed by the
    * table's consistent hash distribution
    */
-  vnodeColIndex:
-    | ColumnIndex
+  vnodeColIndex?:
+    | number
     | undefined;
   /**
    * An optional column index of row id. If the primary key is specified by users,
    * this will be `None`.
    */
-  rowIdIndex:
-    | ColumnIndex
+  rowIdIndex?:
+    | number
     | undefined;
   /**
    * The column indices which are stored in the state store's value with
@@ -265,8 +280,13 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflictBehavior: HandleConflictBehavior;
+  /**
+   * Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+   * for implementing the table's bloom filter or other storage optimization techniques.
+   */
   readPrefixLenHint: number;
   watermarkIndices: number[];
+  distKeyInPk: number[];
   /**
    * Per-table catalog version, used by schema change. `None` for internal tables and tests.
    * Not to be confused with the global catalog version for notification service.
@@ -375,28 +395,6 @@ export interface Database {
   name: string;
   owner: number;
 }
-
-function createBaseColumnIndex(): ColumnIndex {
-  return { index: 0 };
-}
-
-export const ColumnIndex = {
-  fromJSON(object: any): ColumnIndex {
-    return { index: isSet(object.index) ? Number(object.index) : 0 };
-  },
-
-  toJSON(message: ColumnIndex): unknown {
-    const obj: any = {};
-    message.index !== undefined && (obj.index = Math.round(message.index));
-    return obj;
-  },
-
-  fromPartial<I extends Exact<DeepPartial<ColumnIndex>, I>>(object: I): ColumnIndex {
-    const message = createBaseColumnIndex();
-    message.index = object.index ?? 0;
-    return message;
-  },
-};
 
 function createBaseColIndexMapping(): ColIndexMapping {
   return { targetSize: 0, map: [] };
@@ -529,7 +527,7 @@ export const Source = {
       schemaId: isSet(object.schemaId) ? Number(object.schemaId) : 0,
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
       pkColumnIds: Array.isArray(object?.pkColumnIds) ? object.pkColumnIds.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -552,8 +550,7 @@ export const Source = {
     message.schemaId !== undefined && (obj.schemaId = Math.round(message.schemaId));
     message.databaseId !== undefined && (obj.databaseId = Math.round(message.databaseId));
     message.name !== undefined && (obj.name = message.name);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.columns) {
       obj.columns = message.columns.map((e) => e ? ColumnCatalog.toJSON(e) : undefined);
     } else {
@@ -586,9 +583,7 @@ export const Source = {
     message.schemaId = object.schemaId ?? 0;
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
     message.pkColumnIds = object.pkColumnIds?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -773,6 +768,128 @@ export const Sink_PropertiesEntry = {
   },
 };
 
+function createBaseConnection(): Connection {
+  return { id: 0, name: "", info: undefined };
+}
+
+export const Connection = {
+  fromJSON(object: any): Connection {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      info: isSet(object.privateLinkService)
+        ? {
+          $case: "privateLinkService",
+          privateLinkService: Connection_PrivateLinkService.fromJSON(object.privateLinkService),
+        }
+        : undefined,
+    };
+  },
+
+  toJSON(message: Connection): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.name !== undefined && (obj.name = message.name);
+    message.info?.$case === "privateLinkService" && (obj.privateLinkService = message.info?.privateLinkService
+      ? Connection_PrivateLinkService.toJSON(message.info?.privateLinkService)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection>, I>>(object: I): Connection {
+    const message = createBaseConnection();
+    message.id = object.id ?? 0;
+    message.name = object.name ?? "";
+    if (
+      object.info?.$case === "privateLinkService" &&
+      object.info?.privateLinkService !== undefined &&
+      object.info?.privateLinkService !== null
+    ) {
+      message.info = {
+        $case: "privateLinkService",
+        privateLinkService: Connection_PrivateLinkService.fromPartial(object.info.privateLinkService),
+      };
+    }
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService(): Connection_PrivateLinkService {
+  return { provider: "", endpointId: "", dnsEntries: {} };
+}
+
+export const Connection_PrivateLinkService = {
+  fromJSON(object: any): Connection_PrivateLinkService {
+    return {
+      provider: isSet(object.provider) ? String(object.provider) : "",
+      endpointId: isSet(object.endpointId) ? String(object.endpointId) : "",
+      dnsEntries: isObject(object.dnsEntries)
+        ? Object.entries(object.dnsEntries).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: Connection_PrivateLinkService): unknown {
+    const obj: any = {};
+    message.provider !== undefined && (obj.provider = message.provider);
+    message.endpointId !== undefined && (obj.endpointId = message.endpointId);
+    obj.dnsEntries = {};
+    if (message.dnsEntries) {
+      Object.entries(message.dnsEntries).forEach(([k, v]) => {
+        obj.dnsEntries[k] = v;
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService {
+    const message = createBaseConnection_PrivateLinkService();
+    message.provider = object.provider ?? "";
+    message.endpointId = object.endpointId ?? "";
+    message.dnsEntries = Object.entries(object.dnsEntries ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService_DnsEntriesEntry(): Connection_PrivateLinkService_DnsEntriesEntry {
+  return { key: "", value: "" };
+}
+
+export const Connection_PrivateLinkService_DnsEntriesEntry = {
+  fromJSON(object: any): Connection_PrivateLinkService_DnsEntriesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: Connection_PrivateLinkService_DnsEntriesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService_DnsEntriesEntry>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService_DnsEntriesEntry {
+    const message = createBaseConnection_PrivateLinkService_DnsEntriesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
 function createBaseIndex(): Index {
   return {
     id: 0,
@@ -853,6 +970,7 @@ function createBaseFunction(): Function {
     language: "",
     link: "",
     identifier: "",
+    kind: undefined,
   };
 }
 
@@ -871,6 +989,13 @@ export const Function = {
       language: isSet(object.language) ? String(object.language) : "",
       link: isSet(object.link) ? String(object.link) : "",
       identifier: isSet(object.identifier) ? String(object.identifier) : "",
+      kind: isSet(object.scalar)
+        ? { $case: "scalar", scalar: Function_ScalarFunction.fromJSON(object.scalar) }
+        : isSet(object.table)
+        ? { $case: "table", table: Function_TableFunction.fromJSON(object.table) }
+        : isSet(object.aggregate)
+        ? { $case: "aggregate", aggregate: Function_AggregateFunction.fromJSON(object.aggregate) }
+        : undefined,
     };
   },
 
@@ -891,6 +1016,14 @@ export const Function = {
     message.language !== undefined && (obj.language = message.language);
     message.link !== undefined && (obj.link = message.link);
     message.identifier !== undefined && (obj.identifier = message.identifier);
+    message.kind?.$case === "scalar" &&
+      (obj.scalar = message.kind?.scalar ? Function_ScalarFunction.toJSON(message.kind?.scalar) : undefined);
+    message.kind?.$case === "table" &&
+      (obj.table = message.kind?.table ? Function_TableFunction.toJSON(message.kind?.table) : undefined);
+    message.kind?.$case === "aggregate" &&
+      (obj.aggregate = message.kind?.aggregate
+        ? Function_AggregateFunction.toJSON(message.kind?.aggregate)
+        : undefined);
     return obj;
   },
 
@@ -908,6 +1041,75 @@ export const Function = {
     message.language = object.language ?? "";
     message.link = object.link ?? "";
     message.identifier = object.identifier ?? "";
+    if (object.kind?.$case === "scalar" && object.kind?.scalar !== undefined && object.kind?.scalar !== null) {
+      message.kind = { $case: "scalar", scalar: Function_ScalarFunction.fromPartial(object.kind.scalar) };
+    }
+    if (object.kind?.$case === "table" && object.kind?.table !== undefined && object.kind?.table !== null) {
+      message.kind = { $case: "table", table: Function_TableFunction.fromPartial(object.kind.table) };
+    }
+    if (object.kind?.$case === "aggregate" && object.kind?.aggregate !== undefined && object.kind?.aggregate !== null) {
+      message.kind = { $case: "aggregate", aggregate: Function_AggregateFunction.fromPartial(object.kind.aggregate) };
+    }
+    return message;
+  },
+};
+
+function createBaseFunction_ScalarFunction(): Function_ScalarFunction {
+  return {};
+}
+
+export const Function_ScalarFunction = {
+  fromJSON(_: any): Function_ScalarFunction {
+    return {};
+  },
+
+  toJSON(_: Function_ScalarFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(_: I): Function_ScalarFunction {
+    const message = createBaseFunction_ScalarFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_TableFunction(): Function_TableFunction {
+  return {};
+}
+
+export const Function_TableFunction = {
+  fromJSON(_: any): Function_TableFunction {
+    return {};
+  },
+
+  toJSON(_: Function_TableFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(_: I): Function_TableFunction {
+    const message = createBaseFunction_TableFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_AggregateFunction(): Function_AggregateFunction {
+  return {};
+}
+
+export const Function_AggregateFunction = {
+  fromJSON(_: any): Function_AggregateFunction {
+    return {};
+  },
+
+  toJSON(_: Function_AggregateFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_AggregateFunction>, I>>(_: I): Function_AggregateFunction {
+    const message = createBaseFunction_AggregateFunction();
     return message;
   },
 };
@@ -936,6 +1138,7 @@ function createBaseTable(): Table {
     handlePkConflictBehavior: HandleConflictBehavior.NO_CHECK_UNSPECIFIED,
     readPrefixLenHint: 0,
     watermarkIndices: [],
+    distKeyInPk: [],
     version: undefined,
   };
 }
@@ -969,8 +1172,8 @@ export const Table = {
         }, {})
         : {},
       fragmentId: isSet(object.fragmentId) ? Number(object.fragmentId) : 0,
-      vnodeColIndex: isSet(object.vnodeColIndex) ? ColumnIndex.fromJSON(object.vnodeColIndex) : undefined,
-      rowIdIndex: isSet(object.rowIdIndex) ? ColumnIndex.fromJSON(object.rowIdIndex) : undefined,
+      vnodeColIndex: isSet(object.vnodeColIndex) ? Number(object.vnodeColIndex) : undefined,
+      rowIdIndex: isSet(object.rowIdIndex) ? Number(object.rowIdIndex) : undefined,
       valueIndices: Array.isArray(object?.valueIndices)
         ? object.valueIndices.map((e: any) => Number(e))
         : [],
@@ -982,6 +1185,7 @@ export const Table = {
       watermarkIndices: Array.isArray(object?.watermarkIndices)
         ? object.watermarkIndices.map((e: any) => Number(e))
         : [],
+      distKeyInPk: Array.isArray(object?.distKeyInPk) ? object.distKeyInPk.map((e: any) => Number(e)) : [],
       version: isSet(object.version) ? Table_TableVersion.fromJSON(object.version) : undefined,
     };
   },
@@ -1029,10 +1233,8 @@ export const Table = {
       });
     }
     message.fragmentId !== undefined && (obj.fragmentId = Math.round(message.fragmentId));
-    message.vnodeColIndex !== undefined &&
-      (obj.vnodeColIndex = message.vnodeColIndex ? ColumnIndex.toJSON(message.vnodeColIndex) : undefined);
-    message.rowIdIndex !== undefined &&
-      (obj.rowIdIndex = message.rowIdIndex ? ColumnIndex.toJSON(message.rowIdIndex) : undefined);
+    message.vnodeColIndex !== undefined && (obj.vnodeColIndex = Math.round(message.vnodeColIndex));
+    message.rowIdIndex !== undefined && (obj.rowIdIndex = Math.round(message.rowIdIndex));
     if (message.valueIndices) {
       obj.valueIndices = message.valueIndices.map((e) => Math.round(e));
     } else {
@@ -1046,6 +1248,11 @@ export const Table = {
       obj.watermarkIndices = message.watermarkIndices.map((e) => Math.round(e));
     } else {
       obj.watermarkIndices = [];
+    }
+    if (message.distKeyInPk) {
+      obj.distKeyInPk = message.distKeyInPk.map((e) => Math.round(e));
+    } else {
+      obj.distKeyInPk = [];
     }
     message.version !== undefined &&
       (obj.version = message.version ? Table_TableVersion.toJSON(message.version) : undefined);
@@ -1086,17 +1293,14 @@ export const Table = {
       {},
     );
     message.fragmentId = object.fragmentId ?? 0;
-    message.vnodeColIndex = (object.vnodeColIndex !== undefined && object.vnodeColIndex !== null)
-      ? ColumnIndex.fromPartial(object.vnodeColIndex)
-      : undefined;
-    message.rowIdIndex = (object.rowIdIndex !== undefined && object.rowIdIndex !== null)
-      ? ColumnIndex.fromPartial(object.rowIdIndex)
-      : undefined;
+    message.vnodeColIndex = object.vnodeColIndex ?? undefined;
+    message.rowIdIndex = object.rowIdIndex ?? undefined;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.definition = object.definition ?? "";
     message.handlePkConflictBehavior = object.handlePkConflictBehavior ?? HandleConflictBehavior.NO_CHECK_UNSPECIFIED;
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;
     message.watermarkIndices = object.watermarkIndices?.map((e) => e) || [];
+    message.distKeyInPk = object.distKeyInPk?.map((e) => e) || [];
     message.version = (object.version !== undefined && object.version !== null)
       ? Table_TableVersion.fromPartial(object.version)
       : undefined;

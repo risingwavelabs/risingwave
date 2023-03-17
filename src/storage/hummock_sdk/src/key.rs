@@ -18,8 +18,9 @@ use std::ops::Bound::*;
 use std::ops::{Bound, Deref, DerefMut, RangeBounds};
 use std::ptr;
 
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 
 use crate::HummockEpoch;
 
@@ -28,7 +29,7 @@ pub const TABLE_PREFIX_LEN: usize = std::mem::size_of::<u32>();
 // Max length for key overlap and diff length. See KeyPrefix::encode.
 pub const MAX_KEY_LEN: usize = u16::MAX as usize;
 
-pub type KeyPayloadType = Vec<u8>;
+pub type KeyPayloadType = Bytes;
 pub type TableKeyRange = (
     Bound<TableKey<KeyPayloadType>>,
     Bound<TableKey<KeyPayloadType>>,
@@ -277,35 +278,38 @@ pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
 }
 
 /// Get the end bound of the given `prefix` when transforming it to a key range.
-pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn end_bound_of_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Excluded(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Excluded(buf.freeze())
     } else {
         Unbounded
     }
 }
 
 /// Get the start bound of the given `prefix` when it is excluded from the range.
-pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Vec<u8>> {
+pub fn start_bound_of_excluded_prefix(prefix: &[u8]) -> Bound<Bytes> {
     if let Some((s, e)) = next_key_no_alloc(prefix) {
-        let mut res = Vec::with_capacity(s.len() + 1);
-        res.extend_from_slice(s);
-        res.push(e);
-        Included(res)
+        let mut buf = BytesMut::with_capacity(s.len() + 1);
+        buf.extend_from_slice(s);
+        buf.put_u8(e);
+        Included(buf.freeze())
     } else {
         panic!("the prefix is the maximum value")
     }
 }
 
 /// Transform the given `prefix` to a key range.
-pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
+pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Bytes>, Bound<Bytes>) {
     if prefix.is_empty() {
         (Unbounded, Unbounded)
     } else {
-        (Included(prefix.to_vec()), end_bound_of_prefix(prefix))
+        (
+            Included(Bytes::copy_from_slice(prefix)),
+            end_bound_of_prefix(prefix),
+        )
     }
 }
 
@@ -313,23 +317,28 @@ pub fn range_of_prefix(prefix: &[u8]) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
 pub fn prefixed_range<B: AsRef<[u8]>>(
     range: impl RangeBounds<B>,
     prefix: &[u8],
-) -> (Bound<Vec<u8>>, Bound<Vec<u8>>) {
-    let start = match range.start_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+) -> (Bound<Bytes>, Bound<Bytes>) {
+    let prefixed = |b: &B| -> Bytes {
+        let mut buf = BytesMut::with_capacity(prefix.len() + b.as_ref().len());
+        buf.extend_from_slice(prefix);
+        buf.extend_from_slice(b.as_ref());
+        buf.freeze()
+    };
+
+    let start: Bound<Bytes> = match range.start_bound() {
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
-        Unbounded => Included(prefix.to_vec()),
+        Unbounded => Included(Bytes::copy_from_slice(prefix)),
     };
 
     let end = match range.end_bound() {
-        Included(b) => Included([prefix, b.as_ref()].concat()),
+        Included(b) => Included(prefixed(b)),
         Excluded(b) => {
-            let b = b.as_ref();
-            assert!(!b.is_empty());
-            Excluded([prefix, b].concat())
+            assert!(!b.as_ref().is_empty());
+            Excluded(prefixed(b))
         }
         Unbounded => end_bound_of_prefix(prefix),
     };
@@ -429,6 +438,10 @@ impl<T: AsRef<[u8]>> UserKey<T> {
         buf.put_slice(self.table_key.as_ref());
     }
 
+    pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
+        buf.put_slice(self.table_key.as_ref());
+    }
+
     /// Encode in to a buffer.
     pub fn encode_length_prefixed(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
@@ -449,6 +462,15 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     /// Get the length of the encoded format.
     pub fn encoded_len(&self) -> usize {
         self.table_key.as_ref().len() + TABLE_PREFIX_LEN
+    }
+
+    pub fn get_vnode_id(&self) -> usize {
+        VirtualNode::from_be_bytes(
+            self.table_key.as_ref()[..VirtualNode::SIZE]
+                .try_into()
+                .expect("slice with incorrect length"),
+        )
+        .to_index()
     }
 }
 
@@ -565,6 +587,12 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    // Encode in to a buffer.
+    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
+        self.user_key.encode_table_key_into(buf);
+        buf.put_u64(self.epoch);
+    }
+
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
@@ -592,6 +620,20 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch,
+        }
+    }
+
+    /// Construct a [`FullKey`] from a byte slice without `table_id` encoded.
+    pub fn from_slice_without_table_id(
+        table_id: TableId,
+        slice_without_table_id: &'a [u8],
+    ) -> Self {
+        let epoch_pos = slice_without_table_id.len() - EPOCH_LEN;
+        let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
             epoch,
         }
     }
@@ -732,6 +774,14 @@ mod tests {
         let key = FullKey::for_test(TableId::new(1), &table_key[..], 1);
         let buf = key.encode();
         assert_eq!(FullKey::decode(&buf), key);
+        let mut table_key = vec![1];
+        let a = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 2;
+        let b = FullKey::for_test(TableId::new(1), table_key.clone(), 1);
+        table_key[0] = 129;
+        let c = FullKey::for_test(TableId::new(1), table_key, 1);
+        assert!(a.lt(&b));
+        assert!(b.lt(&c));
     }
 
     #[test]

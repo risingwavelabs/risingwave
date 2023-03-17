@@ -18,8 +18,10 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::ordered::OrderedRowSerde;
 
-pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Vec<u8> {
-    pk.memcmp_serialize(serializer)
+pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Bytes {
+    let mut buf = BytesMut::with_capacity(pk.len());
+    pk.memcmp_serialize_into(serializer, &mut buf);
+    buf.freeze()
 }
 
 pub fn serialize_pk_with_vnode(

@@ -18,9 +18,8 @@ use dyn_clone::DynClone;
 use risingwave_common::array::*;
 use risingwave_common::bail;
 use risingwave_common::types::*;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::expr::AggCall;
-use risingwave_pb::plan_common::OrderType as ProstOrderType;
 
 use crate::expr::{build_from_prost, AggKind};
 use crate::vector_op::agg::approx_count_distinct::ApproxCountDistinct;
@@ -34,14 +33,15 @@ use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
+#[async_trait::async_trait]
 pub trait Aggregator: Send + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// `update_single` update the aggregator with a single row with type checked at runtime.
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
 
     /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -71,23 +71,22 @@ impl AggStateFactory {
         let return_type = DataType::from(prost.get_return_type()?);
         let agg_kind = AggKind::try_from(prost.get_type()?)?;
         let distinct = prost.distinct;
-        let mut order_pairs = vec![];
-        let mut order_col_types = vec![];
-        prost.get_order_by_fields().iter().for_each(|field| {
-            let col_idx = field.get_input().unwrap().get_column_idx() as usize;
-            let col_type = DataType::from(field.get_type().unwrap());
-            let order_type =
-                OrderType::from_prost(&ProstOrderType::from_i32(field.direction).unwrap());
-            // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
-            // see also `risingwave_common::util::sort_util::compare_values`
-            order_pairs.push(OrderPair::new(col_idx, order_type));
-            order_col_types.push(col_type);
-        });
+        let column_orders = prost
+            .get_order_by()
+            .iter()
+            .map(|col_order| {
+                let col_idx = col_order.get_column_index() as usize;
+                let order_type = OrderType::from_protobuf(col_order.get_order_type().unwrap());
+                // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
+                // see also `risingwave_common::util::sort_util::compare_values`
+                ColumnOrder::new(col_idx, order_type)
+            })
+            .collect();
 
         let initial_agg_state: BoxedAggState = match (agg_kind, &prost.get_args()[..]) {
             (AggKind::Count, []) => Box::new(CountStar::new(return_type.clone())),
             (AggKind::ApproxCountDistinct, [arg]) => {
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+                let input_col_idx = arg.get_index() as usize;
                 Box::new(ApproxCountDistinct::new(return_type.clone(), input_col_idx))
             }
             (AggKind::StringAgg, [agg_arg, delim_arg]) => {
@@ -99,18 +98,18 @@ impl AggStateFactory {
                     DataType::from(delim_arg.get_type().unwrap()),
                     DataType::Varchar
                 );
-                let agg_col_idx = agg_arg.get_input()?.get_column_idx() as usize;
-                let delim_col_idx = delim_arg.get_input()?.get_column_idx() as usize;
-                create_string_agg_state(agg_col_idx, delim_col_idx, order_pairs)?
+                let agg_col_idx = agg_arg.get_index() as usize;
+                let delim_col_idx = delim_arg.get_index() as usize;
+                create_string_agg_state(agg_col_idx, delim_col_idx, column_orders)?
             }
             (AggKind::ArrayAgg, [arg]) => {
-                let agg_col_idx = arg.get_input()?.get_column_idx() as usize;
-                create_array_agg_state(return_type.clone(), agg_col_idx, order_pairs)?
+                let agg_col_idx = arg.get_index() as usize;
+                create_array_agg_state(return_type.clone(), agg_col_idx, column_orders)?
             }
             (agg_kind, [arg]) => {
                 // other unary agg call
                 let input_type = DataType::from(arg.get_type()?);
-                let input_col_idx = arg.get_input()?.get_column_idx() as usize;
+                let input_col_idx = arg.get_index() as usize;
                 create_agg_state_unary(
                     input_type,
                     input_col_idx,

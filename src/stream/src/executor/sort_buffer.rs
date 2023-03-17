@@ -25,6 +25,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{self, AscentOwnedRow, OwnedRow, Row, RowExt};
 use risingwave_common::types::{ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::{Barrier, PkIndices, StreamExecutorResult};
@@ -94,7 +95,13 @@ impl<S: StateStore> SortBuffer<S> {
             Bound::<row::Empty>::Unbounded,
         );
         let streams = stream::iter(vnodes.iter_vnodes())
-            .map(|vnode| state_table.iter_with_pk_range(&pk_range, vnode))
+            .map(|vnode| {
+                state_table.iter_with_pk_range(
+                    &pk_range,
+                    vnode,
+                    PrefetchOptions::new_for_exhaust_iter(),
+                )
+            })
             .buffer_unordered(10)
             .try_collect::<Vec<_>>()
             .await?
@@ -280,7 +287,7 @@ mod tests {
 
         let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&tys, s);
 
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let mut state_table = StateTable::new_without_distribution(
             state_store.clone(),
             table_id,

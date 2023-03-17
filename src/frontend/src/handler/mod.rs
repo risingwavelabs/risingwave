@@ -18,7 +18,9 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{
+    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
+};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -26,6 +28,7 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
+use self::variable::handle_set_time_zone;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
@@ -56,6 +59,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
+pub mod extended_handle;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;
@@ -171,7 +175,7 @@ pub async fn handle(
             temporary,
             name,
             args,
-            return_type,
+            returns,
             params,
         } => {
             create_function::handle_create_function(
@@ -180,7 +184,7 @@ pub async fn handle(
                 temporary,
                 name,
                 args,
-                return_type,
+                returns,
                 params,
             )
             .await
@@ -349,6 +353,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
+        Statement::SetTimeZone { local: _, value } => handle_set_time_zone(handler_args, value),
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
@@ -408,6 +413,10 @@ pub async fn handle(
         )),
         Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
             ROLLBACK,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
+            SET_TRANSACTION,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => Err(

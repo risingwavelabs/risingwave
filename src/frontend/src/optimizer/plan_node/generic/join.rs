@@ -19,7 +19,8 @@ use risingwave_pb::plan_common::JoinType;
 use super::{EqJoinPredicate, GenericPlanNode, GenericPlanRef};
 use crate::expr::ExprRewriter;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// [`Join`] combines two relations according to some condition.
 ///
@@ -141,6 +142,62 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
     fn ctx(&self) -> OptimizerContextRef {
         self.left.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let left_len = self.left.schema().len();
+        let right_len = self.right.schema().len();
+        let left_fd_set = self.left.functional_dependency().clone();
+        let right_fd_set = self.right.functional_dependency().clone();
+
+        let full_out_col_num = self.internal_column_num();
+
+        let get_new_left_fd_set = |left_fd_set: FunctionalDependencySet| {
+            ColIndexMapping::with_shift_offset(left_len, 0)
+                .composite(&ColIndexMapping::identity(full_out_col_num))
+                .rewrite_functional_dependency_set(left_fd_set)
+        };
+        let get_new_right_fd_set = |right_fd_set: FunctionalDependencySet| {
+            ColIndexMapping::with_shift_offset(right_len, left_len.try_into().unwrap())
+                .rewrite_functional_dependency_set(right_fd_set)
+        };
+        let fd_set: FunctionalDependencySet = match self.join_type {
+            JoinType::Inner => {
+                let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
+                for i in &self.on.conjunctions {
+                    if let Some((col, _)) = i.as_eq_const() {
+                        fd_set.add_constant_columns(&[col.index()])
+                    } else if let Some((left, right)) = i.as_eq_cond() {
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[left.index()],
+                            &[right.index()],
+                        );
+                        fd_set.add_functional_dependency_by_column_indices(
+                            &[right.index()],
+                            &[left.index()],
+                        );
+                    }
+                }
+                get_new_left_fd_set(left_fd_set)
+                    .into_dependencies()
+                    .into_iter()
+                    .chain(
+                        get_new_right_fd_set(right_fd_set)
+                            .into_dependencies()
+                            .into_iter(),
+                    )
+                    .for_each(|fd| fd_set.add_functional_dependency(fd));
+                fd_set
+            }
+            JoinType::LeftOuter => get_new_left_fd_set(left_fd_set),
+            JoinType::RightOuter => get_new_right_fd_set(right_fd_set),
+            JoinType::FullOuter => FunctionalDependencySet::new(full_out_col_num),
+            JoinType::LeftSemi | JoinType::LeftAnti => left_fd_set,
+            JoinType::RightSemi | JoinType::RightAnti => right_fd_set,
+            JoinType::Unspecified => unreachable!(),
+        };
+        ColIndexMapping::with_remaining_columns(&self.output_indices, full_out_col_num)
+            .rewrite_functional_dependency_set(fd_set)
+    }
 }
 
 impl<PlanRef> Join<PlanRef> {
@@ -251,4 +308,133 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             JoinType::Unspecified => unreachable!(),
         }
     }
+}
+
+/// Try to split and pushdown `predicate` into a into a join condition and into the inputs of the
+/// join. Returns the pushed predicates. The pushed part will be removed from the original
+/// predicate.
+///
+/// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
+
+pub fn push_down_into_join(
+    predicate: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    ty: JoinType,
+) -> (Condition, Condition, Condition) {
+    let (left, right) = push_down_to_inputs(
+        predicate,
+        left_col_num,
+        right_col_num,
+        can_push_left_from_filter(ty),
+        can_push_right_from_filter(ty),
+    );
+
+    let on = if can_push_on_from_filter(ty) {
+        let mut conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+        // Do not push now on to the on, it will be pulled up into a filter instead.
+        let on = Condition {
+            conjunctions: conjunctions
+                .drain_filter(|expr| expr.count_nows() == 0)
+                .collect(),
+        };
+        predicate.conjunctions = conjunctions;
+        on
+    } else {
+        Condition::true_cond()
+    };
+    (left, right, on)
+}
+
+/// Try to pushes parts of the join condition to its inputs. Returns the pushed predicates. The
+/// pushed part will be removed from the original join predicate.
+///
+/// `InputRef`s in the right pushed condition are indexed by the right child's output schema.
+
+pub fn push_down_join_condition(
+    on_condition: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    ty: JoinType,
+) -> (Condition, Condition) {
+    push_down_to_inputs(
+        on_condition,
+        left_col_num,
+        right_col_num,
+        can_push_left_from_on(ty),
+        can_push_right_from_on(ty),
+    )
+}
+
+/// Try to split and pushdown `predicate` into a join's left/right child.
+/// Returns the pushed predicates. The pushed part will be removed from the original predicate.
+///
+/// `InputRef`s in the right `Condition` are shifted by `-left_col_num`.
+fn push_down_to_inputs(
+    predicate: &mut Condition,
+    left_col_num: usize,
+    right_col_num: usize,
+    push_left: bool,
+    push_right: bool,
+) -> (Condition, Condition) {
+    let conjunctions = std::mem::take(&mut predicate.conjunctions);
+
+    let (mut left, right, mut others) =
+        Condition { conjunctions }.split(left_col_num, right_col_num);
+
+    if !push_left {
+        others.conjunctions.extend(left);
+        left = Condition::true_cond();
+    };
+
+    let right = if push_right {
+        let mut mapping = ColIndexMapping::with_shift_offset(
+            left_col_num + right_col_num,
+            -(left_col_num as isize),
+        );
+        right.rewrite_expr(&mut mapping)
+    } else {
+        others.conjunctions.extend(right);
+        Condition::true_cond()
+    };
+
+    predicate.conjunctions = others.conjunctions;
+
+    (left, right)
+}
+
+pub fn can_push_left_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftOuter | JoinType::LeftSemi | JoinType::LeftAnti
+    )
+}
+
+pub fn can_push_right_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::RightOuter | JoinType::RightSemi | JoinType::RightAnti
+    )
+}
+
+pub fn can_push_on_from_filter(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftSemi | JoinType::RightSemi
+    )
+}
+
+pub fn can_push_left_from_on(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::RightOuter | JoinType::LeftSemi
+    )
+}
+
+pub fn can_push_right_from_on(ty: JoinType) -> bool {
+    matches!(
+        ty,
+        JoinType::Inner | JoinType::LeftOuter | JoinType::RightSemi
+    )
 }

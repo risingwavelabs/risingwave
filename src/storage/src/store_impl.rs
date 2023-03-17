@@ -23,11 +23,11 @@ use risingwave_object_store::object::{
 };
 
 use crate::error::StorageResult;
-use crate::hummock::backup_reader::{parse_meta_snapshot_storage, BackupReader};
+use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, MemoryLimiter, SstableIdManagerRef, SstableStore, TieredCache,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
     TieredCacheMetricsBuilder,
 };
 use crate::memory::sled::SledStateStore;
@@ -272,14 +272,12 @@ pub mod verify {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, epoch, read_options.clone()).await;
+                let actual = self
+                    .actual
+                    .get(key.clone(), epoch, read_options.clone())
+                    .await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, epoch, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -390,9 +388,9 @@ pub mod verify {
             self.actual.may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             async move {
-                let actual = self.actual.get(key, read_options.clone()).await;
+                let actual = self.actual.get(key.clone(), read_options.clone()).await;
                 if let Some(expected) = &self.expected {
                     let expected = expected.get(key, read_options).await;
                     assert_result_eq(&actual, &expected);
@@ -601,17 +599,9 @@ impl StateStoreImpl {
                 ));
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
-
-                let backup_store = parse_meta_snapshot_storage(
-                    &opts.backup_storage_url,
-                    &opts.backup_storage_directory,
-                )
-                .await?;
-                let backup_reader = BackupReader::new(backup_store);
                 let inner = HummockStorage::new(
                     opts.clone(),
                     sstable_store,
-                    backup_reader,
                     hummock_meta_client.clone(),
                     notification_client,
                     state_store_metrics.clone(),
@@ -643,16 +633,17 @@ impl StateStoreImpl {
 
 /// This trait is for aligning some common methods of `state_store_impl` for external use
 pub trait HummockTrait {
-    fn sstable_id_manager(&self) -> &SstableIdManagerRef;
+    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
+    fn backup_reader(&self) -> BackupReaderRef;
     fn as_hummock(&self) -> Option<&HummockStorage>;
 }
 
 impl HummockTrait for HummockStorage {
-    fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        self.sstable_id_manager()
+    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
+        self.sstable_object_id_manager()
     }
 
     fn sstable_store(&self) -> SstableStoreRef {
@@ -665,6 +656,10 @@ impl HummockTrait for HummockStorage {
 
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter> {
         self.get_memory_limiter()
+    }
+
+    fn backup_reader(&self) -> BackupReaderRef {
+        self.backup_reader()
     }
 
     fn as_hummock(&self) -> Option<&HummockStorage> {
@@ -715,9 +710,9 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     pub trait DynamicDispatchedStateStoreRead: StaticSendSync {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>>;
@@ -732,9 +727,9 @@ pub mod boxed_state_store {
 
     #[async_trait::async_trait]
     impl<S: StateStoreRead> DynamicDispatchedStateStoreRead for S {
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
+        async fn get(
+            &self,
+            key: Bytes,
             epoch: u64,
             read_options: ReadOptions,
         ) -> StorageResult<Option<Bytes>> {
@@ -761,11 +756,7 @@ pub mod boxed_state_store {
             read_options: ReadOptions,
         ) -> StorageResult<bool>;
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>>;
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>>;
 
         async fn iter(
             &self,
@@ -803,11 +794,7 @@ pub mod boxed_state_store {
             self.may_exist(key_range, read_options).await
         }
 
-        async fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            read_options: ReadOptions,
-        ) -> StorageResult<Option<Bytes>> {
+        async fn get(&self, key: Bytes, read_options: ReadOptions) -> StorageResult<Option<Bytes>> {
             self.get(key, read_options).await
         }
 
@@ -872,7 +859,7 @@ pub mod boxed_state_store {
             self.deref().may_exist(key_range, read_options)
         }
 
-        fn get<'a>(&'a self, key: &'a [u8], read_options: ReadOptions) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, read_options)
         }
 
@@ -965,12 +952,7 @@ pub mod boxed_state_store {
 
         define_state_store_read_associated_type!();
 
-        fn get<'a>(
-            &'a self,
-            key: &'a [u8],
-            epoch: u64,
-            read_options: ReadOptions,
-        ) -> Self::GetFuture<'_> {
+        fn get(&self, key: Bytes, epoch: u64, read_options: ReadOptions) -> Self::GetFuture<'_> {
             self.deref().get(key, epoch, read_options)
         }
 

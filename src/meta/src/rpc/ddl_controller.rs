@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
+use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
@@ -27,7 +27,7 @@ use crate::manager::{
 use crate::model::{StreamEnvironment, TableFragments};
 use crate::storage::MetaStore;
 use crate::stream::{
-    ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
+    validate_sink, ActorGraphBuildResult, ActorGraphBuilder, CompleteStreamFragmentGraph,
     CreateStreamingJobContext, GlobalStreamManagerRef, ReplaceTableContext, SourceManagerRef,
     StreamFragmentGraph,
 };
@@ -65,6 +65,8 @@ pub enum DdlCommand {
     CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    CreateConnection(Connection),
+    DropConnection(String),
 }
 
 #[derive(Clone)]
@@ -141,6 +143,10 @@ where
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
+                DdlCommand::CreateConnection(connection) => {
+                    ctrl.create_connection(connection).await
+                }
+                DdlCommand::DropConnection(conn_name) => ctrl.drop_connection(&conn_name).await,
             }
         });
         handler.await.unwrap()
@@ -219,6 +225,14 @@ where
         self.catalog_manager.drop_view(view_id).await
     }
 
+    async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.create_connection(connection).await
+    }
+
+    async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.drop_connection(conn_name).await
+    }
+
     async fn create_streaming_job(
         &self,
         mut stream_job: StreamingJob,
@@ -237,9 +251,18 @@ where
 
             internal_tables = ctx.internal_tables();
 
-            if let Some(source) = stream_job.source() {
-                self.source_manager.register_source(source).await?;
+            match &stream_job {
+                StreamingJob::Table(Some(source), _) => {
+                    // Register the source on the connector node.
+                    self.source_manager.register_source(source).await?;
+                }
+                StreamingJob::Sink(sink) => {
+                    // Validate the sink on the connector node.
+                    validate_sink(sink, self.env.opts.connector_rpc_endpoint.clone()).await?;
+                }
+                _ => {}
             }
+
             self.stream_manager
                 .create_streaming_job(table_fragments, ctx)
                 .await?;

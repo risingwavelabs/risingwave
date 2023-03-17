@@ -159,7 +159,7 @@ impl SchemaFilterKeyExtractor {
         let pk_indices: Vec<usize> = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect();
 
         let read_prefix_len = table_catalog.get_read_prefix_len_hint() as usize;
@@ -173,11 +173,7 @@ impl SchemaFilterKeyExtractor {
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect();
 
         Self {
@@ -351,8 +347,9 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::{ColumnIndex, Table as ProstTable};
-    use risingwave_pb::plan_common::{ColumnCatalog as ProstColumnCatalog, ColumnOrder};
+    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
+    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -361,6 +358,10 @@ mod tests {
         MultiFilterKeyExtractor,
     };
     use crate::key::TABLE_PREFIX_LEN;
+
+    const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
+        VirtualNode::from_index(233).to_be_bytes()
+    }
 
     #[test]
     fn test_default_filter_key_extractor() {
@@ -438,13 +439,17 @@ mod tests {
                 },
             ],
             pk: vec![
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 1,
+                PbColumnOrder {
+                    column_index: 1,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                 },
-                ColumnOrder {
-                    order_type: 1, // Ascending
-                    index: 3,
+                PbColumnOrder {
+                    column_index: 3,
+                    order_type: Some(PbOrderType {
+                        direction: PbDirection::Ascending as _,
+                    }),
                 },
             ],
             stream_key: vec![0],
@@ -459,13 +464,14 @@ mod tests {
             )]),
             fragment_id: 0,
             vnode_col_index: None,
-            row_id_index: Some(ColumnIndex { index: 0 }),
+            row_id_index: Some(0),
             value_indices: vec![0],
             definition: "".into(),
             handle_pk_conflict_behavior: 0,
             read_prefix_len_hint: 1,
             version: None,
             watermark_indices: vec![],
+            dist_key_in_pk: vec![],
         }
     }
 
@@ -474,7 +480,7 @@ mod tests {
         let prost_table = build_table_with_prefix_column_num(1);
         let schema_filter_key_extractor = SchemaFilterKeyExtractor::new(&prost_table);
 
-        let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+        let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
         let schema = vec![DataType::Int64, DataType::Varchar];
         let serializer = OrderedRowSerde::new(schema, order_types);
         let row = OwnedRow::new(vec![
@@ -490,8 +496,7 @@ mod tests {
             buf.to_vec()
         };
 
-        let vnode_prefix = "v".as_bytes();
-        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+        let vnode_prefix = &dummy_vnode()[..];
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
@@ -509,7 +514,7 @@ mod tests {
                 1,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -525,14 +530,13 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64];
-            let order_types = vec![OrderType::Ascending];
+            let order_types = vec![OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();
@@ -547,7 +551,7 @@ mod tests {
                 2,
                 Arc::new(FilterKeyExtractorImpl::Schema(schema_filter_key_extractor)),
             );
-            let order_types: Vec<OrderType> = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types: Vec<OrderType> = vec![OrderType::ascending(), OrderType::ascending()];
             let schema = vec![DataType::Int64, DataType::Varchar];
             let serializer = OrderedRowSerde::new(schema, order_types);
             let row = OwnedRow::new(vec![
@@ -563,14 +567,13 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
 
             let data_types = vec![DataType::Int64, DataType::Varchar];
-            let order_types = vec![OrderType::Ascending, OrderType::Ascending];
+            let order_types = vec![OrderType::ascending(), OrderType::ascending()];
             let deserializer = OrderedRowSerde::new(data_types, order_types);
 
             let pk_prefix_len = deserializer.deserialize_prefix_len(&row_bytes, 1).unwrap();

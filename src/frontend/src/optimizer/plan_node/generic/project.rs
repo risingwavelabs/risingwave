@@ -24,7 +24,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use super::{GenericPlanNode, GenericPlanRef};
 use crate::expr::{assert_input_ref, Expr, ExprDisplay, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::utils::ColIndexMapping;
+use crate::optimizer::property::FunctionalDependencySet;
+use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt};
 
 fn check_expr_type(expr: &ExprImpl) -> std::result::Result<(), &'static str> {
     if expr.has_subquery() {
@@ -109,6 +110,11 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Project<PlanRef> {
     fn ctx(&self) -> OptimizerContextRef {
         self.input.ctx()
     }
+
+    fn functional_dependency(&self) -> FunctionalDependencySet {
+        let i2o = self.i2o_col_mapping();
+        i2o.rewrite_functional_dependency_set(self.input.functional_dependency().clone())
+    }
 }
 
 impl<PlanRef: GenericPlanRef> Project<PlanRef> {
@@ -171,13 +177,7 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
         (self.exprs, self.input)
     }
 
-    pub fn fmt_with_name(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        name: &str,
-        schema: &Schema,
-    ) -> fmt::Result {
-        let mut builder = f.debug_struct(name);
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>, schema: &Schema) {
         builder.field(
             "exprs",
             &self
@@ -198,6 +198,16 @@ impl<PlanRef: GenericPlanRef> Project<PlanRef> {
                 })
                 .collect_vec(),
         );
+    }
+
+    pub fn fmt_with_name(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        name: &str,
+        schema: &Schema,
+    ) -> fmt::Result {
+        let mut builder = f.debug_struct(name);
+        self.fmt_fields_with_builder(&mut builder, schema);
         builder.finish()
     }
 

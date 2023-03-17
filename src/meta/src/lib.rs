@@ -51,6 +51,7 @@ use std::time::Duration;
 
 use clap::Parser;
 pub use error::{MetaError, MetaResult};
+use risingwave_common::system_param::default;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -60,23 +61,23 @@ use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
+    #[clap(long, env = "RW_VPC_ID")]
+    vpd_id: Option<String>,
+
+    #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
+    security_group_id: Option<String>,
+
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
-
-    /// Deprecated. But we keep it for backward compatibility.
-    #[clap(long, env = "RW_HOST")]
-    host: Option<String>,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    /// TODO: After host is removed, we require that this parameter must be provided when using
-    /// etcd
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
-    advertise_addr: Option<String>,
+    advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
@@ -106,10 +107,41 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
-    // TODO(zhidong): Make it required in v0.1.18
     /// State store url.
     #[clap(long, env = "RW_STATE_STORE")]
     state_store: Option<String>,
+
+    /// The interval of periodic barrier.
+    #[clap(long, env = "RW_BARRIER_INTERVAL_MS", default_value_t = default::barrier_interval_ms())]
+    barrier_interval_ms: u32,
+
+    /// There will be a checkpoint for every n barriers
+    #[clap(long, env = "RW_CHECKPOINT_FREQUENCY", default_value_t = default::checkpoint_frequency())]
+    pub checkpoint_frequency: u64,
+
+    /// Target size of the Sstable.
+    #[clap(long, env = "RW_SSTABLE_SIZE_MB", default_value_t = default::sstable_size_mb())]
+    sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    #[clap(long, env = "RW_BLOCK_SIZE_KB", default_value_t = default::block_size_kb())]
+    block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE", default_value_t = default::bloom_false_positive())]
+    bloom_false_positive: f64,
+
+    /// Remote directory for storing data and metadata objects.
+    #[clap(long, env = "RW_DATA_DIRECTORY", default_value_t = default::data_directory())]
+    data_directory: String,
+
+    /// Remote storage url for storing snapshots.
+    #[clap(long, env = "RW_BACKUP_STORAGE_URL", default_value_t = default::backup_storage_url())]
+    backup_storage_url: String,
+
+    /// Remote directory for storing snapshots.
+    #[clap(long, env = "RW_STORAGE_DIRECTORY", default_value_t = default::backup_storage_directory())]
+    backup_storage_directory: String,
 
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
@@ -132,40 +164,9 @@ pub struct OverrideConfigOpts {
     #[clap(long, env = "RW_BACKEND", value_enum)]
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
-
-    /// Target size of the Sstable.
-    #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = storage.sstable_size_mb)]
-    sstable_size_mb: Option<u32>,
-
-    /// Size of each block in bytes in SST.
-    #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = storage.block_size_kb)]
-    block_size_kb: Option<u32>,
-
-    /// False positive probability of bloom filter.
-    #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = storage.bloom_false_positive)]
-    bloom_false_positive: Option<f64>,
-
-    /// Remote directory for storing data and metadata objects.
-    #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = storage.data_directory)]
-    data_directory: Option<String>,
-
-    /// Remote storage url for storing snapshots.
-    #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = backup.storage_url)]
-    backup_storage_url: Option<String>,
-
-    /// Remote directory for storing snapshots.
-    #[clap(long, env = "RW_STORAGE_DIRECTORY")]
-    #[override_opts(path = backup.storage_directory)]
-    backup_storage_directory: Option<String>,
 }
 
 use std::future::Future;
-use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend, RwConfig};
@@ -181,13 +182,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-        let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let advertise_addr = opts
-            .advertise_addr
-            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
@@ -212,7 +209,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            advertise_addr,
+            advertise_addr: opts.advertise_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -237,6 +234,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                vpc_id: opts.vpd_id,
+                security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
@@ -246,15 +245,15 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                     .periodic_ttl_reclaim_compaction_interval_sec,
             },
             SystemParams {
-                barrier_interval_ms: Some(config.streaming.barrier_interval_ms),
-                checkpoint_frequency: Some(config.streaming.checkpoint_frequency as u64),
-                sstable_size_mb: Some(config.storage.sstable_size_mb),
-                block_size_kb: Some(config.storage.block_size_kb),
-                bloom_false_positive: Some(config.storage.bloom_false_positive),
+                barrier_interval_ms: Some(opts.barrier_interval_ms),
+                checkpoint_frequency: Some(opts.checkpoint_frequency),
+                sstable_size_mb: Some(opts.sstable_size_mb),
+                block_size_kb: Some(opts.block_size_kb),
+                bloom_false_positive: Some(opts.bloom_false_positive),
                 state_store: Some(opts.state_store.unwrap_or_default()),
-                data_directory: Some(config.storage.data_directory),
-                backup_storage_url: Some(config.backup.storage_url),
-                backup_storage_directory: Some(config.backup.storage_directory),
+                data_directory: Some(opts.data_directory),
+                backup_storage_url: Some(opts.backup_storage_url),
+                backup_storage_directory: Some(opts.backup_storage_directory),
             },
         )
         .await

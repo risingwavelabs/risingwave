@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { SinkType, sinkTypeFromJSON, sinkTypeToJSON } from "./catalog";
 import {
   DataType_TypeName,
   dataType_TypeNameFromJSON,
@@ -61,8 +62,12 @@ export interface TableSchema_Column {
   dataType: DataType_TypeName;
 }
 
+export interface ValidationError {
+  errorMessage: string;
+}
+
 export interface SinkConfig {
-  sinkType: string;
+  connectorType: string;
   properties: { [key: string]: string };
   tableSchema: TableSchema | undefined;
 }
@@ -129,6 +134,16 @@ export interface SinkResponse_WriteResponse {
 }
 
 export interface SinkResponse_StartResponse {
+}
+
+export interface ValidateSinkRequest {
+  sinkConfig: SinkConfig | undefined;
+  sinkType: SinkType;
+}
+
+export interface ValidateSinkResponse {
+  /** On validation failure, we return the error. */
+  error: ValidationError | undefined;
 }
 
 export interface CdcMessage {
@@ -237,14 +252,36 @@ export const TableSchema_Column = {
   },
 };
 
+function createBaseValidationError(): ValidationError {
+  return { errorMessage: "" };
+}
+
+export const ValidationError = {
+  fromJSON(object: any): ValidationError {
+    return { errorMessage: isSet(object.errorMessage) ? String(object.errorMessage) : "" };
+  },
+
+  toJSON(message: ValidationError): unknown {
+    const obj: any = {};
+    message.errorMessage !== undefined && (obj.errorMessage = message.errorMessage);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ValidationError>, I>>(object: I): ValidationError {
+    const message = createBaseValidationError();
+    message.errorMessage = object.errorMessage ?? "";
+    return message;
+  },
+};
+
 function createBaseSinkConfig(): SinkConfig {
-  return { sinkType: "", properties: {}, tableSchema: undefined };
+  return { connectorType: "", properties: {}, tableSchema: undefined };
 }
 
 export const SinkConfig = {
   fromJSON(object: any): SinkConfig {
     return {
-      sinkType: isSet(object.sinkType) ? String(object.sinkType) : "",
+      connectorType: isSet(object.connectorType) ? String(object.connectorType) : "",
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -257,7 +294,7 @@ export const SinkConfig = {
 
   toJSON(message: SinkConfig): unknown {
     const obj: any = {};
-    message.sinkType !== undefined && (obj.sinkType = message.sinkType);
+    message.connectorType !== undefined && (obj.connectorType = message.connectorType);
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
@@ -271,7 +308,7 @@ export const SinkConfig = {
 
   fromPartial<I extends Exact<DeepPartial<SinkConfig>, I>>(object: I): SinkConfig {
     const message = createBaseSinkConfig();
-    message.sinkType = object.sinkType ?? "";
+    message.connectorType = object.connectorType ?? "";
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -690,6 +727,60 @@ export const SinkResponse_StartResponse = {
 
   fromPartial<I extends Exact<DeepPartial<SinkResponse_StartResponse>, I>>(_: I): SinkResponse_StartResponse {
     const message = createBaseSinkResponse_StartResponse();
+    return message;
+  },
+};
+
+function createBaseValidateSinkRequest(): ValidateSinkRequest {
+  return { sinkConfig: undefined, sinkType: SinkType.UNSPECIFIED };
+}
+
+export const ValidateSinkRequest = {
+  fromJSON(object: any): ValidateSinkRequest {
+    return {
+      sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined,
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
+    };
+  },
+
+  toJSON(message: ValidateSinkRequest): unknown {
+    const obj: any = {};
+    message.sinkConfig !== undefined &&
+      (obj.sinkConfig = message.sinkConfig ? SinkConfig.toJSON(message.sinkConfig) : undefined);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ValidateSinkRequest>, I>>(object: I): ValidateSinkRequest {
+    const message = createBaseValidateSinkRequest();
+    message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
+      ? SinkConfig.fromPartial(object.sinkConfig)
+      : undefined;
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
+    return message;
+  },
+};
+
+function createBaseValidateSinkResponse(): ValidateSinkResponse {
+  return { error: undefined };
+}
+
+export const ValidateSinkResponse = {
+  fromJSON(object: any): ValidateSinkResponse {
+    return { error: isSet(object.error) ? ValidationError.fromJSON(object.error) : undefined };
+  },
+
+  toJSON(message: ValidateSinkResponse): unknown {
+    const obj: any = {};
+    message.error !== undefined && (obj.error = message.error ? ValidationError.toJSON(message.error) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<ValidateSinkResponse>, I>>(object: I): ValidateSinkResponse {
+    const message = createBaseValidateSinkResponse();
+    message.error = (object.error !== undefined && object.error !== null)
+      ? ValidationError.fromPartial(object.error)
+      : undefined;
     return message;
   },
 };

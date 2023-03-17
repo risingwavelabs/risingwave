@@ -981,7 +981,7 @@ pub enum Statement {
         temporary: bool,
         name: ObjectName,
         args: Option<Vec<OperateFunctionArg>>,
-        return_type: Option<DataType>,
+        returns: Option<CreateFunctionReturns>,
         /// Optional parameters.
         params: CreateFunctionBody,
     },
@@ -1040,6 +1040,11 @@ pub enum Statement {
         modes: Vec<TransactionMode>,
         snapshot: Option<Value>,
         session: bool,
+    },
+    /// `SET [ SESSION | LOCAL ] TIME ZONE { value | 'value' | LOCAL | DEFAULT }`
+    SetTimeZone {
+        local: bool,
+        value: SetTimeZoneValue,
     },
     /// `COMMENT ON ...`
     ///
@@ -1250,7 +1255,7 @@ impl fmt::Display for Statement {
                 temporary,
                 name,
                 args,
-                return_type,
+                returns,
                 params,
             } => {
                 write!(
@@ -1262,8 +1267,8 @@ impl fmt::Display for Statement {
                 if let Some(args) = args {
                     write!(f, "({})", display_comma_separated(args))?;
                 }
-                if let Some(return_type) = return_type {
-                    write!(f, " RETURNS {}", return_type)?;
+                if let Some(return_type) = returns {
+                    write!(f, " {}", return_type)?;
                 }
                 write!(f, "{params}")?;
                 Ok(())
@@ -1448,6 +1453,14 @@ impl fmt::Display for Statement {
                 if let Some(snapshot_id) = snapshot {
                     write!(f, " SNAPSHOT {}", snapshot_id)?;
                 }
+                Ok(())
+            }
+            Statement::SetTimeZone { local, value } => {
+                write!(f, "SET")?;
+                if *local {
+                    write!(f, " LOCAL")?;
+                }
+                write!(f, " TIME ZONE {}", value)?;
                 Ok(())
             }
             Statement::Commit { chain } => {
@@ -1977,6 +1990,26 @@ impl fmt::Display for EmitMode {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SetTimeZoneValue {
+    Ident(Ident),
+    Literal(Value),
+    Local,
+    Default,
+}
+
+impl fmt::Display for SetTimeZoneValue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SetTimeZoneValue::Ident(ident) => write!(f, "{}", ident),
+            SetTimeZoneValue::Literal(value) => write!(f, "{}", value),
+            SetTimeZoneValue::Local => f.write_str("LOCAL"),
+            SetTimeZoneValue::Default => f.write_str("DEFAULT"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum TransactionMode {
     AccessMode(TransactionAccessMode),
     IsolationLevel(TransactionIsolationLevel),
@@ -2185,6 +2218,41 @@ impl fmt::Display for FunctionDefinition {
             FunctionDefinition::DoubleDollarDef(s) => write!(f, "$${s}$$")?,
         }
         Ok(())
+    }
+}
+
+/// Return types of a function.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CreateFunctionReturns {
+    /// RETURNS rettype
+    Value(DataType),
+    /// RETURNS TABLE ( column_name column_type [, ...] )
+    Table(Vec<TableColumnDef>),
+}
+
+impl fmt::Display for CreateFunctionReturns {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Value(data_type) => write!(f, "RETURNS {}", data_type),
+            Self::Table(columns) => {
+                write!(f, "RETURNS TABLE ({})", display_comma_separated(columns))
+            }
+        }
+    }
+}
+
+/// Table column definition
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct TableColumnDef {
+    pub name: Ident,
+    pub data_type: DataType,
+}
+
+impl fmt::Display for TableColumnDef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.name, self.data_type)
     }
 }
 

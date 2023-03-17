@@ -447,9 +447,9 @@ mod test {
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
-                    let millis = u32::from(duration.millis()) as i64;
-                    let duration = Some(ScalarImpl::Interval(IntervalUnit::new(
-                        months, days, millis,
+                    let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+                    let duration = Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                        months, days, usecs,
                     )));
                     assert_eq!(row[i], duration);
                 }

@@ -105,6 +105,16 @@ impl WorkerNodeManager {
         self.inner.read().unwrap().worker_nodes.len()
     }
 
+    pub fn schedule_unit_count(&self) -> usize {
+        self.inner
+            .read()
+            .unwrap()
+            .worker_nodes
+            .iter()
+            .map(|node| node.parallel_units.len())
+            .sum()
+    }
+
     /// If parallel unit ids is empty, the scheduler may fail to schedule any task and stuck at
     /// schedule next stage. If we do not return error in this case, needs more complex control
     /// logic above. Report in this function makes the schedule root fail reason more clear.

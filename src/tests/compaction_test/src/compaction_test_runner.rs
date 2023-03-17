@@ -21,7 +21,7 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use bytes::{BufMut, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
 use futures::TryStreamExt;
 use risingwave_common::catalog::TableId;
@@ -43,7 +43,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
-const CHECKPOINT_FREQ_FOR_REPLAY: usize = 99999999;
+const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
 
 use crate::CompactionTestOpts;
 
@@ -131,9 +131,14 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         &listen_addr,
         "--backend",
         "mem",
+        "--checkpoint-frequency",
+        &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
         "--config-path",
         &config_path,
     ]);
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
+    assert_eq!(CHECKPOINT_FREQ_FOR_REPLAY, meta_opts.checkpoint_frequency);
     let config = load_config(
         &meta_opts.config_path,
         Some(meta_opts.override_opts.clone()),
@@ -143,12 +148,6 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "enable_compaction_deterministic should be set"
     );
 
-    // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version during version log replay.
-    assert_eq!(
-        CHECKPOINT_FREQ_FOR_REPLAY,
-        config.streaming.checkpoint_frequency
-    );
     risingwave_meta::start(meta_opts).await
 }
 
@@ -604,11 +603,12 @@ async fn open_hummock_iters(
     // the `ReadOptions` will not be used to filter kv pairs
     let mut buf = BytesMut::with_capacity(5);
     buf.put_u32(table_id);
+    let b = buf.freeze();
     let range = (
-        Bound::Included(buf.to_vec()),
-        Bound::Excluded(risingwave_hummock_sdk::key::next_key(
-            buf.to_vec().as_slice(),
-        )),
+        Bound::Included(b.clone()),
+        Bound::Excluded(Bytes::from(risingwave_hummock_sdk::key::next_key(
+            b.as_ref(),
+        ))),
     );
 
     for &epoch in snapshots.iter() {
@@ -622,6 +622,7 @@ async fn open_hummock_iters(
                     retention_seconds: None,
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
+                    prefetch_options: Default::default(),
                 },
             )
             .await?;

@@ -30,6 +30,7 @@ use std::io::{Cursor, Read};
 use chrono::{Datelike, Timelike};
 use fixedbitset::FixedBitSet;
 
+use crate::array::serial_array::Serial;
 use crate::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayError, ArrayImpl, ArrayResult, DataChunk, JsonbRef,
     ListRef, StructRef,
@@ -38,8 +39,8 @@ use crate::collection::estimate_size::EstimateSize;
 use crate::hash::VirtualNode;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
-    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarRef,
+    DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
+    OrderedF64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
 use crate::util::iter_util::ZipEqFast;
@@ -356,29 +357,6 @@ impl HashKeySerDe<'_> for Decimal {
     }
 }
 
-impl HashKeySerDe<'_> for IntervalUnit {
-    type S = [u8; 16];
-
-    fn serialize(mut self) -> Self::S {
-        self.justify_interval();
-        let mut ret = [0; 16];
-        ret[0..4].copy_from_slice(&self.get_months().to_ne_bytes());
-        ret[4..8].copy_from_slice(&self.get_days().to_ne_bytes());
-        ret[8..16].copy_from_slice(&self.get_ms().to_ne_bytes());
-
-        ret
-    }
-
-    fn deserialize<R: Read>(source: &mut R) -> Self {
-        let value = Self::read_fixed_size_bytes::<R, 16>(source);
-        IntervalUnit::new(
-            i32::from_ne_bytes(value[0..4].try_into().unwrap()),
-            i32::from_ne_bytes(value[4..8].try_into().unwrap()),
-            i64::from_ne_bytes(value[8..16].try_into().unwrap()),
-        )
-    }
-}
-
 impl<'a> HashKeySerDe<'a> for &'a str {
     type S = Vec<u8>;
 
@@ -474,6 +452,18 @@ impl<'a> HashKeySerDe<'a> for JsonbRef<'a> {
     /// This should never be called
     fn deserialize<R: Read>(_source: &mut R) -> Self {
         todo!()
+    }
+}
+
+impl<'a> HashKeySerDe<'a> for Serial {
+    type S = <i64 as HashKeySerDe<'a>>::S;
+
+    fn serialize(self) -> Self::S {
+        self.into_inner().serialize()
+    }
+
+    fn deserialize<R: Read>(source: &mut R) -> Self {
+        i64::deserialize(source).into()
     }
 }
 

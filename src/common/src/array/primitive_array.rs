@@ -21,6 +21,7 @@ use risingwave_pb::common::Buffer;
 use risingwave_pb::data::{Array as ProstArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayResult};
+use crate::array::serial_array::Serial;
 use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;

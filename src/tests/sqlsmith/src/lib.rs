@@ -15,6 +15,7 @@
 #![feature(let_chains)]
 #![feature(if_let_guard)]
 #![feature(once_cell)]
+#![feature(box_patterns)]
 
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -25,8 +26,10 @@ use risingwave_sqlparser::parser::Parser;
 
 use crate::sql_gen::SqlGenerator;
 
+pub mod reducer;
 pub mod runner;
 mod sql_gen;
+mod utils;
 pub mod validation;
 pub use validation::is_permissible_error;
 
@@ -76,7 +79,8 @@ pub fn session_sql_gen<R: Rng>(rng: &mut R) -> String {
 
 /// Parse SQL
 /// FIXME(Noel): Introduce error type for sqlsmith for this.
-pub fn parse_sql(sql: &str) -> Vec<Statement> {
+pub fn parse_sql<S: AsRef<str>>(sql: S) -> Vec<Statement> {
+    let sql = sql.as_ref();
     Parser::parse_sql(sql).unwrap_or_else(|_| panic!("Failed to parse SQL: {}", sql))
 }
 

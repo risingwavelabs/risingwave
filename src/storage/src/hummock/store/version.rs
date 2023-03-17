@@ -411,9 +411,9 @@ impl HummockVersionReader {
 }
 
 impl HummockVersionReader {
-    pub async fn get<'a>(
-        &'a self,
-        table_key: TableKey<&'a [u8]>,
+    pub async fn get(
+        &self,
+        table_key: TableKey<Bytes>,
         epoch: u64,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
@@ -430,7 +430,11 @@ impl HummockVersionReader {
                 continue;
             }
 
-            if let Some(data) = get_from_batch(imm, table_key, &mut stats_guard.local_stats) {
+            if let Some(data) = get_from_batch(
+                imm,
+                TableKey(table_key.as_ref()),
+                &mut stats_guard.local_stats,
+            ) {
                 return Ok(data.into_user_value());
             }
         }
@@ -440,13 +444,13 @@ impl HummockVersionReader {
             Sstable::hash_for_bloom_filter(dist_key.as_ref(), read_options.table_id.table_id())
         });
 
-        let full_key = FullKey::new(read_options.table_id, table_key, epoch);
+        let full_key = FullKey::new(read_options.table_id, TableKey(table_key.clone()), epoch);
         for local_sst in &uncommitted_ssts {
             stats_guard.local_stats.sub_iter_count += 1;
             if let Some(data) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                full_key,
+                full_key.to_ref(),
                 &read_options,
                 dist_key_hash,
                 &mut stats_guard.local_stats,
@@ -468,7 +472,7 @@ impl HummockVersionReader {
 
             match level.level_type() {
                 LevelType::Overlapping | LevelType::Unspecified => {
-                    let single_table_key_range = table_key..=table_key;
+                    let single_table_key_range = table_key.clone()..=table_key.clone();
                     let sstable_infos = prune_overlapping_ssts(
                         &level.table_infos,
                         read_options.table_id,
@@ -479,7 +483,7 @@ impl HummockVersionReader {
                         if let Some(v) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            full_key,
+                            full_key.to_ref(),
                             &read_options,
                             dist_key_hash,
                             &mut stats_guard.local_stats,
@@ -512,7 +516,7 @@ impl HummockVersionReader {
                     if let Some(v) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         &level.table_infos[table_info_idx],
-                        full_key,
+                        full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
                         &mut stats_guard.local_stats,
@@ -658,13 +662,20 @@ impl HummockVersionReader {
         drop(buffered);
         timer.observe_duration();
 
+        let mut sst_read_options = SstableIteratorReadOptions::default();
+        if read_options.prefetch_options.exhaust_iter {
+            sst_read_options.must_iterated_end_user_key =
+                Some(user_key_range.1.map(|key| key.cloned()));
+        }
+        let sst_read_options = Arc::new(sst_read_options);
+
         for (level_type, fetch_meta_req) in fetch_meta_reqs {
             if level_type == LevelType::Nonoverlapping as i32 {
                 let mut sstables = vec![];
                 for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
+                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -683,14 +694,14 @@ impl HummockVersionReader {
                 non_overlapping_iters.push(ConcatIterator::new_with_prefetch(
                     sstables,
                     self.sstable_store.clone(),
-                    Arc::new(SstableIteratorReadOptions::default()),
+                    sst_read_options.clone(),
                 ));
             } else {
                 let mut iters = Vec::new();
                 for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
+                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -707,7 +718,7 @@ impl HummockVersionReader {
                     iters.push(SstableIterator::new(
                         sstable,
                         self.sstable_store.clone(),
-                        Arc::new(SstableIteratorReadOptions::default()),
+                        sst_read_options.clone(),
                     ));
                     overlapping_iter_count += 1;
                 }

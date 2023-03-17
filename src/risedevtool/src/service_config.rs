@@ -42,6 +42,8 @@ pub struct ComputeNodeConfig {
     pub connector_rpc_endpoint: String,
 
     pub total_memory_bytes: usize,
+    pub memory_control_policy: String,
+    pub streaming_memory_proportion: f64,
     pub parallelism: usize,
 }
 

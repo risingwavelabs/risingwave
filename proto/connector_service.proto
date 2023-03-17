@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package connector_service;
 
+import "catalog.proto";
 import "data.proto";
 
 option java_outer_classname = "ConnectorServiceProto";
@@ -16,8 +17,14 @@ message TableSchema {
   repeated uint32 pk_indices = 2;
 }
 
+message ValidationError {
+  string error_message = 1;
+}
+
+/* Sink Service */
+
 message SinkConfig {
-  string sink_type = 1;
+  string connector_type = 1;
   map<string, string> properties = 2;
   TableSchema table_schema = 3;
 }
@@ -84,6 +91,18 @@ message SinkResponse {
   }
 }
 
+message ValidateSinkRequest {
+  SinkConfig sink_config = 1;
+  catalog.SinkType sink_type = 2;
+}
+
+message ValidateSinkResponse {
+  // On validation failure, we return the error.
+  ValidationError error = 1;
+}
+
+/* Source Service */
+
 message CdcMessage {
   string payload = 1;
   string partition = 2;
@@ -124,5 +143,6 @@ message GetEventStreamResponse {
 
 service ConnectorService {
   rpc SinkStream(stream SinkStreamRequest) returns (stream SinkResponse);
+  rpc ValidateSink(ValidateSinkRequest) returns (ValidateSinkResponse);
   rpc GetEventStream(GetEventStreamRequest) returns (stream GetEventStreamResponse);
 }

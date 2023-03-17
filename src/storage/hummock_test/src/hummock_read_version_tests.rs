@@ -15,6 +15,7 @@
 use std::ops::Bound;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
@@ -64,8 +65,10 @@ async fn test_read_version_basic() {
         read_version.update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         let key = iterator_test_table_key_of(epoch as usize);
-        let key_range =
-            map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
+        let key_range = map_table_key_range((
+            Bound::Included(Bytes::from(key.to_vec())),
+            Bound::Included(Bytes::from(key.to_vec())),
+        ));
 
         let (staging_imm_iter, staging_sst_iter) =
             read_version
@@ -103,8 +106,10 @@ async fn test_read_version_basic() {
 
         for epoch in 1..epoch {
             let key = iterator_test_table_key_of(epoch as usize);
-            let key_range =
-                map_table_key_range((Bound::Included(key.to_vec()), Bound::Included(key.to_vec())));
+            let key_range = map_table_key_range((
+                Bound::Included(Bytes::from(key.to_vec())),
+                Bound::Included(Bytes::from(key.to_vec())),
+            ));
 
             let (staging_imm_iter, staging_sst_iter) =
                 read_version
@@ -146,7 +151,8 @@ async fn test_read_version_basic() {
         let dummy_sst = StagingSstableInfo::new(
             vec![
                 LocalSstableInfo::for_test(SstableInfo {
-                    id: 1,
+                    object_id: 1,
+                    sst_id: 1,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(1).encode(), 1),
                         right: key_with_epoch(iterator_test_user_key_of(2).encode(), 2),
@@ -157,13 +163,13 @@ async fn test_read_version_basic() {
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
-                    divide_version: 0,
                     uncompressed_file_size: 1,
                     min_epoch: 0,
                     max_epoch: 0,
                 }),
                 LocalSstableInfo::for_test(SstableInfo {
-                    id: 2,
+                    object_id: 2,
+                    sst_id: 2,
                     key_range: Some(KeyRange {
                         left: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
                         right: key_with_epoch(iterator_test_user_key_of(3).encode(), 3),
@@ -174,7 +180,6 @@ async fn test_read_version_basic() {
                     meta_offset: 1,
                     stale_key_count: 1,
                     total_key_count: 1,
-                    divide_version: 0,
                     uncompressed_file_size: 1,
                     min_epoch: 0,
                     max_epoch: 0,
@@ -194,8 +199,8 @@ async fn test_read_version_basic() {
         // test clear related batch after update sst
 
         // after update sst
-        // imm(0, 1, 2) => sst{sst_id: 1}
-        // staging => {imm(3, 4, 5), sst[{sst_id: 1}, {sst_id: 2}]}
+        // imm(0, 1, 2) => sst{sst_object_id: 1}
+        // staging => {imm(3, 4, 5), sst[{sst_object_id: 1}, {sst_object_id: 2}]}
         let staging = read_version.staging();
         assert_eq!(3, read_version.staging().imm.len());
         assert_eq!(1, read_version.staging().sst.len());
@@ -213,8 +218,8 @@ async fn test_read_version_basic() {
         let key_range_right = iterator_test_table_key_of(4_usize);
 
         let key_range = map_table_key_range((
-            Bound::Included(key_range_left),
-            Bound::Included(key_range_right),
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
         ));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -228,8 +233,8 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
-        assert_eq!(1, staging_ssts[0].id);
-        assert_eq!(2, staging_ssts[1].id);
+        assert_eq!(1, staging_ssts[0].get_object_id());
+        assert_eq!(2, staging_ssts[1].get_object_id());
     }
 
     {
@@ -237,8 +242,8 @@ async fn test_read_version_basic() {
         let key_range_right = iterator_test_table_key_of(4);
 
         let key_range = map_table_key_range((
-            Bound::Included(key_range_left),
-            Bound::Included(key_range_right),
+            Bound::Included(Bytes::from(key_range_left)),
+            Bound::Included(Bytes::from(key_range_right)),
         ));
 
         let (staging_imm_iter, staging_sst_iter) =
@@ -252,7 +257,7 @@ async fn test_read_version_basic() {
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
-        assert_eq!(2, staging_ssts[0].id);
+        assert_eq!(2, staging_ssts[0].get_object_id());
     }
 }
 
@@ -287,7 +292,7 @@ async fn test_read_filter_basic() {
             .update(VersionUpdate::Staging(StagingData::ImmMem(imm)));
 
         // directly prune_overlap
-        let key = iterator_test_table_key_of(epoch as usize);
+        let key = Bytes::from(iterator_test_table_key_of(epoch as usize));
         let key_range = map_table_key_range((Bound::Included(key.clone()), Bound::Included(key)));
 
         let (staging_imm, staging_sst) = {

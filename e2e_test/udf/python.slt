@@ -24,6 +24,13 @@ create function gcd(int, int, int) returns int language python as gcd3 using lin
 statement error exists
 create function gcd(int, int) returns int language python as gcd using link 'http://localhost:8815';
 
+# Create a table function.
+statement ok
+create function series(int) returns table (x int) language python as series using link 'http://localhost:8815';
+
+statement ok
+create function series2(int) returns table (x int, s varchar) language python as series2 using link 'http://localhost:8815';
+
 query I
 select int_42();
 ----
@@ -38,6 +45,26 @@ query I
 select gcd(25, 15, 3);
 ----
 1
+
+query I
+select series(5);
+----
+0
+1
+2
+3
+4
+
+# FIXME: support table function with multiple columns
+# query IT
+# select series2(5);
+# ----
+# (0,0)
+# (1,1)
+# (2,2)
+# (3,3)
+# (4,4)
+
 
 # TODO: drop function without arguments
 

@@ -18,6 +18,7 @@ use risingwave_sqlparser::ast::Statement;
 use super::delete::BoundDelete;
 use super::update::BoundUpdate;
 use crate::binder::{Binder, BoundInsert, BoundQuery};
+use crate::expr::ExprRewriter;
 
 #[derive(Debug)]
 pub enum BoundStatement {
@@ -65,6 +66,21 @@ impl Binder {
                 None.into(),
             )
             .into()),
+        }
+    }
+}
+
+pub(crate) trait RewriteExprsRecursive {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter);
+}
+
+impl RewriteExprsRecursive for BoundStatement {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl ExprRewriter) {
+        match self {
+            BoundStatement::Insert(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Delete(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Update(inner) => inner.rewrite_exprs_recursive(rewriter),
+            BoundStatement::Query(inner) => inner.rewrite_exprs_recursive(rewriter),
         }
     }
 }

@@ -1475,7 +1475,24 @@ impl Parser {
 
     /// Report unexpected token
     pub fn expected<T>(&self, expected: &str, found: Token) -> Result<T, ParserError> {
-        parser_err!(format!("Expected {}, found: {}", expected, found))
+        let start_off = self.index.saturating_sub(10);
+        let end_off = self.index.min(self.tokens.len());
+        let near_tokens = &self.tokens[start_off..end_off];
+        struct TokensDisplay<'a>(&'a [Token]);
+        impl<'a> fmt::Display for TokensDisplay<'a> {
+            fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                for token in self.0 {
+                    write!(f, "{}", token)?;
+                }
+                Ok(())
+            }
+        }
+        parser_err!(format!(
+            "Expected {}, found: {}\nNear \"{}\"",
+            expected,
+            found,
+            TokensDisplay(near_tokens),
+        ))
     }
 
     /// Look for an expected keyword and consume it if it exists
@@ -1768,7 +1785,23 @@ impl Parser {
         self.expect_token(&Token::RParen)?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
+            if self.parse_keyword(Keyword::TABLE) {
+                self.expect_token(&Token::LParen)?;
+                let mut values = vec![];
+                loop {
+                    values.push(self.parse_table_column_def()?);
+                    let comma = self.consume_token(&Token::Comma);
+                    if self.consume_token(&Token::RParen) {
+                        // allow a trailing comma, even though it's not in standard
+                        break;
+                    } else if !comma {
+                        return self.expected("',' or ')'", self.peek_token());
+                    }
+                }
+                Some(CreateFunctionReturns::Table(values))
+            } else {
+                Some(CreateFunctionReturns::Value(self.parse_data_type()?))
+            }
         } else {
             None
         };
@@ -1780,8 +1813,15 @@ impl Parser {
             temporary,
             name,
             args,
-            return_type,
+            returns: return_type,
             params,
+        })
+    }
+
+    fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
+        Ok(TableColumnDef {
+            name: self.parse_identifier_non_reserved()?,
+            data_type: self.parse_data_type()?,
         })
     }
 
@@ -1971,9 +2011,15 @@ impl Parser {
         // parse optional column list (schema) and watermarks on source.
         let (columns, constraints, source_watermarks) = self.parse_columns_with_watermark()?;
 
-        let append_only = if cfg!(debug_assertions) && self.parse_keyword(Keyword::APPEND) {
+        let append_only = if self.parse_keyword(Keyword::APPEND) {
             self.expect_keyword(Keyword::ONLY)?;
-            true
+            if cfg!(debug_assertions) {
+                true
+            } else {
+                return Err(ParserError::ParserError(
+                    "APPEND ONLY is only allowed in debug model".to_string(),
+                ));
+            }
         } else {
             false
         };
@@ -2742,6 +2788,22 @@ impl Parser {
         }
     }
 
+    pub fn parse_for_system_time_as_of_now(&mut self) -> Result<bool, ParserError> {
+        let after_for = self.parse_keyword(Keyword::FOR);
+        if after_for {
+            self.expect_keywords(&[Keyword::SYSTEM_TIME, Keyword::AS, Keyword::OF])?;
+            let ident = self.parse_identifier()?;
+            if ident.real_value() != "now" {
+                return parser_err!(format!("Expected now, found: {}", ident.real_value()));
+            }
+            self.expect_token(&Token::LParen)?;
+            self.expect_token(&Token::RParen)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
     /// Parse a possibly qualified, possibly quoted identifier, e.g.
     /// `foo` or `myschema."table"
     pub fn parse_object_name(&mut self) -> Result<ObjectName, ParserError> {
@@ -3220,6 +3282,23 @@ impl Parser {
 
     pub fn parse_set(&mut self) -> Result<Statement, ParserError> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
+        if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+            let value = if self.parse_keyword(Keyword::DEFAULT) {
+                SetTimeZoneValue::Default
+            } else if self.parse_keyword(Keyword::LOCAL) {
+                SetTimeZoneValue::Local
+            } else if let Ok(ident) = self.parse_identifier() {
+                SetTimeZoneValue::Ident(ident)
+            } else {
+                let value = self.parse_value()?;
+                SetTimeZoneValue::Literal(value)
+            };
+
+            return Ok(Statement::SetTimeZone {
+                local: modifier == Some(Keyword::LOCAL),
+                value,
+            });
+        }
         let variable = self.parse_identifier()?;
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
             let mut values = vec![];
@@ -3521,8 +3600,13 @@ impl Parser {
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
                 Ok(TableFactor::TableFunction { name, alias, args })
             } else {
+                let for_system_time_as_of_now = self.parse_for_system_time_as_of_now()?;
                 let alias = self.parse_optional_table_alias(keywords::RESERVED_FOR_TABLE_ALIAS)?;
-                Ok(TableFactor::Table { name, alias })
+                Ok(TableFactor::Table {
+                    name,
+                    alias,
+                    for_system_time_as_of_now,
+                })
             }
         }
     }
