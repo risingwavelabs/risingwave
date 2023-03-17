@@ -3,6 +3,7 @@ import pyarrow as pa
 import pyarrow.flight
 import pyarrow.parquet
 import inspect
+import traceback
 
 
 class UserDefinedFunction:
@@ -33,10 +34,10 @@ class ScalarFunction(UserDefinedFunction):
         pass
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        result = pa.array([self.eval(*[col[i].as_py() for col in batch])
-                           for i in range(batch.num_rows)],
-                          type=self._result_schema.types[0])
-        return pa.RecordBatch.from_arrays([result], schema=self._result_schema)
+        column = [self.eval(*[col[i].as_py() for col in batch])
+                  for i in range(batch.num_rows)]
+        array = pa.array(column, type=self._result_schema.types[0])
+        return pa.RecordBatch.from_arrays([array], schema=self._result_schema)
 
 
 class TableFunction(UserDefinedFunction):
@@ -52,11 +53,19 @@ class TableFunction(UserDefinedFunction):
         pass
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
-        # only the first row from batch is used
-        res = self.eval(*[col[0].as_py() for col in batch])
-        columns = zip(*res) if len(self._result_schema) > 1 else [res]
-        arrays = [pa.array(col, type)
-                  for col, type in zip(columns, self._result_schema.types)]
+        result_rows = []
+        # Iterate through rows in the input RecordBatch
+        for row_index in range(batch.num_rows):
+            row = tuple(column[row_index].as_py() for column in batch)
+            result_rows.extend(self.eval(*row))
+
+        result_columns = zip(
+            *result_rows) if len(self._result_schema) > 1 else [result_rows]
+
+        # Convert the result columns to arrow arrays
+        arrays = [
+            pa.array(col, type) for col, type in zip(result_columns, self._result_schema.types)
+        ]
         return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
 
 
@@ -205,7 +214,11 @@ class UdfServer(pa.flight.FlightServerBase):
         writer.begin(udf._result_schema)
         for chunk in reader:
             # print(pa.Table.from_batches([chunk.data]))
-            result = udf.eval_batch(chunk.data)
+            try:
+                result = udf.eval_batch(chunk.data)
+            except Exception as e:
+                print(traceback.print_exc())
+                raise e
             writer.write_batch(result)
 
     def serve(self):
