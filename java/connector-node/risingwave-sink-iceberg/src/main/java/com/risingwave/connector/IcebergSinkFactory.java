@@ -117,40 +117,40 @@ public class IcebergSinkFactory implements SinkFactory {
 
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
         Configuration hadoopConf = createHadoopConf(schema, tableProperties);
-        HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
-        Table icebergTable;
-        try {
-            icebergTable = hadoopCatalog.loadTable(tableIdentifier);
-            hadoopCatalog.close();
+
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+
+            Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+
+            // Check that all columns in tableSchema exist in the iceberg table.
+            for (String columnName : tableSchema.getColumnNames()) {
+                if (icebergTable.schema().findField(columnName) == null) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription(
+                                    String.format(
+                                            "table schema does not match. Column %s not found in iceberg table",
+                                            columnName))
+                            .asRuntimeException();
+                }
+            }
+
+            // Check that all required columns in the iceberg table exist in tableSchema.
+            Set<String> columnNames = Set.of(tableSchema.getColumnNames());
+            for (Types.NestedField column : icebergTable.schema().columns()) {
+                if (column.isRequired() && !columnNames.contains(column.name())) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription(
+                                    String.format("missing a required field %s", column.name()))
+                            .asRuntimeException();
+                }
+            }
+
         } catch (Exception e) {
-            throw Status.FAILED_PRECONDITION
+            throw Status.INTERNAL
                     .withDescription(
                             String.format("failed to load iceberg table: %s", e.getMessage()))
                     .withCause(e)
                     .asRuntimeException();
-        }
-
-        // Check that all columns in tableSchema exist in the iceberg table.
-        for (String columnName : tableSchema.getColumnNames()) {
-            if (icebergTable.schema().findField(columnName) == null) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format(
-                                        "table schema does not match. Column %s not found in iceberg table",
-                                        columnName))
-                        .asRuntimeException();
-            }
-        }
-
-        // Check that all required columns in the iceberg table exist in tableSchema.
-        Set<String> columnNames = Set.of(tableSchema.getColumnNames());
-        for (Types.NestedField column : icebergTable.schema().columns()) {
-            if (column.isRequired() && !columnNames.contains(column.name())) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format("missing a required field %s", column.name()))
-                        .asRuntimeException();
-            }
         }
 
         if (!mode.equals("append-only") && !mode.equals("upsert")) {
