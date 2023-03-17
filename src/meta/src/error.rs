@@ -172,6 +172,15 @@ impl From<anyhow::Error> for MetaError {
     }
 }
 
+impl<E> From<aws_sdk_ec2::types::SdkError<E>> for MetaError
+where
+    E: std::error::Error + Sync + Send + 'static,
+{
+    fn from(e: aws_sdk_ec2::types::SdkError<E>) -> Self {
+        MetaErrorInner::Internal(e.into()).into()
+    }
+}
+
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
         match &*err.inner {

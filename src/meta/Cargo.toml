@@ -18,6 +18,8 @@ anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
 async-trait = "0.1"
+aws-config = { workspace = true }
+aws-sdk-ec2 = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"

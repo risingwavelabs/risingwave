@@ -35,8 +35,8 @@ public class SinkValidationHandler {
         try {
             SinkConfig sinkConfig = request.getSinkConfig();
             TableSchema tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-            SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
-            sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap());
+            SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
+            sinkFactory.validate(tableSchema, sinkConfig.getPropertiesMap(), request.getSinkType());
         } catch (Exception e) {
             LOG.error("sink validation failed", e);
             responseObserver.onNext(

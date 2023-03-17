@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
+use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
@@ -67,6 +67,8 @@ pub enum DdlCommand {
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
     AlterRelationName(Relation, String),
+    CreateConnection(Connection),
+    DropConnection(String),
 }
 
 #[derive(Clone)]
@@ -146,6 +148,10 @@ where
                 DdlCommand::AlterRelationName(relation, name) => {
                     ctrl.alter_relation_table(relation, &name).await
                 }
+                DdlCommand::CreateConnection(connection) => {
+                    ctrl.create_connection(connection).await
+                }
+                DdlCommand::DropConnection(conn_name) => ctrl.drop_connection(&conn_name).await,
             }
         });
         handler.await.unwrap()
@@ -222,6 +228,14 @@ where
 
     async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
         self.catalog_manager.drop_view(view_id).await
+    }
+
+    async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.create_connection(connection).await
+    }
+
+    async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.drop_connection(conn_name).await
     }
 
     async fn create_streaming_job(

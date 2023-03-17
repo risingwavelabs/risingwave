@@ -12,14 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.api.sink;
+use risingwave_pb::catalog::Connection;
 
-import com.risingwave.connector.api.TableSchema;
-import com.risingwave.proto.Catalog.SinkType;
-import java.util.Map;
+use crate::model::{MetadataModel, MetadataModelResult};
 
-public interface SinkFactory {
-    SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties);
+/// Column family name for connection.
+const CONNECTION_CF_NAME: &str = "cf/connection";
 
-    void validate(TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType);
+impl MetadataModel for Connection {
+    type KeyType = u32;
+    type ProstType = Connection;
+
+    fn cf_name() -> String {
+        CONNECTION_CF_NAME.to_string()
+    }
+
+    fn to_protobuf(&self) -> Self::ProstType {
+        self.clone()
+    }
+
+    fn from_protobuf(prost: Self::ProstType) -> Self {
+        prost
+    }
+
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
+        Ok(self.id)
+    }
 }
