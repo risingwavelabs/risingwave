@@ -914,15 +914,13 @@ where
             table_name.to_string(),
         ))?;
 
-        let source = if let Some(OptionalAssociatedSourceId::AssociatedSourceId(source_id)) =
-            table.optional_associated_source_id
-        {
-            let mut source = database_core.sources.get(&source_id).unwrap().clone();
-            source.name = table_name.to_string();
-            Some(source)
-        } else {
-            None
-        };
+        let source = table.optional_associated_source_id.as_ref().map(
+            |OptionalAssociatedSourceId::AssociatedSourceId(id)| {
+                let mut source = database_core.sources.get(id).unwrap().clone();
+                source.name = table_name.to_string();
+                source
+            },
+        );
 
         // 2. rename table and its definition.
         table.name = table_name.to_string();
@@ -943,6 +941,7 @@ where
     }
 
     // TODO: refactor dependency cache in catalog manager for better performance.
+    #[allow(clippy::too_many_arguments)]
     async fn alter_relation_name_refs_inner(
         &self,
         database_mgr: &mut DatabaseManager,
@@ -1003,17 +1002,17 @@ where
 
         // 5. notify frontend.
         let mut version = 0;
-        for table in to_update_tables.into_iter() {
+        for table in to_update_tables {
             version = self
                 .notify_frontend(Operation::Update, Info::Table(table))
                 .await;
         }
-        for view in to_update_views.into_iter() {
+        for view in to_update_views {
             version = self
                 .notify_frontend(Operation::Update, Info::View(view))
                 .await;
         }
-        for sink in to_update_sinks.into_iter() {
+        for sink in to_update_sinks {
             version = self
                 .notify_frontend(Operation::Update, Info::Sink(sink))
                 .await;

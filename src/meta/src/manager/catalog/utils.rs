@@ -29,7 +29,7 @@ use crate::{MetaError, MetaResult};
 pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
     // This happens when we try to rename a table that's created by `CREATE TABLE AS`. Remove it
     // when we support `SHOW CREATE TABLE` for `CREATE TABLE AS`.
-    if definition == "" {
+    if definition.is_empty() {
         tracing::warn!("found empty definition when renaming relation, ignored.");
         return "".into();
     }
