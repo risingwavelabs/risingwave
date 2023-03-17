@@ -188,6 +188,7 @@ export interface Connection {
 }
 
 export interface Connection_PrivateLinkService {
+  provider: string;
   endpointId: string;
   dnsEntries: { [key: string]: string };
 }
@@ -797,12 +798,13 @@ export const Connection = {
 };
 
 function createBaseConnection_PrivateLinkService(): Connection_PrivateLinkService {
-  return { endpointId: "", dnsEntries: {} };
+  return { provider: "", endpointId: "", dnsEntries: {} };
 }
 
 export const Connection_PrivateLinkService = {
   fromJSON(object: any): Connection_PrivateLinkService {
     return {
+      provider: isSet(object.provider) ? String(object.provider) : "",
       endpointId: isSet(object.endpointId) ? String(object.endpointId) : "",
       dnsEntries: isObject(object.dnsEntries)
         ? Object.entries(object.dnsEntries).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -815,6 +817,7 @@ export const Connection_PrivateLinkService = {
 
   toJSON(message: Connection_PrivateLinkService): unknown {
     const obj: any = {};
+    message.provider !== undefined && (obj.provider = message.provider);
     message.endpointId !== undefined && (obj.endpointId = message.endpointId);
     obj.dnsEntries = {};
     if (message.dnsEntries) {
@@ -829,6 +832,7 @@ export const Connection_PrivateLinkService = {
     object: I,
   ): Connection_PrivateLinkService {
     const message = createBaseConnection_PrivateLinkService();
+    message.provider = object.provider ?? "";
     message.endpointId = object.endpointId ?? "";
     message.dnsEntries = Object.entries(object.dnsEntries ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
