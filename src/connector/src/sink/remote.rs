@@ -22,6 +22,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_common::types::to_text::ToText;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
@@ -322,6 +323,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
 fn parse_datum(datum: DatumRef<'_>) -> Value {
     match datum {
         None => Value::Null,
+        Some(ScalarRefImpl::Int16(v)) => Value::from(v),
         Some(ScalarRefImpl::Int32(v)) => Value::from(v),
         Some(ScalarRefImpl::Int64(v)) => Value::from(v),
         Some(ScalarRefImpl::Float32(v)) => Value::from(v.into_inner()),
@@ -331,6 +333,7 @@ fn parse_datum(datum: DatumRef<'_>) -> Value {
         Some(ScalarRefImpl::Bool(v)) => Value::from(v),
         Some(ScalarRefImpl::NaiveDate(v)) => Value::from(v.to_string()),
         Some(ScalarRefImpl::NaiveTime(v)) => Value::from(v.to_string()),
+        Some(ScalarRefImpl::NaiveDateTime(v)) => Value::from(v.to_string()),
         Some(ScalarRefImpl::Interval(v)) => Value::from(v.to_string()),
         Some(ScalarRefImpl::Struct(v)) => Value::from(
             v.fields_ref()
@@ -344,7 +347,9 @@ fn parse_datum(datum: DatumRef<'_>) -> Value {
                 .map(|v| parse_datum(*v))
                 .collect::<Vec<_>>(),
         ),
-        _ => unimplemented!(),
+        Some(ScalarRefImpl::Serial(v)) => Value::from(v.into_inner()),
+        Some(ScalarRefImpl::Bytea(v)) => Value::from(v),
+        Some(ScalarRefImpl::Jsonb(v)) => Value::from(v.to_text()),
     }
 }
 
