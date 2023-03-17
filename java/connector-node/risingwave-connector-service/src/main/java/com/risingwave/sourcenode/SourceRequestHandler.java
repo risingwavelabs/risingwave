@@ -24,7 +24,6 @@ import io.grpc.StatusException;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import java.io.IOException;
-import java.sql.Array;
 import java.sql.DriverManager;
 import java.util.*;
 import org.slf4j.Logger;
@@ -266,7 +265,7 @@ public class SourceRequestHandler {
                     }
                     // check whether user is superuser or replication role
                     try (var stmt =
-                                 conn.prepareStatement(sqlStmts.getProperty("postgres.role.check"))) {
+                            conn.prepareStatement(sqlStmts.getProperty("postgres.role.check"))) {
                         stmt.setString(1, props.get(ConnectorConfig.USER));
                         var res = stmt.executeQuery();
                         while (res.next()) {
@@ -279,7 +278,8 @@ public class SourceRequestHandler {
                     }
                     // check whether user has select privilege on table for initial snapshot
                     try (var stmt =
-                                 conn.prepareStatement(sqlStmts.getProperty("postgres.table_privilege.check"))) {
+                            conn.prepareStatement(
+                                    sqlStmts.getProperty("postgres.table_privilege.check"))) {
                         stmt.setString(1, props.get(ConnectorConfig.TABLE_NAME));
                         stmt.setString(2, props.get(ConnectorConfig.USER));
                         var res = stmt.executeQuery();
@@ -287,14 +287,16 @@ public class SourceRequestHandler {
                             if (!res.getBoolean(1)) {
                                 throw new StatusException(
                                         Status.INTERNAL.withDescription(
-                                                "Postgres user must have select privilege on table " +  props.get(ConnectorConfig.TABLE_NAME)));
+                                                "Postgres user must have select privilege on table "
+                                                        + props.get(ConnectorConfig.TABLE_NAME)));
                             }
                         }
                     }
                     // check whether publication exists
                     boolean publicationExists = false;
                     try (var stmt =
-                                 conn.prepareStatement(sqlStmts.getProperty("postgres.publication_att"))) {
+                            conn.prepareStatement(
+                                    sqlStmts.getProperty("postgres.publication_att"))) {
                         stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
                         stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
@@ -320,7 +322,9 @@ public class SourceRequestHandler {
                     if (!publicationExists) {
                         // check create privilege on database
                         try (var stmt =
-                                     conn.prepareStatement(sqlStmts.getProperty("postgres.database_privilege.check"))) {
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty(
+                                                "postgres.database_privilege.check"))) {
                             stmt.setString(1, props.get(ConnectorConfig.USER));
                             stmt.setString(2, props.get(ConnectorConfig.DB_NAME));
                             stmt.setString(3, props.get(ConnectorConfig.USER));
@@ -329,7 +333,8 @@ public class SourceRequestHandler {
                                 if (!res.getBoolean(1)) {
                                     throw new StatusException(
                                             Status.INTERNAL.withDescription(
-                                                    "Postgres user must have create privilege on database" + props.get(ConnectorConfig.DB_NAME)));
+                                                    "Postgres user must have create privilege on database"
+                                                            + props.get(ConnectorConfig.DB_NAME)));
                                 }
                             }
                         }
@@ -338,7 +343,8 @@ public class SourceRequestHandler {
                         String owner = null;
                         // check if user is owner
                         try (var stmt =
-                                     conn.prepareStatement(sqlStmts.getProperty("postgres.table_owner"))) {
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.table_owner"))) {
                             stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
                             stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
                             var res = stmt.executeQuery();
@@ -353,12 +359,14 @@ public class SourceRequestHandler {
                         // if user is not owner, check if user belongs to owner group
                         if (!isTableOwner && !owner.isEmpty()) {
                             try (var stmt =
-                                         conn.prepareStatement(sqlStmts.getProperty("postgres.users_of_group"))) {
+                                    conn.prepareStatement(
+                                            sqlStmts.getProperty("postgres.users_of_group"))) {
                                 stmt.setString(1, owner);
                                 var res = stmt.executeQuery();
                                 while (res.next()) {
                                     String[] users = (String[]) res.getArray("members").getArray();
-                                    if (Arrays.stream(users).anyMatch(props.get(ConnectorConfig.USER)::equals)) {
+                                    if (Arrays.stream(users)
+                                            .anyMatch(props.get(ConnectorConfig.USER)::equals)) {
                                         isTableOwner = true;
                                         break;
                                     }
@@ -368,7 +376,8 @@ public class SourceRequestHandler {
                         if (!isTableOwner) {
                             throw new StatusException(
                                     Status.INTERNAL.withDescription(
-                                            "Postgres user must be owner of table " + props.get(ConnectorConfig.TABLE_NAME)));
+                                            "Postgres user must be owner of table "
+                                                    + props.get(ConnectorConfig.TABLE_NAME)));
                         }
                     }
                     break;
