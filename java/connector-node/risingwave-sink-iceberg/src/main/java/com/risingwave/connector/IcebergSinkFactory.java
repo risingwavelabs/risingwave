@@ -20,6 +20,7 @@ import static io.grpc.Status.UNIMPLEMENTED;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.proto.Catalog.SinkType;
 import io.grpc.Status;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -38,7 +39,7 @@ public class IcebergSinkFactory implements SinkFactory {
 
     private static final Logger LOG = LoggerFactory.getLogger(IcebergSinkFactory.class);
 
-    public static final String SINK_MODE_PROP = "sink.mode";
+    public static final String SINK_TYPE_PROP = "type";
     public static final String WAREHOUSE_PATH_PROP = "warehouse.path";
     public static final String DATABASE_NAME_PROP = "database.name";
     public static final String TABLE_NAME_PROP = "table.name";
@@ -57,10 +58,7 @@ public class IcebergSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
-        String mode = tableProperties.get(SINK_MODE_PROP);
+        String mode = tableProperties.get(SINK_TYPE_PROP);
         String warehousePath = getWarehousePath(tableProperties);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
@@ -73,6 +71,7 @@ public class IcebergSinkFactory implements SinkFactory {
         Table icebergTable;
         try {
             icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+            hadoopCatalog.close();
         } catch (Exception e) {
             throw Status.FAILED_PRECONDITION
                     .withDescription(
@@ -92,8 +91,9 @@ public class IcebergSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
-        if (!tableProperties.containsKey(SINK_MODE_PROP) // only append-only, upsert
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
+        if (!tableProperties.containsKey(SINK_TYPE_PROP) // only append-only, upsert
                 || !tableProperties.containsKey(WAREHOUSE_PATH_PROP)
                 || !tableProperties.containsKey(DATABASE_NAME_PROP)
                 || !tableProperties.containsKey(TABLE_NAME_PROP)) {
@@ -101,14 +101,14 @@ public class IcebergSinkFactory implements SinkFactory {
                     .withDescription(
                             String.format(
                                     "%s, %s, %s or %s is not specified",
-                                    SINK_MODE_PROP,
+                                    SINK_TYPE_PROP,
                                     WAREHOUSE_PATH_PROP,
                                     DATABASE_NAME_PROP,
                                     TABLE_NAME_PROP))
                     .asRuntimeException();
         }
 
-        String mode = tableProperties.get(SINK_MODE_PROP);
+        String mode = tableProperties.get(SINK_TYPE_PROP);
         String databaseName = tableProperties.get(DATABASE_NAME_PROP);
         String tableName = tableProperties.get(TABLE_NAME_PROP);
         String warehousePath = getWarehousePath(tableProperties);
@@ -117,49 +117,60 @@ public class IcebergSinkFactory implements SinkFactory {
 
         TableIdentifier tableIdentifier = TableIdentifier.of(databaseName, tableName);
         Configuration hadoopConf = createHadoopConf(schema, tableProperties);
-        HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath);
-        Table icebergTable;
-        try {
-            icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+
+        try (HadoopCatalog hadoopCatalog = new HadoopCatalog(hadoopConf, warehousePath); ) {
+
+            Table icebergTable = hadoopCatalog.loadTable(tableIdentifier);
+
+            // Check that all columns in tableSchema exist in the iceberg table.
+            for (String columnName : tableSchema.getColumnNames()) {
+                if (icebergTable.schema().findField(columnName) == null) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription(
+                                    String.format(
+                                            "table schema does not match. Column %s not found in iceberg table",
+                                            columnName))
+                            .asRuntimeException();
+                }
+            }
+
+            // Check that all required columns in the iceberg table exist in tableSchema.
+            Set<String> columnNames = Set.of(tableSchema.getColumnNames());
+            for (Types.NestedField column : icebergTable.schema().columns()) {
+                if (column.isRequired() && !columnNames.contains(column.name())) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription(
+                                    String.format("missing a required field %s", column.name()))
+                            .asRuntimeException();
+                }
+            }
+
         } catch (Exception e) {
-            throw Status.FAILED_PRECONDITION
+            throw Status.INTERNAL
                     .withDescription(
                             String.format("failed to load iceberg table: %s", e.getMessage()))
                     .withCause(e)
                     .asRuntimeException();
-        }
-        // check that all columns in tableSchema exist in the iceberg table
-        for (String columnName : tableSchema.getColumnNames()) {
-            if (icebergTable.schema().findField(columnName) == null) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format(
-                                        "table schema does not match. Column %s not found in iceberg table",
-                                        columnName))
-                        .asRuntimeException();
-            }
-        }
-        // check that all required columns in the iceberg table exist in tableSchema
-        Set<String> columnNames = Set.of(tableSchema.getColumnNames());
-        for (Types.NestedField column : icebergTable.schema().columns()) {
-            if (column.isRequired() && !columnNames.contains(column.name())) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription(
-                                String.format("missing a required field %s", column.name()))
-                        .asRuntimeException();
-            }
         }
 
         if (!mode.equals("append-only") && !mode.equals("upsert")) {
             throw UNIMPLEMENTED.withDescription("unsupported mode: " + mode).asRuntimeException();
         }
 
-        if (mode.equals("upsert")) {
-            if (tableSchema.getPrimaryKeys().isEmpty()) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription("no primary keys for upsert mode")
-                        .asRuntimeException();
-            }
+        switch (sinkType) {
+            case UPSERT:
+                // For upsert iceberg sink, the user must specify its primary key explicitly.
+                if (tableSchema.getPrimaryKeys().isEmpty()) {
+                    throw Status.INVALID_ARGUMENT
+                            .withDescription("please define primary key for upsert iceberg sink")
+                            .asRuntimeException();
+                }
+                break;
+            case APPEND_ONLY:
+            case FORCE_APPEND_ONLY:
+                break;
+            default:
+                throw Status.INTERNAL.asRuntimeException();
         }
     }
 

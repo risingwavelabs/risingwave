@@ -15,7 +15,7 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::data::{Op as ProstOp, StreamChunk as ProstStreamChunk};
+use risingwave_pb::data::{PbOp, PbStreamChunk};
 
 use super::{ArrayResult, DataChunkTestExt};
 use crate::array::column::Column;
@@ -41,22 +41,22 @@ pub enum Op {
 }
 
 impl Op {
-    pub fn to_protobuf(self) -> ProstOp {
+    pub fn to_protobuf(self) -> PbOp {
         match self {
-            Op::Insert => ProstOp::Insert,
-            Op::Delete => ProstOp::Delete,
-            Op::UpdateInsert => ProstOp::UpdateInsert,
-            Op::UpdateDelete => ProstOp::UpdateDelete,
+            Op::Insert => PbOp::Insert,
+            Op::Delete => PbOp::Delete,
+            Op::UpdateInsert => PbOp::UpdateInsert,
+            Op::UpdateDelete => PbOp::UpdateDelete,
         }
     }
 
     pub fn from_protobuf(prost: &i32) -> ArrayResult<Op> {
-        let op = match ProstOp::from_i32(*prost) {
-            Some(ProstOp::Insert) => Op::Insert,
-            Some(ProstOp::Delete) => Op::Delete,
-            Some(ProstOp::UpdateInsert) => Op::UpdateInsert,
-            Some(ProstOp::UpdateDelete) => Op::UpdateDelete,
-            Some(ProstOp::Unspecified) => unreachable!(),
+        let op = match PbOp::from_i32(*prost) {
+            Some(PbOp::Insert) => Op::Insert,
+            Some(PbOp::Delete) => Op::Delete,
+            Some(PbOp::UpdateInsert) => Op::UpdateInsert,
+            Some(PbOp::UpdateDelete) => Op::UpdateDelete,
+            Some(PbOp::Unspecified) => unreachable!(),
             None => bail!("No such op type"),
         };
         Ok(op)
@@ -189,15 +189,15 @@ impl StreamChunk {
         (self.ops, columns, visibility)
     }
 
-    pub fn to_protobuf(&self) -> ProstStreamChunk {
-        ProstStreamChunk {
+    pub fn to_protobuf(&self) -> PbStreamChunk {
+        PbStreamChunk {
             cardinality: self.cardinality() as u32,
             ops: self.ops.iter().map(|op| op.to_protobuf() as i32).collect(),
             columns: self.columns().iter().map(|col| col.to_protobuf()).collect(),
         }
     }
 
-    pub fn from_protobuf(prost: &ProstStreamChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(prost: &PbStreamChunk) -> ArrayResult<Self> {
         let cardinality = prost.get_cardinality() as usize;
         let mut ops = Vec::with_capacity(cardinality);
         for op in prost.get_ops() {

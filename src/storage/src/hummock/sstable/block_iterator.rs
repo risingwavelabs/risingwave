@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use risingwave_hummock_sdk::HummockEpoch;
 
@@ -79,6 +80,10 @@ impl BlockIterator {
     pub fn try_prev(&mut self) -> bool {
         assert!(self.is_valid());
         self.try_prev_inner()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        self.block.table_id()
     }
 
     pub fn key(&self) -> FullKey<&[u8]> {
@@ -166,9 +171,9 @@ impl BlockIterator {
             self.key_index_in_restart_point += 1;
         }
 
-        self.epoch = self
-            .block
-            .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
+        // self.epoch = self
+        //     .block
+        //     .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
 
         let prefix =
             self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
@@ -301,7 +306,7 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
-        self.epoch = self.block.decode_epoch(index, 0)
+        // self.epoch = self.block.decode_epoch(index, 0)
     }
 }
 

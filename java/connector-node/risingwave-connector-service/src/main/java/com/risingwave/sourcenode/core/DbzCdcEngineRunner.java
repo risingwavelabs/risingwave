@@ -16,7 +16,7 @@ package com.risingwave.sourcenode.core;
 
 import com.risingwave.connector.api.source.*;
 import com.risingwave.proto.ConnectorServiceProto;
-import io.debezium.engine.DebeziumEngine;
+import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import io.grpc.stub.StreamObserver;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -25,44 +25,40 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Single-thread engine runner */
-public class DefaultCdcEngineRunner implements CdcEngineRunner {
-    static final Logger LOG = LoggerFactory.getLogger(DefaultCdcEngineRunner.class);
+public class DbzCdcEngineRunner implements CdcEngineRunner {
+    static final Logger LOG = LoggerFactory.getLogger(DbzCdcEngineRunner.class);
 
     private final ExecutorService executor;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final CdcEngine engine;
 
-    public DefaultCdcEngineRunner(CdcEngine engine) {
+    public DbzCdcEngineRunner(CdcEngine engine) {
         this.executor = Executors.newSingleThreadExecutor();
         this.engine = engine;
     }
 
     public static CdcEngineRunner newCdcEngineRunner(
-            long sourceId,
-            SourceConfig config,
+            DbzConnectorConfig config,
             StreamObserver<ConnectorServiceProto.GetEventStreamResponse> responseObserver) {
-        DefaultCdcEngineRunner runner = null;
+        DbzCdcEngineRunner runner = null;
         try {
             var engine =
-                    new DefaultCdcEngine(
-                            config,
-                            new DebeziumEngine.CompletionCallback() {
-                                @Override
-                                public void handle(
-                                        boolean success, String message, Throwable error) {
-                                    if (!success) {
-                                        responseObserver.onError(error);
-                                        LOG.error(
-                                                "failed to run the engine. message: {}",
-                                                message,
-                                                error);
-                                    } else {
-                                        responseObserver.onCompleted();
-                                    }
+                    new DbzCdcEngine(
+                            config.getSourceId(),
+                            config.getResolvedDebeziumProps(),
+                            (success, message, error) -> {
+                                if (!success) {
+                                    responseObserver.onError(error);
+                                    LOG.error(
+                                            "the engine terminated with error. message: {}",
+                                            message,
+                                            error);
+                                } else {
+                                    responseObserver.onCompleted();
                                 }
                             });
 
-            runner = new DefaultCdcEngineRunner(engine);
+            runner = new DbzCdcEngineRunner(engine);
         } catch (Exception e) {
             LOG.error("failed to create the CDC engine", e);
         }

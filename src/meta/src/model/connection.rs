@@ -12,31 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector.api.sink;
+use risingwave_pb::catalog::Connection;
 
-import com.risingwave.proto.Data;
+use crate::model::{MetadataModel, MetadataModelResult};
 
-public class ArraySinkrow implements SinkRow {
-    public final Object[] values;
-    public final Data.Op op;
+/// Column family name for connection.
+const CONNECTION_CF_NAME: &str = "cf/connection";
 
-    public ArraySinkrow(Data.Op op, Object... value) {
-        this.op = op;
-        this.values = value;
+impl MetadataModel for Connection {
+    type KeyType = u32;
+    type PbType = Connection;
+
+    fn cf_name() -> String {
+        CONNECTION_CF_NAME.to_string()
     }
 
-    @Override
-    public Object get(int index) {
-        return values[index];
+    fn to_protobuf(&self) -> Self::PbType {
+        self.clone()
     }
 
-    @Override
-    public Data.Op getOp() {
-        return op;
+    fn from_protobuf(prost: Self::PbType) -> Self {
+        prost
     }
 
-    @Override
-    public int size() {
-        return values.length;
+    fn key(&self) -> MetadataModelResult<Self::KeyType> {
+        Ok(self.id)
     }
 }

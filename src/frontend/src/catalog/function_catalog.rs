@@ -14,8 +14,8 @@
 
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::function::Kind as ProstKind;
-use risingwave_pb::catalog::Function as ProstFunction;
+use risingwave_pb::catalog::function::PbKind;
+use risingwave_pb::catalog::PbFunction;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FunctionCatalog {
@@ -37,8 +37,8 @@ pub enum FunctionKind {
     Aggregate,
 }
 
-impl From<&ProstKind> for FunctionKind {
-    fn from(prost: &ProstKind) -> Self {
+impl From<&PbKind> for FunctionKind {
+    fn from(prost: &PbKind) -> Self {
         use risingwave_pb::catalog::function::*;
         match prost {
             Kind::Scalar(ScalarFunction {}) => Self::Scalar,
@@ -48,8 +48,8 @@ impl From<&ProstKind> for FunctionKind {
     }
 }
 
-impl From<&ProstFunction> for FunctionCatalog {
-    fn from(prost: &ProstFunction) -> Self {
+impl From<&PbFunction> for FunctionCatalog {
+    fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
             id: prost.id.into(),
             name: prost.name.clone(),

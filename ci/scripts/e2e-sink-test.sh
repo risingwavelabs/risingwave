@@ -59,12 +59,16 @@ apt-get -y install postgresql-client
 export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
-psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int, v2 int);"
+psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
 psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
 
 node_port=50051
 node_timeout=10
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
+echo "--- starting risingwave cluster with connector node"
+cargo make ci-start ci-1cn-1fe
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
+
 echo "waiting for connector node to start"
 start_time=$(date +%s)
 while :
@@ -83,8 +87,6 @@ do
     sleep 0.1
 done
 
-echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-1cn-1fe
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
