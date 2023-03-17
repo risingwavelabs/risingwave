@@ -149,6 +149,7 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
         }
 
         // Try Kafka connection.
+        // TODO: Reuse the conductor instance we create during validation.
         KafkaTransactionConductor::new(config).await?;
 
         Ok(())
