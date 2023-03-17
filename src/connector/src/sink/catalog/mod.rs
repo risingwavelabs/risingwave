@@ -115,9 +115,8 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink (connector). Now the sink does not care about a field's
-    /// order (ASC/DESC).
-    pub pk: Vec<ColumnOrder>,
+    /// Primiary keys of the sink. Derived by the frontend.
+    pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
     pub downstream_pk: Vec<usize>,
@@ -150,7 +149,7 @@ impl SinkCatalog {
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
-            pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
+            plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
             downstream_pk: self
                 .downstream_pk
                 .iter()
@@ -200,7 +199,11 @@ impl From<ProstSink> for SinkCatalog {
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect_vec(),
-            pk: pb.pk.iter().map(ColumnOrder::from_protobuf).collect_vec(),
+            plan_pk: pb
+                .plan_pk
+                .iter()
+                .map(ColumnOrder::from_protobuf)
+                .collect_vec(),
             downstream_pk: pb.downstream_pk.iter().map(|k| *k as _).collect_vec(),
             distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: pb.properties.clone(),

@@ -126,7 +126,7 @@ impl StreamSink {
             name,
             definition,
             columns,
-            pk,
+            plan_pk: pk,
             downstream_pk,
             distribution_key,
             properties: properties.into_inner(),
@@ -265,7 +265,7 @@ impl fmt::Display for StreamSink {
                 &IndicesDisplay {
                     indices: &self
                         .sink_desc
-                        .pk
+                        .plan_pk
                         .iter()
                         .map(|k| k.column_index)
                         .collect_vec(),

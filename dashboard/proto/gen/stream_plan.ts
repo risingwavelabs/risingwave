@@ -408,7 +408,7 @@ export interface SinkDesc {
   name: string;
   definition: string;
   columns: ColumnDesc[];
-  pk: ColumnOrder[];
+  planPk: ColumnOrder[];
   downstreamPk: number[];
   distributionKey: number[];
   properties: { [key: string]: string };
@@ -1929,7 +1929,7 @@ function createBaseSinkDesc(): SinkDesc {
     name: "",
     definition: "",
     columns: [],
-    pk: [],
+    planPk: [],
     downstreamPk: [],
     distributionKey: [],
     properties: {},
@@ -1946,7 +1946,7 @@ export const SinkDesc = {
       columns: Array.isArray(object?.columns)
         ? object.columns.map((e: any) => ColumnDesc.fromJSON(e))
         : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      planPk: Array.isArray(object?.planPk) ? object.planPk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       downstreamPk: Array.isArray(object?.downstreamPk) ? object.downstreamPk.map((e: any) => Number(e)) : [],
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
@@ -1969,10 +1969,10 @@ export const SinkDesc = {
     } else {
       obj.columns = [];
     }
-    if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.planPk) {
+      obj.planPk = message.planPk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.pk = [];
+      obj.planPk = [];
     }
     if (message.downstreamPk) {
       obj.downstreamPk = message.downstreamPk.map((e) => Math.round(e));
@@ -2000,7 +2000,7 @@ export const SinkDesc = {
     message.name = object.name ?? "";
     message.definition = object.definition ?? "";
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.planPk = object.planPk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(

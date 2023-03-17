@@ -36,9 +36,8 @@ pub struct SinkDesc {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink (connector). Now the sink does not care about a field's
-    /// order (ASC/DESC).
-    pub pk: Vec<ColumnOrder>,
+    /// Primiary keys of the sink. Derived by the frontend.
+    pub plan_pk: Vec<ColumnOrder>,
 
     /// User-defined primary key indices for upsert sink.
     pub downstream_pk: Vec<usize>,
@@ -71,7 +70,7 @@ impl SinkDesc {
             name: self.name,
             definition: self.definition,
             columns: self.columns,
-            pk: self.pk,
+            plan_pk: self.plan_pk,
             downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
@@ -91,7 +90,7 @@ impl SinkDesc {
                 .iter()
                 .map(|column| Into::<ProstColumnDesc>::into(&column.column_desc))
                 .collect_vec(),
-            pk: self.pk.iter().map(|k| k.to_protobuf()).collect_vec(),
+            plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
             downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),

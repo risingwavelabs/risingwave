@@ -165,10 +165,11 @@ export interface Sink {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  pk: ColumnOrder[];
+  /** Primary key derived from the SQL by the frontend. */
+  planPk: ColumnOrder[];
   dependentRelations: number[];
   distributionKey: number[];
-  /** User-defined primary key indices for upsert sink. */
+  /** User-defined primary key indices for the upsert sink. */
   downstreamPk: number[];
   sinkType: SinkType;
   owner: number;
@@ -618,7 +619,7 @@ function createBaseSink(): Sink {
     databaseId: 0,
     name: "",
     columns: [],
-    pk: [],
+    planPk: [],
     dependentRelations: [],
     distributionKey: [],
     downstreamPk: [],
@@ -637,7 +638,7 @@ export const Sink = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      planPk: Array.isArray(object?.planPk) ? object.planPk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
@@ -668,10 +669,10 @@ export const Sink = {
     } else {
       obj.columns = [];
     }
-    if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.planPk) {
+      obj.planPk = message.planPk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.pk = [];
+      obj.planPk = [];
     }
     if (message.dependentRelations) {
       obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
@@ -707,7 +708,7 @@ export const Sink = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.planPk = object.planPk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
