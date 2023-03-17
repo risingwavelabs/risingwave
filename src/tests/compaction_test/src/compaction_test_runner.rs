@@ -129,6 +129,8 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "meta-node",
         "--listen-addr",
         &listen_addr,
+        "--advertise-addr",
+        &listen_addr,
         "--backend",
         "mem",
         "--checkpoint-frequency",
