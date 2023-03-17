@@ -29,9 +29,15 @@ message SinkConfig {
   TableSchema table_schema = 3;
 }
 
+enum SinkPayloadFormat {
+  FORMAT_UNSPECIFIED = 0;
+  JSON = 1;
+}
+
 message SinkStreamRequest {
   message StartSink {
     SinkConfig sink_config = 1;
+    SinkPayloadFormat format = 2;
   }
 
   message WriteBatch {

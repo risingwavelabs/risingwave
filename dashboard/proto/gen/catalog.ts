@@ -165,11 +165,12 @@ export interface Sink {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  pk: ColumnOrder[];
+  /** Primary key derived from the SQL by the frontend. */
+  planPk: ColumnOrder[];
   dependentRelations: number[];
   distributionKey: number[];
-  /** pk_indices of the corresponding materialize operator's output. */
-  streamKey: number[];
+  /** User-defined primary key indices for the upsert sink. */
+  downstreamPk: number[];
   sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
@@ -635,10 +636,10 @@ function createBaseSink(): Sink {
     databaseId: 0,
     name: "",
     columns: [],
-    pk: [],
+    planPk: [],
     dependentRelations: [],
     distributionKey: [],
-    streamKey: [],
+    downstreamPk: [],
     sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
@@ -654,14 +655,14 @@ export const Sink = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      planPk: Array.isArray(object?.planPk) ? object.planPk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
-      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      downstreamPk: Array.isArray(object?.downstreamPk) ? object.downstreamPk.map((e: any) => Number(e)) : [],
       sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
@@ -685,10 +686,10 @@ export const Sink = {
     } else {
       obj.columns = [];
     }
-    if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.planPk) {
+      obj.planPk = message.planPk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.pk = [];
+      obj.planPk = [];
     }
     if (message.dependentRelations) {
       obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
@@ -700,10 +701,10 @@ export const Sink = {
     } else {
       obj.distributionKey = [];
     }
-    if (message.streamKey) {
-      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    if (message.downstreamPk) {
+      obj.downstreamPk = message.downstreamPk.map((e) => Math.round(e));
     } else {
-      obj.streamKey = [];
+      obj.downstreamPk = [];
     }
     message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
@@ -724,10 +725,10 @@ export const Sink = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.planPk = object.planPk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
     message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(

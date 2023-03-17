@@ -127,6 +127,7 @@ impl ConnectorClient {
         request_sender
             .send(SinkStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
+                    format: SinkPayloadFormat::Json as i32,
                     sink_config: Some(SinkConfig {
                         connector_type,
                         properties,

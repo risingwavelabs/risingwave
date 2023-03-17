@@ -190,7 +190,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let table_schema = TableSchema {
             columns,
             pk_indices: sink_catalog
-                .pk_indices()
+                .downstream_pk_indices()
                 .iter()
                 .map(|i| *i as _)
                 .collect_vec(),

@@ -202,19 +202,19 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
-                dist_key_indices,
+                dist_key_in_pk_indices,
             },
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Distribution::all_vnodes(dist_key_indices),
+            None => Distribution::all_vnodes(dist_key_in_pk_indices),
         };
 
         let table_option = TableOption {

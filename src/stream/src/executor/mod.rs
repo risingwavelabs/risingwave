@@ -57,6 +57,7 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+mod barrier_recv;
 mod batch_query;
 mod chain;
 mod dispatch;
@@ -103,6 +104,7 @@ mod test_utils;
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
 pub use backfill::*;
+pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};

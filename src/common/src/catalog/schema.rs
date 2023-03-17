@@ -118,6 +118,11 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn empty() -> &'static Self {
+        static EMPTY: Schema = Schema { fields: Vec::new() };
+        &EMPTY
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }

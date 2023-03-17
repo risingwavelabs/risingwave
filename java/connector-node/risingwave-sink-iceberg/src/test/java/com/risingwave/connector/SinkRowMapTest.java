@@ -16,7 +16,7 @@ package com.risingwave.connector;
 
 import static org.junit.Assert.assertEquals;
 
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.connector.api.sink.SinkRow;
 import com.risingwave.proto.Data;
 import java.util.ArrayList;
@@ -28,7 +28,7 @@ public class SinkRowMapTest {
     @Test
     public void testInsert() {
         SinkRowMap sinkRowMap = new SinkRowMap();
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
 
@@ -42,10 +42,10 @@ public class SinkRowMapTest {
     public void testInsertAfterDelete() {
         SinkRowMap sinkRowMap = new SinkRowMap();
 
-        SinkRow row1 = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1, "Alice");
+        SinkRow row1 = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1, "Alice");
         List<Comparable<Object>> key1 = new ArrayList<>();
         key1.add((Comparable<Object>) row1.get(0));
-        SinkRow row2 = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1, "Bob");
+        SinkRow row2 = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1, "Bob");
         List<Comparable<Object>> key2 = new ArrayList<>();
         key2.add((Comparable<Object>) row2.get(0));
 
@@ -59,7 +59,7 @@ public class SinkRowMapTest {
     @Test
     public void testInsertAfterInsert() {
         SinkRowMap sinkRowMap = new SinkRowMap();
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
 
@@ -83,7 +83,7 @@ public class SinkRowMapTest {
     public void testDelete() {
         SinkRowMap sinkRowMap = new SinkRowMap();
 
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
 
@@ -96,7 +96,7 @@ public class SinkRowMapTest {
     @Test
     public void testDeleteAfterDelete() {
         SinkRowMap sinkRowMap = new SinkRowMap();
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
 
@@ -118,7 +118,7 @@ public class SinkRowMapTest {
     public void testDeleteAfterInsert() {
         SinkRowMap sinkRowMap = new SinkRowMap();
 
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
 
@@ -131,10 +131,10 @@ public class SinkRowMapTest {
     public void testDeleteAfterUpdate() {
         SinkRowMap sinkRowMap = new SinkRowMap();
 
-        SinkRow row1 = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1, "Alice");
+        SinkRow row1 = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1, "Alice");
         List<Comparable<Object>> key1 = new ArrayList<>();
         key1.add((Comparable<Object>) row1.get(0));
-        SinkRow row2 = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1, "Clare");
+        SinkRow row2 = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1, "Clare");
         List<Comparable<Object>> key2 = new ArrayList<>();
         key2.add((Comparable<Object>) row2.get(0));
 
@@ -150,7 +150,7 @@ public class SinkRowMapTest {
     public void testClear() {
         SinkRowMap sinkRowMap = new SinkRowMap();
 
-        SinkRow row = new ArraySinkrow(Data.Op.OP_UNSPECIFIED, 1);
+        SinkRow row = new ArraySinkRow(Data.Op.OP_UNSPECIFIED, 1);
         List<Comparable<Object>> key = new ArrayList<>();
         key.add((Comparable<Object>) row.get(0));
         sinkRowMap.insert(key, row);

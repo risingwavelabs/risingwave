@@ -11,6 +11,41 @@ import {
 
 export const protobufPackage = "connector_service";
 
+export const SinkPayloadFormat = {
+  FORMAT_UNSPECIFIED: "FORMAT_UNSPECIFIED",
+  JSON: "JSON",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkPayloadFormat = typeof SinkPayloadFormat[keyof typeof SinkPayloadFormat];
+
+export function sinkPayloadFormatFromJSON(object: any): SinkPayloadFormat {
+  switch (object) {
+    case 0:
+    case "FORMAT_UNSPECIFIED":
+      return SinkPayloadFormat.FORMAT_UNSPECIFIED;
+    case 1:
+    case "JSON":
+      return SinkPayloadFormat.JSON;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkPayloadFormat.UNRECOGNIZED;
+  }
+}
+
+export function sinkPayloadFormatToJSON(object: SinkPayloadFormat): string {
+  switch (object) {
+    case SinkPayloadFormat.FORMAT_UNSPECIFIED:
+      return "FORMAT_UNSPECIFIED";
+    case SinkPayloadFormat.JSON:
+      return "JSON";
+    case SinkPayloadFormat.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export const SourceType = {
   UNSPECIFIED: "UNSPECIFIED",
   MYSQL: "MYSQL",
@@ -87,6 +122,7 @@ export interface SinkStreamRequest {
 
 export interface SinkStreamRequest_StartSink {
   sinkConfig: SinkConfig | undefined;
+  format: SinkPayloadFormat;
 }
 
 export interface SinkStreamRequest_WriteBatch {
@@ -408,18 +444,22 @@ export const SinkStreamRequest = {
 };
 
 function createBaseSinkStreamRequest_StartSink(): SinkStreamRequest_StartSink {
-  return { sinkConfig: undefined };
+  return { sinkConfig: undefined, format: SinkPayloadFormat.FORMAT_UNSPECIFIED };
 }
 
 export const SinkStreamRequest_StartSink = {
   fromJSON(object: any): SinkStreamRequest_StartSink {
-    return { sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined };
+    return {
+      sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined,
+      format: isSet(object.format) ? sinkPayloadFormatFromJSON(object.format) : SinkPayloadFormat.FORMAT_UNSPECIFIED,
+    };
   },
 
   toJSON(message: SinkStreamRequest_StartSink): unknown {
     const obj: any = {};
     message.sinkConfig !== undefined &&
       (obj.sinkConfig = message.sinkConfig ? SinkConfig.toJSON(message.sinkConfig) : undefined);
+    message.format !== undefined && (obj.format = sinkPayloadFormatToJSON(message.format));
     return obj;
   },
 
@@ -428,6 +468,7 @@ export const SinkStreamRequest_StartSink = {
     message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
       ? SinkConfig.fromPartial(object.sinkConfig)
       : undefined;
+    message.format = object.format ?? SinkPayloadFormat.FORMAT_UNSPECIFIED;
     return message;
   },
 };

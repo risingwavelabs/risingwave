@@ -395,6 +395,13 @@ export interface StreamSource_PropertiesEntry {
   value: string;
 }
 
+/**
+ * The executor only for receiving barrier from the meta service. It always resides in the leaves
+ * of the streaming graph.
+ */
+export interface BarrierRecvNode {
+}
+
 export interface SourceNode {
   /**
    * The source node can contain either a stream source or nothing. So here we extract all
@@ -408,8 +415,8 @@ export interface SinkDesc {
   name: string;
   definition: string;
   columns: ColumnDesc[];
-  pk: ColumnOrder[];
-  streamKey: number[];
+  planPk: ColumnOrder[];
+  downstreamPk: number[];
   distributionKey: number[];
   properties: { [key: string]: string };
   sinkType: SinkType;
@@ -867,7 +874,8 @@ export interface StreamNode {
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
     | { $case: "now"; now: NowNode }
     | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode }
-    | { $case: "temporalJoin"; temporalJoin: TemporalJoinNode };
+    | { $case: "temporalJoin"; temporalJoin: TemporalJoinNode }
+    | { $case: "barrierRecv"; barrierRecv: BarrierRecvNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1898,6 +1906,26 @@ export const StreamSource_PropertiesEntry = {
   },
 };
 
+function createBaseBarrierRecvNode(): BarrierRecvNode {
+  return {};
+}
+
+export const BarrierRecvNode = {
+  fromJSON(_: any): BarrierRecvNode {
+    return {};
+  },
+
+  toJSON(_: BarrierRecvNode): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<BarrierRecvNode>, I>>(_: I): BarrierRecvNode {
+    const message = createBaseBarrierRecvNode();
+    return message;
+  },
+};
+
 function createBaseSourceNode(): SourceNode {
   return { sourceInner: undefined };
 }
@@ -1929,8 +1957,8 @@ function createBaseSinkDesc(): SinkDesc {
     name: "",
     definition: "",
     columns: [],
-    pk: [],
-    streamKey: [],
+    planPk: [],
+    downstreamPk: [],
     distributionKey: [],
     properties: {},
     sinkType: SinkType.UNSPECIFIED,
@@ -1946,8 +1974,8 @@ export const SinkDesc = {
       columns: Array.isArray(object?.columns)
         ? object.columns.map((e: any) => ColumnDesc.fromJSON(e))
         : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
-      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      planPk: Array.isArray(object?.planPk) ? object.planPk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      downstreamPk: Array.isArray(object?.downstreamPk) ? object.downstreamPk.map((e: any) => Number(e)) : [],
       distributionKey: Array.isArray(object?.distributionKey) ? object.distributionKey.map((e: any) => Number(e)) : [],
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
@@ -1969,15 +1997,15 @@ export const SinkDesc = {
     } else {
       obj.columns = [];
     }
-    if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.planPk) {
+      obj.planPk = message.planPk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.pk = [];
+      obj.planPk = [];
     }
-    if (message.streamKey) {
-      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    if (message.downstreamPk) {
+      obj.downstreamPk = message.downstreamPk.map((e) => Math.round(e));
     } else {
-      obj.streamKey = [];
+      obj.downstreamPk = [];
     }
     if (message.distributionKey) {
       obj.distributionKey = message.distributionKey.map((e) => Math.round(e));
@@ -2000,8 +2028,8 @@ export const SinkDesc = {
     message.name = object.name ?? "";
     message.definition = object.definition ?? "";
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
-    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.planPk = object.planPk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
@@ -3733,6 +3761,8 @@ export const StreamNode = {
         ? { $case: "appendOnlyGroupTopN", appendOnlyGroupTopN: GroupTopNNode.fromJSON(object.appendOnlyGroupTopN) }
         : isSet(object.temporalJoin)
         ? { $case: "temporalJoin", temporalJoin: TemporalJoinNode.fromJSON(object.temporalJoin) }
+        : isSet(object.barrierRecv)
+        ? { $case: "barrierRecv", barrierRecv: BarrierRecvNode.fromJSON(object.barrierRecv) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3822,6 +3852,9 @@ export const StreamNode = {
     message.nodeBody?.$case === "temporalJoin" && (obj.temporalJoin = message.nodeBody?.temporalJoin
       ? TemporalJoinNode.toJSON(message.nodeBody?.temporalJoin)
       : undefined);
+    message.nodeBody?.$case === "barrierRecv" && (obj.barrierRecv = message.nodeBody?.barrierRecv
+      ? BarrierRecvNode.toJSON(message.nodeBody?.barrierRecv)
+      : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3840,7 +3873,9 @@ export const StreamNode = {
     message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.identity !== undefined && (obj.identity = message.identity);
     if (message.fields) {
-      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
+      obj.fields = message.fields.map((e) =>
+        e ? Field.toJSON(e) : undefined
+      );
     } else {
       obj.fields = [];
     }
@@ -4061,6 +4096,16 @@ export const StreamNode = {
       message.nodeBody = {
         $case: "temporalJoin",
         temporalJoin: TemporalJoinNode.fromPartial(object.nodeBody.temporalJoin),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "barrierRecv" &&
+      object.nodeBody?.barrierRecv !== undefined &&
+      object.nodeBody?.barrierRecv !== null
+    ) {
+      message.nodeBody = {
+        $case: "barrierRecv",
+        barrierRecv: BarrierRecvNode.fromPartial(object.nodeBody.barrierRecv),
       };
     }
     message.operatorId = object.operatorId ?? 0;

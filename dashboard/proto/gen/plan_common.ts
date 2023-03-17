@@ -214,7 +214,7 @@ export interface StorageTableDesc {
   columns: ColumnDesc[];
   /** TODO: may refactor primary key representations */
   pk: ColumnOrder[];
-  distKeyIndices: number[];
+  distKeyInPkIndices: number[];
   retentionSeconds: number;
   valueIndices: number[];
   readPrefixLenHint: number;
@@ -332,7 +332,7 @@ function createBaseStorageTableDesc(): StorageTableDesc {
     tableId: 0,
     columns: [],
     pk: [],
-    distKeyIndices: [],
+    distKeyInPkIndices: [],
     retentionSeconds: 0,
     valueIndices: [],
     readPrefixLenHint: 0,
@@ -346,9 +346,13 @@ export const StorageTableDesc = {
       tableId: isSet(object.tableId) ? Number(object.tableId) : 0,
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnDesc.fromJSON(e)) : [],
       pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
-      distKeyIndices: Array.isArray(object?.distKeyIndices) ? object.distKeyIndices.map((e: any) => Number(e)) : [],
+      distKeyInPkIndices: Array.isArray(object?.distKeyInPkIndices)
+        ? object.distKeyInPkIndices.map((e: any) => Number(e))
+        : [],
       retentionSeconds: isSet(object.retentionSeconds) ? Number(object.retentionSeconds) : 0,
-      valueIndices: Array.isArray(object?.valueIndices) ? object.valueIndices.map((e: any) => Number(e)) : [],
+      valueIndices: Array.isArray(object?.valueIndices)
+        ? object.valueIndices.map((e: any) => Number(e))
+        : [],
       readPrefixLenHint: isSet(object.readPrefixLenHint) ? Number(object.readPrefixLenHint) : 0,
       versioned: isSet(object.versioned) ? Boolean(object.versioned) : false,
     };
@@ -367,10 +371,10 @@ export const StorageTableDesc = {
     } else {
       obj.pk = [];
     }
-    if (message.distKeyIndices) {
-      obj.distKeyIndices = message.distKeyIndices.map((e) => Math.round(e));
+    if (message.distKeyInPkIndices) {
+      obj.distKeyInPkIndices = message.distKeyInPkIndices.map((e) => Math.round(e));
     } else {
-      obj.distKeyIndices = [];
+      obj.distKeyInPkIndices = [];
     }
     message.retentionSeconds !== undefined && (obj.retentionSeconds = Math.round(message.retentionSeconds));
     if (message.valueIndices) {
@@ -388,7 +392,7 @@ export const StorageTableDesc = {
     message.tableId = object.tableId ?? 0;
     message.columns = object.columns?.map((e) => ColumnDesc.fromPartial(e)) || [];
     message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
-    message.distKeyIndices = object.distKeyIndices?.map((e) => e) || [];
+    message.distKeyInPkIndices = object.distKeyInPkIndices?.map((e) => e) || [];
     message.retentionSeconds = object.retentionSeconds ?? 0;
     message.valueIndices = object.valueIndices?.map((e) => e) || [];
     message.readPrefixLenHint = object.readPrefixLenHint ?? 0;

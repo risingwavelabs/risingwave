@@ -46,6 +46,7 @@ def test_upsert_sink(type, prop, input_file):
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+                format=connector_service_pb2.SinkPayloadFormat.JSON,
                 sink_config=connector_service_pb2.SinkConfig(
                     connector_type=type,
                     properties=prop,
@@ -85,6 +86,7 @@ def test_sink(type, prop, input_file):
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+                format=connector_service_pb2.SinkPayloadFormat.JSON,
                 sink_config=connector_service_pb2.SinkConfig(
                     connector_type=type,
                     properties=prop,
@@ -160,7 +162,7 @@ def test_print_sink(input_file):
 
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
-              {"sink.mode":"append-only",
+              {"type":"append-only",
                "warehouse.path":"s3a://bucket",
                "s3.endpoint": "http://127.0.0.1:9000",
                "s3.access.key": "minioadmin",
@@ -171,7 +173,7 @@ def test_iceberg_sink(input_file):
 
 def test_upsert_iceberg_sink(input_file):
     test_upsert_sink("iceberg",
-              {"sink.mode":"upsert",
+              {"type":"upsert",
                "warehouse.path":"s3a://bucket",
                "s3.endpoint": "http://127.0.0.1:9000",
                "s3.access.key": "minioadmin",
