@@ -231,7 +231,7 @@ impl QueryRewriter<'_> {
     fn may_rewrite_idents(&self, idents: &mut [Ident]) -> MetaResult<()> {
         let idx = idents.len() - 1;
         if idents[idx].real_value() == self.from {
-            idents[idx] = Ident::new_unchecked(self.to.to_string());
+            idents[idx] = Ident::new_unchecked(self.to);
         }
 
         Ok(())
@@ -241,7 +241,7 @@ impl QueryRewriter<'_> {
     /// `from`.
     fn may_rewrite_idents_with_column(&self, idents: &mut [Ident]) -> MetaResult<()> {
         if idents.len() >= 2 && let idx = idents.len() -2 && idents[idx].real_value() == self.from {
-            idents[idx] = Ident::new_unchecked(self.to.to_string());
+            idents[idx] = Ident::new_unchecked(self.to);
         }
 
         Ok(())
