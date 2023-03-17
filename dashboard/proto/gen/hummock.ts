@@ -47,15 +47,14 @@ export function levelTypeToJSON(object: LevelType): string {
 }
 
 export interface SstableInfo {
-  id: number;
+  objectId: number;
+  sstId: number;
   keyRange: KeyRange | undefined;
   fileSize: number;
   tableIds: number[];
   metaOffset: number;
   staleKeyCount: number;
   totalKeyCount: number;
-  /** When a SST is divided, its divide_version will increase one. */
-  divideVersion: number;
   minEpoch: number;
   maxEpoch: number;
   uncompressedFileSize: number;
@@ -97,6 +96,7 @@ export interface GroupConstruct {
   parentGroupId: number;
   tableIds: number[];
   groupId: number;
+  newSstStartId: number;
 }
 
 export interface GroupMetaChange {
@@ -157,7 +157,7 @@ export interface HummockVersionDelta {
    */
   safeEpoch: number;
   trivialMove: boolean;
-  gcSstIds: number[];
+  gcObjectIds: number[];
 }
 
 export interface HummockVersionDelta_GroupDeltas {
@@ -318,7 +318,7 @@ export const CompactTask_TaskStatus = {
   INVALID_GROUP_CANCELED: "INVALID_GROUP_CANCELED",
   EXECUTE_FAILED: "EXECUTE_FAILED",
   JOIN_HANDLE_FAILED: "JOIN_HANDLE_FAILED",
-  TRACK_SST_ID_FAILED: "TRACK_SST_ID_FAILED",
+  TRACK_SST_OBJECT_ID_FAILED: "TRACK_SST_OBJECT_ID_FAILED",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -360,8 +360,8 @@ export function compactTask_TaskStatusFromJSON(object: any): CompactTask_TaskSta
     case "JOIN_HANDLE_FAILED":
       return CompactTask_TaskStatus.JOIN_HANDLE_FAILED;
     case 11:
-    case "TRACK_SST_ID_FAILED":
-      return CompactTask_TaskStatus.TRACK_SST_ID_FAILED;
+    case "TRACK_SST_OBJECT_ID_FAILED":
+      return CompactTask_TaskStatus.TRACK_SST_OBJECT_ID_FAILED;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -393,8 +393,8 @@ export function compactTask_TaskStatusToJSON(object: CompactTask_TaskStatus): st
       return "EXECUTE_FAILED";
     case CompactTask_TaskStatus.JOIN_HANDLE_FAILED:
       return "JOIN_HANDLE_FAILED";
-    case CompactTask_TaskStatus.TRACK_SST_ID_FAILED:
-      return "TRACK_SST_ID_FAILED";
+    case CompactTask_TaskStatus.TRACK_SST_OBJECT_ID_FAILED:
+      return "TRACK_SST_OBJECT_ID_FAILED";
     case CompactTask_TaskStatus.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";
@@ -598,7 +598,7 @@ export interface SubscribeCompactTasksResponse {
 
 /** Delete SSTs in object store */
 export interface VacuumTask {
-  sstableIds: number[];
+  sstableObjectIds: number[];
 }
 
 /** Scan object store to get candidate orphan SSTs. */
@@ -633,7 +633,7 @@ export interface TriggerManualCompactionResponse {
 }
 
 export interface ReportFullScanTaskRequest {
-  sstIds: number[];
+  objectIds: number[];
 }
 
 export interface ReportFullScanTaskResponse {
@@ -795,6 +795,7 @@ export interface CompactionConfig {
   splitByStateTable: boolean;
   /** soft limit for max number of sub level number */
   level0StopWriteThresholdSubLevelNumber: number;
+  level0MaxCompactFileNumber: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -866,14 +867,14 @@ export interface WriteLimits_WriteLimitsEntry {
 
 function createBaseSstableInfo(): SstableInfo {
   return {
-    id: 0,
+    objectId: 0,
+    sstId: 0,
     keyRange: undefined,
     fileSize: 0,
     tableIds: [],
     metaOffset: 0,
     staleKeyCount: 0,
     totalKeyCount: 0,
-    divideVersion: 0,
     minEpoch: 0,
     maxEpoch: 0,
     uncompressedFileSize: 0,
@@ -883,14 +884,14 @@ function createBaseSstableInfo(): SstableInfo {
 export const SstableInfo = {
   fromJSON(object: any): SstableInfo {
     return {
-      id: isSet(object.id) ? Number(object.id) : 0,
+      objectId: isSet(object.objectId) ? Number(object.objectId) : 0,
+      sstId: isSet(object.sstId) ? Number(object.sstId) : 0,
       keyRange: isSet(object.keyRange) ? KeyRange.fromJSON(object.keyRange) : undefined,
       fileSize: isSet(object.fileSize) ? Number(object.fileSize) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       metaOffset: isSet(object.metaOffset) ? Number(object.metaOffset) : 0,
       staleKeyCount: isSet(object.staleKeyCount) ? Number(object.staleKeyCount) : 0,
       totalKeyCount: isSet(object.totalKeyCount) ? Number(object.totalKeyCount) : 0,
-      divideVersion: isSet(object.divideVersion) ? Number(object.divideVersion) : 0,
       minEpoch: isSet(object.minEpoch) ? Number(object.minEpoch) : 0,
       maxEpoch: isSet(object.maxEpoch) ? Number(object.maxEpoch) : 0,
       uncompressedFileSize: isSet(object.uncompressedFileSize) ? Number(object.uncompressedFileSize) : 0,
@@ -899,7 +900,8 @@ export const SstableInfo = {
 
   toJSON(message: SstableInfo): unknown {
     const obj: any = {};
-    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.objectId !== undefined && (obj.objectId = Math.round(message.objectId));
+    message.sstId !== undefined && (obj.sstId = Math.round(message.sstId));
     message.keyRange !== undefined && (obj.keyRange = message.keyRange ? KeyRange.toJSON(message.keyRange) : undefined);
     message.fileSize !== undefined && (obj.fileSize = Math.round(message.fileSize));
     if (message.tableIds) {
@@ -910,7 +912,6 @@ export const SstableInfo = {
     message.metaOffset !== undefined && (obj.metaOffset = Math.round(message.metaOffset));
     message.staleKeyCount !== undefined && (obj.staleKeyCount = Math.round(message.staleKeyCount));
     message.totalKeyCount !== undefined && (obj.totalKeyCount = Math.round(message.totalKeyCount));
-    message.divideVersion !== undefined && (obj.divideVersion = Math.round(message.divideVersion));
     message.minEpoch !== undefined && (obj.minEpoch = Math.round(message.minEpoch));
     message.maxEpoch !== undefined && (obj.maxEpoch = Math.round(message.maxEpoch));
     message.uncompressedFileSize !== undefined && (obj.uncompressedFileSize = Math.round(message.uncompressedFileSize));
@@ -919,7 +920,8 @@ export const SstableInfo = {
 
   fromPartial<I extends Exact<DeepPartial<SstableInfo>, I>>(object: I): SstableInfo {
     const message = createBaseSstableInfo();
-    message.id = object.id ?? 0;
+    message.objectId = object.objectId ?? 0;
+    message.sstId = object.sstId ?? 0;
     message.keyRange = (object.keyRange !== undefined && object.keyRange !== null)
       ? KeyRange.fromPartial(object.keyRange)
       : undefined;
@@ -928,7 +930,6 @@ export const SstableInfo = {
     message.metaOffset = object.metaOffset ?? 0;
     message.staleKeyCount = object.staleKeyCount ?? 0;
     message.totalKeyCount = object.totalKeyCount ?? 0;
-    message.divideVersion = object.divideVersion ?? 0;
     message.minEpoch = object.minEpoch ?? 0;
     message.maxEpoch = object.maxEpoch ?? 0;
     message.uncompressedFileSize = object.uncompressedFileSize ?? 0;
@@ -1098,7 +1099,7 @@ export const IntraLevelDelta = {
 };
 
 function createBaseGroupConstruct(): GroupConstruct {
-  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0 };
+  return { groupConfig: undefined, parentGroupId: 0, tableIds: [], groupId: 0, newSstStartId: 0 };
 }
 
 export const GroupConstruct = {
@@ -1108,6 +1109,7 @@ export const GroupConstruct = {
       parentGroupId: isSet(object.parentGroupId) ? Number(object.parentGroupId) : 0,
       tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
       groupId: isSet(object.groupId) ? Number(object.groupId) : 0,
+      newSstStartId: isSet(object.newSstStartId) ? Number(object.newSstStartId) : 0,
     };
   },
 
@@ -1122,6 +1124,7 @@ export const GroupConstruct = {
       obj.tableIds = [];
     }
     message.groupId !== undefined && (obj.groupId = Math.round(message.groupId));
+    message.newSstStartId !== undefined && (obj.newSstStartId = Math.round(message.newSstStartId));
     return obj;
   },
 
@@ -1133,6 +1136,7 @@ export const GroupConstruct = {
     message.parentGroupId = object.parentGroupId ?? 0;
     message.tableIds = object.tableIds?.map((e) => e) || [];
     message.groupId = object.groupId ?? 0;
+    message.newSstStartId = object.newSstStartId ?? 0;
     return message;
   },
 };
@@ -1428,7 +1432,7 @@ export const HummockVersion_LevelsEntry = {
 };
 
 function createBaseHummockVersionDelta(): HummockVersionDelta {
-  return { id: 0, prevId: 0, groupDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false, gcSstIds: [] };
+  return { id: 0, prevId: 0, groupDeltas: {}, maxCommittedEpoch: 0, safeEpoch: 0, trivialMove: false, gcObjectIds: [] };
 }
 
 export const HummockVersionDelta = {
@@ -1448,8 +1452,8 @@ export const HummockVersionDelta = {
       maxCommittedEpoch: isSet(object.maxCommittedEpoch) ? Number(object.maxCommittedEpoch) : 0,
       safeEpoch: isSet(object.safeEpoch) ? Number(object.safeEpoch) : 0,
       trivialMove: isSet(object.trivialMove) ? Boolean(object.trivialMove) : false,
-      gcSstIds: Array.isArray(object?.gcSstIds)
-        ? object.gcSstIds.map((e: any) => Number(e))
+      gcObjectIds: Array.isArray(object?.gcObjectIds)
+        ? object.gcObjectIds.map((e: any) => Number(e))
         : [],
     };
   },
@@ -1467,10 +1471,10 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch !== undefined && (obj.maxCommittedEpoch = Math.round(message.maxCommittedEpoch));
     message.safeEpoch !== undefined && (obj.safeEpoch = Math.round(message.safeEpoch));
     message.trivialMove !== undefined && (obj.trivialMove = message.trivialMove);
-    if (message.gcSstIds) {
-      obj.gcSstIds = message.gcSstIds.map((e) => Math.round(e));
+    if (message.gcObjectIds) {
+      obj.gcObjectIds = message.gcObjectIds.map((e) => Math.round(e));
     } else {
-      obj.gcSstIds = [];
+      obj.gcObjectIds = [];
     }
     return obj;
   },
@@ -1490,7 +1494,7 @@ export const HummockVersionDelta = {
     message.maxCommittedEpoch = object.maxCommittedEpoch ?? 0;
     message.safeEpoch = object.safeEpoch ?? 0;
     message.trivialMove = object.trivialMove ?? false;
-    message.gcSstIds = object.gcSstIds?.map((e) => e) || [];
+    message.gcObjectIds = object.gcObjectIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -3070,27 +3074,31 @@ export const SubscribeCompactTasksResponse = {
 };
 
 function createBaseVacuumTask(): VacuumTask {
-  return { sstableIds: [] };
+  return { sstableObjectIds: [] };
 }
 
 export const VacuumTask = {
   fromJSON(object: any): VacuumTask {
-    return { sstableIds: Array.isArray(object?.sstableIds) ? object.sstableIds.map((e: any) => Number(e)) : [] };
+    return {
+      sstableObjectIds: Array.isArray(object?.sstableObjectIds)
+        ? object.sstableObjectIds.map((e: any) => Number(e))
+        : [],
+    };
   },
 
   toJSON(message: VacuumTask): unknown {
     const obj: any = {};
-    if (message.sstableIds) {
-      obj.sstableIds = message.sstableIds.map((e) => Math.round(e));
+    if (message.sstableObjectIds) {
+      obj.sstableObjectIds = message.sstableObjectIds.map((e) => Math.round(e));
     } else {
-      obj.sstableIds = [];
+      obj.sstableObjectIds = [];
     }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<VacuumTask>, I>>(object: I): VacuumTask {
     const message = createBaseVacuumTask();
-    message.sstableIds = object.sstableIds?.map((e) => e) || [];
+    message.sstableObjectIds = object.sstableObjectIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -3264,27 +3272,27 @@ export const TriggerManualCompactionResponse = {
 };
 
 function createBaseReportFullScanTaskRequest(): ReportFullScanTaskRequest {
-  return { sstIds: [] };
+  return { objectIds: [] };
 }
 
 export const ReportFullScanTaskRequest = {
   fromJSON(object: any): ReportFullScanTaskRequest {
-    return { sstIds: Array.isArray(object?.sstIds) ? object.sstIds.map((e: any) => Number(e)) : [] };
+    return { objectIds: Array.isArray(object?.objectIds) ? object.objectIds.map((e: any) => Number(e)) : [] };
   },
 
   toJSON(message: ReportFullScanTaskRequest): unknown {
     const obj: any = {};
-    if (message.sstIds) {
-      obj.sstIds = message.sstIds.map((e) => Math.round(e));
+    if (message.objectIds) {
+      obj.objectIds = message.objectIds.map((e) => Math.round(e));
     } else {
-      obj.sstIds = [];
+      obj.objectIds = [];
     }
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<ReportFullScanTaskRequest>, I>>(object: I): ReportFullScanTaskRequest {
     const message = createBaseReportFullScanTaskRequest();
-    message.sstIds = object.sstIds?.map((e) => e) || [];
+    message.objectIds = object.objectIds?.map((e) => e) || [];
     return message;
   },
 };
@@ -4354,6 +4362,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     maxSpaceReclaimBytes: 0,
     splitByStateTable: false,
     level0StopWriteThresholdSubLevelNumber: 0,
+    level0MaxCompactFileNumber: 0,
   };
 }
 
@@ -4386,6 +4395,9 @@ export const CompactionConfig = {
       level0StopWriteThresholdSubLevelNumber: isSet(object.level0StopWriteThresholdSubLevelNumber)
         ? Number(object.level0StopWriteThresholdSubLevelNumber)
         : 0,
+      level0MaxCompactFileNumber: isSet(object.level0MaxCompactFileNumber)
+        ? Number(object.level0MaxCompactFileNumber)
+        : 0,
     };
   },
 
@@ -4414,6 +4426,8 @@ export const CompactionConfig = {
     message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     message.level0StopWriteThresholdSubLevelNumber !== undefined &&
       (obj.level0StopWriteThresholdSubLevelNumber = Math.round(message.level0StopWriteThresholdSubLevelNumber));
+    message.level0MaxCompactFileNumber !== undefined &&
+      (obj.level0MaxCompactFileNumber = Math.round(message.level0MaxCompactFileNumber));
     return obj;
   },
 
@@ -4433,6 +4447,7 @@ export const CompactionConfig = {
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     message.splitByStateTable = object.splitByStateTable ?? false;
     message.level0StopWriteThresholdSubLevelNumber = object.level0StopWriteThresholdSubLevelNumber ?? 0;
+    message.level0MaxCompactFileNumber = object.level0MaxCompactFileNumber ?? 0;
     return message;
   },
 };

@@ -151,7 +151,6 @@ impl HopWindowExecutor {
     async fn do_execute(self: Box<Self>) {
         let Self {
             child,
-
             window_slide,
             window_size,
             output_indices,
@@ -178,12 +177,12 @@ impl HopWindowExecutor {
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {
-                    Some(self.window_start_exprs[i].eval(&data_chunk)?)
+                    Some(self.window_start_exprs[i].eval(&data_chunk).await?)
                 } else {
                     None
                 };
                 let window_end_col = if output_indices.contains(&window_end_col_index) {
-                    Some(self.window_end_exprs[i].eval(&data_chunk)?)
+                    Some(self.window_end_exprs[i].eval(&data_chunk).await?)
                 } else {
                     None
                 };
@@ -219,7 +218,12 @@ mod tests {
     use super::*;
     use crate::executor::test_utils::MockExecutor;
 
-    fn create_executor(output_indices: Vec<usize>) -> Box<HopWindowExecutor> {
+    fn create_executor(
+        output_indices: Vec<usize>,
+        window_slide: IntervalUnit,
+        window_size: IntervalUnit,
+        window_offset: IntervalUnit,
+    ) -> Box<HopWindowExecutor> {
         let field1 = Field::unnamed(DataType::Int64);
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
@@ -237,14 +241,17 @@ mod tests {
             8 3 ^11:02:00"
                 .replace('^', "2022-2-2T"),
         );
-
         let mut mock_executor = MockExecutor::new(schema.clone());
         mock_executor.add(chunk);
 
-        let window_slide = IntervalUnit::from_minutes(15);
-        let window_size = IntervalUnit::from_minutes(30);
-        let (window_start_exprs, window_end_exprs) =
-            make_hop_window_expression(DataType::Timestamp, 2, window_size, window_slide).unwrap();
+        let (window_start_exprs, window_end_exprs) = make_hop_window_expression(
+            DataType::Timestamp,
+            2,
+            window_size,
+            window_slide,
+            window_offset,
+        )
+        .unwrap();
 
         Box::new(HopWindowExecutor::new(
             Box::new(mock_executor),
@@ -260,9 +267,93 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_window_offset() {
+        async fn test_window_offset_helper(window_offset: IntervalUnit) -> DataChunk {
+            let default_indices = (0..3 + 2).collect_vec();
+            let window_slide = IntervalUnit::from_minutes(15);
+            let window_size = IntervalUnit::from_minutes(30);
+            let executor =
+                create_executor(default_indices, window_slide, window_size, window_offset);
+            let mut stream = executor.execute();
+            stream.next().await.unwrap().unwrap()
+        }
+
+        let window_size = 30;
+        for offset in 0..window_size {
+            for coefficient in -5..0 {
+                assert_eq!(
+                    test_window_offset_helper(IntervalUnit::from_minutes(
+                        coefficient * window_size + offset
+                    ))
+                    .await,
+                    test_window_offset_helper(IntervalUnit::from_minutes(
+                        (coefficient - 1) * window_size + offset
+                    ))
+                    .await
+                );
+            }
+        }
+        for offset in 0..window_size {
+            for coefficient in 0..5 {
+                assert_eq!(
+                    test_window_offset_helper(IntervalUnit::from_minutes(
+                        coefficient * window_size + offset
+                    ))
+                    .await,
+                    test_window_offset_helper(IntervalUnit::from_minutes(
+                        (coefficient + 1) * window_size + offset
+                    ))
+                    .await
+                );
+            }
+        }
+        for offset in -window_size..window_size {
+            assert_eq!(
+                test_window_offset_helper(IntervalUnit::from_minutes(window_size + offset)).await,
+                test_window_offset_helper(IntervalUnit::from_minutes(-window_size + offset)).await
+            );
+        }
+
+        assert_eq!(
+            test_window_offset_helper(IntervalUnit::from_minutes(-31)).await,
+            DataChunk::from_pretty(
+                &"I I TS        TS        TS
+                1 1 ^10:00:00 ^09:44:00 ^10:14:00
+                2 3 ^10:05:00 ^09:44:00 ^10:14:00
+                3 2 ^10:14:00 ^09:59:00 ^10:29:00
+                4 1 ^10:22:00 ^09:59:00 ^10:29:00
+                5 3 ^10:33:00 ^10:14:00 ^10:44:00
+                6 2 ^10:42:00 ^10:14:00 ^10:44:00
+                7 1 ^10:51:00 ^10:29:00 ^10:59:00
+                8 3 ^11:02:00 ^10:44:00 ^11:14:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+        assert_eq!(
+            test_window_offset_helper(IntervalUnit::from_minutes(29)).await,
+            DataChunk::from_pretty(
+                &"I I TS        TS        TS
+                1 1 ^10:00:00 ^09:44:00 ^10:14:00
+                2 3 ^10:05:00 ^09:44:00 ^10:14:00
+                3 2 ^10:14:00 ^09:59:00 ^10:29:00
+                4 1 ^10:22:00 ^09:59:00 ^10:29:00
+                5 3 ^10:33:00 ^10:14:00 ^10:44:00
+                6 2 ^10:42:00 ^10:14:00 ^10:44:00
+                7 1 ^10:51:00 ^10:29:00 ^10:59:00
+                8 3 ^11:02:00 ^10:44:00 ^11:14:00"
+                    .replace('^', "2022-2-2T"),
+            )
+        );
+    }
+
+    #[tokio::test]
     async fn test_execute() {
         let default_indices = (0..3 + 2).collect_vec();
-        let executor = create_executor(default_indices);
+
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let window_offset = IntervalUnit::from_minutes(0);
+        let executor = create_executor(default_indices, window_slide, window_size, window_offset);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.
@@ -303,7 +394,10 @@ mod tests {
     }
     #[tokio::test]
     async fn test_output_indices() {
-        let executor = create_executor(vec![1, 3, 4, 2]);
+        let window_slide = IntervalUnit::from_minutes(15);
+        let window_size = IntervalUnit::from_minutes(30);
+        let window_offset = IntervalUnit::from_minutes(0);
+        let executor = create_executor(vec![1, 3, 4, 2], window_slide, window_size, window_offset);
 
         let mut stream = executor.execute();
         // TODO: add more test infra to reduce the duplicated codes below.

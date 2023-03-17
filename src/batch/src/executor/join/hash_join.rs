@@ -366,7 +366,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         #[for_await]
         for chunk in Self::do_inner_join(params) {
             let mut chunk = chunk?;
-            chunk.set_visibility(cond.eval(&chunk)?.as_bool().iter().collect());
+            chunk.set_visibility(cond.eval(&chunk).await?.as_bool().iter().collect());
             yield chunk
         }
     }
@@ -473,7 +473,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
@@ -494,7 +495,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -593,7 +595,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 }
@@ -606,7 +609,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
     }
 
@@ -657,7 +661,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 spilled,
                                 cond.as_ref(),
                                 &mut non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else if let Some(spilled) = Self::append_one_probe_row(
@@ -675,7 +680,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         if let Some(spilled) = remaining_chunk_builder.consume_all() {
             yield spilled
@@ -777,7 +783,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -787,7 +794,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -884,7 +892,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             spilled,
                             cond.as_ref(),
                             &mut non_equi_state,
-                        )?
+                        )
+                        .await?
                     }
                 }
             }
@@ -894,7 +903,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 spilled,
                 cond.as_ref(),
                 &mut non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_semi_anti_join::<ANTI_JOIN>(
@@ -1028,7 +1038,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                                 cond.as_ref(),
                                 &mut left_non_equi_state,
                                 &mut right_non_equi_state,
-                            )?
+                            )
+                            .await?
                         }
                     }
                 } else {
@@ -1050,7 +1061,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 cond.as_ref(),
                 &mut left_non_equi_state,
                 &mut right_non_equi_state,
-            )?
+            )
+            .await?
         }
         #[for_await]
         for spilled in Self::handle_remaining_build_rows_for_right_outer_join(
@@ -1199,7 +1211,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
     ///
     /// For more information about how `process_*_join_non_equi_condition` work, see their unit
     /// tests.
-    fn process_left_outer_join_non_equi_condition(
+    async fn process_left_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1209,7 +1221,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             found_matched,
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(&filter, *probe_column_count)
             .remove_duplicate_rows_for_left_outer_join(
@@ -1223,7 +1235,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
 
     /// Filters for candidate rows which satisfy `non_equi` predicate.
     /// Removes duplicate rows.
-    fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
+    async fn process_left_semi_anti_join_non_equi_condition<const ANTI_JOIN: bool>(
         chunk: DataChunk,
         cond: &dyn Expression,
         LeftNonEquiJoinState {
@@ -1233,7 +1245,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             ..
         }: &mut LeftNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_left_semi_anti_join::<ANTI_JOIN>(
                 &filter,
@@ -1244,7 +1256,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             .take())
     }
 
-    fn process_right_outer_join_non_equi_condition(
+    async fn process_right_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1252,13 +1264,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .remove_duplicate_rows_for_right_outer_join(&filter, build_row_ids, build_row_matched)
             .take())
     }
 
-    fn process_right_semi_anti_join_non_equi_condition(
+    async fn process_right_semi_anti_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         RightNonEquiJoinState {
@@ -1266,7 +1278,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
             build_row_matched,
         }: &mut RightNonEquiJoinState,
     ) -> Result<()> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         DataChunkMutator(chunk).remove_duplicate_rows_for_right_semi_anti_join(
             &filter,
             build_row_ids,
@@ -1275,13 +1287,13 @@ impl<K: HashKey> HashJoinExecutor<K> {
         Ok(())
     }
 
-    fn process_full_outer_join_non_equi_condition(
+    async fn process_full_outer_join_non_equi_condition(
         chunk: DataChunk,
         cond: &dyn Expression,
         left_non_equi_state: &mut LeftNonEquiJoinState,
         right_non_equi_state: &mut RightNonEquiJoinState,
     ) -> Result<DataChunk> {
-        let filter = cond.eval(&chunk)?.as_bool().iter().collect();
+        let filter = cond.eval(&chunk).await?.as_bool().iter().collect();
         Ok(DataChunkMutator(chunk)
             .nullify_build_side_for_non_equi_condition(
                 &filter,
@@ -2609,6 +2621,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2638,6 +2651,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2667,6 +2681,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2706,6 +2721,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2732,6 +2748,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2758,6 +2775,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2799,6 +2817,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2827,6 +2846,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2855,6 +2875,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2918,6 +2939,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -2958,6 +2980,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3010,6 +3033,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3044,6 +3068,7 @@ mod tests {
                 cond.as_ref(),
                 &mut state
             )
+            .await
             .is_ok()
         );
         assert_eq!(state.build_row_ids, Vec::new());
@@ -3105,6 +3130,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect
@@ -3152,6 +3178,7 @@ mod tests {
                 &mut left_state,
                 &mut right_state,
             )
+            .await
             .unwrap()
             .compact(),
             &expect

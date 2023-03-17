@@ -55,13 +55,13 @@ impl MinOverlappingPicker {
     ) -> (Vec<SstableInfo>, Vec<SstableInfo>) {
         let mut scores = vec![];
         for left in 0..select_tables.len() {
-            if level_handlers[self.level].is_pending_compact(&select_tables[left].id) {
+            if level_handlers[self.level].is_pending_compact(&select_tables[left].sst_id) {
                 continue;
             }
             let mut overlap_info = self.overlap_strategy.create_overlap_info();
             let mut select_file_size = 0;
             for (right, table) in select_tables.iter().enumerate().skip(left) {
-                if level_handlers[self.level].is_pending_compact(&table.id) {
+                if level_handlers[self.level].is_pending_compact(&table.sst_id) {
                     break;
                 }
                 if self.split_by_table && table.table_ids != select_tables[left].table_ids {
@@ -76,7 +76,7 @@ impl MinOverlappingPicker {
                 let mut total_file_size = 0;
                 let mut pending_campct = false;
                 for other in overlap_files {
-                    if level_handlers[self.target_level].is_pending_compact(&other.id) {
+                    if level_handlers[self.target_level].is_pending_compact(&other.sst_id) {
                         pending_campct = true;
                         break;
                     }
@@ -210,7 +210,7 @@ pub mod tests {
         assert_eq!(ret.input_levels[0].level_idx, 1);
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 2);
         assert_eq!(ret.input_levels[1].table_infos.len(), 0);
         ret.add_pending_task(0, &mut level_handlers);
 
@@ -221,8 +221,8 @@ pub mod tests {
         assert_eq!(ret.target_level, 2);
         assert_eq!(ret.input_levels[0].table_infos.len(), 2);
         assert_eq!(ret.input_levels[1].table_infos.len(), 3);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
         ret.add_pending_task(1, &mut level_handlers);
 
         let ret = picker.pick_compaction(&levels, &level_handlers, &mut local_stats);
@@ -287,10 +287,10 @@ pub mod tests {
         assert_eq!(ret.input_levels[1].level_idx, 2);
 
         assert_eq!(ret.input_levels[0].table_infos.len(), 2);
-        assert_eq!(ret.input_levels[0].table_infos[0].id, 0);
-        assert_eq!(ret.input_levels[0].table_infos[1].id, 1);
+        assert_eq!(ret.input_levels[0].table_infos[0].get_sst_id(), 0);
+        assert_eq!(ret.input_levels[0].table_infos[1].get_sst_id(), 1);
 
         assert_eq!(ret.input_levels[1].table_infos.len(), 1);
-        assert_eq!(ret.input_levels[1].table_infos[0].id, 4);
+        assert_eq!(ret.input_levels[1].table_infos[0].get_sst_id(), 4);
     }
 }

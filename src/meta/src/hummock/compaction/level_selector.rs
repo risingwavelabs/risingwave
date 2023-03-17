@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::catalog::TableOption;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::HummockCompactionTaskId;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{compact_task, CompactionConfig};
@@ -200,13 +201,15 @@ impl DynamicLevelSelectorCore {
 
         let total_size = levels.l0.as_ref().unwrap().total_file_size
             - handlers[0].get_pending_output_file_size(ctx.base_level as u32);
+        let base_level_size = levels.get_level(ctx.base_level).total_file_size;
         if idle_file_count > 0 {
             // trigger intra-l0 compaction at first when the number of files is too large.
             let l0_score =
                 idle_file_count as u64 * SCORE_BASE / self.config.level0_tier_compact_file_number;
             ctx.score_levels
                 .push((std::cmp::min(l0_score, max_l0_score), 0, 0));
-            let score = total_size * SCORE_BASE / self.config.max_bytes_for_level_base;
+            let score = total_size * SCORE_BASE
+                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
             ctx.score_levels.push((score, 0, ctx.base_level));
         }
 
@@ -540,7 +543,7 @@ pub mod tests {
             level_type: LevelType::Overlapping as i32,
             total_file_size: sst.file_size,
             uncompressed_file_size: sst.uncompressed_file_size,
-            sub_level_id: sst.id,
+            sub_level_id: sst.get_sst_id(),
             table_infos: vec![sst],
         });
     }
@@ -563,7 +566,7 @@ pub mod tests {
             .iter()
             .map(|table| table.uncompressed_file_size)
             .sum();
-        let sub_level_id = table_infos[0].id;
+        let sub_level_id = table_infos[0].get_sst_id();
         levels.l0.as_mut().unwrap().total_file_size += total_file_size;
         levels.l0.as_mut().unwrap().sub_levels.push(Level {
             level_idx: 0,
@@ -583,7 +586,8 @@ pub mod tests {
         epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
-            id,
+            object_id: id,
+            sst_id: id,
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
@@ -594,7 +598,6 @@ pub mod tests {
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch: 0,
             max_epoch: 0,
@@ -613,7 +616,8 @@ pub mod tests {
         max_epoch: u64,
     ) -> SstableInfo {
         SstableInfo {
-            id,
+            object_id: id,
+            sst_id: id,
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(table_prefix, left, epoch),
                 right: iterator_test_key_of_epoch(table_prefix, right, epoch),
@@ -624,7 +628,6 @@ pub mod tests {
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
             uncompressed_file_size: (right - left + 1) as u64,
             min_epoch,
             max_epoch,
@@ -730,7 +733,7 @@ pub mod tests {
     ) {
         for i in &compact_task.input.input_levels {
             for t in &i.table_infos {
-                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.id));
+                assert!(level_handlers[i.level_idx as usize].is_pending_compact(&t.sst_id));
             }
         }
     }
@@ -906,7 +909,7 @@ pub mod tests {
             compaction.input.input_levels[0]
                 .table_infos
                 .iter()
-                .map(|sst| sst.id)
+                .map(|sst| sst.get_sst_id())
                 .collect_vec(),
             vec![5, 6, 7]
         );

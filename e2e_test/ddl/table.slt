@@ -120,6 +120,9 @@ create table "T2" ("V1" int);
 statement ok
 insert into "T2" ("V1") values (1);
 
+statement ok
+drop table "T2"
+
 statement error
 create table C1 (c1 varchar(5));
 

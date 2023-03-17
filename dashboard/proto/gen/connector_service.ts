@@ -1,4 +1,5 @@
 /* eslint-disable */
+import { SinkType, sinkTypeFromJSON, sinkTypeToJSON } from "./catalog";
 import {
   DataType_TypeName,
   dataType_TypeNameFromJSON,
@@ -9,6 +10,41 @@ import {
 } from "./data";
 
 export const protobufPackage = "connector_service";
+
+export const SinkPayloadFormat = {
+  FORMAT_UNSPECIFIED: "FORMAT_UNSPECIFIED",
+  JSON: "JSON",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type SinkPayloadFormat = typeof SinkPayloadFormat[keyof typeof SinkPayloadFormat];
+
+export function sinkPayloadFormatFromJSON(object: any): SinkPayloadFormat {
+  switch (object) {
+    case 0:
+    case "FORMAT_UNSPECIFIED":
+      return SinkPayloadFormat.FORMAT_UNSPECIFIED;
+    case 1:
+    case "JSON":
+      return SinkPayloadFormat.JSON;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return SinkPayloadFormat.UNRECOGNIZED;
+  }
+}
+
+export function sinkPayloadFormatToJSON(object: SinkPayloadFormat): string {
+  switch (object) {
+    case SinkPayloadFormat.FORMAT_UNSPECIFIED:
+      return "FORMAT_UNSPECIFIED";
+    case SinkPayloadFormat.JSON:
+      return "JSON";
+    case SinkPayloadFormat.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
 
 export const SourceType = {
   UNSPECIFIED: "UNSPECIFIED",
@@ -66,7 +102,7 @@ export interface ValidationError {
 }
 
 export interface SinkConfig {
-  sinkType: string;
+  connectorType: string;
   properties: { [key: string]: string };
   tableSchema: TableSchema | undefined;
 }
@@ -86,6 +122,7 @@ export interface SinkStreamRequest {
 
 export interface SinkStreamRequest_StartSink {
   sinkConfig: SinkConfig | undefined;
+  format: SinkPayloadFormat;
 }
 
 export interface SinkStreamRequest_WriteBatch {
@@ -137,9 +174,11 @@ export interface SinkResponse_StartResponse {
 
 export interface ValidateSinkRequest {
   sinkConfig: SinkConfig | undefined;
+  sinkType: SinkType;
 }
 
 export interface ValidateSinkResponse {
+  /** On validation failure, we return the error. */
   error: ValidationError | undefined;
 }
 
@@ -272,13 +311,13 @@ export const ValidationError = {
 };
 
 function createBaseSinkConfig(): SinkConfig {
-  return { sinkType: "", properties: {}, tableSchema: undefined };
+  return { connectorType: "", properties: {}, tableSchema: undefined };
 }
 
 export const SinkConfig = {
   fromJSON(object: any): SinkConfig {
     return {
-      sinkType: isSet(object.sinkType) ? String(object.sinkType) : "",
+      connectorType: isSet(object.connectorType) ? String(object.connectorType) : "",
       properties: isObject(object.properties)
         ? Object.entries(object.properties).reduce<{ [key: string]: string }>((acc, [key, value]) => {
           acc[key] = String(value);
@@ -291,7 +330,7 @@ export const SinkConfig = {
 
   toJSON(message: SinkConfig): unknown {
     const obj: any = {};
-    message.sinkType !== undefined && (obj.sinkType = message.sinkType);
+    message.connectorType !== undefined && (obj.connectorType = message.connectorType);
     obj.properties = {};
     if (message.properties) {
       Object.entries(message.properties).forEach(([k, v]) => {
@@ -305,7 +344,7 @@ export const SinkConfig = {
 
   fromPartial<I extends Exact<DeepPartial<SinkConfig>, I>>(object: I): SinkConfig {
     const message = createBaseSinkConfig();
-    message.sinkType = object.sinkType ?? "";
+    message.connectorType = object.connectorType ?? "";
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
       (acc, [key, value]) => {
         if (value !== undefined) {
@@ -405,18 +444,22 @@ export const SinkStreamRequest = {
 };
 
 function createBaseSinkStreamRequest_StartSink(): SinkStreamRequest_StartSink {
-  return { sinkConfig: undefined };
+  return { sinkConfig: undefined, format: SinkPayloadFormat.FORMAT_UNSPECIFIED };
 }
 
 export const SinkStreamRequest_StartSink = {
   fromJSON(object: any): SinkStreamRequest_StartSink {
-    return { sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined };
+    return {
+      sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined,
+      format: isSet(object.format) ? sinkPayloadFormatFromJSON(object.format) : SinkPayloadFormat.FORMAT_UNSPECIFIED,
+    };
   },
 
   toJSON(message: SinkStreamRequest_StartSink): unknown {
     const obj: any = {};
     message.sinkConfig !== undefined &&
       (obj.sinkConfig = message.sinkConfig ? SinkConfig.toJSON(message.sinkConfig) : undefined);
+    message.format !== undefined && (obj.format = sinkPayloadFormatToJSON(message.format));
     return obj;
   },
 
@@ -425,6 +468,7 @@ export const SinkStreamRequest_StartSink = {
     message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
       ? SinkConfig.fromPartial(object.sinkConfig)
       : undefined;
+    message.format = object.format ?? SinkPayloadFormat.FORMAT_UNSPECIFIED;
     return message;
   },
 };
@@ -729,18 +773,22 @@ export const SinkResponse_StartResponse = {
 };
 
 function createBaseValidateSinkRequest(): ValidateSinkRequest {
-  return { sinkConfig: undefined };
+  return { sinkConfig: undefined, sinkType: SinkType.UNSPECIFIED };
 }
 
 export const ValidateSinkRequest = {
   fromJSON(object: any): ValidateSinkRequest {
-    return { sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined };
+    return {
+      sinkConfig: isSet(object.sinkConfig) ? SinkConfig.fromJSON(object.sinkConfig) : undefined,
+      sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
+    };
   },
 
   toJSON(message: ValidateSinkRequest): unknown {
     const obj: any = {};
     message.sinkConfig !== undefined &&
       (obj.sinkConfig = message.sinkConfig ? SinkConfig.toJSON(message.sinkConfig) : undefined);
+    message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     return obj;
   },
 
@@ -749,6 +797,7 @@ export const ValidateSinkRequest = {
     message.sinkConfig = (object.sinkConfig !== undefined && object.sinkConfig !== null)
       ? SinkConfig.fromPartial(object.sinkConfig)
       : undefined;
+    message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     return message;
   },
 };

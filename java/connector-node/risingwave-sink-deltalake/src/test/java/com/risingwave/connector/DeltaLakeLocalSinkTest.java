@@ -20,7 +20,7 @@ import static org.apache.spark.sql.types.DataTypes.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import io.delta.standalone.DeltaLog;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -66,8 +66,8 @@ public class DeltaLakeLocalSinkTest {
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkrow(Op.INSERT, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                        new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
 
         List<Row> rows = List.of(RowFactory.create(1, "Alice"), RowFactory.create(2, "Bob"));
@@ -93,14 +93,14 @@ public class DeltaLakeLocalSinkTest {
                             createStructField("name", StringType, false),
                         });
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         validateTableWithSpark(location, List.of(), schema);
 
         sink.sync();
         List<Row> rows = List.of(RowFactory.create(1, "Alice"));
         validateTableWithSpark(location, rows, schema);
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         rows = List.of(RowFactory.create(1, "Alice"), RowFactory.create(2, "Bob"));
         validateTableWithSpark(location, rows, schema);

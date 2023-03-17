@@ -41,7 +41,9 @@ use crate::hummock::store::version::{
     HummockReadVersion, StagingData, StagingSstableInfo, VersionUpdate,
 };
 use crate::hummock::utils::validate_table_key_range;
-use crate::hummock::{HummockError, HummockResult, MemoryLimiter, SstableIdManagerRef, TrackerId};
+use crate::hummock::{
+    HummockError, HummockResult, MemoryLimiter, SstableObjectIdManagerRef, TrackerId,
+};
 use crate::opts::StorageOpts;
 use crate::store::SyncResult;
 
@@ -106,7 +108,7 @@ pub struct HummockEventHandler {
 
     last_instance_id: LocalInstanceId,
 
-    sstable_id_manager: SstableIdManagerRef,
+    sstable_object_id_manager: SstableObjectIdManagerRef,
 }
 
 async fn flush_imms(
@@ -116,8 +118,8 @@ async fn flush_imms(
 ) -> HummockResult<Vec<LocalSstableInfo>> {
     for epoch in &task_info.epochs {
         let _ = compactor_context
-            .sstable_id_manager
-            .add_watermark_sst_id(Some(*epoch))
+            .sstable_object_id_manager
+            .add_watermark_object_id(Some(*epoch))
             .await
             .inspect_err(|e| {
                 error!("unable to set watermark sst id. epoch: {}, {:?}", epoch, e);
@@ -142,7 +144,7 @@ impl HummockEventHandler {
         let buffer_tracker = BufferTracker::from_storage_opts(&compactor_context.storage_opts);
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
-        let sstable_id_manager = compactor_context.sstable_id_manager.clone();
+        let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
@@ -161,7 +163,7 @@ impl HummockEventHandler {
             read_version_mapping,
             uploader,
             last_instance_id: 0,
-            sstable_id_manager,
+            sstable_object_id_manager,
         }
     }
 
@@ -359,8 +361,8 @@ impl HummockEventHandler {
             });
         }
 
-        self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(HummockEpoch::MAX));
+        self.sstable_object_id_manager
+            .remove_watermark_object_id(TrackerId::Epoch(HummockEpoch::MAX));
 
         // Notify completion of the Clear event.
         let _ = notifier.send(()).inspect_err(|e| {
@@ -412,8 +414,8 @@ impl HummockEventHandler {
         if let Some(conflict_detector) = self.write_conflict_detector.as_ref() {
             conflict_detector.set_watermark(max_committed_epoch);
         }
-        self.sstable_id_manager
-            .remove_watermark_sst_id(TrackerId::Epoch(
+        self.sstable_object_id_manager
+            .remove_watermark_object_id(TrackerId::Epoch(
                 self.pinned_version.load().max_committed_epoch(),
             ));
 

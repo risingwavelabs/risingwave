@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 pub use tracing;
 
-use self::catalog::SinkType;
+use self::catalog::{SinkCatalog, SinkType};
 use crate::sink::console::{ConsoleConfig, ConsoleSink, CONSOLE_SINK};
 use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
@@ -160,6 +160,37 @@ impl SinkImpl {
             SinkConfig::BlackHole => SinkImpl::Blackhole,
         })
     }
+
+    pub async fn validate(
+        cfg: SinkConfig,
+        sink_catalog: SinkCatalog,
+        connector_rpc_endpoint: Option<String>,
+    ) -> Result<()> {
+        match cfg {
+            SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
+            SinkConfig::Kafka(cfg) => {
+                // We simply call `KafkaSink::new` here to validate a Kafka sink.
+                if sink_catalog.sink_type.is_append_only() {
+                    KafkaSink::<true>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
+                        .await
+                        .map(|_| ())
+                } else {
+                    KafkaSink::<false>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
+                        .await
+                        .map(|_| ())
+                }
+            }
+            SinkConfig::Remote(cfg) => {
+                if sink_catalog.sink_type.is_append_only() {
+                    RemoteSink::<true>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
+                } else {
+                    RemoteSink::<false>::validate(cfg, sink_catalog, connector_rpc_endpoint).await
+                }
+            }
+            SinkConfig::Console(_) => Ok(()),
+            SinkConfig::BlackHole => Ok(()),
+        }
+    }
 }
 
 macro_rules! impl_sink {
@@ -222,7 +253,7 @@ pub enum SinkError {
 
 impl From<RpcError> for SinkError {
     fn from(value: RpcError) -> Self {
-        SinkError::Remote(format!("{:?}", value))
+        SinkError::Remote(format!("{}", value))
     }
 }
 

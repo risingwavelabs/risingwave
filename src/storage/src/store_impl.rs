@@ -27,7 +27,7 @@ use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::{
-    HummockStorage, MemoryLimiter, SstableIdManagerRef, SstableStore, TieredCache,
+    HummockStorage, MemoryLimiter, SstableObjectIdManagerRef, SstableStore, TieredCache,
     TieredCacheMetricsBuilder,
 };
 use crate::memory::sled::SledStateStore;
@@ -633,7 +633,7 @@ impl StateStoreImpl {
 
 /// This trait is for aligning some common methods of `state_store_impl` for external use
 pub trait HummockTrait {
-    fn sstable_id_manager(&self) -> &SstableIdManagerRef;
+    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef;
     fn sstable_store(&self) -> SstableStoreRef;
     fn filter_key_extractor_manager(&self) -> &FilterKeyExtractorManagerRef;
     fn get_memory_limiter(&self) -> Arc<MemoryLimiter>;
@@ -642,8 +642,8 @@ pub trait HummockTrait {
 }
 
 impl HummockTrait for HummockStorage {
-    fn sstable_id_manager(&self) -> &SstableIdManagerRef {
-        self.sstable_id_manager()
+    fn sstable_object_id_manager(&self) -> &SstableObjectIdManagerRef {
+        self.sstable_object_id_manager()
     }
 
     fn sstable_store(&self) -> SstableStoreRef {

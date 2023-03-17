@@ -164,7 +164,7 @@ impl TtlReclaimCompactionPicker {
                 .sstable_overlap(&state.last_select_end_bound);
 
             if unmatched_sst
-                || level_handler.is_pending_compact(&sst.id)
+                || level_handler.is_pending_compact(&sst.sst_id)
                 || self.filter(sst, current_epoch_time)
             {
                 if !select_input_ssts.is_empty() {
@@ -362,7 +362,7 @@ mod test {
 
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
-            assert_eq!(10, sst_10.id);
+            assert_eq!(10, sst_10.get_sst_id());
             sst_10.key_range.as_mut().unwrap().right_exclusive = true;
         }
 
@@ -404,7 +404,7 @@ mod test {
 
             let mut start_id = 2;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.id);
+                assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
             }
 
@@ -455,7 +455,7 @@ mod test {
 
             let mut start_id = 7;
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.id);
+                assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
             }
 
@@ -490,7 +490,7 @@ mod test {
                 compact_task::TaskType::Ttl
             ));
             for sst in &task.input.input_levels[0].table_infos {
-                assert_eq!(start_id, sst.id);
+                assert_eq!(start_id, sst.get_sst_id());
                 start_id += 1;
             }
 
@@ -551,7 +551,7 @@ mod test {
             // test table_option_filter
             assert_eq!(task.input.input_levels[0].table_infos.len(), 1);
             let select_sst = &task.input.input_levels[0].table_infos.first().unwrap();
-            assert_eq!(select_sst.id, 5);
+            assert_eq!(select_sst.get_sst_id(), 5);
 
             assert_eq!(task.input.input_levels[1].level_idx, 4);
             assert_eq!(task.input.input_levels[1].table_infos.len(), 0);
@@ -655,7 +655,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.id)
+                    .map(|sst| sst.get_sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);
@@ -746,7 +746,7 @@ mod test {
                 let select_sst = &task.input.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|sst| sst.id)
+                    .map(|sst| sst.get_sst_id())
                     .collect_vec();
                 assert!(select_sst.is_sorted());
                 assert_eq!(expect_task_sst_id_range[index], *select_sst);

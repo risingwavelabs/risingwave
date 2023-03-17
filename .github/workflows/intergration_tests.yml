@@ -1,0 +1,107 @@
+name: Integration Tests CI
+
+on:
+  schedule:
+  # Currently we build docker images at 12:00 (UTC), so run this at 13:00
+  - cron: '0 13 * * *'
+
+jobs:
+  golangci:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.18
+      - uses: actions/checkout@v3
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v3
+        with:
+          working-directory: integration_tests/datagen
+          args: --timeout=120s
+      - name: Go build
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+          go build .
+        working-directory: integration_tests/datagen
+  run-demos:
+    strategy:
+      matrix:
+        testcase:
+          - ad-click
+          - ad-ctr
+          - cdn-metrics
+          - clickstream
+          - livestream
+          - twitter
+          - prometheus
+          - schema-registry
+          - mysql-cdc
+          - postgres-cdc
+          - mysql-sink
+          - postgres-sink
+          - iceberg-sink
+        format: ["json", "protobuf"]
+        exclude:
+          - testcase: ad-click
+            format: protobuf
+          - testcase: ad-ctr
+            format: protobuf
+          - testcase: cdn-metrics
+            format: protobuf
+          - testcase: clickstream
+            format: protobuf
+          - testcase: prometheus
+            format: protobuf
+          # This demo is showcasing avro + schema registry. So there's no file server for the schema file.
+          - testcase: schema-registry
+            format: protobuf
+          - testcase: mysql-cdc
+            format: protobuf
+          - testcase: postgres-cdc
+            format: protobuf
+          - testcase: mysql-sink
+            format: protobuf
+          - testcase: postgres-sink
+            format: protobuf
+          - testcase: iceberg-sink
+            format: protobuf
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      # In this step, this action saves a list of existing images,
+      # the cache is created without them in the post run.
+      # It also restores the cache if it exists.
+      - uses: satackey/action-docker-layer-caching@v0.0.11
+        # Ignore the failure of a step and avoid terminating the job.
+        continue-on-error: true
+
+      - name: Rewrite docker compose for protobuf
+        working-directory: integration_tests/scripts
+        if: ${{ matrix.format == 'protobuf' }}
+        run: |
+          python3 gen_pb_compose.py ${{ matrix.testcase }} ${{ matrix.format }}
+
+      - name: Run Demos
+        working-directory: integration_tests/scripts
+        run: |
+          python3 run_demos.py --case ${{ matrix.testcase }} --format ${{ matrix.format }}
+
+      - name: Check if the ingestion is successful
+        working-directory: integration_tests/scripts
+        run: |
+          python3 check_data.py ${{ matrix.testcase }}
+
+      - name: Dump logs on failure
+        if: ${{ failure() }}
+        working-directory: integration_tests/${{ matrix.testcase }}
+        run: |
+          docker compose logs
+
+      - uses: satackey/action-docker-layer-caching@v0.0.11
+        continue-on-error: true
