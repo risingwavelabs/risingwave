@@ -137,7 +137,7 @@ profile:
       - use: opendal
         engine: webhdfs
         namenode: "127.0.0.1:9870"
-        root: wcy
+        root: risingwave
       - use: compactor
       # - use: prometheus
       # - use: grafana
@@ -166,7 +166,7 @@ profile:
       # If you want to use oss as storage backend, configure bucket name and root path:
       - use: opendal
         engine: oss
-        bucket: "risingwave-oss-wcy"
+        bucket: test-bucket
         root: risingwave
       - use: compactor
       # - use: prometheus
