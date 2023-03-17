@@ -167,10 +167,12 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             return expr;
         }
         let n_join_cols = available_join_on_columns.len();
-        let n = if n_join_cols < 2 { n_join_cols } else {
+        let n = if n_join_cols < 2 {
+            n_join_cols
+        } else {
             match self.rng.gen_range(0..100) {
-                0..=10 => self.rng.gen_range(n_join_cols/2..n_join_cols),
-                11..=100 => self.rng.gen_range(0..n_join_cols/2),
+                0..=10 => self.rng.gen_range(n_join_cols / 2..n_join_cols),
+                11..=100 => self.rng.gen_range(0..n_join_cols / 2),
                 _ => unreachable!(),
             }
         };
