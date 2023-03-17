@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
@@ -499,13 +500,14 @@ impl LogicalMultiJoin {
         struct GraphNode {
             id: usize,
             join_tree: JoinTreeNode,
-            relations: HashSet<usize>,
+            // use BTreeSet for deterministic
+            relations: BTreeSet<usize>,
         }
 
-        let mut nodes: HashMap<_, _> = (0..self.inputs.len())
+        let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
             .map(|idx| GraphNode {
                 id: idx,
-                relations: HashSet::new(),
+                relations: BTreeSet::new(),
                 join_tree: JoinTreeNode {
                     idx: Some(idx),
                     left: None,
@@ -525,9 +527,29 @@ impl LogicalMultiJoin {
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
 
+        // isolated nodes can be joined at any where.
+        let iso_nodes = nodes
+            .iter()
+            .filter_map(|n| {
+                if n.1.relations.is_empty() {
+                    Some(*n.0)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for n in iso_nodes {
+            for adj in 0..nodes.len() {
+                if adj != n {
+                    nodes.get_mut(&n).unwrap().relations.insert(adj);
+                }
+            }
+        }
+
         let mut optimized_bushy_tree = None;
         let mut que = VecDeque::from([nodes]);
-        let mut isolated = HashSet::new();
+        let mut isolated = BTreeSet::new();
 
         while let Some(mut nodes) = que.pop_front() {
             if nodes.len() == 1 {
@@ -545,8 +567,16 @@ impl LogicalMultiJoin {
                 continue;
             }
 
-            let (idx, _) = nodes.iter().min_by_key(|(_, g)| g.relations.len()).unwrap();
-
+            let (idx, _) = nodes
+                .iter()
+                .min_by(
+                    |(_, x), (_, y)| match x.relations.len().cmp(&y.relations.len()) {
+                        Ordering::Less => Ordering::Less,
+                        Ordering::Greater => Ordering::Greater,
+                        Ordering::Equal => x.join_tree.height.cmp(&y.join_tree.height),
+                    },
+                )
+                .unwrap();
             let n = nodes.remove(&idx.clone()).unwrap();
 
             if n.relations.is_empty() {
@@ -581,6 +611,11 @@ impl LogicalMultiJoin {
                 let l_tree = n.join_tree.clone();
                 let r_tree = std::mem::take(&mut merge_graph_node.join_tree);
                 let new_height = usize::max(l_tree.height, r_tree.height) + 1;
+
+                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|t| t.join_tree.height) && min_height < new_height {
+                    continue;
+                }
+
                 merge_graph_node.join_tree = JoinTreeNode {
                     idx: None,
                     left: Some(Box::new(l_tree)),
