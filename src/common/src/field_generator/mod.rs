@@ -19,6 +19,7 @@ mod varchar;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
 pub use timestamp::*;
@@ -155,11 +156,13 @@ impl FieldGeneratorImpl {
     }
 
     pub fn with_timestamp(
+        base: Option<DateTime<FixedOffset>>,
         max_past: Option<String>,
         max_past_mode: Option<String>,
         seed: u64,
     ) -> Result<Self> {
         Ok(FieldGeneratorImpl::Timestamp(TimestampField::new(
+            base,
             max_past,
             max_past_mode,
             seed,
@@ -293,7 +296,7 @@ mod tests {
             let mut generator = match data_type {
                 DataType::Varchar => FieldGeneratorImpl::with_varchar(None, seed).unwrap(),
                 DataType::Timestamp => {
-                    FieldGeneratorImpl::with_timestamp(None, None, seed).unwrap()
+                    FieldGeneratorImpl::with_timestamp(None, None, None, seed).unwrap()
                 }
                 _ => FieldGeneratorImpl::with_number_random(data_type, None, None, seed).unwrap(),
             };
@@ -320,5 +323,15 @@ mod tests {
             assert_eq!(datum1_new, datum1);
             assert_eq!(datum2_new, datum2);
         }
+    }
+
+    #[test]
+    fn test_deterministic_timestamp() {
+        let seed = 1234;
+        let base_time: DateTime<FixedOffset> = DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00").unwrap();
+        let mut generator = FieldGeneratorImpl::with_timestamp(Some(base_time), None, None, seed).unwrap();
+        let val1 = generator.generate_json(1);
+        let val2 = generator.generate_json(1);
+        assert_eq!(val1, val2);
     }
 }

@@ -14,8 +14,9 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use chrono::{DateTime, FixedOffset};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;
@@ -204,8 +205,22 @@ fn generator_from_data_type(
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
                 .map(|s| s.to_lowercase());
+            let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
+            {
+                Some(base) => {
+                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
+                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
+                    })?)
+                }
+                None => None,
+            };
 
-            FieldGeneratorImpl::with_timestamp(max_past_value, max_past_mode_value, random_seed)
+            FieldGeneratorImpl::with_timestamp(
+                basetime,
+                max_past_value,
+                max_past_mode_value,
+                random_seed,
+            )
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
