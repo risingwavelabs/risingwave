@@ -543,6 +543,7 @@ impl LogicalMultiJoin {
             for adj in 0..nodes.len() {
                 if adj != n {
                     nodes.get_mut(&n).unwrap().relations.insert(adj);
+                    nodes.get_mut(&adj).unwrap().relations.insert(n);
                 }
             }
         }

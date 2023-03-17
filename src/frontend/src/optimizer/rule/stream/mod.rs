@@ -13,4 +13,4 @@
 // limitations under the License.
 
 pub(crate) mod filter_with_now_to_join_rule;
-pub(crate) mod reorder_multijoin_rule_streaming;
+pub(crate) mod bushy_tree_join_ordering_rule;
