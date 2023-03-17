@@ -113,7 +113,7 @@ pub fn gen_projected_data(
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
-        let array = expr.eval(&chunk).unwrap();
+        let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
         let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
         ret.push(chunk);
     }

@@ -148,15 +148,19 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
     fn gen_temporal_scalar(&mut self, typ: &DataType) -> String {
         use DataType as T;
 
-        let rand_secs = self.rng.gen_range(2..1000000) as u64;
         let minute = 60;
         let hour = 60 * minute;
         let day = 24 * hour;
         let week = 7 * day;
-        let choices = [0, 1, minute, hour, day, week, rand_secs];
-        let secs = choices.choose(&mut self.rng).unwrap();
+        let choices = [0, 1, minute, hour, day, week];
 
-        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(*secs));
+        let secs = match self.rng.gen_range(1..=100) {
+            1..=30 => *choices.choose(&mut self.rng).unwrap(),
+            31..=100 => self.rng.gen_range(2..100) as u64,
+            _ => unreachable!(),
+        };
+
+        let tm = DateTime::<Utc>::from(SystemTime::now() - Duration::from_secs(secs));
         match typ {
             T::Date => tm.format("%F").to_string(),
             T::Timestamp | T::Timestamptz => tm.format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -169,7 +173,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             T::Time => tm.format("%T").to_string(),
             T::Interval => {
                 if self.rng.gen_bool(0.5) {
-                    (-(*secs as i64)).to_string()
+                    (-(secs as i64)).to_string()
                 } else {
                     secs.to_string()
                 }

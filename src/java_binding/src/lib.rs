@@ -17,7 +17,8 @@
 #![feature(once_cell)]
 #![feature(type_alias_impl_trait)]
 
-mod iterator;
+mod hummock_iterator;
+mod stream_chunk_iterator;
 
 use std::backtrace::Backtrace;
 use std::marker::PhantomData;
@@ -26,15 +27,19 @@ use std::panic::catch_unwind;
 use std::slice::from_raw_parts;
 use std::sync::LazyLock;
 
-use iterator::{Iterator, KeyedRow};
+use hummock_iterator::{HummockJavaBindingIterator, KeyedRow};
 use jni::objects::{AutoArray, JClass, JObject, JString, ReleaseMode};
 use jni::sys::{jboolean, jbyte, jbyteArray, jdouble, jfloat, jint, jlong, jshort};
 use jni::JNIEnv;
 use prost::{DecodeError, Message};
+use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::row::OwnedRow;
 use risingwave_storage::error::StorageError;
 use thiserror::Error;
 use tokio::runtime::Runtime;
+
+use crate::stream_chunk_iterator::{StreamChunkIterator, StreamChunkRow};
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());
 
@@ -58,6 +63,13 @@ enum BindingError {
     Decode {
         #[from]
         error: DecodeError,
+        backtrace: Backtrace,
+    },
+
+    #[error("StreamChunkArrayError {error}")]
+    StreamChunkArray {
+        #[from]
+        error: ArrayError,
         backtrace: Backtrace,
     },
 }
@@ -209,6 +221,38 @@ where
     }
 }
 
+pub enum JavaBindingRow {
+    Keyed(KeyedRow),
+    StreamChunk(StreamChunkRow),
+}
+
+impl JavaBindingRow {
+    fn as_keyed(&self) -> &KeyedRow {
+        match &self {
+            JavaBindingRow::Keyed(r) => r,
+            _ => unreachable!("can only call as_keyed for KeyedRow"),
+        }
+    }
+
+    fn as_stream_chunk(&self) -> &StreamChunkRow {
+        match &self {
+            JavaBindingRow::StreamChunk(r) => r,
+            _ => unreachable!("can only call as_stream_chunk for StreamChunkRow"),
+        }
+    }
+}
+
+impl Deref for JavaBindingRow {
+    type Target = OwnedRow;
+
+    fn deref(&self) -> &Self::Target {
+        match &self {
+            JavaBindingRow::Keyed(r) => r.row(),
+            JavaBindingRow::StreamChunk(r) => r.row(),
+        }
+    }
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
     _env: EnvParam<'_>,
@@ -217,34 +261,66 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_vnodeCount(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNew<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNew<'a>(
     env: EnvParam<'a>,
     read_plan: JByteArray<'a>,
-) -> Pointer<'static, Iterator> {
+) -> Pointer<'static, HummockJavaBindingIterator> {
     execute_and_catch(env, move || {
         let read_plan = Message::decode(read_plan.to_guarded_slice(*env)?.deref())?;
-        let iter = RUNTIME.block_on(Iterator::new(read_plan))?;
+        let iter = RUNTIME.block_on(HummockJavaBindingIterator::new(read_plan))?;
         Ok(iter.into())
     })
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorNext<'a>(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorNext<'a>(
     env: EnvParam<'a>,
-    mut pointer: Pointer<'a, Iterator>,
-) -> Pointer<'static, KeyedRow> {
+    mut pointer: Pointer<'a, HummockJavaBindingIterator>,
+) -> Pointer<'static, JavaBindingRow> {
     execute_and_catch(env, move || {
         match RUNTIME.block_on(pointer.as_mut().next())? {
             None => Ok(Pointer::null()),
-            Some(row) => Ok(row.into()),
+            Some(row) => Ok(JavaBindingRow::Keyed(row).into()),
         }
     })
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_hummockIteratorClose(
     _env: EnvParam<'_>,
-    pointer: Pointer<'_, Iterator>,
+    pointer: Pointer<'_, HummockJavaBindingIterator>,
+) {
+    pointer.drop();
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNew<'a>(
+    env: EnvParam<'a>,
+    stream_chunk_payload: JByteArray<'a>,
+) -> Pointer<'static, StreamChunkIterator> {
+    execute_and_catch(env, move || {
+        let prost_stream_chumk =
+            Message::decode(stream_chunk_payload.to_guarded_slice(*env)?.deref())?;
+        let iter = StreamChunkIterator::new(StreamChunk::from_protobuf(&prost_stream_chumk)?);
+        Ok(iter.into())
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorNext<'a>(
+    env: EnvParam<'a>,
+    mut pointer: Pointer<'a, StreamChunkIterator>,
+) -> Pointer<'static, JavaBindingRow> {
+    execute_and_catch(env, move || match pointer.as_mut().next() {
+        None => Ok(Pointer::null()),
+        Some(row) => Ok(JavaBindingRow::StreamChunk(row).into()),
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_streamChunkIteratorClose(
+    _env: EnvParam<'_>,
+    pointer: Pointer<'_, StreamChunkIterator>,
 ) {
     pointer.drop();
 }
@@ -252,19 +328,29 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorClose(
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetKey<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
 ) -> JByteArray<'a> {
     execute_and_catch(env, move || {
-        Ok(JByteArray::from(
-            env.byte_array_from_slice(pointer.as_ref().key())?,
-        ))
+        Ok(JByteArray::from(env.byte_array_from_slice(
+            pointer.as_ref().as_keyed().key(),
+        )?))
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetOp<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+) -> jint {
+    execute_and_catch(env, move || {
+        Ok(pointer.as_ref().as_stream_chunk().op() as jint)
     })
 }
 
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jboolean {
     execute_and_catch(env, move || {
@@ -275,7 +361,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowIsNull<'a>(
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt16Value<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jshort {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int16(idx as usize)))
@@ -284,7 +370,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt16Value
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt32Value<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jint {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int32(idx as usize)))
@@ -293,7 +379,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt32Value
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jlong {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_int64(idx as usize)))
@@ -302,7 +388,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetInt64Value
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetFloatValue<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jfloat {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_f32(idx as usize)))
@@ -311,7 +397,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetFloatValue
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDoubleValue<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jdouble {
     execute_and_catch(env, move || Ok(pointer.as_ref().get_f64(idx as usize)))
@@ -320,7 +406,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDoubleValu
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetBooleanValue<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> jboolean {
     execute_and_catch(env, move || {
@@ -331,7 +417,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetBooleanVal
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValue<'a>(
     env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
     idx: jint,
 ) -> JString<'a> {
     execute_and_catch(env, move || {
@@ -342,7 +428,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
 #[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     _env: EnvParam<'a>,
-    pointer: Pointer<'a, KeyedRow>,
+    pointer: Pointer<'a, JavaBindingRow>,
 ) {
     pointer.drop()
 }

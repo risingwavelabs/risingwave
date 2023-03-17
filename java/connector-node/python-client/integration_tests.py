@@ -47,7 +47,7 @@ def test_upsert_sink(type, prop, input_file):
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
                 sink_config=connector_service_pb2.SinkConfig(
-                    sink_type=type,
+                    connector_type=type,
                     properties=prop,
                     table_schema=make_mock_schema()
                 )
@@ -86,7 +86,7 @@ def test_sink(type, prop, input_file):
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
                 sink_config=connector_service_pb2.SinkConfig(
-                    sink_type=type,
+                    connector_type=type,
                     properties=prop,
                     table_schema=make_mock_schema()
                 )
@@ -161,8 +161,10 @@ def test_print_sink(input_file):
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
               {"sink.mode":"append-only",
-               "location.type":"minio",
-               "warehouse.path":"minio://minioadmin:minioadmin@127.0.0.1:9000/bucket",
+               "warehouse.path":"s3a://bucket",
+               "s3.endpoint": "http://127.0.0.1:9000",
+               "s3.access.key": "minioadmin",
+               "s3.secret.key": "minioadmin",
                "database.name":"demo_db",
                "table.name":"demo_table"},
               input_file)
@@ -170,8 +172,10 @@ def test_iceberg_sink(input_file):
 def test_upsert_iceberg_sink(input_file):
     test_upsert_sink("iceberg",
               {"sink.mode":"upsert",
-               "location.type":"minio",
-               "warehouse.path":"minio://minioadmin:minioadmin@127.0.0.1:9000/bucket",
+               "warehouse.path":"s3a://bucket",
+               "s3.endpoint": "http://127.0.0.1:9000",
+               "s3.access.key": "minioadmin",
+               "s3.secret.key": "minioadmin",
                "database.name":"demo_db",
                "table.name":"demo_table"},
               input_file)

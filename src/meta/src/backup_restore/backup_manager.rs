@@ -22,7 +22,7 @@ use risingwave_backup::error::BackupError;
 use risingwave_backup::storage::{BoxedMetaSnapshotStorage, ObjectStoreMetaSnapshotStorage};
 use risingwave_backup::{MetaBackupJobId, MetaSnapshotId, MetaSnapshotManifest};
 use risingwave_common::bail;
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::{BackupJobStatus, MetaBackupManifestId};
@@ -304,7 +304,7 @@ impl<S: MetaStore> BackupManager<S> {
     }
 
     /// List all `SSTables` required by backups.
-    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableId> {
+    pub fn list_pinned_ssts(&self) -> Vec<HummockSstableObjectId> {
         self.backup_store
             .load()
             .0

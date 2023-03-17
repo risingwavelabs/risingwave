@@ -20,7 +20,9 @@ use bytes::Bytes;
 use futures::{pin_mut, TryStreamExt};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, HummockSstableId, LocalSstableInfo};
+use risingwave_hummock_sdk::{
+    HummockEpoch, HummockReadEpoch, HummockSstableObjectId, LocalSstableInfo,
+};
 use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
@@ -1295,9 +1297,9 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     let mut local_hummock_storage = hummock_storage
@@ -1317,9 +1319,9 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 
     let epoch2 = initial_epoch + 2;
@@ -1331,34 +1333,34 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
-    let min_sst_id = |sync_result: &SyncResult| {
+    let min_object_id = |sync_result: &SyncResult| {
         sync_result
             .uncommitted_ssts
             .iter()
-            .map(|LocalSstableInfo { sst_info, .. }| sst_info.id)
+            .map(|LocalSstableInfo { sst_info, .. }| sst_info.get_object_id())
             .min()
             .unwrap()
     };
     local_hummock_storage.seal_current_epoch(u64::MAX);
     let sync_result1 = hummock_storage.seal_and_sync_epoch(epoch1).await.unwrap();
-    let min_sst_id_epoch1 = min_sst_id(&sync_result1);
+    let min_object_id_epoch1 = min_object_id(&sync_result1);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch1,
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        min_object_id_epoch1,
     );
     let sync_result2 = hummock_storage.seal_and_sync_epoch(epoch2).await.unwrap();
-    let min_sst_id_epoch2 = min_sst_id(&sync_result2);
+    let min_object_id_epoch2 = min_object_id(&sync_result2);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch1,
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        min_object_id_epoch1,
     );
     meta_client
         .commit_epoch(epoch1, sync_result1.uncommitted_ssts)
@@ -1371,9 +1373,9 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
 
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        min_sst_id_epoch2,
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        min_object_id_epoch2,
     );
 
     hummock_storage.clear_shared_buffer().await.unwrap();
@@ -1386,8 +1388,8 @@ async fn test_gc_watermark_and_clear_shared_buffer() {
     assert_eq!(read_version.committed().max_committed_epoch(), epoch1);
     assert_eq!(
         hummock_storage
-            .sstable_id_manager()
-            .global_watermark_sst_id(),
-        HummockSstableId::MAX
+            .sstable_object_id_manager()
+            .global_watermark_object_id(),
+        HummockSstableObjectId::MAX
     );
 }

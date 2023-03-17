@@ -1785,7 +1785,23 @@ impl Parser {
         self.expect_token(&Token::RParen)?;
 
         let return_type = if self.parse_keyword(Keyword::RETURNS) {
-            Some(self.parse_data_type()?)
+            if self.parse_keyword(Keyword::TABLE) {
+                self.expect_token(&Token::LParen)?;
+                let mut values = vec![];
+                loop {
+                    values.push(self.parse_table_column_def()?);
+                    let comma = self.consume_token(&Token::Comma);
+                    if self.consume_token(&Token::RParen) {
+                        // allow a trailing comma, even though it's not in standard
+                        break;
+                    } else if !comma {
+                        return self.expected("',' or ')'", self.peek_token());
+                    }
+                }
+                Some(CreateFunctionReturns::Table(values))
+            } else {
+                Some(CreateFunctionReturns::Value(self.parse_data_type()?))
+            }
         } else {
             None
         };
@@ -1797,8 +1813,15 @@ impl Parser {
             temporary,
             name,
             args,
-            return_type,
+            returns: return_type,
             params,
+        })
+    }
+
+    fn parse_table_column_def(&mut self) -> Result<TableColumnDef, ParserError> {
+        Ok(TableColumnDef {
+            name: self.parse_identifier_non_reserved()?,
+            data_type: self.parse_data_type()?,
         })
     }
 
@@ -3259,6 +3282,23 @@ impl Parser {
 
     pub fn parse_set(&mut self) -> Result<Statement, ParserError> {
         let modifier = self.parse_one_of_keywords(&[Keyword::SESSION, Keyword::LOCAL]);
+        if self.parse_keywords(&[Keyword::TIME, Keyword::ZONE]) {
+            let value = if self.parse_keyword(Keyword::DEFAULT) {
+                SetTimeZoneValue::Default
+            } else if self.parse_keyword(Keyword::LOCAL) {
+                SetTimeZoneValue::Local
+            } else if let Ok(ident) = self.parse_identifier() {
+                SetTimeZoneValue::Ident(ident)
+            } else {
+                let value = self.parse_value()?;
+                SetTimeZoneValue::Literal(value)
+            };
+
+            return Ok(Statement::SetTimeZone {
+                local: modifier == Some(Keyword::LOCAL),
+                value,
+            });
+        }
         let variable = self.parse_identifier()?;
         if self.consume_token(&Token::Eq) || self.parse_keyword(Keyword::TO) {
             let mut values = vec![];

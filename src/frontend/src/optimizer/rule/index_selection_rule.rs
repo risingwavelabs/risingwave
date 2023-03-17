@@ -52,6 +52,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 
 use itertools::Itertools;
+use risingwave_common::array::serial_array::Serial;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
@@ -106,17 +107,8 @@ impl Rule for IndexSelectionRule {
         let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
 
-        let required_col_idx = logical_scan.required_col_idx();
         for index in indexes {
-            let p2s_mapping = index.primary_to_secondary_mapping();
-            if required_col_idx.iter().all(|x| p2s_mapping.contains_key(x)) {
-                // covering index selection
-                let index_scan = logical_scan.to_index_scan(
-                    &index.name,
-                    index.index_table.table_desc().into(),
-                    p2s_mapping,
-                );
-
+            if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                 let index_cost = self.estimate_table_scan_cost(
                     &index_scan,
                     TableScanIoEstimator::estimate_row_size(&index_scan),
@@ -713,6 +705,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Int16 => size_of::<i16>(),
             DataType::Int32 => size_of::<i32>(),
             DataType::Int64 => size_of::<i64>(),
+            DataType::Serial => size_of::<Serial>(),
             DataType::Float32 => size_of::<f32>(),
             DataType::Float64 => size_of::<f64>(),
             DataType::Decimal => size_of::<Decimal>(),
