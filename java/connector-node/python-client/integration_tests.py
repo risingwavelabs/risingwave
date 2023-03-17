@@ -47,7 +47,7 @@ def test_upsert_sink(type, prop, input_file):
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
                 sink_config=connector_service_pb2.SinkConfig(
-                    sink_type=type,
+                    connector_type=type,
                     properties=prop,
                     table_schema=make_mock_schema()
                 )
@@ -86,7 +86,7 @@ def test_sink(type, prop, input_file):
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
                 sink_config=connector_service_pb2.SinkConfig(
-                    sink_type=type,
+                    connector_type=type,
                     properties=prop,
                     table_schema=make_mock_schema()
                 )
