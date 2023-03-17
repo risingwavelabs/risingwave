@@ -37,7 +37,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
-            .pk
+            .plan_pk
             .iter()
             .map(|pk| pk.column_index as usize)
             .collect::<Vec<_>>();
