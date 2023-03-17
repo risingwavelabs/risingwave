@@ -36,6 +36,7 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
     };
     for p in pretty {
         config.unicode(&mut output, &p);
+        output.push('\n');
     }
     output
 }
