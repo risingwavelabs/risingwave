@@ -43,7 +43,7 @@ impl LogicalTableFunction {
         let schema = Schema {
             fields: vec![Field::with_name(
                 table_function.return_type(),
-                table_function.function_type.name(),
+                table_function.name(),
             )],
         };
         let functional_dependency = FunctionalDependencySet::new(schema.len());

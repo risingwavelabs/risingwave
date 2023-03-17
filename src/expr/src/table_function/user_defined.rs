@@ -51,9 +51,7 @@ impl TableFunction for UserDefinedTableFunction {
         let input =
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
-        let output = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.client.call(&self.identifier, input))
-        })?;
+        let output = self.client.call(&self.identifier, input).await?;
         // TODO: split by chunk_size
         Ok(output
             .columns()

@@ -93,7 +93,7 @@ converts_generic! {
     { arrow_array::Date32Array, Date32, ArrayImpl::NaiveDate },
     { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::NaiveDateTime },
     { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::NaiveTime },
-    // { arrow_array::StructArray, Struct(_), ArrayImpl::Struct }, // TODO: convert struct
+    { arrow_array::StructArray, Struct(_), ArrayImpl::Struct },
     { arrow_array::ListArray, List(_), ArrayImpl::List },
     { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
 }
