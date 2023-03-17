@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
+use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
@@ -53,7 +53,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
@@ -76,7 +76,7 @@ fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor 
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(0)).as_ref()),
             })),
         };

@@ -22,13 +22,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `HummockVersion` tracks `Sstables` in given version.
 impl MetadataModel for HummockVersion {
     type KeyType = HummockVersionId;
-    type ProstType = HummockVersion;
+    type PbType = HummockVersion;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_VERSION_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -36,7 +36,7 @@ impl MetadataModel for HummockVersion {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

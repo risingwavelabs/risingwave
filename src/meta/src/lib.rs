@@ -61,6 +61,12 @@ use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
+    #[clap(long, env = "RW_VPC_ID")]
+    vpd_id: Option<String>,
+
+    #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
+    security_group_id: Option<String>,
+
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
@@ -228,6 +234,8 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                vpc_id: opts.vpd_id,
+                security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta

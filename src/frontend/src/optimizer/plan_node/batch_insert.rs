@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::InsertNode;
 
 use super::{
-    ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalInsert, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
@@ -71,7 +71,7 @@ impl ToDistributedBatch for BatchInsert {
     }
 }
 
-impl ToBatchProst for BatchInsert {
+impl ToBatchPb for BatchInsert {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_indices = self
             .logical

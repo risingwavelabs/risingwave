@@ -132,7 +132,7 @@ mod tests {
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+    use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
@@ -143,7 +143,7 @@ mod tests {
     fn test_in_expr() {
         let input_ref_expr_node = ExprNode {
             expr_type: Type::InputRef as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
@@ -152,21 +152,21 @@ mod tests {
         let constant_values = vec![
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
-                return_type: Some(ProstDataType {
+                return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(ProstDatum {
+                rex_node: Some(RexNode::Constant(PbDatum {
                     body: serialize_datum(Some("ABC".into()).as_ref()),
                 })),
             },
             ExprNode {
                 expr_type: Type::ConstantValue as i32,
-                return_type: Some(ProstDataType {
+                return_type: Some(PbDataType {
                     type_name: TypeName::Varchar as i32,
                     ..Default::default()
                 }),
-                rex_node: Some(RexNode::Constant(ProstDatum {
+                rex_node: Some(RexNode::Constant(PbDatum {
                     body: serialize_datum(Some("def".into()).as_ref()),
                 })),
             },
@@ -178,7 +178,7 @@ mod tests {
         };
         let p = ExprNode {
             expr_type: Type::In as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Boolean as i32,
                 ..Default::default()
             }),
