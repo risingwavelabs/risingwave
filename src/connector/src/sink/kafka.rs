@@ -618,7 +618,7 @@ mod test {
         let properties: HashMap<String, String> = hashmap! {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
-            "format".to_string() => "append_only".to_string(),
+            "type".to_string() => "append-only".to_string(),
             "use_transaction".to_string() => "False".to_string(),
             "security_protocol".to_string() => "SASL".to_string(),
             "sasl_mechanism".to_string() => "SASL".to_string(),
@@ -638,7 +638,7 @@ mod test {
         let properties = hashmap! {
             "kafka.brokers".to_string() => "localhost:29092".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
-            "sink.type".to_string() => "append_only".to_string(),
+            "type".to_string() => "append-only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let schema = Schema::new(vec![
