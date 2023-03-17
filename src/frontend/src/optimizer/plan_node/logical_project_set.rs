@@ -14,11 +14,12 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
 use crate::optimizer::plan_node::{
@@ -237,10 +238,15 @@ impl fmt::Display for LogicalProjectSet {
 }
 
 impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: column pruning for ProjectSet
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // TODO: column pruning for ProjectSet https://github.com/risingwavelabs/risingwave/issues/8593
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_input = {
+            let input = self.input();
+            let required = (0..input.schema().len()).collect_vec();
+            input.prune_col(&required, ctx)
+        };
+        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
     }
 }
 
@@ -264,10 +270,10 @@ impl PredicatePushdown for LogicalProjectSet {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
-        _ctx: &mut PredicatePushdownContext,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: predicate pushdown for ProjectSet
-        LogicalFilter::create(self.clone().into(), predicate)
+        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

@@ -17,9 +17,7 @@ package com.risingwave.connector;
 import static io.grpc.Status.*;
 
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.SinkBase;
-import com.risingwave.connector.api.sink.SinkFactory;
-import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.*;
 import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.metrics.MonitoredRowIterator;
 import com.risingwave.proto.ConnectorServiceProto;
@@ -28,7 +26,6 @@ import com.risingwave.proto.ConnectorServiceProto.SinkResponse.StartResponse;
 import com.risingwave.proto.ConnectorServiceProto.SinkResponse.SyncResponse;
 import com.risingwave.proto.ConnectorServiceProto.SinkResponse.WriteResponse;
 import io.grpc.stub.StreamObserver;
-import java.util.Iterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -63,7 +60,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .withDescription("Sink is already initialized")
                             .asRuntimeException();
                 }
-                bindSink(sinkTask.getStart().getSinkConfig());
+                bindSink(sinkTask.getStart().getSinkConfig(), sinkTask.getStart().getFormat());
                 LOG.debug("Sink initialized");
                 responseObserver.onNext(
                         ConnectorServiceProto.SinkResponse.newBuilder()
@@ -122,28 +119,10 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                             .asRuntimeException();
                 }
 
-                Iterator<SinkRow> rows;
-                switch (sinkTask.getWrite().getPayloadCase()) {
-                    case JSON_PAYLOAD:
-                        if (deserializer == null) {
-                            deserializer = new JsonDeserializer(tableSchema);
-                        }
-
-                        if (deserializer instanceof JsonDeserializer) {
-                            rows = deserializer.deserialize(sinkTask.getWrite().getJsonPayload());
-                        } else {
-                            throw INTERNAL.withDescription(
-                                            "invalid payload type: expected JSON, got "
-                                                    + deserializer.getClass().getName())
-                                    .asRuntimeException();
-                        }
-                        break;
-                    default:
-                        throw INVALID_ARGUMENT
-                                .withDescription("invalid payload type")
-                                .asRuntimeException();
+                try (CloseableIterator<SinkRow> rowIter =
+                        deserializer.deserialize(sinkTask.getWrite())) {
+                    sink.write(new MonitoredRowIterator(rowIter));
                 }
-                sink.write(new MonitoredRowIterator(rows));
 
                 currentBatchId = sinkTask.getWrite().getBatchId();
                 LOG.debug(
@@ -193,25 +172,37 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
     @Override
     public void onError(Throwable throwable) {
         LOG.error("sink task error: ", throwable);
-        if (sink != null) {
-            sink.drop();
-        }
+        cleanup();
         responseObserver.onError(throwable);
     }
 
     @Override
     public void onCompleted() {
         LOG.debug("sink task completed");
-        if (sink != null) {
-            sink.drop();
-        }
+        cleanup();
         responseObserver.onCompleted();
     }
 
-    private void bindSink(SinkConfig sinkConfig) {
+    private void cleanup() {
+        if (sink != null) {
+            sink.drop();
+        }
+    }
+
+    private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
         tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
+        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
-        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");
+        switch (format) {
+            case FORMAT_UNSPECIFIED:
+            case UNRECOGNIZED:
+                throw INVALID_ARGUMENT
+                        .withDescription("should specify payload format in request")
+                        .asRuntimeException();
+            case JSON:
+                deserializer = new JsonDeserializer(tableSchema);
+                break;
+        }
+        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getConnectorType(), "node1");
     }
 }

@@ -422,7 +422,7 @@ impl Compactor {
                                 0
                             };
 
-                            tracing::info!("compactor cpu usage {cpu}");
+                            tracing::debug!("compactor cpu usage {cpu}");
                             let workload = CompactorWorkload {
                                 cpu,
                             };

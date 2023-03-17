@@ -16,7 +16,7 @@ use risingwave_common::constants::hummock::CompactionFilterFlag;
 use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::CompactionConfig;
 
-const DEFAULT_MAX_COMPACTION_BYTES: u64 = 1024 * 1024 * 1024; // 1GB
+const DEFAULT_MAX_COMPACTION_BYTES: u64 = 2 * 1024 * 1024 * 1024; // 2GB
 const DEFAULT_MIN_COMPACTION_BYTES: u64 = 128 * 1024 * 1024; // 128MB
 const DEFAULT_MAX_BYTES_FOR_LEVEL_BASE: u64 = 512 * 1024 * 1024; // 512MB
 
@@ -28,7 +28,7 @@ const MAX_LEVEL: u64 = 6;
 const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
 const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * 1024 * 1024; // 512MB;
 const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = u32::MAX as u64;
-const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 64;
+const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 96;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -64,9 +64,13 @@ impl CompactionConfigBuilder {
                 max_sub_compaction: DEFAULT_MAX_SUB_COMPACTION,
                 max_space_reclaim_bytes: DEFAULT_MAX_SPACE_RECLAIM_BYTES,
                 split_by_state_table: false,
-                level0_max_compact_file_number: DEFAULT_MAX_COMPACTION_FILE_COUNT,
                 level0_stop_write_threshold_sub_level_number:
                     DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER,
+                // This configure variable shall be larger than level0_tier_compact_file_number, and
+                // it shall meet the following condition:
+                //    level0_max_compact_file_number * target_file_size_base >
+                // max_bytes_for_level_base
+                level0_max_compact_file_number: DEFAULT_MAX_COMPACTION_FILE_COUNT,
             },
         }
     }
@@ -128,6 +132,6 @@ builder_field! {
     target_file_size_base: u64,
     max_sub_compaction: u32,
     max_space_reclaim_bytes: u64,
-    level0_max_compact_file_number: u64,
     level0_stop_write_threshold_sub_level_number: u64,
+    level0_max_compact_file_number: u64,
 }

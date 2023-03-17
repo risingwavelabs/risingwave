@@ -40,7 +40,7 @@ use bytes::{Buf, BufMut};
 pub use forward_sstable_iterator::*;
 mod backward_sstable_iterator;
 pub use backward_sstable_iterator::*;
-use risingwave_hummock_sdk::key::{KeyPayloadType, TableKey, UserKey};
+use risingwave_hummock_sdk::key::{FullKey, KeyPayloadType, TableKey, UserKey};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId};
 #[cfg(test)]
 use risingwave_pb::hummock::{KeyRange, SstableInfo};
@@ -252,6 +252,10 @@ impl BlockMeta {
     #[inline]
     pub fn encoded_size(&self) -> usize {
         16 /* offset + len + key len + uncompressed size */ + self.smallest_key.len()
+    }
+
+    pub fn table_id(&self) -> TableId {
+        FullKey::decode(&self.smallest_key).user_key.table_id
     }
 }
 

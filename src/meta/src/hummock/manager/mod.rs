@@ -2023,7 +2023,7 @@ where
                     .get_compaction_group_config(*group_id);
                 let info = status.get_compaction_info(levels, cg.compaction_config());
                 global_info.add(&info);
-                tracing::info!("cg {} info {:?}", group_id, info);
+                tracing::debug!("cg {} info {:?}", group_id, info);
             }
         }
         global_info

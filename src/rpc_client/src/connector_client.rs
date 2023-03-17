@@ -19,6 +19,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, STREAM_WINDOW_SIZE};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_pb::catalog::SinkType;
 use risingwave_pb::connector_service::connector_service_client::ConnectorServiceClient;
 use risingwave_pb::connector_service::get_event_stream_request::{
     Request as SourceRequest, StartSource, ValidateProperties,
@@ -116,7 +117,7 @@ impl ConnectorClient {
 
     pub async fn start_sink_stream(
         &self,
-        sink_type: String,
+        connector_type: String,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
     ) -> Result<(UnboundedSender<SinkStreamRequest>, Streaming<SinkResponse>)> {
@@ -126,8 +127,9 @@ impl ConnectorClient {
         request_sender
             .send(SinkStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
+                    format: SinkPayloadFormat::Json as i32,
                     sink_config: Some(SinkConfig {
-                        sink_type,
+                        connector_type,
                         properties,
                         table_schema,
                     }),
@@ -151,16 +153,18 @@ impl ConnectorClient {
         connector_type: String,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        sink_type: SinkType,
     ) -> Result<()> {
         let response = self
             .0
             .to_owned()
             .validate_sink(ValidateSinkRequest {
                 sink_config: Some(SinkConfig {
-                    sink_type: connector_type,
+                    connector_type,
                     properties,
                     table_schema,
                 }),
+                sink_type: sink_type as i32,
             })
             .await
             .inspect_err(|err| {

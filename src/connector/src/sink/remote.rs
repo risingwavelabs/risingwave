@@ -190,14 +190,20 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let table_schema = TableSchema {
             columns,
             pk_indices: sink_catalog
-                .pk_indices()
+                .downstream_pk_indices()
                 .iter()
                 .map(|i| *i as _)
                 .collect_vec(),
         };
 
+        // We validate a remote sink's accessibility as well as the pk.
         client
-            .validate_sink_properties(config.connector_type, config.properties, Some(table_schema))
+            .validate_sink_properties(
+                config.connector_type,
+                config.properties,
+                Some(table_schema),
+                sink_catalog.sink_type.to_proto(),
+            )
             .await
             .map_err(SinkError::from)
     }

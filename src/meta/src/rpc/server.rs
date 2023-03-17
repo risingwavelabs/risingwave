@@ -51,6 +51,7 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
 };
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
@@ -441,8 +442,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
+    let mut aws_cli = None;
+    if let Some(my_vpc_id) = &env.opts.vpc_id && let Some(security_group_id) = &env.opts.security_group_id {
+        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
+        aws_cli = Some(cli);
+    }
+
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
+        aws_cli,
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),

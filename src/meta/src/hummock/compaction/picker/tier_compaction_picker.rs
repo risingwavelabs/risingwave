@@ -75,11 +75,9 @@ impl TierCompactionPicker {
                 if compaction_bytes > max_compaction_bytes {
                     break;
                 }
-
                 if compact_file_count > self.config.level0_max_compact_file_number {
                     break;
                 }
-
                 if other.level_type != non_overlapping_type
                     || other.total_file_size > self.config.sub_level_max_compaction_bytes
                 {
@@ -309,8 +307,8 @@ impl TierCompactionPicker {
                 self.config.sub_level_max_compaction_bytes,
             );
 
-            let mut compact_file_count = level.table_infos.len();
             let mut compaction_bytes = level.total_file_size;
+            let mut compact_file_count = level.table_infos.len() as u64;
             let mut waiting_enough_files = true;
 
             for other in &l0.sub_levels[idx + 1..] {
@@ -319,7 +317,7 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                if compact_file_count as u64 > self.config.level0_max_compact_file_number {
+                if compact_file_count > self.config.level0_max_compact_file_number {
                     break;
                 }
 
@@ -332,10 +330,10 @@ impl TierCompactionPicker {
                     break;
                 }
 
-                compact_file_count += other.table_infos.len();
+                compact_file_count += other.table_infos.len() as u64;
 
                 compaction_bytes += other.total_file_size;
-                compact_file_count += other.table_infos.len();
+                compact_file_count += other.table_infos.len() as u64;
                 select_level_inputs.push(InputLevel {
                     level_idx: 0,
                     level_type: other.level_type,
@@ -343,7 +341,7 @@ impl TierCompactionPicker {
                 });
             }
 
-            if compact_file_count < self.config.level0_tier_compact_file_number as usize
+            if compact_file_count < self.config.level0_tier_compact_file_number
                 && waiting_enough_files
             {
                 stats.skip_by_count_limit += 1;
