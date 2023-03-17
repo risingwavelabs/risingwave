@@ -168,8 +168,8 @@ export interface Sink {
   pk: ColumnOrder[];
   dependentRelations: number[];
   distributionKey: number[];
-  /** pk_indices of the corresponding materialize operator's output. */
-  streamKey: number[];
+  /** User-defined primary key indices for upsert sink. */
+  downstreamPk: number[];
   sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
@@ -621,7 +621,7 @@ function createBaseSink(): Sink {
     pk: [],
     dependentRelations: [],
     distributionKey: [],
-    streamKey: [],
+    downstreamPk: [],
     sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
@@ -644,7 +644,7 @@ export const Sink = {
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
-      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      downstreamPk: Array.isArray(object?.downstreamPk) ? object.downstreamPk.map((e: any) => Number(e)) : [],
       sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
@@ -683,10 +683,10 @@ export const Sink = {
     } else {
       obj.distributionKey = [];
     }
-    if (message.streamKey) {
-      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    if (message.downstreamPk) {
+      obj.downstreamPk = message.downstreamPk.map((e) => Math.round(e));
     } else {
-      obj.streamKey = [];
+      obj.downstreamPk = [];
     }
     message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
@@ -710,7 +710,7 @@ export const Sink = {
     message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
     message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
