@@ -40,8 +40,8 @@ pub struct SinkDesc {
     /// order (ASC/DESC).
     pub pk: Vec<ColumnOrder>,
 
-    /// Primary key indices of the corresponding sink operator's output.
-    pub stream_key: Vec<usize>,
+    /// User-defined primary key indices for upsert sink.
+    pub downstream_pk: Vec<usize>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -72,7 +72,7 @@ impl SinkDesc {
             definition: self.definition,
             columns: self.columns,
             pk: self.pk,
-            stream_key: self.stream_key,
+            downstream_pk: self.downstream_pk,
             distribution_key: self.distribution_key,
             owner,
             dependent_relations,
@@ -92,7 +92,7 @@ impl SinkDesc {
                 .map(|column| Into::<ProstColumnDesc>::into(&column.column_desc))
                 .collect_vec(),
             pk: self.pk.iter().map(|k| k.to_protobuf()).collect_vec(),
-            stream_key: self.stream_key.iter().map(|idx| *idx as _).collect_vec(),
+            downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),
             distribution_key: self.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: self.properties.clone().into_iter().collect(),
             sink_type: self.sink_type.to_proto() as i32,

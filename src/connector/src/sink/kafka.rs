@@ -33,7 +33,9 @@ use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use super::{Sink, SinkError, SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_DEBEZIUM, SINK_FORMAT_UPSERT};
+use super::{
+    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::common::KafkaCommon;
 use crate::sink::Result;
 use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
@@ -61,7 +63,7 @@ pub struct KafkaConfig {
     #[serde(flatten)]
     pub common: KafkaCommon,
 
-    pub format: String, // accept "append_only", "debezium", or "upsert"
+    pub r#type: String, // accept "append-only", "debezium", or "upsert"
 
     pub identifier: String,
 
@@ -94,12 +96,16 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.format != SINK_FORMAT_APPEND_ONLY
-            && config.format != SINK_FORMAT_DEBEZIUM
-            && config.format != SINK_FORMAT_UPSERT
+        if config.r#type != SINK_TYPE_APPEND_ONLY
+            && config.r#type != SINK_TYPE_DEBEZIUM
+            && config.r#type != SINK_TYPE_UPSERT
         {
             return Err(SinkError::Config(anyhow!(
-                "format must be append_only, debezium, or upsert"
+                "`{}` must be {}, {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_DEBEZIUM,
+                SINK_TYPE_UPSERT
             )));
         }
         Ok(config)
@@ -132,6 +138,20 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
             schema,
             pk_indices,
         })
+    }
+
+    pub async fn validate(config: KafkaConfig, pk_indices: Vec<usize>) -> Result<()> {
+        // For upsert Kafka sink, the primary key must be defined.
+        if !APPEND_ONLY && pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "primary key not defined for upsert kafka sink (please define in `primary_key` field)"
+            )));
+        }
+
+        // Try Kafka connection.
+        KafkaTransactionConductor::new(config).await?;
+
+        Ok(())
     }
 
     // any error should report to upper level and requires revert to previous epoch.
@@ -305,7 +325,7 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
             self.append_only(chunk).await
         } else {
             // Debezium
-            if self.config.format == SINK_FORMAT_DEBEZIUM {
+            if self.config.r#type == SINK_TYPE_DEBEZIUM {
                 self.debezium_update(
                     chunk,
                     SystemTime::now()
