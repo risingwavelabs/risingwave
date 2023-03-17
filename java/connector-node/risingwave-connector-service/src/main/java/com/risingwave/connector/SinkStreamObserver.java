@@ -191,7 +191,7 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
 
     private void bindSink(SinkConfig sinkConfig, ConnectorServiceProto.SinkPayloadFormat format) {
         tableSchema = TableSchema.fromProto(sinkConfig.getTableSchema());
-        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getSinkType());
+        SinkFactory sinkFactory = SinkUtils.getSinkFactory(sinkConfig.getConnectorType());
         sink = sinkFactory.create(tableSchema, sinkConfig.getPropertiesMap());
         switch (format) {
             case FORMAT_UNSPECIFIED:
@@ -203,6 +203,6 @@ public class SinkStreamObserver implements StreamObserver<ConnectorServiceProto.
                 deserializer = new JsonDeserializer(tableSchema);
                 break;
         }
-        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getSinkType(), "node1");
+        ConnectorNodeMetrics.incActiveConnections(sinkConfig.getConnectorType(), "node1");
     }
 }
