@@ -64,7 +64,9 @@ psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY,
 
 node_port=50051
 node_timeout=10
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
+mkdir -p .risingwave/log
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 echo "waiting for connector node to start"
 start_time=$(date +%s)
 while :
