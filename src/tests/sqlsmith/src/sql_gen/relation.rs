@@ -166,7 +166,15 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         if available_join_on_columns.is_empty() {
             return expr;
         }
-        let n = self.rng.gen_range(0..available_join_on_columns.len());
+        let n_join_cols = available_join_on_columns.len();
+        let n = if n_join_cols < 2 { n_join_cols } else {
+            match self.rng.gen_range(0..100) {
+                0..=10 => self.rng.gen_range(n_join_cols/2..n_join_cols),
+                11..=100 => self.rng.gen_range(0..n_join_cols/2),
+                _ => unreachable!(),
+            }
+        };
+
         for (l_col, r_col) in available_join_on_columns.drain(0..n) {
             let equi_expr = create_equi_expr(l_col.name, r_col.name);
             expr = Expr::BinaryOp {
