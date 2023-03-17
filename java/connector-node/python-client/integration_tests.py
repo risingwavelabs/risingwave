@@ -46,6 +46,7 @@ def test_upsert_sink(type, prop, input_file):
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+                format=connector_service_pb2.SinkPayloadFormat.JSON,
                 sink_config=connector_service_pb2.SinkConfig(
                     connector_type=type,
                     properties=prop,
@@ -85,6 +86,7 @@ def test_sink(type, prop, input_file):
         stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
         request_list = [
             connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+                format=connector_service_pb2.SinkPayloadFormat.JSON,
                 sink_config=connector_service_pb2.SinkConfig(
                     connector_type=type,
                     properties=prop,

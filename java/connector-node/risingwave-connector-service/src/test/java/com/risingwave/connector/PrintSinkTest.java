@@ -18,7 +18,7 @@ import static com.risingwave.proto.Data.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import java.io.PrintStream;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -66,10 +66,10 @@ public class PrintSinkTest extends TestCase {
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkrow(Op.UPDATE_DELETE, 1, "Alice"),
-                        new ArraySinkrow(Op.UPDATE_INSERT, 2, "Bob"),
-                        new ArraySinkrow(Op.DELETE, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                        new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
+                        new ArraySinkRow(Op.UPDATE_INSERT, 2, "Bob"),
+                        new ArraySinkRow(Op.DELETE, 2, "Bob")));
         if (!writeCalled[0]) {
             fail("write batch did not print messages");
         }
