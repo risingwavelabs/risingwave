@@ -75,7 +75,7 @@ public class UpsertIcebergSink extends SinkBase {
                         .collect(Collectors.toList());
     }
 
-    private Record newRecord(Schema schema, SinkRow row) {
+    private static Record newRecord(Schema schema, SinkRow row) {
         Record record = GenericRecord.create(schema);
         for (int i = 0; i < schema.columns().size(); i++) {
             record.set(i, row.get(i));
@@ -174,10 +174,10 @@ public class UpsertIcebergSink extends SinkBase {
                 }
                 switch (row.getOp()) {
                     case INSERT:
-                        sinkRowMap.insert(getKeyFromRow(row), row);
+                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
                         break;
                     case DELETE:
-                        sinkRowMap.delete(getKeyFromRow(row), row);
+                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
                         break;
                     case UPDATE_DELETE:
                         if (updateBufferExists) {
@@ -186,7 +186,7 @@ public class UpsertIcebergSink extends SinkBase {
                                             "an UPDATE_INSERT should precede an UPDATE_DELETE")
                                     .asRuntimeException();
                         }
-                        sinkRowMap.delete(getKeyFromRow(row), row);
+                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
                         updateBufferExists = true;
                         break;
                     case UPDATE_INSERT:
@@ -196,7 +196,7 @@ public class UpsertIcebergSink extends SinkBase {
                                             "an UPDATE_INSERT should precede an UPDATE_DELETE")
                                     .asRuntimeException();
                         }
-                        sinkRowMap.insert(getKeyFromRow(row), row);
+                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
                         updateBufferExists = false;
                         break;
                     default:
@@ -217,13 +217,13 @@ public class UpsertIcebergSink extends SinkBase {
                     newEqualityDeleteWriter(entry.getKey());
             DataWriter<Record> dataWriter = newDataWriter(entry.getKey());
             for (SinkRowOp sinkRowOp : entry.getValue().map.values()) {
-                SinkRow insert = sinkRowOp.getInsert();
-                SinkRow delete = sinkRowOp.getDelete();
+                Record insert = sinkRowOp.getInsert();
+                Record delete = sinkRowOp.getDelete();
                 if (insert != null) {
-                    dataWriter.write(newRecord(rowSchema, insert));
+                    dataWriter.write(insert);
                 }
                 if (delete != null) {
-                    equalityDeleteWriter.write(newRecord(deleteRowSchema, delete));
+                    equalityDeleteWriter.write(delete);
                 }
             }
             try {
