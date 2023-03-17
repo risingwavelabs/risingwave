@@ -15,6 +15,7 @@
 mod barrier;
 mod catalog;
 mod cluster;
+mod connection;
 mod error;
 mod notification;
 mod stream;
@@ -177,6 +178,7 @@ macro_rules! for_all_metadata_models {
             { crate::model::stream::TableFragments },
             { risingwave_pb::user::UserInfo },
             { risingwave_pb::catalog::Function },
+            { risingwave_pb::catalog::Connection },
             // These items need not be included in a meta snapshot.
             { crate::model::cluster::Worker },
             { risingwave_pb::hummock::CompactTaskAssignment },

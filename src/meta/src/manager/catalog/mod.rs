@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod connection;
 mod database;
 mod fragment;
 mod user;
@@ -22,6 +23,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
+pub use connection::*;
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -32,7 +34,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -57,6 +61,7 @@ pub type ViewId = u32;
 pub type FunctionId = u32;
 
 pub type UserId = u32;
+pub type ConnectionId = u32;
 
 /// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
 /// meta store.
@@ -101,13 +106,19 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
+    pub connection: ConnectionManager,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
-        let user = UserManager::new(env, &database).await?;
-        Ok(Self { database, user })
+        let user = UserManager::new(env.clone(), &database).await?;
+        let connection = ConnectionManager::new(env).await?;
+        Ok(Self {
+            database,
+            user,
+            connection,
+        })
     }
 }
 
@@ -323,6 +334,40 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
+    }
+
+    /// Each connection is identified by a unique name
+    pub async fn create_connection(
+        &self,
+        connection: Connection,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.connection;
+        core.check_connection_duplicated(&connection.name)?;
+
+        let conn_id = connection.id;
+        let conn_name = connection.name.clone();
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        connections.insert(conn_id, connection);
+        commit_meta!(self, connections)?;
+
+        core.connection_by_name.insert(conn_name, conn_id);
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
+    }
+
+    pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.connection;
+
+        let conn_id = core
+            .connection_by_name
+            .remove(conn_name)
+            .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
+
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        connections.remove(conn_id);
+        commit_meta!(self, connections)?;
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -869,6 +914,13 @@ where
             user_core.increase_ref(source.owner);
             Ok(())
         }
+    }
+
+    pub async fn get_connection_by_name(&self, name: &str) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await.connection;
+        core.get_connection_by_name(name)
+            .cloned()
+            .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
     }
 
     pub async fn finish_create_source_procedure(
@@ -1519,6 +1571,10 @@ where
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
         Ok(())
+    }
+
+    pub async fn list_connections(&self) -> Vec<Connection> {
+        self.core.lock().await.connection.list_connections()
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {

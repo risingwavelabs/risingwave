@@ -181,6 +181,23 @@ export interface Sink_PropertiesEntry {
   value: string;
 }
 
+export interface Connection {
+  id: number;
+  name: string;
+  info?: { $case: "privateLinkService"; privateLinkService: Connection_PrivateLinkService };
+}
+
+export interface Connection_PrivateLinkService {
+  provider: string;
+  endpointId: string;
+  dnsEntries: { [key: string]: string };
+}
+
+export interface Connection_PrivateLinkService_DnsEntriesEntry {
+  key: string;
+  value: string;
+}
+
 export interface Index {
   id: number;
   schemaId: number;
@@ -745,6 +762,128 @@ export const Sink_PropertiesEntry = {
 
   fromPartial<I extends Exact<DeepPartial<Sink_PropertiesEntry>, I>>(object: I): Sink_PropertiesEntry {
     const message = createBaseSink_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseConnection(): Connection {
+  return { id: 0, name: "", info: undefined };
+}
+
+export const Connection = {
+  fromJSON(object: any): Connection {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      info: isSet(object.privateLinkService)
+        ? {
+          $case: "privateLinkService",
+          privateLinkService: Connection_PrivateLinkService.fromJSON(object.privateLinkService),
+        }
+        : undefined,
+    };
+  },
+
+  toJSON(message: Connection): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.name !== undefined && (obj.name = message.name);
+    message.info?.$case === "privateLinkService" && (obj.privateLinkService = message.info?.privateLinkService
+      ? Connection_PrivateLinkService.toJSON(message.info?.privateLinkService)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection>, I>>(object: I): Connection {
+    const message = createBaseConnection();
+    message.id = object.id ?? 0;
+    message.name = object.name ?? "";
+    if (
+      object.info?.$case === "privateLinkService" &&
+      object.info?.privateLinkService !== undefined &&
+      object.info?.privateLinkService !== null
+    ) {
+      message.info = {
+        $case: "privateLinkService",
+        privateLinkService: Connection_PrivateLinkService.fromPartial(object.info.privateLinkService),
+      };
+    }
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService(): Connection_PrivateLinkService {
+  return { provider: "", endpointId: "", dnsEntries: {} };
+}
+
+export const Connection_PrivateLinkService = {
+  fromJSON(object: any): Connection_PrivateLinkService {
+    return {
+      provider: isSet(object.provider) ? String(object.provider) : "",
+      endpointId: isSet(object.endpointId) ? String(object.endpointId) : "",
+      dnsEntries: isObject(object.dnsEntries)
+        ? Object.entries(object.dnsEntries).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: Connection_PrivateLinkService): unknown {
+    const obj: any = {};
+    message.provider !== undefined && (obj.provider = message.provider);
+    message.endpointId !== undefined && (obj.endpointId = message.endpointId);
+    obj.dnsEntries = {};
+    if (message.dnsEntries) {
+      Object.entries(message.dnsEntries).forEach(([k, v]) => {
+        obj.dnsEntries[k] = v;
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService {
+    const message = createBaseConnection_PrivateLinkService();
+    message.provider = object.provider ?? "";
+    message.endpointId = object.endpointId ?? "";
+    message.dnsEntries = Object.entries(object.dnsEntries ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService_DnsEntriesEntry(): Connection_PrivateLinkService_DnsEntriesEntry {
+  return { key: "", value: "" };
+}
+
+export const Connection_PrivateLinkService_DnsEntriesEntry = {
+  fromJSON(object: any): Connection_PrivateLinkService_DnsEntriesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: Connection_PrivateLinkService_DnsEntriesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService_DnsEntriesEntry>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService_DnsEntriesEntry {
+    const message = createBaseConnection_PrivateLinkService_DnsEntriesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;

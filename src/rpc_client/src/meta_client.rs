@@ -39,7 +39,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
+    Connection, Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
     Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
     View as ProstView,
 };
@@ -121,6 +121,26 @@ impl MetaClient {
             self.inner.subscribe(request).await
         })
         .await
+    }
+
+    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
+        let request = CreateConnectionRequest { payload: Some(req) };
+        let resp = self.inner.create_connection(request).await?;
+        Ok(resp.connection_id)
+    }
+
+    pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
+        let request = ListConnectionsRequest {};
+        let resp = self.inner.list_connections(request).await?;
+        Ok(resp.connections)
+    }
+
+    pub async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+        let request = DropConnectionRequest {
+            connection_name: connection_name.to_string(),
+        };
+        let _ = self.inner.drop_connection(request).await?;
+        Ok(())
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -1358,6 +1378,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
+            ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
+            ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
+            ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
