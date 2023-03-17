@@ -40,13 +40,18 @@ public class PrintSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            out.println(
-                    "PrintSink: "
-                            + row.getOp().name()
-                            + " values "
-                            + Arrays.toString(
-                                    IntStream.range(0, row.size()).mapToObj(row::get).toArray()));
+            try (SinkRow row = rows.next()) {
+                out.println(
+                        "PrintSink: "
+                                + row.getOp().name()
+                                + " values "
+                                + Arrays.toString(
+                                        IntStream.range(0, row.size())
+                                                .mapToObj(row::get)
+                                                .toArray()));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 

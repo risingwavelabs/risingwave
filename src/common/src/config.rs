@@ -112,9 +112,6 @@ pub struct RwConfig {
     #[serde(default)]
     pub storage: StorageConfig,
 
-    #[serde(default)]
-    pub backup: BackupConfig,
-
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -252,17 +249,9 @@ impl Default for BatchConfig {
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamingConfig {
-    /// The interval of periodic barrier.
-    #[serde(default = "default::streaming::barrier_interval_ms")]
-    pub barrier_interval_ms: u32,
-
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
-
-    /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::streaming::checkpoint_frequency")]
-    pub checkpoint_frequency: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -297,24 +286,6 @@ impl Default for StreamingConfig {
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Target size of the Sstable.
-    #[serde(default = "default::storage::sst_size_mb")]
-    pub sstable_size_mb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Size of each block in bytes in SST.
-    #[serde(default = "default::storage::block_size_kb")]
-    pub block_size_kb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// False positive probability of bloom filter.
-    #[serde(default = "default::storage::bloom_false_positive")]
-    pub bloom_false_positive: f64,
-
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::storage::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
@@ -328,12 +299,6 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::storage::data_directory")]
-    pub data_directory: String,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
@@ -486,30 +451,6 @@ impl Default for DeveloperConfig {
     }
 }
 
-/// Configs for meta node backup
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BackupConfig {
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote storage url for storing snapshots.
-    #[serde(default = "default::backup::storage_url")]
-    pub storage_url: String,
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote directory for storing snapshots.
-    #[serde(default = "default::backup::storage_directory")]
-    pub storage_directory: String,
-
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
-}
-
-impl Default for BackupConfig {
-    fn default() -> Self {
-        toml::from_str("").unwrap()
-    }
-}
-
 mod default {
     pub mod meta {
         use crate::config::MetaBackend;
@@ -576,18 +517,6 @@ mod default {
 
     pub mod storage {
 
-        pub fn sst_size_mb() -> u32 {
-            256
-        }
-
-        pub fn block_size_kb() -> u32 {
-            64
-        }
-
-        pub fn bloom_false_positive() -> f64 {
-            0.001
-        }
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -598,10 +527,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn data_directory() -> String {
-            "hummock_001".to_string()
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -657,18 +582,10 @@ mod default {
     pub mod streaming {
         use crate::config::AsyncStackTraceOption;
 
-        pub fn barrier_interval_ms() -> u32 {
-            1000
-        }
-
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
             // TODO: remove this limitation from code
             10000
-        }
-
-        pub fn checkpoint_frequency() -> usize {
-            10
         }
 
         pub fn enable_jaegar_tracing() -> bool {
@@ -743,16 +660,6 @@ mod default {
 
         pub fn stream_exchange_batched_permits() -> usize {
             1024
-        }
-    }
-
-    pub mod backup {
-        pub fn storage_url() -> String {
-            "memory".to_string()
-        }
-
-        pub fn storage_directory() -> String {
-            "backup".to_string()
         }
     }
 }

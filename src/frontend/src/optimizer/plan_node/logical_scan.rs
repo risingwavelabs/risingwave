@@ -20,9 +20,9 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema, TableDesc};
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::sort_util::ColumnOrder;
 
-use super::generic::{GenericPlanNode, GenericPlanRef};
+use super::generic::GenericPlanRef;
 use super::{
     generic, BatchFilter, BatchProject, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PredicatePushdown, StreamTableScan, ToBatch, ToStream,
@@ -36,7 +36,7 @@ use crate::optimizer::plan_node::{
     BatchSeqScan, ColumnPruningContext, LogicalFilter, LogicalProject, LogicalValues,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::Order;
 use crate::optimizer::rule::IndexSelectionRule;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay};
 
@@ -89,21 +89,10 @@ impl LogicalScan {
             predicate,
             chunk_size: None,
             for_system_time_as_of_now,
-        };
-
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-
-        let functional_dependency = match &pk_indices {
-            Some(pk_indices) => FunctionalDependencySet::with_key(schema.len(), pk_indices),
-            None => FunctionalDependencySet::new(schema.len()),
-        };
-        let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        };
+
+        let base = PlanBase::new_logical_with_core(&core);
 
         Self { base, core }
     }
@@ -201,6 +190,18 @@ impl LogicalScan {
             .collect()
     }
 
+    /// Get the ids of the output columns and primary key columns.
+    pub fn output_and_pk_column_ids(&self) -> Vec<ColumnId> {
+        let mut ids = self.output_column_ids();
+        for column_order in self.primary_key() {
+            let id = self.table_desc().columns[column_order.column_index].column_id;
+            if !ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+        ids
+    }
+
     pub fn output_column_indices(&self) -> &[usize] {
         &self.core.output_col_idx
     }
@@ -267,6 +268,65 @@ impl LogicalScan {
         self.i2o_col_mapping().rewrite_bitset(watermark_columns)
     }
 
+    /// Return indexes can satisfy the required order.
+    pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Rc<IndexCatalog>> {
+        let output_col_map = self
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let unmatched_idx = output_col_map.len();
+        self.indexes()
+            .iter()
+            .filter(|idx| {
+                let s2p_mapping = idx.secondary_to_primary_mapping();
+                Order {
+                    column_orders: idx
+                        .index_table
+                        .pk()
+                        .iter()
+                        .map(|idx_item| {
+                            ColumnOrder::new(
+                                *output_col_map
+                                    .get(
+                                        s2p_mapping
+                                            .get(&idx_item.column_index)
+                                            .expect("should be in s2p mapping"),
+                                    )
+                                    .unwrap_or(&unmatched_idx),
+                                idx_item.order_type,
+                            )
+                        })
+                        .collect(),
+                }
+                .satisfies(required_order)
+            })
+            .collect()
+    }
+
+    /// If the index can cover the scan, transform it to the index scan.
+    pub fn to_index_scan_if_index_covered(&self, index: &Rc<IndexCatalog>) -> Option<LogicalScan> {
+        let p2s_mapping = index.primary_to_secondary_mapping();
+        if self
+            .required_col_idx()
+            .iter()
+            .all(|x| p2s_mapping.contains_key(x))
+        {
+            let index_scan = self.to_index_scan(
+                &index.name,
+                index.index_table.table_desc().into(),
+                p2s_mapping,
+            );
+            Some(index_scan)
+        } else {
+            None
+        }
+    }
+
+    /// Prerequisite: the caller should guarantee that `primary_to_secondary_mapping` must cover the
+    /// scan.
     pub fn to_index_scan(
         &self,
         index_name: &str,
@@ -581,32 +641,14 @@ impl LogicalScan {
             return None;
         }
 
-        let index = self.indexes().iter().find(|idx| {
-            Order {
-                column_orders: idx
-                    .index_item
-                    .iter()
-                    .map(|idx_item| ColumnOrder::new(idx_item.index, OrderType::ascending()))
-                    .collect(),
+        let order_satisfied_index = self.indexes_satisfy_order(required_order);
+        for index in order_satisfied_index {
+            if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
+                return Some(index_scan.to_batch());
             }
-            .satisfies(required_order)
-        })?;
-
-        let p2s_mapping = index.primary_to_secondary_mapping();
-        if self
-            .required_col_idx()
-            .iter()
-            .all(|x| p2s_mapping.contains_key(x))
-        {
-            let index_scan = self.to_index_scan(
-                &index.name,
-                index.index_table.table_desc().into(),
-                p2s_mapping,
-            );
-            Some(index_scan.to_batch())
-        } else {
-            None
         }
+
+        None
     }
 }
 
@@ -623,12 +665,11 @@ impl ToBatch for LogicalScan {
             if let Some(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
-                    return required_order.enforce_if_not_satisfies(scan.to_batch().unwrap());
+                    return required_order.enforce_if_not_satisfies(scan.to_batch()?);
                 } else if let Some(join) = applied.as_logical_join() {
                     // index lookup join
-                    return required_order.enforce_if_not_satisfies(
-                        join.index_lookup_join_to_batch_lookup_join().unwrap(),
-                    );
+                    return required_order
+                        .enforce_if_not_satisfies(join.index_lookup_join_to_batch_lookup_join()?);
                 } else {
                     unreachable!();
                 }

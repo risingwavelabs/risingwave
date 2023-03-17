@@ -39,9 +39,30 @@ class ScalarFunction(UserDefinedFunction):
         return pa.RecordBatch.from_arrays([result], schema=self._result_schema)
 
 
-class UserDefinedFunctionWrapper(ScalarFunction):
+class TableFunction(UserDefinedFunction):
     """
-    Base Wrapper for Python user-defined function.
+    Base interface for user-defined table function. A user-defined table functions maps zero, one,
+    or multiple table values to a new table value.
+    """
+
+    def eval(self, *args):
+        """
+        Method which defines the logic of the table function.
+        """
+        pass
+
+    def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
+        # only the first row from batch is used
+        res = self.eval(*[col[0].as_py() for col in batch])
+        columns = zip(*res) if len(self._result_schema) > 1 else [res]
+        arrays = [pa.array(col, type)
+                  for col, type in zip(columns, self._result_schema.types)]
+        return pa.RecordBatch.from_arrays(arrays, schema=self._result_schema)
+
+
+class UserDefinedScalarFunctionWrapper(ScalarFunction):
+    """
+    Base Wrapper for Python user-defined scalar function.
     """
     _func: Callable
 
@@ -49,7 +70,7 @@ class UserDefinedFunctionWrapper(ScalarFunction):
         self._func = func
         self._input_schema = pa.schema(zip(
             inspect.getfullargspec(func)[0],
-            [_to_data_type(t) for t in input_types]
+            [_to_data_type(t) for t in _to_list(input_types)]
         ))
         self._result_schema = pa.schema(
             [('output', _to_data_type(result_type))])
@@ -63,38 +84,112 @@ class UserDefinedFunctionWrapper(ScalarFunction):
         return self._func(*args)
 
 
-def _create_udf(f, input_types, result_type, name):
-    return UserDefinedFunctionWrapper(
-        f, input_types, result_type, name)
+class UserDefinedTableFunctionWrapper(TableFunction):
+    """
+    Base Wrapper for Python user-defined table function.
+    """
+    _func: Callable
+
+    def __init__(self, func, input_types, result_types, name=None):
+        self._func = func
+        self._input_schema = pa.schema(zip(
+            inspect.getfullargspec(func)[0],
+            [_to_data_type(t) for t in _to_list(input_types)]
+        ))
+        self._result_schema = pa.schema(
+            [('', _to_data_type(t)) for t in _to_list(result_types)])
+        self._name = name or (
+            func.__name__ if hasattr(func, '__name__') else func.__class__.__name__)
+
+    def __call__(self, *args):
+        return self._func(*args)
+
+    def eval(self, *args):
+        return self._func(*args)
+
+
+def _to_list(x):
+    if isinstance(x, list):
+        return x
+    else:
+        return [x]
 
 
 def udf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
         result_type: Union[str, pa.DataType],
         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
     """
-    Annotation for creating a user-defined function.
+    Annotation for creating a user-defined scalar function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_type: A string or an Arrow data type that specifies the return value type.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udf(input_types=['INT', 'INT'], result_type='INT')
+    def gcd(x, y):
+        while y != 0:
+            (x, y) = (y, x % y)
+        return x
+    ```
     """
 
-    return lambda f: _create_udf(f, input_types, result_type, name)
+    return lambda f: UserDefinedScalarFunctionWrapper(f, input_types, result_type, name)
+
+
+def udtf(input_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+         result_types: Union[List[Union[str, pa.DataType]], Union[str, pa.DataType]],
+         name: Optional[str] = None,) -> Union[Callable, UserDefinedFunction]:
+    """
+    Annotation for creating a user-defined table function.
+
+    Parameters:
+    - input_types: A list of strings or Arrow data types that specifies the input data types.
+    - result_types A list of strings or Arrow data types that specifies the return value types.
+    - name: An optional string specifying the function name. If not provided, the original name will be used.
+
+    Example:
+    ```
+    @udtf(input_types='INT', result_types='INT')
+    def series(n):
+        for i in range(n):
+            yield i
+    ```
+    """
+
+    return lambda f: UserDefinedTableFunctionWrapper(f, input_types, result_types, name)
 
 
 class UdfServer(pa.flight.FlightServerBase):
     """
-    UDF server based on Apache Arrow Flight protocol.
-    Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+    A server that provides user-defined functions to clients.
+
+    Example:
+    ```
+    server = UdfServer(location="0.0.0.0:8815")
+    server.add_function(my_udf)
+    server.serve()
+    ```
     """
+    # UDF server based on Apache Arrow Flight protocol.
+    # Reference: https://arrow.apache.org/cookbook/py/flight.html#simple-parquet-storage-service-with-arrow-flight
+
     _functions: Dict[str, UserDefinedFunction]
 
-    def __init__(self, location="grpc://0.0.0.0:8815", **kwargs):
-        super(UdfServer, self).__init__(location, **kwargs)
+    def __init__(self, location="0.0.0.0:8815", **kwargs):
+        super(UdfServer, self).__init__('grpc://' + location, **kwargs)
         self._functions = {}
 
     def get_flight_info(self, context, descriptor):
         """Return the result schema of a function."""
         udf = self._functions[descriptor.path[0].decode('utf-8')]
         # return the concatenation of input and output schema
-        full_schema = udf._input_schema.append(udf._result_schema.field(0))
-        return pa.flight.FlightInfo(schema=full_schema, descriptor=descriptor, endpoints=[], total_records=0, total_bytes=0)
+        full_schema = pa.schema(
+            list(udf._input_schema) + list(udf._result_schema))
+        # we use `total_records` to indicate the number of input arguments
+        return pa.flight.FlightInfo(schema=full_schema, descriptor=descriptor, endpoints=[], total_records=len(udf._input_schema), total_bytes=0)
 
     def add_function(self, udf: UserDefinedFunction):
         """Add a function to the server."""

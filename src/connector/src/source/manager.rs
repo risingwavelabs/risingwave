@@ -48,6 +48,11 @@ impl SourceColumnDesc {
             is_meta: false,
         }
     }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        !self.is_row_id && !self.is_meta
+    }
 }
 
 impl From<&ColumnDesc> for SourceColumnDesc {
@@ -73,5 +78,21 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_visible() {
+        let mut c = SourceColumnDesc::simple("a", DataType::Int32, ColumnId::new(0));
+        assert!(c.is_visible());
+        c.is_row_id = true;
+        assert!(!c.is_visible());
+        c.is_row_id = false;
+        c.is_meta = true;
+        assert!(!c.is_visible());
     }
 }

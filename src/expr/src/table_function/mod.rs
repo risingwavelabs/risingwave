@@ -18,7 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::project_set_select_item::SelectItem::*;
+use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::{
     ProjectSetSelectItem as SelectItemProst, TableFunction as TableFunctionProst,
 };
@@ -27,20 +27,24 @@ use super::Result;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
 
 mod generate_series;
-use generate_series::*;
-mod unnest;
-use unnest::*;
 mod regexp_matches;
-use regexp_matches::*;
+mod unnest;
+mod user_defined;
+
+use self::generate_series::*;
+use self::regexp_matches::*;
+use self::unnest::*;
+use self::user_defined::*;
 
 /// Instance of a table function.
 ///
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
+#[async_trait::async_trait]
 pub trait TableFunction: std::fmt::Debug + Sync + Send {
     fn return_type(&self) -> DataType;
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>>;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>>;
 
     fn boxed(self) -> BoxedTableFunction
     where
@@ -63,6 +67,7 @@ pub fn build_from_prost(
         Unnest => new_unnest(prost, chunk_size),
         RegexpMatches => new_regexp_matches(prost, chunk_size),
         Range => new_generate_series::<false>(prost, chunk_size),
+        Udtf => new_user_defined(prost, chunk_size),
         Unspecified => unreachable!(),
     }
 }
@@ -80,13 +85,14 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
         n: usize,
     }
 
+    #[async_trait::async_trait]
     impl TableFunction for Mock {
         fn return_type(&self) -> DataType {
             self.expr.return_type()
         }
 
-        fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-            let array = self.expr.eval(input)?;
+        async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+            let array = self.expr.eval(input).await?;
 
             let mut res = vec![];
             for datum_ref in array.iter() {
@@ -126,8 +132,8 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
 impl ProjectSetSelectItem {
     pub fn from_prost(prost: &SelectItemProst, chunk_size: usize) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
-            Expr(expr) => expr_build_from_prost(expr).map(Into::into),
-            TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
+            SelectItem::Expr(expr) => expr_build_from_prost(expr).map(Into::into),
+            SelectItem::TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),
         }
     }
 
@@ -138,10 +144,10 @@ impl ProjectSetSelectItem {
         }
     }
 
-    pub fn eval(&self, input: &DataChunk) -> Result<Either<Vec<ArrayRef>, ArrayRef>> {
+    pub async fn eval(&self, input: &DataChunk) -> Result<Either<Vec<ArrayRef>, ArrayRef>> {
         match self {
-            ProjectSetSelectItem::TableFunction(tf) => tf.eval(input).map(Either::Left),
-            ProjectSetSelectItem::Expr(expr) => expr.eval(input).map(Either::Right),
+            ProjectSetSelectItem::TableFunction(tf) => tf.eval(input).await.map(Either::Left),
+            ProjectSetSelectItem::Expr(expr) => expr.eval(input).await.map(Either::Right),
         }
     }
 }

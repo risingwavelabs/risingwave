@@ -21,39 +21,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
-use super::{
-    ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
-    SimpleExecutorWrapper, StreamExecutorResult, Watermark,
-};
-use crate::common::InfallibleExpression;
-
-pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
-
-impl ProjectExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
-        execuotr_id: u64,
-        watermark_derivations: MultiMap<usize, usize>,
-    ) -> Self {
-        let info = ExecutorInfo {
-            schema: input.schema().to_owned(),
-            pk_indices,
-            identity: "Project".to_owned(),
-        };
-        SimpleExecutorWrapper {
-            input,
-            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id, watermark_derivations),
-        }
-    }
-}
+use super::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
-pub struct SimpleProjectExecutor {
+pub struct ProjectExecutor {
+    input: BoxedExecutor,
+    inner: Inner,
+}
+
+struct Inner {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -64,14 +42,21 @@ pub struct SimpleProjectExecutor {
     watermark_derivations: MultiMap<usize, usize>,
 }
 
-impl SimpleProjectExecutor {
+impl ProjectExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        input_info: ExecutorInfo,
+        input: Box<dyn Executor>,
+        pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
     ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
+
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -79,47 +64,73 @@ impl SimpleProjectExecutor {
                 .collect_vec(),
         };
         Self {
-            ctx,
-            info: ExecutorInfo {
-                schema,
-                pk_indices: input_info.pk_indices,
-                identity: format!("ProjectExecutor {:X}", executor_id),
+            input,
+            inner: Inner {
+                ctx,
+                info: ExecutorInfo {
+                    schema,
+                    pk_indices: info.pk_indices,
+                    identity: format!("ProjectExecutor {:X}", executor_id),
+                },
+                exprs,
+                watermark_derivations,
             },
-            exprs,
-            watermark_derivations,
         }
     }
 }
 
-impl Debug for SimpleProjectExecutor {
+impl Debug for ProjectExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProjectExecutor")
-            .field("exprs", &self.exprs)
+            .field("exprs", &self.inner.exprs)
             .finish()
     }
 }
 
-impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
+impl Executor for ProjectExecutor {
+    fn schema(&self) -> &Schema {
+        &self.inner.info.schema
+    }
+
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.inner.info.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.inner.info.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.inner.execute(self.input).boxed()
+    }
+}
+
+impl Inner {
+    async fn map_filter_chunk(
+        &self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
         let chunk = chunk.compact();
 
         let (data_chunk, ops) = chunk.into_parts();
 
-        let projected_columns = self
-            .exprs
-            .iter()
-            .map(|expr| {
-                Column::new(expr.eval_infallible(&data_chunk, |err| {
+        let mut projected_columns = Vec::new();
+
+        for expr in &self.exprs {
+            let evaluated_expr = expr
+                .eval_infallible(&data_chunk, |err| {
                     self.ctx.on_compute_error(err, &self.info.identity)
-                }))
-            })
-            .collect();
+                })
+                .await;
+            let new_column = Column::new(evaluated_expr);
+            projected_columns.push(new_column);
+        }
 
         let new_chunk = StreamChunk::new(ops, projected_columns, None);
         Ok(Some(new_chunk))
     }
 
-    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+    async fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
         let out_col_indices = match self.watermark_derivations.get_vec(&watermark.col_idx) {
             Some(v) => v,
             None => return Ok(vec![]),
@@ -127,16 +138,15 @@ impl SimpleExecutor for SimpleProjectExecutor {
         let mut ret = vec![];
         for out_col_idx in out_col_indices {
             let out_col_idx = *out_col_idx;
-            let derived_watermark = watermark.clone().transform_with_expr(
-                &self.exprs[out_col_idx],
-                out_col_idx,
-                |err| {
+            let derived_watermark = watermark
+                .clone()
+                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx, |err| {
                     self.ctx.on_compute_error(
                         err,
                         &(self.info.identity.to_string() + "(when computing watermark)"),
                     )
-                },
-            );
+                })
+                .await;
             if let Some(derived_watermark) = derived_watermark {
                 ret.push(derived_watermark);
             } else {
@@ -149,16 +159,25 @@ impl SimpleExecutor for SimpleProjectExecutor {
         Ok(ret)
     }
 
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute(self, input: BoxedExecutor) {
+        #[for_await]
+        for msg in input.execute() {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(w) => {
+                    let watermarks = self.handle_watermark(w).await?;
+                    for watermark in watermarks {
+                        yield Message::Watermark(watermark)
+                    }
+                }
+                Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
+                    Some(new_chunk) => yield Message::Chunk(new_chunk),
+                    None => continue,
+                },
+                m => yield m,
+            }
+        }
     }
 }
 

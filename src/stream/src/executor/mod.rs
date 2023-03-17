@@ -20,6 +20,7 @@ use await_tree::InstrumentAwait;
 use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use minitrace::prelude::*;
 use risingwave_common::array::column::Column;
@@ -46,7 +47,6 @@ use risingwave_pb::stream_plan::{
 };
 use smallvec::SmallVec;
 
-use crate::common::InfallibleExpression;
 use crate::error::StreamResult;
 use crate::task::{ActorId, FragmentId};
 
@@ -57,6 +57,7 @@ pub mod monitor;
 
 pub mod agg_common;
 pub mod aggregation;
+mod barrier_recv;
 mod batch_query;
 mod chain;
 mod dispatch;
@@ -81,7 +82,6 @@ mod project_set;
 mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
-mod simple;
 mod sink;
 mod sort;
 mod sort_buffer;
@@ -104,6 +104,7 @@ mod test_utils;
 pub use actor::{Actor, ActorContext, ActorContextRef};
 use anyhow::Context;
 pub use backfill::*;
+pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use dispatch::{DispatchExecutor, DispatcherImpl};
@@ -126,7 +127,6 @@ pub use project_set::*;
 pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use simple::{SimpleExecutor, SimpleExecutorWrapper};
 pub use sink::SinkExecutor;
 pub use sort::SortExecutor;
 pub use source::*;
@@ -591,7 +591,7 @@ impl Watermark {
         }
     }
 
-    pub fn transform_with_expr(
+    pub async fn transform_with_expr(
         self,
         expr: &BoxedExpression,
         new_col_idx: usize,
@@ -607,7 +607,7 @@ impl Watermark {
             row[col_idx] = Some(val);
             OwnedRow::new(row)
         };
-        let val = expr.eval_row_infallible(&row, on_err)?;
+        let val = expr.eval_row_infallible(&row, on_err).await?;
         Some(Self {
             col_idx: new_col_idx,
             data_type,

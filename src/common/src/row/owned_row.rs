@@ -92,6 +92,61 @@ impl OwnedRow {
     }
 }
 
+impl OwnedRow {
+    pub fn is_null(&self, idx: usize) -> bool {
+        self[idx].is_none()
+    }
+
+    pub fn get_int16(&self, idx: usize) -> i16 {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Int16(num) => *num,
+            _ => unreachable!("type is not int16 at index: {}", idx),
+        }
+    }
+
+    pub fn get_int32(&self, idx: usize) -> i32 {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Int32(num) => *num,
+            _ => unreachable!("type is not int32 at index: {}", idx),
+        }
+    }
+
+    pub fn get_int64(&self, idx: usize) -> i64 {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Int64(num) => *num,
+            _ => unreachable!("type is not int64 at index: {}", idx),
+        }
+    }
+
+    pub fn get_f32(&self, idx: usize) -> f32 {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Float32(num) => num.into_inner(),
+            _ => unreachable!("type is not float32 at index: {}", idx),
+        }
+    }
+
+    pub fn get_f64(&self, idx: usize) -> f64 {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Float64(num) => num.into_inner(),
+            _ => unreachable!("type is not float64 at index: {}", idx),
+        }
+    }
+
+    pub fn get_bool(&self, idx: usize) -> bool {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Bool(num) => *num,
+            _ => unreachable!("type is not boolean at index: {}", idx),
+        }
+    }
+
+    pub fn get_utf8(&self, idx: usize) -> &str {
+        match self[idx].as_ref().unwrap() {
+            ScalarImpl::Utf8(s) => s.as_ref(),
+            _ => unreachable!("type is not utf8 at index: {}", idx),
+        }
+    }
+}
+
 impl EstimateSize for OwnedRow {
     fn estimated_heap_size(&self) -> usize {
         // FIXME(bugen): this is not accurate now as the heap size of some `Scalar` is not counted.

@@ -22,7 +22,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableId, LocalSstableInfo,
+    CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
 use risingwave_pb::catalog::Table as ProstTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
@@ -69,7 +69,7 @@ where
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
@@ -136,7 +136,7 @@ where
     let ssts = to_local_sstable_info(&test_tables_3);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
@@ -147,11 +147,12 @@ where
     vec![test_tables, test_tables_2, test_tables_3]
 }
 
-pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<SstableInfo> {
+pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableObjectId>) -> Vec<SstableInfo> {
     let mut sst_info = vec![];
     for (i, sst_id) in sst_ids.into_iter().enumerate() {
         sst_info.push(SstableInfo {
-            id: sst_id,
+            object_id: sst_id,
+            sst_id,
             key_range: Some(KeyRange {
                 left: iterator_test_key_of_epoch(sst_id, i + 1, epoch),
                 right: iterator_test_key_of_epoch(sst_id, (i + 1) * 10, epoch),
@@ -162,7 +163,6 @@ pub fn generate_test_tables(epoch: u64, sst_ids: Vec<HummockSstableId>) -> Vec<S
             meta_offset: 0,
             stale_key_count: 0,
             total_key_count: 0,
-            divide_version: 0,
             uncompressed_file_size: 2,
             min_epoch: 0,
             max_epoch: 0,
@@ -251,7 +251,7 @@ pub fn update_filter_key_extractor_for_tables(
 
 /// Generate keys like `001_key_test_00002` with timestamp `epoch`.
 pub fn iterator_test_key_of_epoch(
-    table: HummockSstableId,
+    table: HummockSstableObjectId,
     idx: usize,
     ts: HummockEpoch,
 ) -> Vec<u8> {
@@ -264,11 +264,17 @@ pub fn iterator_test_key_of_epoch(
     )
 }
 
-pub fn get_sorted_sstable_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableId> {
-    sstables.iter().map(|table| table.id).sorted().collect_vec()
+pub fn get_sorted_object_ids(sstables: &[SstableInfo]) -> Vec<HummockSstableObjectId> {
+    sstables
+        .iter()
+        .map(|table| table.get_object_id())
+        .sorted()
+        .collect_vec()
 }
 
-pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec<HummockSstableId> {
+pub fn get_sorted_committed_object_ids(
+    hummock_version: &HummockVersion,
+) -> Vec<HummockSstableObjectId> {
     let levels = match hummock_version
         .levels
         .get(&StaticCompactionGroupId::StateDefault.into())
@@ -280,7 +286,7 @@ pub fn get_sorted_committed_sstable_ids(hummock_version: &HummockVersion) -> Vec
         .levels
         .iter()
         .chain(levels.l0.as_ref().unwrap().sub_levels.iter())
-        .flat_map(|levels| levels.table_infos.iter().map(|info| info.id))
+        .flat_map(|levels| levels.table_infos.iter().map(|info| info.get_object_id()))
         .sorted()
         .collect_vec()
 }
@@ -332,6 +338,7 @@ pub async fn setup_compute_env(
 ) {
     let config = CompactionConfigBuilder::new()
         .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
         .build();
     setup_compute_env_with_config(port, config).await
 }
@@ -339,7 +346,7 @@ pub async fn setup_compute_env(
 pub async fn get_sst_ids<S>(
     hummock_manager: &HummockManager<S>,
     number: u32,
-) -> Vec<HummockSstableId>
+) -> Vec<HummockSstableObjectId>
 where
     S: MetaStore,
 {
@@ -357,7 +364,7 @@ where
 {
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, META_NODE_ID))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), META_NODE_ID))
         .collect();
     hummock_manager_ref
         .commit_epoch(epoch, ssts, sst_to_worker)
@@ -383,7 +390,7 @@ where
     let ssts = to_local_sstable_info(&test_tables);
     let sst_to_worker = ssts
         .iter()
-        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.id, context_id))
+        .map(|LocalSstableInfo { sst_info, .. }| (sst_info.get_object_id(), context_id))
         .collect();
     hummock_manager
         .commit_epoch(epoch, ssts, sst_to_worker)
