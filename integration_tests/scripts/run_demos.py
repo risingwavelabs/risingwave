@@ -25,8 +25,8 @@ def run_demo(demo: str, format: str):
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
 
-    subprocess.run(["docker", "compose", "up", "-d"],
-                   cwd=demo_dir, check=True, env = dict(os.environ, ENABLE_TELEMETRY="false"))
+    subprocess.run(["docker", "compose", "up", "-d", "-e",
+    "ENABLE_TELEMETRY=false"], cwd=demo_dir, check=True)
     sleep(40)
 
     sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
@@ -50,8 +50,7 @@ def run_iceberg_demo():
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-sink")
 
-    subprocess.run(["docker", "compose", "up", "-d"],
-                   cwd=demo_dir, check=True, env = dict(os.environ, ENABLE_TELEMETRY="false"))
+    subprocess.run(["docker", "compose", "up", "-d", "-e", "ENABLE_TELEMETRY=false"], cwd=demo_dir, check=True)
     sleep(40)
 
     subprocess.run(["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "create-table"],
