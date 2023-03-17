@@ -164,6 +164,16 @@ impl JsonbVal {
         let v = Value::from_sql(&Type::JSONB, buf).ok()?;
         Some(Self(v.into()))
     }
+
+    pub fn take(mut self) -> Value {
+        self.0.take()
+    }
+}
+
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v.into())
+    }
 }
 
 impl JsonbRef<'_> {

@@ -22,10 +22,10 @@ use enum_as_inner::EnumAsInner;
 use futures::stream::BoxStream;
 use itertools::Itertools;
 use parking_lot::Mutex;
-use prost::Message;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{JsonbVal, StreamChunk};
 use risingwave_common::catalog::TableId;
 use risingwave_common::error::{ErrorCode, ErrorSuppressor, Result as RwResult, RwError};
+use risingwave_common::types::Scalar;
 use risingwave_pb::connector_service::TableSchema;
 use risingwave_pb::source::ConnectorSplit;
 use serde::{Deserialize, Serialize};
@@ -65,6 +65,9 @@ use crate::source::pulsar::{
     PulsarProperties, PulsarSplit, PulsarSplitEnumerator, PULSAR_CONNECTOR,
 };
 use crate::{impl_connector_properties, impl_split, impl_split_enumerator, impl_split_reader};
+
+const SPLIT_TYPE_FIELD: &str = "split_type";
+const SPLIT_INFO_FIELD: &str = "split_info";
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
@@ -403,8 +406,18 @@ impl Eq for SourceMessage {}
 /// The metadata of a split.
 pub trait SplitMetaData: Sized {
     fn id(&self) -> SplitId;
-    fn encode_to_bytes(&self) -> Bytes;
-    fn restore_from_bytes(bytes: &[u8]) -> Result<Self>;
+    fn encode_to_bytes(&self) -> Bytes {
+        self.encode_to_json()
+            .as_scalar_ref()
+            .value_serialize()
+            .into()
+    }
+    fn restore_from_bytes(bytes: &[u8]) -> Result<Self> {
+        Self::restore_from_json(JsonbVal::value_deserialize(bytes).unwrap())
+    }
+
+    fn encode_to_json(&self) -> JsonbVal;
+    fn restore_from_json(value: JsonbVal) -> Result<Self>;
 }
 
 /// [`ConnectorState`] maintains the consuming splits' info. In specific split readers,
@@ -427,6 +440,7 @@ mod tests {
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
         assert_eq!(split.encode_to_bytes(), get_value.encode_to_bytes());
+        assert_eq!(split.encode_to_json(), get_value.encode_to_json());
 
         Ok(())
     }
@@ -440,6 +454,21 @@ mod tests {
         assert_eq!(
             split_impl.encode_to_bytes(),
             restored_split_impl.encode_to_bytes()
+        );
+        assert_eq!(
+            split_impl.encode_to_json(),
+            restored_split_impl.encode_to_json()
+        );
+
+        let encoded_split = split_impl.encode_to_json();
+        let restored_split_impl = SplitImpl::restore_from_json(encoded_split)?;
+        assert_eq!(
+            split_impl.encode_to_bytes(),
+            restored_split_impl.encode_to_bytes()
+        );
+        assert_eq!(
+            split_impl.encode_to_json(),
+            restored_split_impl.encode_to_json()
         );
         Ok(())
     }
