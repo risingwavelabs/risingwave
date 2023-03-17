@@ -17,7 +17,6 @@ use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
 use futures::future::join_all;
-use futures::pin_mut;
 use hytra::TrAdder;
 use minitrace::prelude::*;
 use parking_lot::Mutex;
@@ -173,19 +172,16 @@ where
         };
 
         let mut last_epoch: Option<EpochPair> = None;
-
-        let stream = Box::new(self.consumer).execute();
-        pin_mut!(stream);
+        let mut stream = Box::pin(Box::new(self.consumer).execute());
 
         // Drive the streaming task with an infinite loop
         while let Some(barrier) = stream
-            .next()
+            .try_next()
             .in_span(span)
             .instrument_await(
                 last_epoch.map_or("Epoch <initial>".into(), |e| format!("Epoch {}", e.curr)),
             )
-            .await
-            .transpose()?
+            .await?
         {
             last_epoch = Some(barrier.epoch);
 
@@ -193,10 +189,8 @@ where
             self.context.lock_barrier_manager().collect(id, &barrier);
 
             // Then stop this actor if asked
-            let to_stop = barrier.is_stop_or_update_drop_actor(id);
-            if to_stop {
-                tracing::trace!(actor_id = id, "actor exit");
-                return Ok(());
+            if barrier.is_stop_or_update_drop_actor(id) {
+                break;
             }
 
             // Tracing related work
@@ -210,6 +204,22 @@ where
             };
         }
 
+        spawn_blocking_drop_stream(stream).await;
+
+        tracing::trace!(actor_id = id, "actor exit");
         Ok(())
     }
+}
+
+/// Drop the stream in a blocking task to avoid interfering with other actors.
+///
+/// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
+/// downstream，thus making the `drop`'s progress asynchronous. However, there might be a
+/// considerable of data in the executors' in-memory cache, dropping these structures might be a
+/// CPU-intensive task. This may lead to the runtime being unable to schedule other actors if the
+/// `drop` is called on the current thread.
+pub async fn spawn_blocking_drop_stream<T: Send + 'static>(stream: T) {
+    let _ = tokio::task::spawn_blocking(move || drop(stream))
+        .instrument_await("drop_stream")
+        .await;
 }
