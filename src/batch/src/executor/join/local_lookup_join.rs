@@ -77,20 +77,14 @@ pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
-        let dist_keys = self
+        let dist_key_in_pk_indices = self
             .table_desc
-            .dist_key_indices
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let pk_indices = self
-            .table_desc
-            .pk
-            .iter()
-            .map(|col| col.column_index as usize)
-            .collect_vec();
 
-        let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
+        let virtual_node = scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
         virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
     }
 

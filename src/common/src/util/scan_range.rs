@@ -95,6 +95,13 @@ impl ScanRange {
         }
 
         let dist_key_in_pk_indices = get_dist_key_in_pk_indices(dist_key_indices, pk_indices);
+        self.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices)
+    }
+
+    pub fn try_compute_vnode_with_dist_key_in_pk_indices(
+        &self,
+        dist_key_in_pk_indices: &[usize],
+    ) -> Option<VirtualNode> {
         let pk_prefix_len = self.eq_conds.len();
         if dist_key_in_pk_indices.iter().any(|&i| i >= pk_prefix_len) {
             return None;

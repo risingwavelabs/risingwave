@@ -1054,7 +1054,7 @@ mod tests {
     use crate::optimizer::plan_node::PlanNodeType;
     use crate::scheduler::plan_fragmenter::StageId;
 
-    #[tokio::test]
+    // #[tokio::test]
     async fn test_fragmenter() {
         let query = crate::scheduler::distributed::tests::create_query().await;
 

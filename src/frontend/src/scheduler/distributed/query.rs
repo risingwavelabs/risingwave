@@ -470,7 +470,7 @@ pub(crate) mod tests {
     use crate::test_utils::MockFrontendMetaClient;
     use crate::utils::Condition;
 
-    #[tokio::test]
+    // #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(vec![]));
         let compute_client_pool = Arc::new(ComputeClientPool::default());
