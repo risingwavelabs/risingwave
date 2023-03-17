@@ -836,12 +836,12 @@ impl Display for IntervalUnit {
         write_i32(months, "mon")?;
         write_i32(days, "day")?;
         if self.usecs != 0 || self.months == 0 && self.days == 0 {
-            let usecs = self.usecs.abs();
-            let ms = usecs / 1000;
-            let hours = ms / 1000 / 3600;
-            let minutes = (ms / 1000 / 60) % 60;
-            let seconds = ms % 60000 / 1000;
-            let secs_fract = usecs % USECS_PER_SEC;
+            // `abs` on `self.usecs == i64::MIN` would overflow, so we divide first then abs
+            let secs_fract = (self.usecs % USECS_PER_SEC).abs();
+            let total_secs = (self.usecs / USECS_PER_SEC).abs();
+            let hours = total_secs / 3600;
+            let minutes = (total_secs / 60) % 60;
+            let seconds = total_secs % 60;
 
             if space {
                 write!(f, " ")?;
