@@ -34,7 +34,9 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
         width: 80,
         ..Default::default()
     };
-    config.unicode(&mut output, &pretty);
+    for p in pretty {
+        config.unicode(&mut output, &p);
+    }
     output
 }
 
@@ -66,7 +68,7 @@ impl StreamGraphFormatter {
         tb.id
     }
 
-    fn explain_graph<'a>(&mut self, graph: &StreamFragmentGraph) -> Pretty<'a> {
+    fn explain_graph<'a>(&mut self, graph: &StreamFragmentGraph) -> Vec<Pretty<'a>> {
         self.edges.clear();
         for edge in &graph.edges {
             self.edges.insert(edge.link_id, edge.clone());
@@ -78,7 +80,7 @@ impl StreamGraphFormatter {
         for tb in self.tables.values() {
             pretties.push(self.explain_table(tb));
         }
-        Pretty::Array(pretties)
+        pretties
     }
 
     fn explain_table<'a>(&self, tb: &Table) -> Pretty<'a> {
