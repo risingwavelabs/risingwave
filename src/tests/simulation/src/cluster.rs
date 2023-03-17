@@ -195,22 +195,19 @@ impl Cluster {
 
         // meta node
         for i in 1..=conf.meta_nodes {
-            let opts = risingwave_meta::MetaNodeOpts::parse_from(
-                [
-                    "meta-node",
-                    "--config-path",
-                    &conf.config_path,
-                    "--listen-addr",
-                    "0.0.0.0:5690",
-                    "--advertise-addr",
-                    &format!("meta-{i}:5690"),
-                    "--backend",
-                    "etcd",
-                    "--etcd-endpoints",
-                    "etcd:2388",
-                ]
-                .concat(),
-            );
+            let opts = risingwave_meta::MetaNodeOpts::parse_from([
+                "meta-node",
+                "--config-path",
+                &conf.config_path,
+                "--listen-addr",
+                "0.0.0.0:5690",
+                "--advertise-addr",
+                &format!("meta-{i}:5690"),
+                "--backend",
+                "etcd",
+                "--etcd-endpoints",
+                "etcd:2388",
+            ]);
             handle
                 .create_node()
                 .name(format!("meta-{i}"))
