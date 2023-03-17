@@ -115,12 +115,11 @@ pub struct SinkCatalog {
     /// All columns of the sink. Note that this is NOT sorted by columnId in the vector.
     pub columns: Vec<ColumnCatalog>,
 
-    /// Primiary keys of the sink (connector). Now the sink does not care about a field's
-    /// order (ASC/DESC).
-    pub pk: Vec<ColumnOrder>,
+    /// Primiary keys of the sink. Derived by the frontend.
+    pub plan_pk: Vec<ColumnOrder>,
 
-    /// Primary key indices of the corresponding sink operator's output.
-    pub stream_key: Vec<usize>,
+    /// User-defined primary key indices for upsert sink.
+    pub downstream_pk: Vec<usize>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -150,8 +149,12 @@ impl SinkCatalog {
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
-            pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
-            stream_key: self.stream_key.iter().map(|idx| *idx as i32).collect_vec(),
+            plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
+            downstream_pk: self
+                .downstream_pk
+                .iter()
+                .map(|idx| *idx as i32)
+                .collect_vec(),
             dependent_relations: self
                 .dependent_relations
                 .iter()
@@ -177,8 +180,8 @@ impl SinkCatalog {
         Schema { fields }
     }
 
-    pub fn pk_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|k| k.column_index).collect_vec()
+    pub fn downstream_pk_indices(&self) -> Vec<usize> {
+        self.downstream_pk.clone()
     }
 }
 
@@ -196,8 +199,12 @@ impl From<ProstSink> for SinkCatalog {
                 .into_iter()
                 .map(ColumnCatalog::from)
                 .collect_vec(),
-            pk: pb.pk.iter().map(ColumnOrder::from_protobuf).collect_vec(),
-            stream_key: pb.stream_key.iter().map(|k| *k as _).collect_vec(),
+            plan_pk: pb
+                .plan_pk
+                .iter()
+                .map(ColumnOrder::from_protobuf)
+                .collect_vec(),
+            downstream_pk: pb.downstream_pk.iter().map(|k| *k as _).collect_vec(),
             distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
             properties: pb.properties.clone(),
             owner: pb.owner.into(),

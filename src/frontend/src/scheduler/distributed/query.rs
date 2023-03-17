@@ -541,7 +541,7 @@ pub(crate) mod tests {
                         field_descs: vec![],
                     },
                 ],
-                distribution_key: vec![2],
+                distribution_key: vec![],
                 append_only: false,
                 retention_seconds: TABLE_OPTION_DUMMY_RETENTION_SECOND,
                 value_indices: vec![0, 1, 2],

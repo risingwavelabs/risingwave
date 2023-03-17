@@ -75,24 +75,27 @@ public class DeltaLakeSink extends SinkBase {
             }
         }
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            switch (row.getOp()) {
-                case INSERT:
-                    GenericRecord record = new GenericData.Record(this.sinkSchema);
-                    for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
-                        record.put(i, row.get(i));
-                    }
-                    try {
-                        this.parquetWriter.write(record);
-                        this.numOutputRows += 1;
-                    } catch (IOException ioException) {
-                        throw INTERNAL.withCause(ioException).asRuntimeException();
-                    }
-                    break;
-                default:
-                    throw UNIMPLEMENTED
-                            .withDescription("unsupported operation: " + row.getOp())
-                            .asRuntimeException();
+            try (SinkRow row = rows.next()) {
+                switch (row.getOp()) {
+                    case INSERT:
+                        GenericRecord record = new GenericData.Record(this.sinkSchema);
+                        for (int i = 0; i < this.sinkSchema.getFields().size(); i++) {
+                            record.put(i, row.get(i));
+                        }
+                        try {
+                            this.parquetWriter.write(record);
+                            this.numOutputRows += 1;
+                        } catch (IOException ioException) {
+                            throw INTERNAL.withCause(ioException).asRuntimeException();
+                        }
+                        break;
+                    default:
+                        throw UNIMPLEMENTED
+                                .withDescription("unsupported operation: " + row.getOp())
+                                .asRuntimeException();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }

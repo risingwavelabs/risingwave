@@ -16,6 +16,7 @@ package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
 import junit.framework.TestCase;
@@ -31,7 +32,11 @@ public class DeserializerTest extends TestCase {
                                         .setLine("{\"id\": 1, \"name\": \"John\"}")
                                         .build())
                         .build();
-        SinkRow outcome = deserializer.deserialize(jsonPayload).next();
+        ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch =
+                ConnectorServiceProto.SinkStreamRequest.WriteBatch.newBuilder()
+                        .setJsonPayload(jsonPayload)
+                        .build();
+        SinkRow outcome = deserializer.deserialize(writeBatch).next();
         assertEquals(outcome.get(0), 1);
         assertEquals(outcome.get(1), "John");
     }

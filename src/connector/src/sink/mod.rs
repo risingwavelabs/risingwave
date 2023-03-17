@@ -38,10 +38,10 @@ use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
 
-pub const SINK_FORMAT_OPTION: &str = "format";
-pub const SINK_FORMAT_APPEND_ONLY: &str = "append_only";
-pub const SINK_FORMAT_DEBEZIUM: &str = "debezium";
-pub const SINK_FORMAT_UPSERT: &str = "upsert";
+pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
+pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
+pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[async_trait]
@@ -82,10 +82,10 @@ pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        const SINK_TYPE_KEY: &str = "connector";
+        const CONNECTOR_TYPE_KEY: &str = "connector";
         let sink_type = properties
-            .get(SINK_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", SINK_TYPE_KEY)))?;
+            .get(CONNECTOR_TYPE_KEY)
+            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
@@ -169,15 +169,10 @@ impl SinkImpl {
         match cfg {
             SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
             SinkConfig::Kafka(cfg) => {
-                // We simply call `KafkaSink::new` here to validate a Kafka sink.
                 if sink_catalog.sink_type.is_append_only() {
-                    KafkaSink::<true>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 } else {
-                    KafkaSink::<false>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 }
             }
             SinkConfig::Remote(cfg) => {

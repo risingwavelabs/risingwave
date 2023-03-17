@@ -17,6 +17,7 @@ package com.risingwave.connector;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public class PrintSinkFactory implements SinkFactory {
@@ -27,5 +28,6 @@ public class PrintSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {}
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {}
 }
