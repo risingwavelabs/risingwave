@@ -41,9 +41,8 @@ use risingwave_pb::stream_plan::barrier::PbMutation;
 use risingwave_pb::stream_plan::stream_message::StreamMessage;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, PbBarrier, PbDispatcher, PauseMutation,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, PbStreamMessage,
-    UpdateMutation, PbWatermark,
+    AddMutation, PauseMutation, PbBarrier, PbDispatcher, PbStreamMessage, PbWatermark,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, UpdateMutation,
 };
 use smallvec::SmallVec;
 
@@ -409,25 +408,19 @@ impl Mutation {
                     .collect(),
                 ..Default::default()
             }),
-            Mutation::SourceChangeSplit(changes) => {
-                PbMutation::Splits(SourceChangeSplitMutation {
-                    actor_splits: changes
-                        .iter()
-                        .map(|(&actor_id, splits)| {
-                            (
-                                actor_id,
-                                ConnectorSplits {
-                                    splits: splits
-                                        .clone()
-                                        .iter()
-                                        .map(ConnectorSplit::from)
-                                        .collect(),
-                                },
-                            )
-                        })
-                        .collect(),
-                })
-            }
+            Mutation::SourceChangeSplit(changes) => PbMutation::Splits(SourceChangeSplitMutation {
+                actor_splits: changes
+                    .iter()
+                    .map(|(&actor_id, splits)| {
+                        (
+                            actor_id,
+                            ConnectorSplits {
+                                splits: splits.clone().iter().map(ConnectorSplit::from).collect(),
+                            },
+                        )
+                    })
+                    .collect(),
+            }),
             Mutation::Pause => PbMutation::Pause(PauseMutation {}),
             Mutation::Resume => PbMutation::Resume(ResumeMutation {}),
         }
@@ -435,9 +428,7 @@ impl Mutation {
 
     fn from_protobuf(prost: &PbMutation) -> StreamExecutorResult<Self> {
         let mutation = match prost {
-            PbMutation::Stop(stop) => {
-                Mutation::Stop(HashSet::from_iter(stop.get_actors().clone()))
-            }
+            PbMutation::Stop(stop) => Mutation::Stop(HashSet::from_iter(stop.get_actors().clone())),
 
             PbMutation::Update(update) => Mutation::Update {
                 dispatchers: update

@@ -32,8 +32,8 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeNode, PbExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, PbTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeNode, LocalExecutePlan, PbExchangeSource, PbTaskId, PlanFragment,
+    PlanNode, RowSeqScanNode, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;

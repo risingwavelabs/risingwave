@@ -14,7 +14,7 @@
 
 use std::fmt::{Display, Write};
 
-use risingwave_pb::data::{PbArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};

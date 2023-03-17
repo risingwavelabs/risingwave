@@ -19,10 +19,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{
-    PbFunction, PbIndex, PbSchema, PbSink,
-    PbSource, PbTable, PbView,
-};
+use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
 
 use super::source_catalog::SourceCatalog;
 use super::ViewId;

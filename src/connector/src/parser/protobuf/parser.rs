@@ -420,14 +420,8 @@ mod test {
             PbTypeName::Struct
         );
         let struct_inner = inner_field_type[0].field_type.clone();
-        assert_eq!(
-            struct_inner[0].get_type_name().unwrap(),
-            PbTypeName::Int32
-        );
-        assert_eq!(
-            struct_inner[1].get_type_name().unwrap(),
-            PbTypeName::Int32
-        );
+        assert_eq!(struct_inner[0].get_type_name().unwrap(), PbTypeName::Int32);
+        assert_eq!(struct_inner[1].get_type_name().unwrap(), PbTypeName::Int32);
         assert_eq!(
             struct_inner[2].get_type_name().unwrap(),
             PbTypeName::Varchar

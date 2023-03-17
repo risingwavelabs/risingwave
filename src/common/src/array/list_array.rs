@@ -20,7 +20,7 @@ use std::hash::Hash;
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
-use risingwave_pb::data::{PbArray, PbArrayType, ListArrayData};
+use risingwave_pb::data::{ListArrayData, PbArray, PbArrayType};
 use serde::{Deserializer, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};

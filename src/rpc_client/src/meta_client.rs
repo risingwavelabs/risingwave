@@ -39,9 +39,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, PbDatabase, PbFunction, PbIndex,
-    PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;

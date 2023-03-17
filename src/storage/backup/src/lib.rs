@@ -41,10 +41,7 @@ use std::hash::Hasher;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
-use risingwave_pb::backup_service::{
-    PbMetaSnapshotManifest,
-    PbMetaSnapshotMetadata,
-};
+use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 

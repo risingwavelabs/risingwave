@@ -20,8 +20,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
 use super::{
-    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch,
-    ToLocalBatch,
+    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 

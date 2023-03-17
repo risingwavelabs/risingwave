@@ -23,9 +23,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
 use risingwave_connector::ConnectorParams;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::plan_common::{
-    PbColumnCatalog, PbRowFormatType,
-};
+use risingwave_pb::plan_common::{PbColumnCatalog, PbRowFormatType};
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;

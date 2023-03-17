@@ -21,9 +21,7 @@ use parking_lot::Mutex;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
-use risingwave_pb::batch_plan::{
-    PlanFragment, PbTaskId, PbTaskOutputId,
-};
+use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use tokio::runtime::Runtime;
@@ -260,8 +258,8 @@ mod tests {
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, PbTaskId,
-        PbTaskOutputId, ValuesNode,
+        ExchangeInfo, PbTaskId, PbTaskOutputId, PlanFragment, PlanNode, TableFunctionNode,
+        ValuesNode,
     };
     use risingwave_pb::expr::table_function::Type;
     use risingwave_pb::expr::TableFunction;

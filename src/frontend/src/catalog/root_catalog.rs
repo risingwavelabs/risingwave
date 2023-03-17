@@ -21,9 +21,7 @@ use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_pb::catalog::{
-    PbDatabase, PbFunction, PbIndex,
-    PbSchema, PbSink, PbSource, PbTable,
-    PbView,
+    PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 
 use super::function_catalog::FunctionCatalog;

@@ -23,9 +23,7 @@ use risingwave_common::catalog::{
     USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::{
-    PbSource, StreamSourceInfo, PbTable, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,

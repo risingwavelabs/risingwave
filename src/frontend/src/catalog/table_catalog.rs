@@ -20,9 +20,7 @@ use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersion
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, PbTableType, PbTableVersion,
-};
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
 use risingwave_pb::catalog::PbTable;
 
 use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
@@ -457,9 +455,7 @@ mod tests {
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::PbTable;
-    use risingwave_pb::plan_common::{
-        PbColumnCatalog, PbColumnDesc,
-    };
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -484,16 +480,8 @@ mod tests {
                         1,
                         ".test.Country",
                         vec![
-                            PbColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "address",
-                                2,
-                            ),
-                            PbColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "zipcode",
-                                3,
-                            ),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
                         ],
                     )),
                     is_hidden: false,

@@ -22,8 +22,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanRef;
 use super::{
-    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
-    ToBatchPb, ToDistributedBatch,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
+    ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;

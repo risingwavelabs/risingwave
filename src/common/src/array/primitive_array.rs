@@ -18,7 +18,7 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{PbArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;

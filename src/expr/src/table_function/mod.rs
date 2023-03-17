@@ -19,9 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::project_set_select_item::SelectItem;
-use risingwave_pb::expr::{
-    ProjectSetSelectItem as SelectItemPb, TableFunction as TableFunctionPb,
-};
+use risingwave_pb::expr::{ProjectSetSelectItem as SelectItemPb, TableFunction as TableFunctionPb};
 
 use super::Result;
 use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
@@ -56,10 +54,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
-pub fn build_from_prost(
-    prost: &TableFunctionPb,
-    chunk_size: usize,
-) -> Result<BoxedTableFunction> {
+pub fn build_from_prost(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
 
     match prost.get_function_type().unwrap() {

@@ -132,7 +132,7 @@ mod tests {
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
     use risingwave_pb::data::PbDatum;
-    use risingwave_pb::expr::expr_node::{RexNode, PbType};
+    use risingwave_pb::expr::expr_node::{PbType, RexNode};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;

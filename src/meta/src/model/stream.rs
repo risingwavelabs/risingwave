@@ -24,8 +24,7 @@ use risingwave_pb::meta::table_fragments::{ActorStatus, Fragment, State};
 use risingwave_pb::meta::PbTableFragments;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
-    FragmentTypeFlag, SourceNode, StreamActor, PbStreamEnvironment,
-    StreamNode,
+    FragmentTypeFlag, PbStreamEnvironment, SourceNode, StreamActor, StreamNode,
 };
 
 use super::{ActorId, FragmentId};
