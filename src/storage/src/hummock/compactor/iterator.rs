@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
+use risingwave_hummock_sdk::KeyComparator;
 use risingwave_pb::hummock::SstableInfo;
 
 use crate::hummock::iterator::{Forward, HummockIterator};
@@ -261,9 +262,10 @@ impl ConcatSstableIterator {
                 block_metas.len()
             } else {
                 block_metas.partition_point(|block| {
-                    FullKey::decode(&block.smallest_key)
-                        .cmp(&FullKey::decode(&self.key_range.right))
-                        != Ordering::Greater
+                    KeyComparator::compare_encoded_full_key(
+                        &block.smallest_key,
+                        &self.key_range.right,
+                    ) != Ordering::Greater
                 })
             };
             if end_index <= start_index {

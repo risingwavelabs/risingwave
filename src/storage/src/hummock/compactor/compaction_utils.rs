@@ -25,7 +25,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::prost_key_range::KeyRangeExt;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::HummockEpoch;
+use risingwave_hummock_sdk::{HummockEpoch, KeyComparator};
 use risingwave_pb::hummock::{compact_task, CompactTask, KeyRange as KeyRange_vec, LevelType};
 
 pub use super::context::CompactorContext;
@@ -219,7 +219,7 @@ pub async fn generate_splits(compact_task: &mut CompactTask, context: Arc<Compac
             );
         }
         // sort by key, as for every data block has the same size;
-        indexes.sort_by(|a, b| FullKey::decode(a.1.as_ref()).cmp(&FullKey::decode(b.1.as_ref())));
+        indexes.sort_by(|a, b| KeyComparator::compare_encoded_full_key(a.1.as_ref(), b.1.as_ref()));
         let mut splits: Vec<KeyRange_vec> = vec![];
         splits.push(KeyRange_vec::new(vec![], vec![]));
         let parallelism = std::cmp::min(
