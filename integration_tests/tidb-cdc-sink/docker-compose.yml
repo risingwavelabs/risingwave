@@ -188,6 +188,31 @@ services:
       CONFLUENT_METRICS_ENABLE: 'true'
       CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
 
+  #===================== Others ===================
+  datagen:
+    build: ../datagen
+    depends_on: 
+      - tidb
+    command:
+      - /bin/sh
+      - -c
+      - /datagen --mode twitter --qps 2 mysql --host tidb --db test --port 4000 --user root --password ""
+    restart: always
+    container_name: datagen
+
+  datagen:
+    image: mysql:8.0
+    depends_on: 
+      - tidb
+    command:
+      - /bin/sh
+      - -c
+      - "mysql --password= -h tidb --port 4000 test < tidb_create_tables.sql"
+    volumes:
+      - "./tidb_create_tables.sql:/tidb_create_tables.sql"      
+    container_name: datagen
+    restart: on-failure
+
 volumes:
   compute-node-0:
     external: false
