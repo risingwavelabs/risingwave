@@ -99,11 +99,6 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
-        let tracking_id = get_tracking_id_at_snapshot::<S>(&meta_store_snapshot)
-            .await?
-            .ok_or_else(|| {
-                anyhow!("tracking_id not found in meta store, telemetry may be disabled")
-            })?;
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
             hummock_version,
@@ -120,7 +115,6 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             user_info,
             function,
             system_param,
-            tracking_id,
         };
         Ok(())
     }
