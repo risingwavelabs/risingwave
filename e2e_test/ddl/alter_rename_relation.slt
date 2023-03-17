@@ -1,0 +1,119 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE t (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
+
+statement ok
+CREATE TABLE t_as AS ( WITH source_data AS ( SELECT 1 AS id) SELECT * FROM source_data);
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t;
+
+statement ok
+CREATE SINK sink AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv AS mv3 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+CREATE VIEW v1 AS ( SELECT * FROM t_as WHERE id = 1);
+
+statement ok
+CREATE VIEW v2 AS (SELECT COUNT(*) FROM t, t AS t2 WHERE t.v1 = t2.v1);
+
+statement ok
+CREATE index idx ON t(v1);
+
+query TT
+SHOW CREATE TABLE t;
+----
+public.t CREATE TABLE t (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
+
+# alter table rename with alias conflict
+statement error which is ambiguous and used by relation 'v2'
+ALTER TABLE t RENAME TO t2;
+
+# alter table rename
+statement ok
+ALTER TABLE t RENAME TO t3;
+
+query TT
+SHOW CREATE TABLE t3;
+----
+public.t3 CREATE TABLE t3 (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>)
+
+query TT
+SHOW CREATE VIEW v2;
+----
+public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t3, t3 AS t2 WHERE t3.v1 = t2.v1)
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv;
+----
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t3.v2).v1 AS v21 FROM t3
+
+# alter mview rename
+statement ok
+ALTER MATERIALIZED VIEW mv RENAME TO mv2;
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv2;
+----
+public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t3.v2).v1 AS v21 FROM t3
+
+statement ok
+ALTER SINK sink RENAME TO sink1;
+
+# alter mview rename with alias conflict
+statement error which is ambiguous and used by relation 'sink1'
+ALTER MATERIALIZED VIEW mv2 RENAME TO mv3;
+
+statement ok
+ALTER TABLE t_as RENAME TO t_as_1;
+
+# alter view rename
+statement ok
+ALTER VIEW v1 RENAME TO v3;
+
+query TT
+SHOW CREATE VIEW v3;
+----
+public.v3 CREATE VIEW v3 AS (SELECT * FROM t_as_1 WHERE id = 1)
+
+statement ok
+ALTER INDEX idx RENAME TO idx1;
+
+statement ok
+INSERT INTO t3 VALUES(1,(1,(1,2)));
+
+statement ok
+INSERT INTO t3 VALUES(2,(2,(2,4)));
+
+query II rowsort
+SELECT * from mv2
+----
+1 1
+2 2
+
+query I
+SELECT * from v2
+----
+2
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP VIEW v3;
+
+statement ok
+DROP VIEW v2;
+
+statement ok
+DROP MATERIALIZED VIEW mv2;
+
+statement ok
+DROP TABLE t3;
+
+statement ok
+DROP TABLE t_as_1;

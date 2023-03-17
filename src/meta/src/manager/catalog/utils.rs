@@ -343,15 +343,9 @@ impl QueryRewriter<'_> {
     /// Visit select item and update all references.
     fn visit_select_item(&self, select_item: &mut SelectItem) -> MetaResult<()> {
         match select_item {
-            SelectItem::UnnamedExpr(expr) | SelectItem::ExprQualifiedWildcard(expr, _) => {
-                self.visit_expr(expr)
-            }
-            SelectItem::ExprWithAlias { expr, alias } => {
-                if alias.real_value() == self.to {
-                    return Err(ambiguous_error(self.relation, self.from, self.to));
-                }
-                self.visit_expr(expr)
-            }
+            SelectItem::UnnamedExpr(expr)
+            | SelectItem::ExprQualifiedWildcard(expr, _)
+            | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
             SelectItem::QualifiedWildcard(obj_name) => self.may_rewrite_idents(&mut obj_name.0),
             SelectItem::Wildcard => Ok(()),
         }
@@ -369,7 +363,7 @@ mod tests {
         let definition = "CREATE TABLE foo (a int, b int)";
         let new_name = "bar";
         let expected = "CREATE TABLE bar (a INT, b INT)";
-        let actual = alter_relation_rename(definition, new_name.to_string());
+        let actual = alter_relation_rename(definition, new_name);
         assert_eq!(expected, actual);
     }
 
