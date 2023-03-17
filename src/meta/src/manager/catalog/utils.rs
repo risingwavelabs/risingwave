@@ -152,6 +152,9 @@ impl QueryRewriter<'_> {
     }
 
     /// Check if the alias is the same as the new name, if so, return an ambiguous error.
+    /// TODO: Here we simply reject renaming if the new name is used as alias by the target
+    /// relation, we'd better only reject if the new name is used as alias in the same scope as the
+    /// target relation.
     fn check_alias(&self, alias: &Option<TableAlias>) -> MetaResult<()> {
         if let Some(alias) = alias {
             if alias.name.real_value() == self.to {
