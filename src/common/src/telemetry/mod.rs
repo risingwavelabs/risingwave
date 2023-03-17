@@ -182,6 +182,7 @@ mod tests {
 
     #[test]
     fn test_telemetry_enabled() {
+        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
         assert!(telemetry_env_enabled());
         std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
         assert!(!telemetry_env_enabled());

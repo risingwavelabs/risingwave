@@ -124,14 +124,6 @@ impl TelemetryReportCreator for MetaReportCreator {
     }
 }
 
-pub(crate) async fn get_tracking_id_at_snapshot<S: MetaStore>(
-    snapshot: &S::Snapshot,
-) -> MetadataModelResult<Option<String>> {
-    let bytes = snapshot.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
-    let tracking_id = String::from_utf8(bytes).map_err(MetadataModelError::internal)?;
-    Ok(Some(tracking_id))
-}
-
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

@@ -28,7 +28,6 @@ use risingwave_pb::user::UserInfo;
 use crate::manager::model::SystemParamsModel;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
-use crate::telemetry::get_tracking_id_at_snapshot;
 
 const VERSION: u32 = 1;
 
