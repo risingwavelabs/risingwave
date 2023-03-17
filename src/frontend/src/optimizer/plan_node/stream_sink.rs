@@ -187,6 +187,9 @@ impl StreamSink {
 
     /// Extract user-defined downstream pk columns from with options. Return the indices of the pk
     /// columns.
+    ///
+    /// The format of `downstream_pk_str` should be 'col1,col2,...' (delimited by `,`) in order to
+    /// get parsed.
     fn parse_downstream_pk(
         columns: &[ColumnCatalog],
         downstream_pk_str: Option<&String>,
