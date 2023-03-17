@@ -473,6 +473,7 @@ mod tests {
         let props = ConnectorProperties::extract(props).unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             assert!(k.common.broker_rewrite_map.is_some());
+            println!("{:?}", k.common.broker_rewrite_map);
         } else {
             panic!("extract kafka config failed");
         }

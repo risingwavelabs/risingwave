@@ -47,7 +47,7 @@ pub struct KafkaCommon {
     pub brokers: String,
 
     #[serde(rename = "broker.rewrite.endpoints")]
-    #[serde_as(as = "JsonString")]
+    #[serde_as(as = "Option<JsonString>")]
     pub broker_rewrite_map: Option<HashMap<String, String>>,
 
     #[serde(rename = "topic", alias = "kafka.topic")]

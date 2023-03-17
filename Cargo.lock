@@ -8836,6 +8836,8 @@ dependencies = [
  "ring",
  "scopeguard",
  "serde",
+ "serde_json",
+ "serde_with 2.3.1",
  "smallvec",
  "socket2",
  "strum",
