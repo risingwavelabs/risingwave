@@ -66,7 +66,7 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 node_port=50051
 node_timeout=10
 
-# start risingwave cluster
+echo "--- starting risingwave cluster with connector node"
 cargo make ci-start ci-1cn-1fe-with-recovery
 ./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
