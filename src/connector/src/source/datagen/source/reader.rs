@@ -16,7 +16,6 @@ use std::collections::HashMap;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::field_generator::FieldGeneratorImpl;

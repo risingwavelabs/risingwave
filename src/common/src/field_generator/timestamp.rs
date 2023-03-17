@@ -22,7 +22,6 @@ use serde_json::{json, Value};
 use tracing::debug;
 
 use super::DEFAULT_MAX_PAST;
-use crate::array::Op;
 use crate::types::{Datum, NaiveDateTimeWrapper, Scalar};
 
 #[derive(Debug)]

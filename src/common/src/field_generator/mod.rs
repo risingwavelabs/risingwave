@@ -328,8 +328,10 @@ mod tests {
     #[test]
     fn test_deterministic_timestamp() {
         let seed = 1234;
-        let base_time: DateTime<FixedOffset> = DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00").unwrap();
-        let mut generator = FieldGeneratorImpl::with_timestamp(Some(base_time), None, None, seed).unwrap();
+        let base_time: DateTime<FixedOffset> =
+            DateTime::parse_from_rfc3339("2020-01-01T00:00:00+00:00").unwrap();
+        let mut generator =
+            FieldGeneratorImpl::with_timestamp(Some(base_time), None, None, seed).unwrap();
         let val1 = generator.generate_json(1);
         let val2 = generator.generate_json(1);
         assert_eq!(val1, val2);
