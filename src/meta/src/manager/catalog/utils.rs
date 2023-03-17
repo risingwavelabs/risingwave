@@ -27,6 +27,12 @@ use crate::{MetaError, MetaResult};
 /// `new_name` must be a valid identifier, it should be validated before calling this function. To
 /// update all relations that depend on the renamed one, use `alter_relation_rename_refs`.
 pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
+    // This happens when we try to rename a table that's created by `CREATE TABLE AS`. Remove it
+    // when we support `SHOW CREATE TABLE` for `CREATE TABLE AS`.
+    if definition == "" {
+        tracing::warn!("found empty definition when renaming relation, ignored.");
+        return "".into();
+    }
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt = ast
         .into_iter()
