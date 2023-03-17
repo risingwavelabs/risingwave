@@ -21,13 +21,11 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
 use risingwave_common::types::to_text::ToText;
 #[cfg(test)]
 use risingwave_common::types::DataType;
 use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
@@ -43,7 +41,7 @@ use tokio_stream::StreamExt;
 use tonic::{Status, Streaming};
 
 use super::catalog::SinkCatalog;
-use crate::sink::{Result, Sink, SinkError};
+use crate::sink::{record_to_json, Result, Sink, SinkError};
 use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
@@ -255,13 +253,14 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut row_ops = vec![];
         for (op, row_ref) in chunk.rows() {
-            let mut map = serde_json::Map::new();
-            row_ref
-                .iter()
-                .zip_eq_fast(self.schema.fields.iter())
-                .for_each(|(v, f)| {
-                    map.insert(f.name.clone(), parse_datum(v));
-                });
+            // let mut map = serde_json::Map::new();
+            // row_ref
+            //     .iter()
+            //     .zip_eq_fast(self.schema.fields.iter())
+            //     .for_each(|(v, f)| {
+            //         map.insert(f.name.clone(), parse_datum(v));
+            //     });
+            let map = record_to_json(row_ref, &self.schema.fields)?;
             let row_op = RowOp {
                 op_type: op.to_protobuf() as i32,
                 line: serde_json::to_string(&map)
