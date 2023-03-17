@@ -108,29 +108,35 @@ impl VirtualNode {
 }
 
 impl VirtualNode {
+    // `compute_chunk` is used to calculate the `VirtualNode` for the columns in the
+    // chunk. When only one column is provided and its type is `Serial`, we consider the column to
+    // be the one that contains RowId, and use a special method to skip the calculation of Hash
+    // and directly extract the `VirtualNode` from `RowId`.
     pub fn compute_chunk(data_chunk: &DataChunk, keys: &[usize]) -> Vec<VirtualNode> {
         if let Ok(idx) = keys.iter().exactly_one() &&
             let ArrayImpl::Serial(serial_array) = data_chunk.column_at(*idx).array_ref() {
 
             return serial_array.iter()
-                .map(|serial| Self::from_index(extract_vnode_id_from_row_id(serial.unwrap().as_row_id()) as usize))
+                .map(|serial|extract_vnode_id_from_row_id(serial.unwrap().as_row_id()))
                 .collect();
         }
 
         data_chunk
             .get_hash_values(keys, Crc32FastBuilder)
             .into_iter()
-            .map(|hash| hash.to_vnode())
-            .collect_vec()
+            .map(|hash| hash.into())
+            .collect()
     }
 
-    pub fn compute_row(row: &impl Row, indices: &[usize]) -> VirtualNode {
+    // `compute_row` is used to calculate the `VirtualNode` for the corresponding column in a `Row`.
+    // Similar to `compute_chunk`, it also contains special handling for serial columns.
+    pub fn compute_row(row: impl Row, indices: &[usize]) -> VirtualNode {
         let project = row.project(indices);
         if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
-            return Self::from_index(extract_vnode_id_from_row_id(s.as_row_id()) as usize);
+            return extract_vnode_id_from_row_id(s.as_row_id());
         }
 
-        project.hash(Crc32FastBuilder).to_vnode()
+        project.hash(Crc32FastBuilder).into()
     }
 }
 

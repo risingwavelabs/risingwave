@@ -79,7 +79,7 @@ impl Expression for VnodeExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         Ok(Some(
-            VirtualNode::compute_row(&input, &self.dist_key_indices)
+            VirtualNode::compute_row(input, &self.dist_key_indices)
                 .to_scalar()
                 .into(),
         ))
