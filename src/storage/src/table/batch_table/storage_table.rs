@@ -25,9 +25,7 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
-};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::ordered::*;

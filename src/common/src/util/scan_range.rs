@@ -109,7 +109,7 @@ impl ScanRange {
 
         let pk_prefix_value = &self.eq_conds;
         let vnode = pk_prefix_value
-            .project(&dist_key_in_pk_indices)
+            .project(dist_key_in_pk_indices)
             .hash(Crc32FastBuilder)
             .to_vnode();
         Some(vnode)

@@ -148,7 +148,6 @@ impl DataChunk {
         &self.columns[idx]
     }
 
-
     pub fn columns(&self) -> &[Column] {
         &self.columns
     }

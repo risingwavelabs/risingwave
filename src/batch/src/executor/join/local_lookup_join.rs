@@ -84,7 +84,8 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             .map(|&k| k as usize)
             .collect_vec();
 
-        let virtual_node = scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
+        let virtual_node =
+            scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
         virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
     }
 
