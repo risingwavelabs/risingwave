@@ -106,7 +106,7 @@ impl ScanRange {
         }
 
         let pk_prefix_value: &[_] = &self.eq_conds;
-        let vnode = VirtualNode::compute_row(pk_prefix_value, &dist_key_in_pk_indices);
+        let vnode = VirtualNode::compute_row(pk_prefix_value, dist_key_in_pk_indices);
         Some(vnode)
     }
 }
