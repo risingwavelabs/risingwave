@@ -114,7 +114,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_pb::expr::expr_node::Type as ProstType;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
     use crate::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
@@ -188,7 +188,7 @@ mod tests {
         // filter (where $1 > 5)
         let condition = Arc::from(
             new_binary_expr(
-                ProstType::GreaterThan,
+                PbType::GreaterThan,
                 DataType::Boolean,
                 InputRefExpression::new(DataType::Int64, 0).boxed(),
                 LiteralExpression::new(DataType::Int64, Some((5_i64).into())).boxed(),
@@ -230,7 +230,7 @@ mod tests {
     async fn test_selective_agg_null_condition() -> Result<()> {
         let condition = Arc::from(
             new_binary_expr(
-                ProstType::Equal,
+                PbType::Equal,
                 DataType::Boolean,
                 InputRefExpression::new(DataType::Int64, 0).boxed(),
                 LiteralExpression::new(DataType::Int64, None).boxed(),

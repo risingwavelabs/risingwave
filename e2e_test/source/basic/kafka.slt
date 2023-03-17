@@ -79,7 +79,7 @@ from
   s5 with (
     properties.bootstrap.server = '127.0.0.1:29092',
     topic = 'sink_target',
-    format = 'append_only',
+    type = 'append-only',
     connector = 'kafka'
   )
 

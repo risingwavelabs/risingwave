@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
@@ -79,11 +79,11 @@ impl Array for BoolArray {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let value = self.data.to_protobuf();
         let null_bitmap = self.null_bitmap().to_protobuf();
 
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![value],
             array_type: ArrayType::Bool as i32,

@@ -50,6 +50,7 @@ cargo make pre-start-dev
 cargo make link-all-in-one-binaries
 
 echo "--- starting risingwave cluster with connector node"
+mkdir -p .risingwave/log
 ./connector-node/start-service.sh -p 50051 > .risingwave/log/connector-sink.log 2>&1 &
 cargo make ci-start ci-iceberg-test
 sleep 1

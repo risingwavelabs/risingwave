@@ -21,7 +21,7 @@ use risingwave_common::catalog::{ColumnCatalog, ConflictBehavior, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::derive::derive_columns;
 use super::{reorganize_elements_id, ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -296,11 +296,11 @@ impl PlanTreeNodeUnary for StreamMaterialize {
 impl_plan_tree_node_for_unary! { StreamMaterialize }
 
 impl StreamNode for StreamMaterialize {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
         let handle_pk_conflict_behavior = self.table.conflict_behavior_type();
-        ProstStreamNode::Materialize(MaterializeNode {
+        PbNodeBody::Materialize(MaterializeNode {
             // We don't need table id for materialize node in frontend. The id will be generated on
             // meta catalog service.
             table_id: 0,

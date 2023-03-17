@@ -231,6 +231,10 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
+        NodeBody::BarrierRecv(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
+        }
+
         NodeBody::Source(src) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
             // Note: For creating table with connector, the source id is left with placeholder and
@@ -248,7 +252,6 @@ fn build_fragment(
 
         NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-        // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
@@ -259,6 +262,7 @@ fn build_fragment(
         }
 
         NodeBody::Now(_) => {
+            // TODO: Remove this and insert a `BarrierRecv` instead.
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
             current_fragment.requires_singleton = true;
         }

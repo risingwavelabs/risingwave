@@ -6,7 +6,7 @@ set -euo pipefail
 source ci/scripts/common.env.sh
 
 # prepare environment
-export CONNECTOR_RPC_ENDPOINT="localhost:60061"
+export CONNECTOR_RPC_ENDPOINT="localhost:50051"
 
 while getopts 'p:' opt; do
     case ${opt} in
@@ -69,7 +69,10 @@ psql -h db -U postgres -d cdc_test < ./e2e_test/source/cdc/postgres_cdc.sql
 
 node_port=50051
 node_timeout=10
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
+echo "--- starting risingwave cluster with connector node"
+cargo make ci-start ci-1cn-1fe-with-recovery
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
 
 echo "waiting for connector node to start"
 start_time=$(date +%s)
@@ -88,9 +91,6 @@ do
     fi
     sleep 0.1
 done
-
-# start risingwave cluster
-cargo make ci-start ci-1cn-1fe-with-recovery
 sleep 2
 
 echo "---- mysql & postgres cdc validate test"
