@@ -14,7 +14,7 @@
 
 use std::fmt::{Display, Write};
 
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{PbArray, ArrayType};
 
 use super::bytes_array::{BytesWriter, PartialBytesWriter};
 use super::{Array, ArrayBuilder, ArrayMeta, BytesArray, BytesArrayBuilder};
@@ -43,8 +43,8 @@ impl Array for Utf8Array {
     }
 
     #[inline]
-    fn to_protobuf(&self) -> ProstArray {
-        ProstArray {
+    fn to_protobuf(&self) -> PbArray {
+        PbArray {
             array_type: ArrayType::Utf8 as i32,
             ..self.bytes.to_protobuf()
         }

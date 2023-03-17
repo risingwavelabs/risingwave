@@ -17,7 +17,7 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{PbArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayMeta};
 use crate::array::ArrayBuilderImpl;
@@ -47,7 +47,7 @@ impl Array for BytesArray {
         self.offset.len() - 1
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let offset_buffer = self
             .offset
             .iter()
@@ -82,7 +82,7 @@ impl Array for BytesArray {
             },
         ];
         let null_bitmap = self.null_bitmap().to_protobuf();
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values,
             array_type: ArrayType::Bytea as i32,

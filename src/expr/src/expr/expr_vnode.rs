@@ -93,7 +93,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::Row;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::Vnode;
     use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -105,7 +105,7 @@ mod tests {
     pub fn make_vnode_function(children: Vec<ExprNode>) -> ExprNode {
         ExprNode {
             expr_type: Vnode as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int16 as i32,
                 ..Default::default()
             }),

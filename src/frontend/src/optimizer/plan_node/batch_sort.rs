@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
 
 use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Order, OrderDisplay};
@@ -73,7 +73,7 @@ impl ToDistributedBatch for BatchSort {
     }
 }
 
-impl ToBatchProst for BatchSort {
+impl ToBatchPb for BatchSort {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.base.order.to_protobuf();
         NodeBody::Sort(SortNode { column_orders })

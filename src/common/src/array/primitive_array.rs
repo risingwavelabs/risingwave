@@ -18,7 +18,7 @@ use std::mem::size_of;
 
 use risingwave_pb::common::buffer::CompressionType;
 use risingwave_pb::common::Buffer;
-use risingwave_pb::data::{Array as ProstArray, ArrayType};
+use risingwave_pb::data::{PbArray, ArrayType};
 
 use super::{Array, ArrayBuilder, ArrayResult};
 use crate::array::serial_array::Serial;
@@ -188,7 +188,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<T>());
 
         for v in self.iter() {
@@ -200,7 +200,7 @@ impl<T: PrimitiveArrayItemType> Array for PrimitiveArray<T> {
             body: output_buffer,
         };
         let null_bitmap = self.null_bitmap().to_protobuf();
-        ProstArray {
+        PbArray {
             null_bitmap: Some(null_bitmap),
             values: vec![buffer],
             array_type: T::array_type() as i32,

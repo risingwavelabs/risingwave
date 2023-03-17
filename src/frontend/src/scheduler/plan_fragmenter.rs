@@ -31,7 +31,7 @@ use risingwave_connector::source::{ConnectorProperties, SplitEnumeratorImpl, Spl
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::common::Buffer;
-use risingwave_pb::plan_common::Field as FieldProst;
+use risingwave_pb::plan_common::Field as FieldPb;
 use serde::ser::SerializeStruct;
 use serde::Serialize;
 use uuid::Uuid;
@@ -70,7 +70,7 @@ pub struct ExecutionPlanNode {
     pub plan_node_id: PlanNodeId,
     pub plan_node_type: PlanNodeType,
     pub node: NodeBody,
-    pub schema: Vec<FieldProst>,
+    pub schema: Vec<FieldPb>,
 
     pub children: Vec<Arc<ExecutionPlanNode>>,
 

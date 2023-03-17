@@ -22,13 +22,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `HummockPinnedVersion` tracks pinned versions by given context id.
 impl MetadataModel for HummockPinnedVersion {
     type KeyType = HummockContextId;
-    type ProstType = HummockPinnedVersion;
+    type PbType = HummockPinnedVersion;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_PINNED_VERSION_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -36,7 +36,7 @@ impl MetadataModel for HummockPinnedVersion {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

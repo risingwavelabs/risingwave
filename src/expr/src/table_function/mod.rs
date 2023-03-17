@@ -20,7 +20,7 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::project_set_select_item::SelectItem;
 use risingwave_pb::expr::{
-    ProjectSetSelectItem as SelectItemProst, TableFunction as TableFunctionProst,
+    ProjectSetSelectItem as SelectItemPb, TableFunction as TableFunctionPb,
 };
 
 use super::Result;
@@ -57,7 +57,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
 pub type BoxedTableFunction = Box<dyn TableFunction>;
 
 pub fn build_from_prost(
-    prost: &TableFunctionProst,
+    prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     use risingwave_pb::expr::table_function::Type::*;
@@ -110,7 +110,7 @@ pub fn repeat_tf(expr: BoxedExpression, n: usize) -> BoxedTableFunction {
     Mock { expr, n }.boxed()
 }
 
-/// See also [`SelectItemProst`]
+/// See also [`SelectItemPb`]
 #[derive(Debug)]
 pub enum ProjectSetSelectItem {
     TableFunction(BoxedTableFunction),
@@ -130,7 +130,7 @@ impl From<BoxedExpression> for ProjectSetSelectItem {
 }
 
 impl ProjectSetSelectItem {
-    pub fn from_prost(prost: &SelectItemProst, chunk_size: usize) -> Result<Self> {
+    pub fn from_prost(prost: &SelectItemPb, chunk_size: usize) -> Result<Self> {
         match prost.select_item.as_ref().unwrap() {
             SelectItem::Expr(expr) => expr_build_from_prost(expr).map(Into::into),
             SelectItem::TableFunction(tf) => build_from_prost(tf, chunk_size).map(Into::into),

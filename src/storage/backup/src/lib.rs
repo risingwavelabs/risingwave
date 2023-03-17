@@ -42,8 +42,8 @@ use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_pb::backup_service::{
-    MetaSnapshotManifest as ProstMetaSnapshotManifest,
-    MetaSnapshotMetadata as ProstMetaSnapshotMetadata,
+    PbMetaSnapshotManifest,
+    PbMetaSnapshotMetadata,
 };
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
@@ -102,7 +102,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
     Ok(())
 }
 
-impl From<&MetaSnapshotMetadata> for ProstMetaSnapshotMetadata {
+impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
@@ -113,7 +113,7 @@ impl From<&MetaSnapshotMetadata> for ProstMetaSnapshotMetadata {
     }
 }
 
-impl From<&MetaSnapshotManifest> for ProstMetaSnapshotManifest {
+impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
     fn from(m: &MetaSnapshotManifest) -> Self {
         Self {
             manifest_id: m.manifest_id,

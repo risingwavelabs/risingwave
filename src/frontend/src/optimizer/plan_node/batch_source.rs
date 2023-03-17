@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SourceNode;
 
 use super::{
-    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalSource, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch,
     ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
@@ -92,7 +92,7 @@ impl ToDistributedBatch for BatchSource {
     }
 }
 
-impl ToBatchProst for BatchSource {
+impl ToBatchPb for BatchSource {
     fn to_batch_prost_body(&self) -> NodeBody {
         let source_catalog = self.logical.source_catalog().unwrap();
         NodeBody::Source(SourceNode {

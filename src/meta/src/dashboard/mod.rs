@@ -59,7 +59,7 @@ pub(super) mod handlers {
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{Sink, Source, Table};
     use risingwave_pb::common::WorkerNode;
-    use risingwave_pb::meta::{ActorLocation, TableFragments as ProstTableFragments};
+    use risingwave_pb::meta::{ActorLocation, PbTableFragments};
     use risingwave_pb::monitor_service::StackTraceResponse;
     use risingwave_pb::stream_plan::StreamActor;
     use serde_json::json;
@@ -203,7 +203,7 @@ pub(super) mod handlers {
 
     pub async fn list_fragments<S: MetaStore>(
         Extension(srv): Extension<Service<S>>,
-    ) -> Result<Json<Vec<ProstTableFragments>>> {
+    ) -> Result<Json<Vec<PbTableFragments>>> {
         use crate::model::MetadataModel;
 
         let table_fragments = TableFragments::list(&*srv.meta_store)

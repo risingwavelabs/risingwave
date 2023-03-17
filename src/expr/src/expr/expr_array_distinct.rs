@@ -131,8 +131,8 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_pb::data::Datum as ProstDatum;
-    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
+    use risingwave_pb::data::PbDatum;
+    use risingwave_pb::expr::expr_node::{RexNode, PbType};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
@@ -140,9 +140,9 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::ConstantValue as i32,
+            expr_type: PbType::ConstantValue as i32,
             return_type: Some(DataType::Int64.to_protobuf()),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),
             })),
         }
@@ -150,7 +150,7 @@ mod tests {
 
     fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::Int64),
@@ -165,7 +165,7 @@ mod tests {
 
     fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::List {
@@ -185,7 +185,7 @@ mod tests {
         {
             let array = make_i64_array_expr_node(vec![12]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayDistinct as i32,
+                expr_type: PbType::ArrayDistinct as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -202,7 +202,7 @@ mod tests {
         {
             let array = make_i64_array_array_expr_node(vec![vec![42], vec![42]]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayDistinct as i32,
+                expr_type: PbType::ArrayDistinct as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),

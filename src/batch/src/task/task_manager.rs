@@ -22,7 +22,7 @@ use risingwave_common::config::BatchConfig;
 use risingwave_common::error::ErrorCode::{self, TaskNotFound};
 use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstTaskOutputId,
+    PlanFragment, PbTaskId, PbTaskOutputId,
 };
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -84,7 +84,7 @@ impl BatchManager {
 
     pub async fn fire_task(
         &self,
-        tid: &ProstTaskId,
+        tid: &PbTaskId,
         plan: PlanFragment,
         epoch: BatchQueryEpoch,
         context: ComputeNodeContext,
@@ -116,7 +116,7 @@ impl BatchManager {
         &self,
         tx: Sender<std::result::Result<GetDataResponse, Status>>,
         peer_addr: SocketAddr,
-        pb_task_output_id: &ProstTaskOutputId,
+        pb_task_output_id: &PbTaskOutputId,
     ) -> Result<()> {
         let task_id = TaskOutputId::try_from(pb_task_output_id)?;
         tracing::trace!(target: "events::compute::exchange", peer_addr = %peer_addr, from = ?task_id, "serve exchange RPC");
@@ -138,7 +138,7 @@ impl BatchManager {
         Ok(())
     }
 
-    pub fn take_output(&self, output_id: &ProstTaskOutputId) -> Result<TaskOutput> {
+    pub fn take_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         self.tasks
             .lock()
@@ -147,7 +147,7 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &ProstTaskId, msg: String) {
+    pub fn abort_task(&self, sid: &PbTaskId, msg: String) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
@@ -260,8 +260,8 @@ mod tests {
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
     use risingwave_pb::batch_plan::plan_node::NodeBody;
     use risingwave_pb::batch_plan::{
-        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, TaskId as ProstTaskId,
-        TaskOutputId as ProstTaskOutputId, ValuesNode,
+        ExchangeInfo, PlanFragment, PlanNode, TableFunctionNode, PbTaskId,
+        PbTaskOutputId, ValuesNode,
     };
     use risingwave_pb::expr::table_function::Type;
     use risingwave_pb::expr::TableFunction;
@@ -285,7 +285,7 @@ mod tests {
             Code::Internal
         );
 
-        let output_id = ProstTaskOutputId {
+        let output_id = PbTaskOutputId {
             task_id: Some(risingwave_pb::batch_plan::TaskId {
                 stage_id: 0,
                 task_id: 0,
@@ -317,7 +317,7 @@ mod tests {
             }),
         };
         let context = ComputeNodeContext::for_test();
-        let task_id = ProstTaskId {
+        let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,
@@ -373,7 +373,7 @@ mod tests {
             }),
         };
         let context = ComputeNodeContext::for_test();
-        let task_id = ProstTaskId {
+        let task_id = PbTaskId {
             query_id: "".to_string(),
             stage_id: 0,
             task_id: 0,

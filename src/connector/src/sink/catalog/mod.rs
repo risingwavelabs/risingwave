@@ -21,7 +21,7 @@ use risingwave_common::catalog::{
     ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
 };
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::{Sink as ProstSink, SinkType as ProstSinkType};
+use risingwave_pb::catalog::{PbSink, PbSinkType};
 
 #[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
 pub struct SinkId {
@@ -77,20 +77,20 @@ impl SinkType {
         self == &Self::Upsert
     }
 
-    pub fn to_proto(self) -> ProstSinkType {
+    pub fn to_proto(self) -> PbSinkType {
         match self {
-            SinkType::AppendOnly => ProstSinkType::AppendOnly,
-            SinkType::ForceAppendOnly => ProstSinkType::ForceAppendOnly,
-            SinkType::Upsert => ProstSinkType::Upsert,
+            SinkType::AppendOnly => PbSinkType::AppendOnly,
+            SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
+            SinkType::Upsert => PbSinkType::Upsert,
         }
     }
 
-    pub fn from_proto(pb: ProstSinkType) -> Self {
+    pub fn from_proto(pb: PbSinkType) -> Self {
         match pb {
-            ProstSinkType::AppendOnly => SinkType::AppendOnly,
-            ProstSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
-            ProstSinkType::Upsert => SinkType::Upsert,
-            ProstSinkType::Unspecified => unreachable!(),
+            PbSinkType::AppendOnly => SinkType::AppendOnly,
+            PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
+            PbSinkType::Upsert => SinkType::Upsert,
+            PbSinkType::Unspecified => unreachable!(),
         }
     }
 }
@@ -141,8 +141,8 @@ pub struct SinkCatalog {
 }
 
 impl SinkCatalog {
-    pub fn to_proto(&self) -> ProstSink {
-        ProstSink {
+    pub fn to_proto(&self) -> PbSink {
+        PbSink {
             id: self.id.into(),
             schema_id: self.schema_id.schema_id,
             database_id: self.database_id.database_id,
@@ -185,8 +185,8 @@ impl SinkCatalog {
     }
 }
 
-impl From<ProstSink> for SinkCatalog {
-    fn from(pb: ProstSink) -> Self {
+impl From<PbSink> for SinkCatalog {
+    fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
@@ -218,8 +218,8 @@ impl From<ProstSink> for SinkCatalog {
     }
 }
 
-impl From<&ProstSink> for SinkCatalog {
-    fn from(pb: &ProstSink) -> Self {
+impl From<&PbSink> for SinkCatalog {
+    fn from(pb: &PbSink) -> Self {
         pb.clone().into()
     }
 }

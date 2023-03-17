@@ -20,7 +20,7 @@ use std::hash::Hash;
 use bytes::{Buf, BufMut};
 use itertools::EitherOrBoth::{Both, Left, Right};
 use itertools::Itertools;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, ListArrayData};
+use risingwave_pb::data::{PbArray, PbArrayType, ListArrayData};
 use serde::{Deserializer, Serializer};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult, RowRef};
@@ -174,10 +174,10 @@ impl Array for ListArray {
         self.bitmap.len()
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let value = self.value.to_protobuf();
-        ProstArray {
-            array_type: ProstArrayType::List as i32,
+        PbArray {
+            array_type: PbArrayType::List as i32,
             struct_array_data: None,
             list_array_data: Some(Box::new(ListArrayData {
                 offsets: self.offsets.clone(),
@@ -219,7 +219,7 @@ impl Array for ListArray {
 }
 
 impl ListArray {
-    pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
+    pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a list array"

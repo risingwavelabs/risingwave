@@ -15,14 +15,14 @@
 use std::collections::BTreeMap;
 
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 
 use super::{ColumnId, RelationCatalog, SourceId};
 use crate::user::UserId;
 use crate::WithOptions;
 
 /// This struct `SourceCatalog` is used in frontend.
-/// Compared with `ProstSource`, it only maintains information used during optimization.
+/// Compared with `PbSource`, it only maintains information used during optimization.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct SourceCatalog {
     pub id: SourceId,
@@ -37,8 +37,8 @@ pub struct SourceCatalog {
     pub watermark_descs: Vec<WatermarkDesc>,
 }
 
-impl From<&ProstSource> for SourceCatalog {
-    fn from(prost: &ProstSource) -> Self {
+impl From<&PbSource> for SourceCatalog {
+    fn from(prost: &PbSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
         let prost_columns = prost.columns.clone();

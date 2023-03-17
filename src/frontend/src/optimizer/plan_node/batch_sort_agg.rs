@@ -22,7 +22,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
@@ -109,7 +109,7 @@ impl ToDistributedBatch for BatchSortAgg {
     }
 }
 
-impl ToBatchProst for BatchSortAgg {
+impl ToBatchPb for BatchSortAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::SortAgg(SortAggNode {
             agg_calls: self
