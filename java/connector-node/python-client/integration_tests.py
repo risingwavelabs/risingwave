@@ -162,7 +162,7 @@ def test_print_sink(input_file):
 
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
-              {"sink.mode":"append-only",
+              {"type":"append-only",
                "warehouse.path":"s3a://bucket",
                "s3.endpoint": "http://127.0.0.1:9000",
                "s3.access.key": "minioadmin",
@@ -173,7 +173,7 @@ def test_iceberg_sink(input_file):
 
 def test_upsert_iceberg_sink(input_file):
     test_upsert_sink("iceberg",
-              {"sink.mode":"upsert",
+              {"type":"upsert",
                "warehouse.path":"s3a://bucket",
                "s3.endpoint": "http://127.0.0.1:9000",
                "s3.access.key": "minioadmin",

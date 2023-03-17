@@ -455,7 +455,7 @@ mod tests {
     use risingwave_common::types::Scalar;
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+    use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
@@ -467,21 +467,21 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some("foo".into()).as_ref()),
                     })),
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some("bar".into()).as_ref()),
                     })),
                 },
@@ -491,9 +491,9 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::Array as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::List as i32,
-                        field_type: vec![ProstDataType {
+                        field_type: vec![PbDataType {
                             type_name: TypeName::Varchar as i32,
                             ..Default::default()
                         }],
@@ -503,11 +503,11 @@ mod tests {
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
@@ -515,7 +515,7 @@ mod tests {
         };
         let access = ExprNode {
             expr_type: Type::ArrayAccess as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
@@ -532,18 +532,18 @@ mod tests {
     fn test_build_extract_expr() {
         let left = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 precision: 11,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some("DAY".into()).as_ref()),
             })),
         };
         let right_date = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Date as i32,
                 ..Default::default()
             }),
@@ -551,7 +551,7 @@ mod tests {
         };
         let right_time = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Timestamp as i32,
                 ..Default::default()
             }),
@@ -560,7 +560,7 @@ mod tests {
 
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -571,7 +571,7 @@ mod tests {
         assert!(build_binary_expr_prost(&expr).is_ok());
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),

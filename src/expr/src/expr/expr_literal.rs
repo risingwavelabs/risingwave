@@ -125,7 +125,7 @@ mod tests {
     use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
-    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+    use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::RexNode::Constant;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::expr::ExprNode;
@@ -142,25 +142,25 @@ mod tests {
         let body = serialize_datum(Some(value.clone().to_scalar_value()).as_ref());
         let expr = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Struct as i32,
                 field_type: vec![
-                    ProstDataType {
+                    PbDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     },
-                    ProstDataType {
+                    PbDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     },
-                    ProstDataType {
+                    PbDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     },
                 ],
                 ..Default::default()
             }),
-            rex_node: Some(Constant(ProstDatum { body })),
+            rex_node: Some(Constant(PbDatum { body })),
         };
         let expr = LiteralExpression::try_from(&expr).unwrap();
         assert_eq!(value.to_scalar_value(), expr.literal().unwrap());
@@ -236,12 +236,12 @@ mod tests {
     fn make_expression(bytes: Option<Vec<u8>>, data_type: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: data_type as i32,
                 interval_type: IntervalType::Month as i32,
                 ..Default::default()
             }),
-            rex_node: bytes.map(|bs| RexNode::Constant(ProstDatum { body: bs })),
+            rex_node: bytes.map(|bs| RexNode::Constant(PbDatum { body: bs })),
         }
     }
 

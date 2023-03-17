@@ -18,14 +18,14 @@ use std::vec;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{ParallelUnit, PbColumnOrder, PbDirection, PbOrderType, WorkerNode};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::Type;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{Add, GreaterThan, InputRef};
-use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, InputRef as ProstInputRef};
+use risingwave_pb::expr::{AggCall, ExprNode, FunctionCall, PbInputRef};
 use risingwave_pb::plan_common::{ColumnCatalog, ColumnDesc, Field};
 use risingwave_pb::stream_plan::stream_fragment_graph::{StreamFragment, StreamFragmentEdge};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -56,7 +56,7 @@ fn make_inputref(idx: u32) -> ExprNode {
 fn make_sum_aggcall(idx: u32) -> AggCall {
     AggCall {
         r#type: Type::Sum as i32,
-        args: vec![ProstInputRef {
+        args: vec![PbInputRef {
             index: idx,
             r#type: Some(DataType {
                 type_name: TypeName::Int64 as i32,
@@ -114,12 +114,12 @@ fn make_column(column_type: TypeName, column_id: i32) -> ColumnCatalog {
     }
 }
 
-fn make_source_internal_table(id: u32) -> ProstTable {
+fn make_source_internal_table(id: u32) -> PbTable {
     let columns = vec![
         make_column(TypeName::Varchar, 0),
         make_column(TypeName::Varchar, 1),
     ];
-    ProstTable {
+    PbTable {
         id,
         schema_id: SchemaId::placeholder().schema_id,
         database_id: DatabaseId::placeholder().database_id,
@@ -135,12 +135,12 @@ fn make_source_internal_table(id: u32) -> ProstTable {
     }
 }
 
-fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
+fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
     let mut columns = vec![make_column(TypeName::Int64, 0)];
     if !is_agg_value {
         columns.push(make_column(TypeName::Int32, 1));
     }
-    ProstTable {
+    PbTable {
         id,
         schema_id: SchemaId::placeholder().schema_id,
         database_id: DatabaseId::placeholder().database_id,
@@ -157,8 +157,8 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> ProstTable {
     }
 }
 
-fn make_empty_table(id: u32) -> ProstTable {
-    ProstTable {
+fn make_empty_table(id: u32) -> PbTable {
+    PbTable {
         id,
         schema_id: SchemaId::placeholder().schema_id,
         database_id: DatabaseId::placeholder().database_id,
@@ -170,7 +170,7 @@ fn make_empty_table(id: u32) -> ProstTable {
     }
 }
 
-fn make_materialize_table(id: u32) -> ProstTable {
+fn make_materialize_table(id: u32) -> PbTable {
     make_internal_table(id, true)
 }
 

@@ -21,12 +21,9 @@ use risingwave_common::array::StreamChunk;
 #[cfg(test)]
 use risingwave_common::catalog::Field;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::Row;
 #[cfg(test)]
 use risingwave_common::types::DataType;
-use risingwave_common::types::{DatumRef, ScalarRefImpl};
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::json_payload::RowOp;
 use risingwave_pb::connector_service::sink_stream_request::write_batch::{JsonPayload, Payload};
 use risingwave_pb::connector_service::sink_stream_request::{
@@ -35,14 +32,12 @@ use risingwave_pb::connector_service::sink_stream_request::{
 use risingwave_pb::connector_service::table_schema::Column;
 use risingwave_pb::connector_service::{SinkResponse, SinkStreamRequest, TableSchema};
 use risingwave_rpc_client::ConnectorClient;
-use serde_json::Value;
-use serde_json::Value::Number;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio_stream::StreamExt;
 use tonic::{Status, Streaming};
 
 use super::catalog::SinkCatalog;
-use crate::sink::{Result, Sink, SinkError};
+use crate::sink::{record_to_json, Result, Sink, SinkError};
 use crate::ConnectorParams;
 
 pub const VALID_REMOTE_SINKS: [&str; 3] = ["jdbc", "file", "iceberg"];
@@ -190,7 +185,7 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         let table_schema = TableSchema {
             columns,
             pk_indices: sink_catalog
-                .pk_indices()
+                .downstream_pk_indices()
                 .iter()
                 .map(|i| *i as _)
                 .collect_vec(),
@@ -254,13 +249,7 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn write_batch(&mut self, chunk: StreamChunk) -> Result<()> {
         let mut row_ops = vec![];
         for (op, row_ref) in chunk.rows() {
-            let mut map = serde_json::Map::new();
-            row_ref
-                .iter()
-                .zip_eq_fast(self.schema.fields.iter())
-                .for_each(|(v, f)| {
-                    map.insert(f.name.clone(), parse_datum(v));
-                });
+            let map = record_to_json(row_ref, &self.schema.fields)?;
             let row_op = RowOp {
                 op_type: op.to_protobuf() as i32,
                 line: serde_json::to_string(&map)
@@ -316,35 +305,6 @@ impl<const APPEND_ONLY: bool> Sink for RemoteSink<APPEND_ONLY> {
     async fn abort(&mut self) -> Result<()> {
         self.request_sender = None;
         Ok(())
-    }
-}
-
-fn parse_datum(datum: DatumRef<'_>) -> Value {
-    match datum {
-        None => Value::Null,
-        Some(ScalarRefImpl::Int32(v)) => Value::from(v),
-        Some(ScalarRefImpl::Int64(v)) => Value::from(v),
-        Some(ScalarRefImpl::Float32(v)) => Value::from(v.into_inner()),
-        Some(ScalarRefImpl::Float64(v)) => Value::from(v.into_inner()),
-        Some(ScalarRefImpl::Decimal(v)) => Number(v.to_string().parse().unwrap()),
-        Some(ScalarRefImpl::Utf8(v)) => Value::from(v),
-        Some(ScalarRefImpl::Bool(v)) => Value::from(v),
-        Some(ScalarRefImpl::NaiveDate(v)) => Value::from(v.to_string()),
-        Some(ScalarRefImpl::NaiveTime(v)) => Value::from(v.to_string()),
-        Some(ScalarRefImpl::Interval(v)) => Value::from(v.to_string()),
-        Some(ScalarRefImpl::Struct(v)) => Value::from(
-            v.fields_ref()
-                .iter()
-                .map(|v| parse_datum(*v))
-                .collect::<Vec<_>>(),
-        ),
-        Some(ScalarRefImpl::List(v)) => Value::from(
-            v.values_ref()
-                .iter()
-                .map(|v| parse_datum(*v))
-                .collect::<Vec<_>>(),
-        ),
-        _ => unimplemented!(),
     }
 }
 

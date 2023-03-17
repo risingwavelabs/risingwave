@@ -21,7 +21,7 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::select_all;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 use risingwave_pb::plan_common::Field as NodeField;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
@@ -36,7 +36,7 @@ use super::BatchTaskMetricsWithTaskLabels;
 use crate::executor::{BoxedDataChunkStream, BoxedExecutor, BoxedExecutorBuilder, Executor};
 
 pub struct GenericExchangeExecutor<CS, C> {
-    proto_sources: Vec<ProstExchangeSource>,
+    proto_sources: Vec<PbExchangeSource>,
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
     context: C,
@@ -56,7 +56,7 @@ pub trait CreateSource: Send {
     async fn create_source(
         &self,
         context: impl BatchTaskContext,
-        prost_source: &ProstExchangeSource,
+        prost_source: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl>;
 }
 
@@ -76,7 +76,7 @@ impl CreateSource for DefaultCreateSource {
     async fn create_source(
         &self,
         context: impl BatchTaskContext,
-        prost_source: &ProstExchangeSource,
+        prost_source: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         let peer_addr = prost_source.get_host()?.into();
         let task_output_id = prost_source.get_task_output_id()?;
@@ -127,7 +127,7 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         )?;
 
         ensure!(!node.get_sources().is_empty());
-        let proto_sources: Vec<ProstExchangeSource> = node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = node.get_sources().to_vec();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
 
@@ -189,7 +189,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> GenericExchangeExec
 
     #[try_stream(boxed, ok = DataChunk, error = RwError)]
     async fn data_chunk_stream(
-        prost_source: ProstExchangeSource,
+        prost_source: PbExchangeSource,
         source_creator: CS,
         context: C,
         metrics: Option<BatchTaskMetricsWithTaskLabels>,
@@ -264,7 +264,7 @@ mod tests {
             let chunks = vec![Some(chunk); 100];
             let fake_exchange_source = FakeExchangeSource::new(chunks);
             let fake_create_source = FakeCreateSource::new(fake_exchange_source);
-            proto_sources.push(ProstExchangeSource::default());
+            proto_sources.push(PbExchangeSource::default());
             source_creators.push(fake_create_source);
         }
 

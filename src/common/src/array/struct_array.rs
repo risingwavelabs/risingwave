@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
@@ -173,11 +173,11 @@ impl Array for StructArray {
         self.len
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
         let children_type = self.children_type.iter().map(|t| t.to_protobuf()).collect();
-        ProstArray {
-            array_type: ProstArrayType::Struct as i32,
+        PbArray {
+            array_type: PbArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
                 children_array,
                 children_type,
@@ -220,7 +220,7 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
+    pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a struct array"
