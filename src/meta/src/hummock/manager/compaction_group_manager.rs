@@ -29,7 +29,7 @@ use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::hummock_version_delta::GroupDeltas;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
+    compact_task, CompactionConfig, CompactionGroupInfo, GroupConstruct, GroupDelta, GroupDestroy,
     GroupMetaChange, GroupTableChange,
 };
 use tokio::sync::{OnceCell, RwLock};
@@ -493,6 +493,7 @@ impl<S: MetaStore> HummockManager<S> {
                 ),
             )
             .await?;
+        let mut new_group = None;
         let target_compaction_group_id = match target_group_id {
             Some(compaction_group_id) => {
                 match current_version.levels.get(&compaction_group_id) {
@@ -547,7 +548,7 @@ impl<S: MetaStore> HummockManager<S> {
                     GroupDeltas {
                         group_deltas: vec![GroupDelta {
                             delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                                group_config: Some(config),
+                                group_config: Some(config.clone()),
                                 group_id: new_compaction_group_id,
                                 parent_group_id,
                                 new_sst_start_id,
@@ -556,6 +557,11 @@ impl<S: MetaStore> HummockManager<S> {
                         }],
                     },
                 );
+
+                new_group = Some(CompactionGroup {
+                    group_id: new_compaction_group_id,
+                    compaction_config: Arc::new(config.clone()),
+                });
                 new_version_delta.group_deltas.insert(
                     parent_group_id,
                     GroupDeltas {
@@ -574,6 +580,13 @@ impl<S: MetaStore> HummockManager<S> {
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
         self.env.meta_store().txn(trx).await?;
+        if let Some(new_compaction_group) = new_group {
+            self.compaction_group_manager
+                .write()
+                .await
+                .compaction_groups
+                .insert(new_compaction_group.group_id, new_compaction_group);
+        }
         let sst_split_info = versioning
             .current_version
             .apply_version_delta(&new_version_delta);
@@ -607,6 +620,15 @@ impl<S: MetaStore> HummockManager<S> {
         new_version_delta.commit();
         branched_ssts.commit_memory();
         self.notify_last_version_delta(versioning);
+        // Don't trigger compactions if we enable deterministic compaction
+        if !self.env.opts.compaction_deterministic_test {
+            // commit_epoch may contains SSTs from any compaction group
+            self.try_send_compaction_request(parent_group_id, compact_task::TaskType::SpaceReclaim);
+            self.try_send_compaction_request(
+                target_compaction_group_id,
+                compact_task::TaskType::SpaceReclaim,
+            );
+        }
         Ok(target_compaction_group_id)
     }
 }
