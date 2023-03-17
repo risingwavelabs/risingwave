@@ -185,8 +185,10 @@ export const FragmentTypeFlag = {
   SOURCE: "SOURCE",
   MVIEW: "MVIEW",
   SINK: "SINK",
+  /** NOW - TODO: Remove this and insert a `BarrierRecv` instead. */
   NOW: "NOW",
   CHAIN_NODE: "CHAIN_NODE",
+  BARRIER_RECV: "BARRIER_RECV",
   UNRECOGNIZED: "UNRECOGNIZED",
 } as const;
 
@@ -212,6 +214,9 @@ export function fragmentTypeFlagFromJSON(object: any): FragmentTypeFlag {
     case 16:
     case "CHAIN_NODE":
       return FragmentTypeFlag.CHAIN_NODE;
+    case 32:
+    case "BARRIER_RECV":
+      return FragmentTypeFlag.BARRIER_RECV;
     case -1:
     case "UNRECOGNIZED":
     default:
@@ -233,6 +238,8 @@ export function fragmentTypeFlagToJSON(object: FragmentTypeFlag): string {
       return "NOW";
     case FragmentTypeFlag.CHAIN_NODE:
       return "CHAIN_NODE";
+    case FragmentTypeFlag.BARRIER_RECV:
+      return "BARRIER_RECV";
     case FragmentTypeFlag.UNRECOGNIZED:
     default:
       return "UNRECOGNIZED";

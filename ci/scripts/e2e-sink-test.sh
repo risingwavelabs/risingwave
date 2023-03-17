@@ -25,8 +25,13 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
+mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+
+export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./

@@ -27,6 +27,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave.java</groupId>
+            <artifactId>java-binding</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave.java</groupId>
             <artifactId>connector-api</artifactId>
         </dependency>
 
