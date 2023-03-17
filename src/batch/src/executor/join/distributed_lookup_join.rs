@@ -195,11 +195,11 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
-            .iter()
-            .map(|&k| k as usize)
-            .collect_vec();
+        // let dist_key_indices = table_desc
+        //     .dist_key_indices
+        //     .iter()
+        //     .map(|&k| k as usize)
+        //     .collect_vec();
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
         let distribution = Distribution::all_vnodes(dist_key_indices);
         let table_option = TableOption {

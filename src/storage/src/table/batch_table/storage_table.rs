@@ -188,7 +188,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes,
         }: Distribution,
         table_option: TableOption,
@@ -249,7 +249,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             }
         };
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let key_output_indices = match key_output_indices.is_empty() {
             true => None,
             false => Some(key_output_indices),
@@ -266,7 +265,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             mapping: Arc::new(mapping),
             row_serde: Arc::new(row_serde),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
             table_option,
