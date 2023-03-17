@@ -161,7 +161,7 @@ async fn start_compactor_node(
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
-        "--host",
+        "--listen-addr",
         "127.0.0.1:5550",
         "--advertise-addr",
         &advertise_addr,
