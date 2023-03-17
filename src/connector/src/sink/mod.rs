@@ -170,13 +170,9 @@ impl SinkImpl {
             SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
             SinkConfig::Kafka(cfg) => {
                 if sink_catalog.sink_type.is_append_only() {
-                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 } else {
-                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 }
             }
             SinkConfig::Remote(cfg) => {
