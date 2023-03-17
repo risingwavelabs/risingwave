@@ -813,7 +813,7 @@ impl Display for IntervalUnit {
         let months = self.months % 12;
         let days = self.days;
         let mut space = false;
-        let mut need_pos = false;
+        let mut following_neg = false;
         let mut write_i32 = |arg: i32, unit: &str| -> std::fmt::Result {
             if arg == 0 {
                 return Ok(());
@@ -821,7 +821,7 @@ impl Display for IntervalUnit {
             if space {
                 write!(f, " ")?;
             }
-            if need_pos && arg > 0 {
+            if following_neg && arg > 0 {
                 write!(f, "+")?;
             }
             write!(f, "{arg} {unit}")?;
@@ -829,7 +829,7 @@ impl Display for IntervalUnit {
                 write!(f, "s")?;
             }
             space = true;
-            need_pos = arg < 0;
+            following_neg = arg < 0;
             Ok(())
         };
         write_i32(years, "year")?;
@@ -846,7 +846,7 @@ impl Display for IntervalUnit {
             if space {
                 write!(f, " ")?;
             }
-            if need_pos && self.usecs > 0 {
+            if following_neg && self.usecs > 0 {
                 write!(f, "+")?;
             } else if self.usecs < 0 {
                 write!(f, "-")?;
@@ -1046,16 +1046,19 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
         return None;
     }
+    const HOUR: usize = 0;
+    const MINUTE: usize = 1;
+    const SECOND: usize = 2;
     let mut is_neg = false;
     for (i, s) in c.iter().enumerate() {
         match i {
-            0 => {
+            HOUR => {
                 let v = s.parse().ok()?;
                 is_neg = v < 0;
                 t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
             }
-            1 => {
+            MINUTE => {
                 let mut v: i64 = s.parse().ok()?;
                 if !(0..60).contains(&v) {
                     return None;
@@ -1066,7 +1069,7 @@ fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
                 t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
             }
-            2 => {
+            SECOND => {
                 let mut v: OrderedF64 = s.parse().ok()?;
                 // PostgreSQL allows '60.x' for seconds.
                 if !(0f64 <= *v && *v < 61f64) {

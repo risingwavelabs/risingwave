@@ -150,5 +150,3 @@ select '-2562047788:00:54.775808'::interval;
 
 statement error
 select '-2562047788:00:54.775809'::interval;
-
-# Tests moved from regress tests due to not matching exactly.
