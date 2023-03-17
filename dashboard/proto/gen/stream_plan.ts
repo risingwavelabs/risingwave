@@ -395,6 +395,13 @@ export interface StreamSource_PropertiesEntry {
   value: string;
 }
 
+/**
+ * The executor only for receiving barrier from the meta service. It always resides in the leaves
+ * of the streaming graph.
+ */
+export interface BarrierRecvNode {
+}
+
 export interface SourceNode {
   /**
    * The source node can contain either a stream source or nothing. So here we extract all
@@ -867,7 +874,8 @@ export interface StreamNode {
     | { $case: "rowIdGen"; rowIdGen: RowIdGenNode }
     | { $case: "now"; now: NowNode }
     | { $case: "appendOnlyGroupTopN"; appendOnlyGroupTopN: GroupTopNNode }
-    | { $case: "temporalJoin"; temporalJoin: TemporalJoinNode };
+    | { $case: "temporalJoin"; temporalJoin: TemporalJoinNode }
+    | { $case: "barrierRecv"; barrierRecv: BarrierRecvNode };
   /**
    * The id for the operator. This is local per mview.
    * TODO: should better be a uint32.
@@ -1894,6 +1902,26 @@ export const StreamSource_PropertiesEntry = {
     const message = createBaseStreamSource_PropertiesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseBarrierRecvNode(): BarrierRecvNode {
+  return {};
+}
+
+export const BarrierRecvNode = {
+  fromJSON(_: any): BarrierRecvNode {
+    return {};
+  },
+
+  toJSON(_: BarrierRecvNode): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<BarrierRecvNode>, I>>(_: I): BarrierRecvNode {
+    const message = createBaseBarrierRecvNode();
     return message;
   },
 };
@@ -3733,6 +3761,8 @@ export const StreamNode = {
         ? { $case: "appendOnlyGroupTopN", appendOnlyGroupTopN: GroupTopNNode.fromJSON(object.appendOnlyGroupTopN) }
         : isSet(object.temporalJoin)
         ? { $case: "temporalJoin", temporalJoin: TemporalJoinNode.fromJSON(object.temporalJoin) }
+        : isSet(object.barrierRecv)
+        ? { $case: "barrierRecv", barrierRecv: BarrierRecvNode.fromJSON(object.barrierRecv) }
         : undefined,
       operatorId: isSet(object.operatorId) ? Number(object.operatorId) : 0,
       input: Array.isArray(object?.input)
@@ -3822,6 +3852,9 @@ export const StreamNode = {
     message.nodeBody?.$case === "temporalJoin" && (obj.temporalJoin = message.nodeBody?.temporalJoin
       ? TemporalJoinNode.toJSON(message.nodeBody?.temporalJoin)
       : undefined);
+    message.nodeBody?.$case === "barrierRecv" && (obj.barrierRecv = message.nodeBody?.barrierRecv
+      ? BarrierRecvNode.toJSON(message.nodeBody?.barrierRecv)
+      : undefined);
     message.operatorId !== undefined && (obj.operatorId = Math.round(message.operatorId));
     if (message.input) {
       obj.input = message.input.map((e) =>
@@ -3840,7 +3873,9 @@ export const StreamNode = {
     message.appendOnly !== undefined && (obj.appendOnly = message.appendOnly);
     message.identity !== undefined && (obj.identity = message.identity);
     if (message.fields) {
-      obj.fields = message.fields.map((e) => e ? Field.toJSON(e) : undefined);
+      obj.fields = message.fields.map((e) =>
+        e ? Field.toJSON(e) : undefined
+      );
     } else {
       obj.fields = [];
     }
@@ -4061,6 +4096,16 @@ export const StreamNode = {
       message.nodeBody = {
         $case: "temporalJoin",
         temporalJoin: TemporalJoinNode.fromPartial(object.nodeBody.temporalJoin),
+      };
+    }
+    if (
+      object.nodeBody?.$case === "barrierRecv" &&
+      object.nodeBody?.barrierRecv !== undefined &&
+      object.nodeBody?.barrierRecv !== null
+    ) {
+      message.nodeBody = {
+        $case: "barrierRecv",
+        barrierRecv: BarrierRecvNode.fromPartial(object.nodeBody.barrierRecv),
       };
     }
     message.operatorId = object.operatorId ?? 0;
