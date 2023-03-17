@@ -27,7 +27,7 @@ class ScalarFunction(UserDefinedFunction):
     or multiple scalar values to a new scalar value.
     """
 
-    def eval(self, *args):
+    def eval(self, *args) -> Any:
         """
         Method which defines the logic of the scalar function.
         """
@@ -46,11 +46,11 @@ class TableFunction(UserDefinedFunction):
     or multiple table values to a new table value.
     """
 
-    def eval(self, *args):
+    def eval(self, *args) -> Iterator:
         """
         Method which defines the logic of the table function.
         """
-        pass
+        yield
 
     def eval_batch(self, batch: pa.RecordBatch) -> pa.RecordBatch:
         result_rows = []

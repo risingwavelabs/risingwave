@@ -34,13 +34,13 @@ def series2(n: int) -> Iterator[tuple[int, str]]:
         yield i, str(i)
 
 
-@udtf(input_types=['BINARY'], result_types=['VARCHAR', 'VARCHAR', 'INT', 'INT'])
-def extract_tcp_info(tcp_packet: bytes):
+@udtf(input_types=['BINARY'], result_types=['VARCHAR', 'VARCHAR', 'SMALLINT', 'SMALLINT'])
+def extract_tcp_info(tcp_packet: bytes) -> Iterator:
     src_addr, dst_addr = struct.unpack('!4s4s', tcp_packet[12:20])
     src_port, dst_port = struct.unpack('!HH', tcp_packet[20:24])
     src_addr = socket.inet_ntoa(src_addr)
     dst_addr = socket.inet_ntoa(dst_addr)
-    return src_addr, dst_addr, src_port, dst_port
+    yield src_addr, dst_addr, src_port, dst_port
 
 
 if __name__ == '__main__':

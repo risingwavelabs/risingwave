@@ -28,8 +28,10 @@ create function gcd(int, int) returns int language python as gcd using link 'htt
 statement ok
 create function series(int) returns table (x int) language python as series using link 'http://localhost:8815';
 
+# Create a table function that returns multiple columns.
 statement ok
-create function series2(int) returns table (x int, s varchar) language python as series2 using link 'http://localhost:8815';
+create function extract_tcp_info(bytea) returns table (src_ip varchar, dst_ip varchar, src_port smallint, dst_port smallint) 
+language python as extract_tcp_info using link 'http://localhost:8815';
 
 query I
 select int_42();
@@ -55,15 +57,19 @@ select series(5);
 3
 4
 
-# FIXME: support table function with multiple columns
-# query IT
-# select series2(5);
+# TODO: support argument implicit cast for UDF
+# e.g. extract_tcp_info(E'\\x45');
+
+query T
+select extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
+----
+(192.168.0.14,192.168.0.1,861,8374)
+
+# FIXME: table function should return multiple columns
+# query TTII
+# select * from extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: bytea);
 # ----
-# (0,0)
-# (1,1)
-# (2,2)
-# (3,3)
-# (4,4)
+# 192.168.0.14 192.168.0.1 861 8374
 
 
 # TODO: drop function without arguments

@@ -1,3 +1,5 @@
+import socket
+import struct
 import sys
 from typing import Iterator
 sys.path.append('src/udf/python')  # noqa
@@ -28,10 +30,13 @@ def series(n: int) -> Iterator[int]:
         yield i
 
 
-@udtf(input_types=['INT'], result_types=['INT', 'VARCHAR'])
-def series2(n: int) -> Iterator[tuple[int, str]]:
-    for i in range(n):
-        yield i, str(i)
+@udtf(input_types=['BINARY'], result_types=['VARCHAR', 'VARCHAR', 'SMALLINT', 'SMALLINT'])
+def extract_tcp_info(tcp_packet: bytes) -> Iterator:
+    src_addr, dst_addr = struct.unpack('!4s4s', tcp_packet[12:20])
+    src_port, dst_port = struct.unpack('!HH', tcp_packet[20:24])
+    src_addr = socket.inet_ntoa(src_addr)
+    dst_addr = socket.inet_ntoa(dst_addr)
+    yield src_addr, dst_addr, src_port, dst_port
 
 
 if __name__ == '__main__':
@@ -40,5 +45,5 @@ if __name__ == '__main__':
     server.add_function(gcd)
     server.add_function(gcd3)
     server.add_function(series)
-    server.add_function(series2)
+    server.add_function(extract_tcp_info)
     server.serve()

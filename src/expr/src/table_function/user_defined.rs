@@ -52,12 +52,13 @@ impl TableFunction for UserDefinedTableFunction {
             arrow_array::RecordBatch::try_new_with_options(self.arg_schema.clone(), columns, &opts)
                 .expect("failed to build record batch");
         let output = self.client.call(&self.identifier, input).await?;
+        let array: arrow_array::ArrayRef = if output.num_columns() == 1 {
+            output.column(0).clone()
+        } else {
+            Arc::new(arrow_array::StructArray::from(output))
+        };
         // TODO: split by chunk_size
-        Ok(output
-            .columns()
-            .iter()
-            .map(|a| Arc::new(ArrayImpl::from(a)))
-            .collect())
+        Ok(vec![Arc::new(ArrayImpl::from(&array))])
     }
 }
 
