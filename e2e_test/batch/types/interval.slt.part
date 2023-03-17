@@ -120,4 +120,22 @@ select '1 mons 1 days 00:00:00.0000001'::INTERVAL;
 ----
 1 mon 1 day
 
+# parsing large values
+
+query T
+select '2562047788:00:54.775807'::interval;
+----
+2562047788:00:54.775807
+
+statement error
+select '2562047788:00:54.775808'::interval;
+
+query T
+select '4 years 2147483599 mon'::interval;
+----
+178956970 years 7 mons
+
+statement error
+select '4 years 2147483600 mon'::interval;
+
 # Tests moved from regress tests due to not matching exactly.

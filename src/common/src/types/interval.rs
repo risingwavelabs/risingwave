@@ -1138,7 +1138,7 @@ impl IntervalUnit {
         while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + (|| match interval_unit {
+                    result = (|| match interval_unit {
                         Year => {
                             let months = num.checked_mul(12)?.try_into().ok()?;
                             Some(IntervalUnit::from_month_day_usec(months, 0, 0))
@@ -1158,10 +1158,11 @@ impl IntervalUnit {
                             Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                     })()
+                    .and_then(|rhs| result.checked_add(&rhs))
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + match interval_unit {
+                    result = match interval_unit {
                         Second => {
                             // If unsatisfied precision is passed as input, we should not return None (Error).
                             let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
@@ -1169,6 +1170,7 @@ impl IntervalUnit {
                         }
                         _ => None,
                     }
+                    .and_then(|rhs| result.checked_add(&rhs))
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 _ => {
