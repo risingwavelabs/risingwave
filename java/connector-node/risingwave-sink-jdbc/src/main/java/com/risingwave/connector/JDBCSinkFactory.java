@@ -57,20 +57,17 @@ public class JDBCSinkFactory implements SinkFactory {
         Set<String> jdbcColumns = new HashSet<>();
         Set<String> jdbcPk = new HashSet<>();
 
-        try {
-            Connection conn = DriverManager.getConnection(jdbcUrl);
-
-            ResultSet columnResultSet = conn.getMetaData().getColumns(null, null, tableName, null);
+        try (Connection conn = DriverManager.getConnection(jdbcUrl);
+                ResultSet columnResultSet =
+                        conn.getMetaData().getColumns(null, null, tableName, null);
+                ResultSet pkResultSet =
+                        conn.getMetaData().getPrimaryKeys(null, null, tableName); ) {
             while (columnResultSet.next()) {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
-
-            ResultSet pkResultSet = conn.getMetaData().getPrimaryKeys(null, null, tableName);
             while (pkResultSet.next()) {
                 jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
             }
-
-            conn.close();
         } catch (SQLException e) {
             throw Status.INTERNAL.withCause(e).asRuntimeException();
         }
