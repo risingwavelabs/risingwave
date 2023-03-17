@@ -60,3 +60,7 @@
         └─BatchExchange { order: [], dist: Single }
           └─BatchFilter { predicate: (t.v1 <> t.v2) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t._row_id], distribution: UpstreamHashShard(t._row_id) }
+- sql: |
+    create table t (v1 int primary key, v2 int);
+    update t set (v2, v1) = (v1, v2);
+  binder_error: 'Bind error: update modifying the PK column is banned'
