@@ -104,6 +104,13 @@ export interface GroupMetaChange {
   tableIdsRemove: number[];
 }
 
+export interface GroupTableChange {
+  tableIds: number[];
+  targetGroupId: number;
+  originGroupId: number;
+  newSstStartId: number;
+}
+
 export interface GroupDestroy {
 }
 
@@ -112,7 +119,8 @@ export interface GroupDelta {
     | { $case: "intraLevel"; intraLevel: IntraLevelDelta }
     | { $case: "groupConstruct"; groupConstruct: GroupConstruct }
     | { $case: "groupDestroy"; groupDestroy: GroupDestroy }
-    | { $case: "groupMetaChange"; groupMetaChange: GroupMetaChange };
+    | { $case: "groupMetaChange"; groupMetaChange: GroupMetaChange }
+    | { $case: "groupTableChange"; groupTableChange: GroupTableChange };
 }
 
 export interface UncommittedEpoch {
@@ -1175,6 +1183,43 @@ export const GroupMetaChange = {
   },
 };
 
+function createBaseGroupTableChange(): GroupTableChange {
+  return { tableIds: [], targetGroupId: 0, originGroupId: 0, newSstStartId: 0 };
+}
+
+export const GroupTableChange = {
+  fromJSON(object: any): GroupTableChange {
+    return {
+      tableIds: Array.isArray(object?.tableIds) ? object.tableIds.map((e: any) => Number(e)) : [],
+      targetGroupId: isSet(object.targetGroupId) ? Number(object.targetGroupId) : 0,
+      originGroupId: isSet(object.originGroupId) ? Number(object.originGroupId) : 0,
+      newSstStartId: isSet(object.newSstStartId) ? Number(object.newSstStartId) : 0,
+    };
+  },
+
+  toJSON(message: GroupTableChange): unknown {
+    const obj: any = {};
+    if (message.tableIds) {
+      obj.tableIds = message.tableIds.map((e) => Math.round(e));
+    } else {
+      obj.tableIds = [];
+    }
+    message.targetGroupId !== undefined && (obj.targetGroupId = Math.round(message.targetGroupId));
+    message.originGroupId !== undefined && (obj.originGroupId = Math.round(message.originGroupId));
+    message.newSstStartId !== undefined && (obj.newSstStartId = Math.round(message.newSstStartId));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GroupTableChange>, I>>(object: I): GroupTableChange {
+    const message = createBaseGroupTableChange();
+    message.tableIds = object.tableIds?.map((e) => e) || [];
+    message.targetGroupId = object.targetGroupId ?? 0;
+    message.originGroupId = object.originGroupId ?? 0;
+    message.newSstStartId = object.newSstStartId ?? 0;
+    return message;
+  },
+};
+
 function createBaseGroupDestroy(): GroupDestroy {
   return {};
 }
@@ -1210,6 +1255,8 @@ export const GroupDelta = {
         ? { $case: "groupDestroy", groupDestroy: GroupDestroy.fromJSON(object.groupDestroy) }
         : isSet(object.groupMetaChange)
         ? { $case: "groupMetaChange", groupMetaChange: GroupMetaChange.fromJSON(object.groupMetaChange) }
+        : isSet(object.groupTableChange)
+        ? { $case: "groupTableChange", groupTableChange: GroupTableChange.fromJSON(object.groupTableChange) }
         : undefined,
     };
   },
@@ -1227,6 +1274,9 @@ export const GroupDelta = {
       : undefined);
     message.deltaType?.$case === "groupMetaChange" && (obj.groupMetaChange = message.deltaType?.groupMetaChange
       ? GroupMetaChange.toJSON(message.deltaType?.groupMetaChange)
+      : undefined);
+    message.deltaType?.$case === "groupTableChange" && (obj.groupTableChange = message.deltaType?.groupTableChange
+      ? GroupTableChange.toJSON(message.deltaType?.groupTableChange)
       : undefined);
     return obj;
   },
@@ -1268,6 +1318,16 @@ export const GroupDelta = {
       message.deltaType = {
         $case: "groupMetaChange",
         groupMetaChange: GroupMetaChange.fromPartial(object.deltaType.groupMetaChange),
+      };
+    }
+    if (
+      object.deltaType?.$case === "groupTableChange" &&
+      object.deltaType?.groupTableChange !== undefined &&
+      object.deltaType?.groupTableChange !== null
+    ) {
+      message.deltaType = {
+        $case: "groupTableChange",
+        groupTableChange: GroupTableChange.fromPartial(object.deltaType.groupTableChange),
       };
     }
     return message;

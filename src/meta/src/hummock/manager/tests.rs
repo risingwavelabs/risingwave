@@ -60,14 +60,14 @@ fn pin_snapshots_epoch(pin_snapshots: &[HummockPinnedSnapshot]) -> Vec<u64> {
 
 fn gen_sstable_info(sst_id: u64, idx: usize, table_ids: Vec<u32>) -> SstableInfo {
     SstableInfo {
-        id: sst_id,
+        sst_id,
         key_range: Some(KeyRange {
             left: iterator_test_key_of_epoch(1, idx, 1),
             right: iterator_test_key_of_epoch(1, idx, 1),
             right_exclusive: false,
         }),
         table_ids,
-        divide_version: 0,
+        object_id: sst_id,
         min_epoch: 20,
         max_epoch: 20,
         ..Default::default()
@@ -93,7 +93,7 @@ fn get_compaction_group_object_ids(
     get_compaction_group_ssts(version, group_id)
         .into_iter()
         .map(|(object_id, _)| object_id)
-        .collect_vec(
+        .collect_vec()
 }
 
 #[tokio::test]
@@ -1415,7 +1415,7 @@ async fn test_split_compaction_group_on_commit() {
 
 async fn get_branched_ssts<S: MetaStore>(
     hummock_manager: &HummockManager<S>,
-) -> BTreeMap<HummockSstableObjectId, BTreeMap<CompactionGroupId, Vec<HummockSstableId>>> {
+) -> BTreeMap<HummockSstableObjectId, BTreeMap<CompactionGroupId, HummockSstableId>> {
     hummock_manager
         .versioning
         .read(&["", "", ""])
@@ -1556,7 +1556,7 @@ async fn test_split_compaction_group_on_demand_basic() {
                 .get(&new_group_id)
                 .cloned()
                 .unwrap(),
-            vec![object_id],
+            object_id,
             "trivial adjust should also generate a new SST id"
         );
     }
@@ -1625,7 +1625,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
     assert_eq!(branched_ssts.len(), 1);
     assert_eq!(branched_ssts.get(&10).unwrap().len(), 2);
     let sst_ids = branched_ssts.get(&10).unwrap().get(&2).cloned().unwrap();
-    assert_ne!(sst_ids, vec![10]);
+    assert_ne!(sst_ids, 10);
     assert_ne!(
         branched_ssts
             .get(&10)
@@ -1642,7 +1642,7 @@ async fn test_split_compaction_group_on_demand_non_trivial() {
             .get(&new_group_id)
             .cloned()
             .unwrap(),
-        vec![10],
+        10,
     );
 }
 

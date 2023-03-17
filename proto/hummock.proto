@@ -75,6 +75,7 @@ message GroupTableChange {
   repeated uint32 table_ids = 1;
   uint64 target_group_id = 2;
   uint64 origin_group_id = 3;
+  uint64 new_sst_start_id = 4;
 }
 
 message GroupDestroy {}

@@ -62,7 +62,7 @@ impl<S: MetaStore> HummockManager<S> {
     ) -> Result<RwLock<CompactionGroupManager>> {
         let compaction_group_manager = RwLock::new(CompactionGroupManager {
             compaction_groups: BTreeMap::new(),
-            provided_default_config_for_test: config,
+            default_config: config,
         });
         compaction_group_manager
             .write()
@@ -467,12 +467,32 @@ impl<S: MetaStore> HummockManager<S> {
                 parent_group_id
             )));
         }
+        if let Some(compaction_group_id) = target_group_id {
+            if !versioning
+                .check_branched_sst_in_target_group(&parent_group_id, &compaction_group_id)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "invalid split attempt for group {}: we shall wait some time for parent group and target group could compact stale sst files",
+                    parent_group_id
+                )));
+            }
+        }
 
         let mut new_version_delta = BTreeMapEntryTransaction::new_insert(
             &mut versioning.hummock_version_deltas,
             current_version.id + 1,
             build_version_delta_after_version(current_version),
         );
+        let new_sst_start_id = self
+            .env
+            .id_gen_manager()
+            .generate_interval::<{ IdCategory::HummockSstableId }>(
+                current_version.count_new_ssts_in_group_split(
+                    parent_group_id,
+                    HashSet::from_iter(table_ids.clone()),
+                ),
+            )
+            .await?;
         let target_compaction_group_id = match target_group_id {
             Some(compaction_group_id) => {
                 match current_version.levels.get(&compaction_group_id) {
@@ -503,6 +523,7 @@ impl<S: MetaStore> HummockManager<S> {
                         table_ids: table_ids.to_vec(),
                         origin_group_id: parent_group_id,
                         target_group_id: compaction_group_id,
+                        new_sst_start_id,
                     })),
                 });
                 compaction_group_id
@@ -529,6 +550,7 @@ impl<S: MetaStore> HummockManager<S> {
                                 group_config: Some(config),
                                 group_id: new_compaction_group_id,
                                 parent_group_id,
+                                new_sst_start_id,
                                 table_ids: table_ids.to_vec(),
                             })),
                         }],
@@ -548,60 +570,6 @@ impl<S: MetaStore> HummockManager<S> {
                 new_compaction_group_id
             }
         };
-        // Remove tables from parent group.
-        for table_id in &table_ids {
-            let group_deltas = &mut new_version_delta
-                .group_deltas
-                .entry(parent_group_id)
-                .or_default()
-                .group_deltas;
-            group_deltas.push(GroupDelta {
-                delta_type: Some(DeltaType::GroupMetaChange(GroupMetaChange {
-                    table_ids_remove: vec![*table_id],
-                    ..Default::default()
-                })),
-            });
-        }
-
-        // Add tables to new group.
-        let new_group_id = self
-            .env
-            .id_gen_manager()
-            .generate::<{ IdCategory::CompactionGroup }>()
-            .await?;
-        let new_sst_start_id = self
-            .env
-            .id_gen_manager()
-            .generate_interval::<{ IdCategory::HummockSstableId }>(
-                versioning.current_version.count_new_ssts_in_group_split(
-                    parent_group_id,
-                    &HashSet::from_iter(table_ids.iter().cloned()),
-                ),
-            )
-            .await?;
-        let group_deltas = &mut new_version_delta
-            .group_deltas
-            .entry(new_group_id)
-            .or_default()
-            .group_deltas;
-        let config = self
-            .compaction_group_manager
-            .read()
-            .await
-            .get_compaction_group_config(new_group_id)
-            .compaction_config
-            .as_ref()
-            .clone();
-        group_deltas.push(GroupDelta {
-            delta_type: Some(DeltaType::GroupConstruct(GroupConstruct {
-                group_config: Some(config),
-                group_id: new_group_id,
-                parent_group_id,
-                table_ids,
-                new_sst_start_id,
-            })),
-        });
-
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
@@ -610,33 +578,27 @@ impl<S: MetaStore> HummockManager<S> {
             .current_version
             .apply_version_delta(&new_version_delta);
         // Updates SST split info
-        for (object_id, sst_id, parent_old_sst_id, parent_new_sst_id) in sst_split_info {
+        for (object_id, sst_id, _parent_old_sst_id, parent_new_sst_id) in sst_split_info {
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
-                    let p = entry.get_mut(&parent_group_id).unwrap();
-                    let parent_pos = p.iter().position(|id| *id == parent_old_sst_id).unwrap();
                     if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        p[parent_pos] = parent_new_sst_id;
+                        entry.entry(target_compaction_group_id).or_insert(sst_id);
+                        entry.insert(parent_group_id, parent_new_sst_id);
                     } else {
-                        p.remove(parent_pos);
-                        if p.is_empty() {
-                            entry.remove(&parent_group_id);
-                        }
+                        entry.remove(&parent_group_id);
+                        entry.insert(target_compaction_group_id, sst_id);
                     }
-                    entry.entry(new_group_id).or_default().push(sst_id);
                 }
                 None => {
                     branched_ssts.insert(
                         object_id,
                         if let Some(parent_new_sst_id) = parent_new_sst_id {
-                            [
-                                (parent_group_id, vec![parent_new_sst_id]),
-                                (new_group_id, vec![sst_id]),
-                            ]
-                            .into_iter()
-                            .collect()
+                            HashMap::from_iter([
+                                (parent_group_id, parent_new_sst_id),
+                                (target_compaction_group_id, sst_id),
+                            ])
                         } else {
-                            [(new_group_id, vec![sst_id])].into_iter().collect()
+                            HashMap::from_iter([(target_compaction_group_id, sst_id)])
                         },
                     );
                 }
@@ -652,8 +614,7 @@ impl<S: MetaStore> HummockManager<S> {
 #[derive(Default)]
 pub(super) struct CompactionGroupManager {
     compaction_groups: BTreeMap<CompactionGroupId, CompactionGroup>,
-    /// Provided default config, only used in test.
-    provided_default_config_for_test: CompactionConfig,
+    default_config: CompactionConfig,
 }
 
 impl CompactionGroupManager {
@@ -689,9 +650,11 @@ impl CompactionGroupManager {
         compaction_group_ids
             .iter()
             .map(|id| {
-                let group = self.compaction_groups.get(id).cloned().unwrap_or_else(|| {
-                    CompactionGroup::new(*id, self.provided_default_config_for_test.clone())
-                });
+                let group = self
+                    .compaction_groups
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| CompactionGroup::new(*id, self.default_config.clone()));
                 (*id, group)
             })
             .collect()
@@ -712,10 +675,7 @@ impl CompactionGroupManager {
             if !compaction_groups.contains_key(compaction_group_id) {
                 compaction_groups.insert(
                     *compaction_group_id,
-                    CompactionGroup::new(
-                        *compaction_group_id,
-                        self.provided_default_config_for_test.clone(),
-                    ),
+                    CompactionGroup::new(*compaction_group_id, self.default_config.clone()),
                 );
             }
             let group = compaction_groups.get(compaction_group_id).unwrap();

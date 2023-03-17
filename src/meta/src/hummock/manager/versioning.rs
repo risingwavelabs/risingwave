@@ -18,9 +18,11 @@ use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    get_compaction_group_ids, BranchedSstInfo,
+};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -60,8 +62,6 @@ impl Drop for HummockVersionSafePoint {
     }
 }
 
-pub type BranchedSstInfo = HashMap<CompactionGroupId, /* divide version */ u64>;
-
 #[derive(Default)]
 pub struct Versioning {
     // Volatile states below
@@ -85,7 +85,7 @@ pub struct Versioning {
     pub branched_ssts: BTreeMap<
         // SST object id
         HummockSstableObjectId,
-        BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
+        BranchedSstInfo,
     >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
     /// Hummock versions GE than min(safe_point) should not be GCed.
@@ -150,6 +150,21 @@ impl Versioning {
             // Otherwise, the delta is qualified for deletion after all its sst_to_delete is
             // deleted.
         }
+    }
+
+    /// If there is some sst in the target group which is just split but we have not compact it, we
+    ///  can not split or move state-table to those group, because it may cause data overlap.
+    pub fn check_branched_sst_in_target_group(
+        &self,
+        source_group_id: &CompactionGroupId,
+        target_group_id: &CompactionGroupId,
+    ) -> bool {
+        for groups in self.branched_ssts.values() {
+            if groups.contains_key(target_group_id) && groups.contains_key(source_group_id) {
+                return false;
+            }
+        }
+        true
     }
 }
 
