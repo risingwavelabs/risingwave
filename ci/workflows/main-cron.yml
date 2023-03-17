@@ -103,7 +103,7 @@ steps:
     retry: *auto-retry
 
   - label: "fuzz test"
-    command: "ci/scripts/cron-fuzz-test.sh -p ci-dev"
+    command: "ci/scripts/cron-fuzz-test.sh -p ci-release"
     depends_on:
       - "build"
       - "build-simulation"
