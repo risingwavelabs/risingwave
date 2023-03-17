@@ -1004,7 +1004,9 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
         convert_digit(&mut num_buf, &mut tokens)?;
     }
     convert_unit(&mut char_buf, &mut tokens)?;
-    convert_hms(&mut hour_min_sec, &mut tokens)?;
+    convert_hms(&mut hour_min_sec, &mut tokens).ok_or_else(|| {
+        ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", hour_min_sec))
+    })?;
 
     Ok(tokens)
 }
@@ -1040,34 +1042,46 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
 /// [`TimeStrToken::Num(1)`, `TimeStrToken::TimeUnit(DateTimeField::Hour)`,
 ///  `TimeStrToken::Num(2)`, `TimeStrToken::TimeUnit(DateTimeField::Minute)`,
 ///  `TimeStrToken::Second("3")`, `TimeStrToken::TimeUnit(DateTimeField::Second)`]
-fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Result<()> {
+fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
-        return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", c)).into());
+        return None;
     }
+    let mut is_neg = false;
     for (i, s) in c.iter().enumerate() {
         match i {
             0 => {
-                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+                let v = s.parse().ok()?;
+                is_neg = v < 0;
+                t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
             }
             1 => {
-                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+                let mut v: i64 = s.parse().ok()?;
+                if !(0..60).contains(&v) {
+                    return None;
+                }
+                if is_neg {
+                    v = v.checked_neg()?;
+                }
+                t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
             }
             2 => {
-                t.push(TimeStrToken::Second(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+                let mut v: OrderedF64 = s.parse().ok()?;
+                // PostgreSQL allows '60.x' for seconds.
+                if !(0f64 <= *v && *v < 61f64) {
+                    return None;
+                }
+                if is_neg {
+                    v = v.checked_neg()?;
+                }
+                t.push(TimeStrToken::Second(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
             }
             _ => unreachable!(),
         }
     }
-    Ok(())
+    Some(())
 }
 
 impl IntervalUnit {

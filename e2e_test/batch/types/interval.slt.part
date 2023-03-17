@@ -138,4 +138,9 @@ select '4 years 2147483599 mon'::interval;
 statement error
 select '4 years 2147483600 mon'::interval;
 
+query T
+select '-2562047788:00:54.775807'::interval;
+----
+-2562047788:00:54.775807
+
 # Tests moved from regress tests due to not matching exactly.
