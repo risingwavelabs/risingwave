@@ -22,9 +22,9 @@ use risingwave_common::telemetry::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::model::{MetadataModelError, MetadataModelResult};
-use crate::storage::{MetaStore, Snapshot};
+use crate::storage::MetaStore;
 
+/// Column in meta store
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
