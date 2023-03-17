@@ -27,7 +27,7 @@ public abstract class SourceHandlerFactory {
     public static SourceHandler createSourceHandler(
             SourceTypeE source, long sourceId, String startOffset, Map<String, String> userProps) {
         var config = new DbzConnectorConfig(source, sourceId, startOffset, userProps);
-        LOG.info("resolved dbzdbzProps: {}", config.getResolvedDebeziumProps());
+        LOG.info("resolved dbzProps: {}", config.getResolvedDebeziumProps());
         return new DbzSourceHandler(config);
     }
 }
