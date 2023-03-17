@@ -16,8 +16,8 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use super::{KeyPrefix, LenType, RestartPoint};
 use crate::hummock::BlockHolder;
@@ -75,9 +75,14 @@ impl BlockIterator {
         self.try_prev_inner()
     }
 
+    pub fn table_id(&self) -> TableId {
+        self.block.table_id()
+    }
+
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
-        FullKey::decode(&self.key)
+
+        FullKey::from_slice_without_table_id(self.table_id(), &self.key[..])
     }
 
     pub fn value(&self) -> &[u8] {
@@ -99,19 +104,19 @@ impl BlockIterator {
     }
 
     pub fn seek(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        self.seek_restart_point_by_key(key);
+
+        self.next_until_key(key);
     }
 
     pub fn seek_le(&mut self, key: FullKey<&[u8]>) {
-        let full_key_encoded = key.encode();
-        self.seek_restart_point_by_key(&full_key_encoded);
-        self.next_until_key(&full_key_encoded);
+        self.seek_restart_point_by_key(key);
+
+        self.next_until_key(key);
         if !self.is_valid() {
             self.seek_to_last();
         }
-        self.prev_until_key(&full_key_encoded);
+        self.prev_until_key(key);
     }
 }
 
@@ -171,19 +176,15 @@ impl BlockIterator {
     }
 
     /// Moves forward until reaching the first that equals or larger than the given `key`.
-    fn next_until_key(&mut self, key: &[u8]) {
-        while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Less
-        {
+    fn next_until_key(&mut self, key: FullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Less {
             self.next_inner();
         }
     }
 
     /// Moves backward until reaching the first key that equals or smaller than the given `key`.
-    fn prev_until_key(&mut self, key: &[u8]) {
-        while self.is_valid()
-            && KeyComparator::compare_encoded_full_key(&self.key[..], key) == Ordering::Greater
-        {
+    fn prev_until_key(&mut self, key: FullKey<&[u8]>) {
+        while self.is_valid() && self.key().cmp(&key) == Ordering::Greater {
             self.prev_inner();
         }
     }
@@ -240,7 +241,7 @@ impl BlockIterator {
     }
 
     /// Searches the restart point index that the given `key` belongs to.
-    fn search_restart_point_index_by_key(&self, key: &[u8]) -> usize {
+    fn search_restart_point_index_by_key(&self, key: FullKey<&[u8]>) -> usize {
         // Find the largest restart point that restart key equals or less than the given key.
         self.block
             .search_restart_partition_point(
@@ -252,7 +253,9 @@ impl BlockIterator {
                     let prefix =
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
                     let probe_key = &self.block.data()[prefix.diff_key_range()];
-                    match KeyComparator::compare_encoded_full_key(probe_key, key) {
+                    let full_probe_key =
+                        FullKey::from_slice_without_table_id(self.block.table_id(), probe_key);
+                    match full_probe_key.cmp(&key) {
                         Ordering::Less | Ordering::Equal => true,
                         Ordering::Greater => false,
                     }
@@ -262,7 +265,7 @@ impl BlockIterator {
     }
 
     /// Seeks to the restart point that the given `key` belongs to.
-    fn seek_restart_point_by_key(&mut self, key: &[u8]) {
+    fn seek_restart_point_by_key(&mut self, key: FullKey<&[u8]>) {
         let index = self.search_restart_point_index_by_key(key);
         self.seek_restart_point_by_index(index)
     }

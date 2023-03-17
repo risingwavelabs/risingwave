@@ -22,6 +22,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{DataType as AstDataType, Distinct, Expr, Select, SelectItem};
 
 use super::bind_context::{Clause, ColumnBinding};
+use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
 use crate::binder::{Binder, Relation};
 use crate::catalog::check_valid_column_name;
@@ -42,6 +43,33 @@ pub struct BoundSelect {
     pub group_by: Vec<ExprImpl>,
     pub having: Option<ExprImpl>,
     schema: Schema,
+}
+
+impl RewriteExprsRecursive for BoundSelect {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        self.distinct.rewrite_exprs_recursive(rewriter);
+
+        let new_select_items = std::mem::take(&mut self.select_items)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.select_items = new_select_items;
+
+        if let Some(from) = &mut self.from {
+            from.rewrite_exprs_recursive(rewriter);
+        }
+
+        self.where_clause =
+            std::mem::take(&mut self.where_clause).map(|expr| rewriter.rewrite_expr(expr));
+
+        let new_group_by = std::mem::take(&mut self.group_by)
+            .into_iter()
+            .map(|expr| rewriter.rewrite_expr(expr))
+            .collect::<Vec<_>>();
+        self.group_by = new_group_by;
+
+        self.having = std::mem::take(&mut self.having).map(|expr| rewriter.rewrite_expr(expr));
+    }
 }
 
 impl BoundSelect {
@@ -102,6 +130,18 @@ pub enum BoundDistinct {
     All,
     Distinct,
     DistinctOn(Vec<ExprImpl>),
+}
+
+impl RewriteExprsRecursive for BoundDistinct {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        if let Self::DistinctOn(exprs) = self {
+            let new_exprs = std::mem::take(exprs)
+                .into_iter()
+                .map(|expr| rewriter.rewrite_expr(expr))
+                .collect::<Vec<_>>();
+            exprs.extend(new_exprs);
+        }
+    }
 }
 
 impl BoundDistinct {

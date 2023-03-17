@@ -6103,11 +6103,13 @@ dependencies = [
  "anyhow",
  "arrow-array",
  "arrow-schema",
+ "async-trait",
  "chrono",
  "chrono-tz",
  "criterion",
  "dyn-clone",
  "either",
+ "futures-util",
  "itertools",
  "madsim-tokio",
  "md5",
@@ -6120,6 +6122,7 @@ dependencies = [
  "risingwave_pb",
  "risingwave_udf",
  "speedate",
+ "static_assertions",
  "thiserror",
  "workspace-hack",
 ]
@@ -6145,6 +6148,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "iana-time-zone",
  "itertools",
  "lazy_static",
  "madsim-tokio",
@@ -6344,6 +6348,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "0.2.0-alpha"
 dependencies = [
+ "enum-as-inner",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -6662,6 +6667,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "serde_json",
  "smallvec",
  "static_assertions",
  "task_stats_alloc",
@@ -8239,7 +8245,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
- "rand 0.8.5",
+ "rand 0.7.3",
  "static_assertions",
 ]
 

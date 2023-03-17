@@ -204,6 +204,7 @@ export interface Function {
   name: string;
   owner: number;
   argTypes: DataType[];
+  returnType: DataType | undefined;
   language: string;
   link: string;
   identifier: string;
@@ -214,11 +215,9 @@ export interface Function {
 }
 
 export interface Function_ScalarFunction {
-  returnType: DataType | undefined;
 }
 
 export interface Function_TableFunction {
-  returnTypes: DataType[];
 }
 
 export interface Function_AggregateFunction {
@@ -264,6 +263,10 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflictBehavior: HandleConflictBehavior;
+  /**
+   * Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+   * for implementing the table's bloom filter or other storage optimization techniques.
+   */
   readPrefixLenHint: number;
   watermarkIndices: number[];
   distKeyInPk: number[];
@@ -824,6 +827,7 @@ function createBaseFunction(): Function {
     name: "",
     owner: 0,
     argTypes: [],
+    returnType: undefined,
     language: "",
     link: "",
     identifier: "",
@@ -842,6 +846,7 @@ export const Function = {
       argTypes: Array.isArray(object?.argTypes)
         ? object.argTypes.map((e: any) => DataType.fromJSON(e))
         : [],
+      returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined,
       language: isSet(object.language) ? String(object.language) : "",
       link: isSet(object.link) ? String(object.link) : "",
       identifier: isSet(object.identifier) ? String(object.identifier) : "",
@@ -867,6 +872,8 @@ export const Function = {
     } else {
       obj.argTypes = [];
     }
+    message.returnType !== undefined &&
+      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     message.language !== undefined && (obj.language = message.language);
     message.link !== undefined && (obj.link = message.link);
     message.identifier !== undefined && (obj.identifier = message.identifier);
@@ -889,6 +896,9 @@ export const Function = {
     message.name = object.name ?? "";
     message.owner = object.owner ?? 0;
     message.argTypes = object.argTypes?.map((e) => DataType.fromPartial(e)) || [];
+    message.returnType = (object.returnType !== undefined && object.returnType !== null)
+      ? DataType.fromPartial(object.returnType)
+      : undefined;
     message.language = object.language ?? "";
     message.link = object.link ?? "";
     message.identifier = object.identifier ?? "";
@@ -906,54 +916,41 @@ export const Function = {
 };
 
 function createBaseFunction_ScalarFunction(): Function_ScalarFunction {
-  return { returnType: undefined };
+  return {};
 }
 
 export const Function_ScalarFunction = {
-  fromJSON(object: any): Function_ScalarFunction {
-    return { returnType: isSet(object.returnType) ? DataType.fromJSON(object.returnType) : undefined };
+  fromJSON(_: any): Function_ScalarFunction {
+    return {};
   },
 
-  toJSON(message: Function_ScalarFunction): unknown {
+  toJSON(_: Function_ScalarFunction): unknown {
     const obj: any = {};
-    message.returnType !== undefined &&
-      (obj.returnType = message.returnType ? DataType.toJSON(message.returnType) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(object: I): Function_ScalarFunction {
+  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(_: I): Function_ScalarFunction {
     const message = createBaseFunction_ScalarFunction();
-    message.returnType = (object.returnType !== undefined && object.returnType !== null)
-      ? DataType.fromPartial(object.returnType)
-      : undefined;
     return message;
   },
 };
 
 function createBaseFunction_TableFunction(): Function_TableFunction {
-  return { returnTypes: [] };
+  return {};
 }
 
 export const Function_TableFunction = {
-  fromJSON(object: any): Function_TableFunction {
-    return {
-      returnTypes: Array.isArray(object?.returnTypes) ? object.returnTypes.map((e: any) => DataType.fromJSON(e)) : [],
-    };
+  fromJSON(_: any): Function_TableFunction {
+    return {};
   },
 
-  toJSON(message: Function_TableFunction): unknown {
+  toJSON(_: Function_TableFunction): unknown {
     const obj: any = {};
-    if (message.returnTypes) {
-      obj.returnTypes = message.returnTypes.map((e) => e ? DataType.toJSON(e) : undefined);
-    } else {
-      obj.returnTypes = [];
-    }
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(object: I): Function_TableFunction {
+  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(_: I): Function_TableFunction {
     const message = createBaseFunction_TableFunction();
-    message.returnTypes = object.returnTypes?.map((e) => DataType.fromPartial(e)) || [];
     return message;
   },
 };
