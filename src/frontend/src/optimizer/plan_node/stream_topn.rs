@@ -15,7 +15,7 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::{ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Distribution, Order};
@@ -93,7 +93,7 @@ impl PlanTreeNodeUnary for StreamTopN {
 impl_plan_tree_node_for_unary! { StreamTopN }
 
 impl StreamNode for StreamTopN {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let topn_node = TopNNode {
             limit: self.limit(),
@@ -108,9 +108,9 @@ impl StreamNode for StreamTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            ProstStreamNode::AppendOnlyTopN(topn_node)
+            PbNodeBody::AppendOnlyTopN(topn_node)
         } else {
-            ProstStreamNode::TopN(topn_node)
+            PbNodeBody::TopN(topn_node)
         }
     }
 }

@@ -22,13 +22,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `HummockPinnedSnapshot` tracks pinned snapshots by given context id.
 impl MetadataModel for HummockPinnedSnapshot {
     type KeyType = HummockContextId;
-    type ProstType = HummockPinnedSnapshot;
+    type PbType = HummockPinnedSnapshot;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_PINNED_SNAPSHOT_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -36,7 +36,7 @@ impl MetadataModel for HummockPinnedSnapshot {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

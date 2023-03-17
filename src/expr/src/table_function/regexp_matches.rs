@@ -103,7 +103,7 @@ impl TableFunction for RegexpMatches {
 }
 
 pub fn new_regexp_matches(
-    prost: &TableFunctionProst,
+    prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     ensure!(
