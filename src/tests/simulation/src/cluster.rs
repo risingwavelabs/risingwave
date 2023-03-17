@@ -29,6 +29,14 @@ use sqllogictest::AsyncDB;
 
 use crate::client::RisingWave;
 
+/// Embed the config file and create a temporary file at runtime.
+static CONFIG_PATH: LazyLock<tempfile::TempPath> = LazyLock::new(|| {
+    let mut file = tempfile::NamedTempFile::new().expect("failed to create temp config file");
+    file.write_all(include_bytes!("risingwave.toml"))
+        .expect("failed to write config file");
+    file.into_temp_path()
+});
+
 /// RisingWave cluster configuration.
 #[derive(Debug, Clone)]
 pub struct Configuration {
@@ -45,9 +53,6 @@ pub struct Configuration {
 
     /// The number of meta nodes.
     pub meta_nodes: usize,
-
-    /// Extra CLI arguments for meta nodes.
-    pub meta_node_extra_args: Vec<&'static str>,
 
     /// The number of compactor nodes.
     pub compactor_nodes: usize,
@@ -68,16 +73,10 @@ impl Configuration {
     /// Returns the config for scale test.
     pub fn for_scale() -> Self {
         Configuration {
-            config_path: "".to_string(),
+            config_path: CONFIG_PATH.as_os_str().to_string_lossy().into(),
             frontend_nodes: 2,
             compute_nodes: 3,
             meta_nodes: 1,
-            meta_node_extra_args: vec![
-                "--barrier-interval-ms",
-                "250",
-                "--checkpoint-frequency",
-                "4",
-            ],
             compactor_nodes: 2,
             compute_node_cores: 2,
             etcd_timeout_rate: 0.0,
@@ -198,20 +197,17 @@ impl Cluster {
         for i in 1..=conf.meta_nodes {
             let opts = risingwave_meta::MetaNodeOpts::parse_from(
                 [
-                    vec![
-                        "meta-node",
-                        "--config-path",
-                        &conf.config_path,
-                        "--listen-addr",
-                        "0.0.0.0:5690",
-                        "--advertise-addr",
-                        &format!("meta-{i}:5690"),
-                        "--backend",
-                        "etcd",
-                        "--etcd-endpoints",
-                        "etcd:2388",
-                    ],
-                    conf.meta_node_extra_args.clone(),
+                    "meta-node",
+                    "--config-path",
+                    &conf.config_path,
+                    "--listen-addr",
+                    "0.0.0.0:5690",
+                    "--advertise-addr",
+                    &format!("meta-{i}:5690"),
+                    "--backend",
+                    "etcd",
+                    "--etcd-endpoints",
+                    "etcd:2388",
                 ]
                 .concat(),
             );
