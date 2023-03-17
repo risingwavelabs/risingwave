@@ -6,8 +6,8 @@ CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
         unnest(regexp_matches(tweet.text, '#\w+', 'g')) AS hashtag,
         tweet.created_at AS created_at
     FROM
-        tweet, user
-    WHERE
+        tweet JOIN user
+    ON
         tweet.author_id = user.id
 )
 SELECT

@@ -17,7 +17,7 @@ create table user (
 );
 
 
-create table (
+create table hot_hashtags (
     `window_start` timestamp not null,
     `hashtag` varchar(100) not null,
     `hashtag_occurrences` bigint not null,

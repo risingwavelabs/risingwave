@@ -1,9 +1,9 @@
-CREATE TABLE `tweet` (
-  id varchar NOT NULL,
-  text varchar DEFAULT NULL,
-  lang varchar DEFAULT NULL,
-  created_at timestamp NULL DEFAULT NULL,
-  author_id varchar NOT NULL,
+CREATE TABLE tweet (
+  id varchar,
+  text varchar,
+  lang varchar,
+  created_at timestamp,
+  author_id varchar,
   PRIMARY KEY (id)
 ) WITH (
     connector='kafka',
@@ -13,11 +13,11 @@ CREATE TABLE `tweet` (
 ) ROW FORMAT CANAL_JSON;
 
 create table user (
-    id varchar NOT NULL,
-    name varchar DEFAULT NULL,
-    username varchar DEFAULT NULL,
-    followers bigint not null,
-    created_at timestamp NULL DEFAULT NULL,
+    id varchar,
+    name varchar,
+    username varchar,
+    followers bigint,
+    created_at timestamp,
     PRIMARY KEY (id)
 ) WITH (
     connector='kafka',

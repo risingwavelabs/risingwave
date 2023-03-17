@@ -33,6 +33,10 @@ services:
     extends:
       file: ../../docker/docker-compose.yml
       service: prometheus-0
+  connector-node:
+    extends:
+      file: ../../docker/docker-compose.yml
+      service: connector-node
 
   #=================== TiDB & TiCDC components ==================
   ticdc-controller:
@@ -200,17 +204,17 @@ services:
     restart: always
     container_name: datagen
 
-  datagen:
+  init_tidb:
     image: mysql:8.0
     depends_on: 
       - tidb
     command:
       - /bin/sh
       - -c
-      - "mysql --password= -h tidb --port 4000 test < tidb_create_tables.sql"
+      - "mysql --password= -h tidb --port 4000 -u root test < tidb_create_tables.sql"
     volumes:
       - "./tidb_create_tables.sql:/tidb_create_tables.sql"      
-    container_name: datagen
+    container_name: init_tidb
     restart: on-failure
 
 volumes:
