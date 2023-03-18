@@ -12,5 +12,5 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod filter_with_now_to_join_rule;
 pub(crate) mod bushy_tree_join_ordering_rule;
+pub(crate) mod filter_with_now_to_join_rule;
