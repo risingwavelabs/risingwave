@@ -22,7 +22,7 @@ use risingwave_common::error::RwError;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::catalog::WatermarkDesc;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -141,7 +141,7 @@ pub fn infer_internal_table_catalog(watermark_type: DataType) -> TableCatalog {
 }
 
 impl StreamNode for StreamWatermarkFilter {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
         // TODO(yuhao): allow multiple watermark on source.
@@ -150,7 +150,7 @@ impl StreamNode for StreamWatermarkFilter {
 
         let table = infer_internal_table_catalog(watermark_type);
 
-        ProstStreamNode::WatermarkFilter(WatermarkFilterNode {
+        PbNodeBody::WatermarkFilter(WatermarkFilterNode {
             watermark_descs: self.watermark_descs.clone(),
             tables: vec![table
                 .with_id(state.gen_table_id_wrapped())

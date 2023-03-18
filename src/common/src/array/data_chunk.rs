@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 
 use super::{ArrayResult, Vis};
 use crate::array::column::Column;
@@ -152,12 +152,12 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> ProstDataChunk {
+    pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
             "must be compacted before transfer"
         );
-        let mut proto = ProstDataChunk {
+        let mut proto = PbDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
@@ -189,7 +189,7 @@ impl DataChunk {
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;

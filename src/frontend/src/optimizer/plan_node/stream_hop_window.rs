@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::HopWindowNode;
 
 use super::{ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -118,8 +118,8 @@ impl PlanTreeNodeUnary for StreamHopWindow {
 impl_plan_tree_node_for_unary! {StreamHopWindow}
 
 impl StreamNode for StreamHopWindow {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::HopWindow(HopWindowNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::HopWindow(HopWindowNode {
             time_col: self.logical.core.time_col.index() as _,
             window_slide: Some(self.logical.core.window_slide.into()),
             window_size: Some(self.logical.core.window_size.into()),

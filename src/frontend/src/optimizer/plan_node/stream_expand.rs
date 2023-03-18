@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::expand_node::Subset;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ExpandNode;
 
 use super::{ExprRewritable, LogicalExpand, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -86,8 +86,8 @@ impl PlanTreeNodeUnary for StreamExpand {
 impl_plan_tree_node_for_unary! { StreamExpand }
 
 impl StreamNode for StreamExpand {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Expand(ExpandNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Expand(ExpandNode {
             column_subsets: self
                 .column_subsets()
                 .iter()

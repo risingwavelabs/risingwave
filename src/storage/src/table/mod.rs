@@ -33,7 +33,7 @@ pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 #[derive(Debug)]
 pub struct Distribution {
     /// Indices of distribution key for computing vnode, based on the all columns of the table.
-    pub dist_key_indices: Vec<usize>,
+    pub dist_key_in_pk_indices: Vec<usize>,
 
     /// Virtual nodes that the table is partitioned into.
     pub vnodes: Arc<Bitmap>,
@@ -49,7 +49,7 @@ impl Distribution {
             vnodes.finish().into()
         });
         Self {
-            dist_key_indices: vec![],
+            dist_key_in_pk_indices: vec![],
             vnodes: FALLBACK_VNODES.clone(),
         }
     }
@@ -66,12 +66,12 @@ impl Distribution {
     }
 
     /// Distribution that accesses all vnodes, mainly used for tests.
-    pub fn all_vnodes(dist_key_indices: Vec<usize>) -> Self {
+    pub fn all_vnodes(dist_key_in_pk_indices: Vec<usize>) -> Self {
         /// A bitmap that all vnodes are set.
         static ALL_VNODES: LazyLock<Arc<Bitmap>> =
             LazyLock::new(|| Bitmap::ones(VirtualNode::COUNT).into());
         Self {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes: ALL_VNODES.clone(),
         }
     }
