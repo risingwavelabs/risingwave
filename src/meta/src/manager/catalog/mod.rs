@@ -956,8 +956,7 @@ where
         for table in database_mgr.tables.values() {
             if table.dependent_relations.contains(&relation_id) {
                 let mut table = table.clone();
-                table.definition =
-                    alter_relation_rename_refs(&table.name, &table.definition, from, to)?;
+                table.definition = alter_relation_rename_refs(&table.definition, from, to);
                 to_update_tables.push(table);
             }
         }
@@ -965,7 +964,7 @@ where
         for view in database_mgr.views.values() {
             if view.dependent_relations.contains(&relation_id) {
                 let mut view = view.clone();
-                view.sql = alter_relation_rename_refs(&view.name, &view.sql, from, to)?;
+                view.sql = alter_relation_rename_refs(&view.sql, from, to);
                 to_update_views.push(view);
             }
         }
@@ -973,8 +972,7 @@ where
         for sink in database_mgr.sinks.values() {
             if sink.dependent_relations.contains(&relation_id) {
                 let mut sink = sink.clone();
-                sink.definition =
-                    alter_relation_rename_refs(&sink.name, &sink.definition, from, to)?;
+                sink.definition = alter_relation_rename_refs(&sink.definition, from, to);
                 to_update_sinks.push(sink);
             }
         }
