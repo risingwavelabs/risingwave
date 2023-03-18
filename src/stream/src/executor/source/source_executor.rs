@@ -663,7 +663,7 @@ mod tests {
             Box::new(executor),
             mem_state_store.clone(),
             TableId::from(0x2333),
-            vec![ColumnOrder::new(0, OrderType::default_ascending())],
+            vec![ColumnOrder::new(0, OrderType::ascending())],
             column_ids,
             2,
             Arc::new(AtomicU64::new(0)),

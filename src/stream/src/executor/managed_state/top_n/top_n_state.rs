@@ -264,11 +264,11 @@ mod tests {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let schema = Schema::new(data_types.into_iter().map(Field::unnamed).collect());
         let storage_key = vec![
-            ColumnOrder::new(0, OrderType::default_ascending()),
-            ColumnOrder::new(1, OrderType::default_ascending()),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
         ];
         let pk = vec![0, 1];
-        let order_by = vec![ColumnOrder::new(0, OrderType::default_ascending())];
+        let order_by = vec![ColumnOrder::new(0, OrderType::ascending())];
 
         create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
     }
@@ -278,10 +278,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[
-                    OrderType::default_ascending(),
-                    OrderType::default_ascending(),
-                ],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;
@@ -360,10 +357,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[
-                    OrderType::default_ascending(),
-                    OrderType::default_ascending(),
-                ],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;

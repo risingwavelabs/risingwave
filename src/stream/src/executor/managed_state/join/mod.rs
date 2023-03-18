@@ -270,7 +270,7 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
             .collect();
         let pk_serializer = OrderedRowSerde::new(
             pk_data_types,
-            vec![OrderType::default_ascending(); state_pk_indices.len()],
+            vec![OrderType::ascending(); state_pk_indices.len()],
         );
 
         let state = TableInner {

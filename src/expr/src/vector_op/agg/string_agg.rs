@@ -309,9 +309,9 @@ mod tests {
             1,
             0,
             vec![
-                ColumnOrder::new(2, OrderType::default_ascending()),
-                ColumnOrder::new(3, OrderType::default_descending()),
-                ColumnOrder::new(1, OrderType::default_descending()),
+                ColumnOrder::new(2, OrderType::ascending()),
+                ColumnOrder::new(3, OrderType::descending()),
+                ColumnOrder::new(1, OrderType::descending()),
             ],
         )?;
         let mut builder = ArrayBuilderImpl::Utf8(Utf8ArrayBuilder::new(0));

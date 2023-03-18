@@ -118,10 +118,7 @@ mod tests {
 
     #[test]
     fn test_ordered_row_serializer() {
-        let orders = vec![
-            OrderType::default_descending(),
-            OrderType::default_ascending(),
-        ];
+        let orders = vec![OrderType::descending(), OrderType::ascending()];
         let data_types = vec![DataType::Int16, DataType::Varchar];
         let serializer = OrderedRowSerde::new(data_types, orders);
         let row1 = OwnedRow::new(vec![Some(Int16(5)), Some(Utf8("abc".into()))]);
@@ -147,10 +144,7 @@ mod tests {
         use crate::types::ScalarImpl::{self, *};
         {
             // basic
-            let order_types = vec![
-                OrderType::default_descending(),
-                OrderType::default_ascending(),
-            ];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
             let schema = vec![DataType::Varchar, DataType::Int16];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -172,10 +166,7 @@ mod tests {
         {
             // decimal
 
-            let order_types = vec![
-                OrderType::default_descending(),
-                OrderType::default_ascending(),
-            ];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
             let schema = vec![DataType::Varchar, DataType::Decimal];
             let serde = OrderedRowSerde::new(schema, order_types);
@@ -206,10 +197,7 @@ mod tests {
 
     #[test]
     fn test_deserialize_with_column_indices() {
-        let order_types = vec![
-            OrderType::default_descending(),
-            OrderType::default_ascending(),
-        ];
+        let order_types = vec![OrderType::descending(), OrderType::ascending()];
 
         let schema = vec![DataType::Varchar, DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types);
@@ -226,7 +214,7 @@ mod tests {
             let row_0_idx_0_len = serde.deserialize_prefix_len(&array[0], 1).unwrap();
 
             let schema = vec![DataType::Varchar];
-            let order_types = vec![OrderType::default_descending()];
+            let order_types = vec![OrderType::descending()];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_0_len];
             assert_eq!(
@@ -238,10 +226,7 @@ mod tests {
         {
             let row_0_idx_1_len = serde.deserialize_prefix_len(&array[0], 2).unwrap();
 
-            let order_types = vec![
-                OrderType::default_descending(),
-                OrderType::default_ascending(),
-            ];
+            let order_types = vec![OrderType::descending(), OrderType::ascending()];
             let schema = vec![DataType::Varchar, DataType::Int16];
             let deserde = OrderedRowSerde::new(schema, order_types);
             let prefix_slice = &array[0][0..row_0_idx_1_len];
@@ -256,7 +241,7 @@ mod tests {
         use crate::types::interval::IntervalUnit;
         use crate::types::OrderedF64;
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let schema = vec![DataType::Int16];
         let serde = OrderedRowSerde::new(schema, order_types.clone());
 
@@ -451,7 +436,7 @@ mod tests {
                 {
                     {
                         // test varchar Descending
-                        let order_types = vec![OrderType::default_descending()];
+                        let order_types = vec![OrderType::descending()];
                         let schema = vec![DataType::Varchar];
                         let serde = OrderedRowSerde::new(schema, order_types.clone());
                         let varchar = "abcdefghijklmnopq";

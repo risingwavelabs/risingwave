@@ -487,7 +487,7 @@ mod tests {
                     is_hidden: false,
                 },
             ],
-            pk: vec![ColumnOrder::new(0, OrderType::default_ascending()).to_protobuf()],
+            pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
@@ -554,7 +554,7 @@ mod tests {
                     }
                 ],
                 stream_key: vec![0],
-                pk: vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                pk: vec![ColumnOrder::new(0, OrderType::ascending())],
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,

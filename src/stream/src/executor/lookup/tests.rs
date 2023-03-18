@@ -54,13 +54,13 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
 
 fn arrangement_col_arrange_rules() -> Vec<ColumnOrder> {
     vec![
-        ColumnOrder::new(1, OrderType::default_ascending()),
-        ColumnOrder::new(0, OrderType::default_ascending()),
+        ColumnOrder::new(1, OrderType::ascending()),
+        ColumnOrder::new(0, OrderType::ascending()),
     ]
 }
 
 fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
-    vec![ColumnOrder::new(1, OrderType::default_ascending())]
+    vec![ColumnOrder::new(1, OrderType::ascending())]
 }
 
 /// Create a test arrangement.

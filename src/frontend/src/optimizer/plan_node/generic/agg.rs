@@ -221,7 +221,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for &idx in &self.group_key {
                 add_column(
                     idx,
-                    Some(OrderType::default_ascending()),
+                    Some(OrderType::ascending()),
                     false,
                     &mut internal_table_catalog_builder,
                 );
@@ -239,7 +239,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for &idx in &in_pks {
                 add_column(
                     idx,
-                    Some(OrderType::default_ascending()),
+                    Some(OrderType::ascending()),
                     true,
                     &mut internal_table_catalog_builder,
                 );
@@ -275,7 +275,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             for &idx in &self.group_key {
                 let tb_column_idx = internal_table_catalog_builder.add_column(&in_fields[idx]);
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::default_ascending());
+                    .add_order_column(tb_column_idx, OrderType::ascending());
                 included_upstream_indices.push(idx);
             }
             let read_prefix_len_hint = internal_table_catalog_builder.get_current_pk_len();
@@ -325,13 +325,10 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                         let sort_keys = {
                             match agg_call.agg_kind {
                                 AggKind::Min => {
-                                    vec![(OrderType::default_ascending(), agg_call.inputs[0].index)]
+                                    vec![(OrderType::ascending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::Max => {
-                                    vec![(
-                                        OrderType::default_descending(),
-                                        agg_call.inputs[0].index,
-                                    )]
+                                    vec![(OrderType::descending(), agg_call.inputs[0].index)]
                                 }
                                 AggKind::StringAgg | AggKind::ArrayAgg => agg_call
                                     .order_by
@@ -389,7 +386,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
             let tb_column_idx = internal_table_catalog_builder.add_column(field);
             if tb_column_idx < self.group_key.len() {
                 internal_table_catalog_builder
-                    .add_order_column(tb_column_idx, OrderType::default_ascending());
+                    .add_order_column(tb_column_idx, OrderType::ascending());
             }
         }
         let read_prefix_len_hint = self.group_key.len();
@@ -439,7 +436,7 @@ impl<PlanRef: stream::StreamPlanRef> Agg<PlanRef> {
                     .collect_vec();
                 for &idx in &key_cols {
                     let table_col_idx = table_builder.add_column(&in_fields[idx]);
-                    table_builder.add_order_column(table_col_idx, OrderType::default_ascending());
+                    table_builder.add_order_column(table_col_idx, OrderType::ascending());
                 }
                 let read_prefix_len_hint = table_builder.get_current_pk_len();
 

@@ -310,12 +310,12 @@ mod tests {
             // group key columns
             for data_type in group_key_types {
                 add_column_desc(data_type.clone());
-                order_types.push(OrderType::default_ascending());
+                order_types.push(OrderType::ascending());
             }
 
             // distinct key column
             add_column_desc(indices_and_calls[0].1.args.arg_types()[0].clone());
-            order_types.push(OrderType::default_ascending());
+            order_types.push(OrderType::ascending());
 
             // count columns
             for (_, _) in indices_and_calls {

@@ -79,7 +79,7 @@ pub fn infer_left_internal_table_catalog(
     });
 
     pk_indices.iter().for_each(|idx| {
-        internal_table_catalog_builder.add_order_column(*idx, OrderType::default_ascending())
+        internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
     });
 
     internal_table_catalog_builder.build(dist_keys, read_prefix_len_hint)

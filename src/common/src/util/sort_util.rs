@@ -25,10 +25,9 @@ use crate::error::ErrorCode::InternalError;
 use crate::error::Result;
 use crate::types::ToDatumRef;
 
-/// Sort direction.
-/// NOTE: Don't direct use this type, use [`OrderType`] instead.
+/// Sort direction, ascending/descending.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-pub enum Direction {
+enum Direction {
     #[default]
     #[display("ASC")]
     Ascending,
@@ -54,9 +53,8 @@ impl Direction {
 }
 
 /// Nulls are largest/smallest.
-/// NOTE: Don't direct use this type, use [`OrderType`] instead.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Display, Default)]
-pub enum NullsAre {
+enum NullsAre {
     #[default]
     #[display("LARGEST")]
     Largest,
@@ -105,10 +103,24 @@ impl OrderType {
 }
 
 impl OrderType {
-    pub fn new(direction: Direction, nulls_are: NullsAre) -> Self {
+    fn new(direction: Direction, nulls_are: NullsAre) -> Self {
         Self {
             direction,
             nulls_are,
+        }
+    }
+
+    fn nulls_first(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::new(direction, NullsAre::Smallest),
+            Direction::Descending => Self::new(direction, NullsAre::Largest),
+        }
+    }
+
+    fn nulls_last(direction: Direction) -> Self {
+        match direction {
+            Direction::Ascending => Self::new(direction, NullsAre::Largest),
+            Direction::Descending => Self::new(direction, NullsAre::Smallest),
         }
     }
 
@@ -125,67 +137,41 @@ impl OrderType {
         }
     }
 
-    pub fn ascending(nulls_are: NullsAre) -> Self {
+    // TODO(rc): Many places that call `ascending` should've call `default`.
+    /// Create an `ASC` order type.
+    pub fn ascending() -> Self {
         Self {
             direction: Direction::Ascending,
-            nulls_are,
+            nulls_are: NullsAre::default(),
         }
     }
 
-    pub fn descending(nulls_are: NullsAre) -> Self {
+    /// Create a `DESC` order type.
+    pub fn descending() -> Self {
         Self {
             direction: Direction::Descending,
-            nulls_are,
+            nulls_are: NullsAre::default(),
         }
     }
 
-    // TODO(rc): Many places that call `default_ascending` should've call `default`.
-    /// Create an ascending order type, with other options set to default.
-    pub fn default_ascending() -> Self {
-        Self::ascending(NullsAre::default())
+    /// Create an `ASC NULLS FIRST` order type.
+    pub fn ascending_nulls_first() -> Self {
+        Self::nulls_first(Direction::Ascending)
     }
 
-    /// Create an descending order type, with other options set to default.
-    pub fn default_descending() -> Self {
-        Self::descending(NullsAre::default())
+    /// Create an `ASC NULLS LAST` order type.
+    pub fn ascending_nulls_last() -> Self {
+        Self::nulls_last(Direction::Ascending)
     }
 
-    pub fn nulls_largest(direction: Direction) -> Self {
-        Self {
-            direction,
-            nulls_are: NullsAre::Largest,
-        }
+    /// Create a `DESC NULLS FIRST` order type.
+    pub fn descending_nulls_first() -> Self {
+        Self::nulls_first(Direction::Descending)
     }
 
-    pub fn nulls_smallest(direction: Direction) -> Self {
-        Self {
-            direction,
-            nulls_are: NullsAre::Smallest,
-        }
-    }
-
-    pub fn nulls_first(direction: Direction) -> Self {
-        match direction {
-            Direction::Ascending => Self::nulls_smallest(direction),
-            Direction::Descending => Self::nulls_largest(direction),
-        }
-    }
-
-    pub fn nulls_last(direction: Direction) -> Self {
-        match direction {
-            Direction::Ascending => Self::nulls_largest(direction),
-            Direction::Descending => Self::nulls_smallest(direction),
-        }
-    }
-
-    /// Get the order direction.
-    pub fn direction(&self) -> Direction {
-        self.direction
-    }
-
-    /// Get which extreme nulls are considered to be.
-    pub fn nulls_are(&self) -> NullsAre {
-        self.nulls_are
+    /// Create a `DESC NULLS LAST` order type.
+    pub fn descending_nulls_last() -> Self {
+        Self::nulls_last(Direction::Descending)
     }
 
     pub fn is_ascending(&self) -> bool {
@@ -439,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_order_type() {
-        assert_eq!(OrderType::default(), OrderType::default_ascending());
+        assert_eq!(OrderType::default(), OrderType::ascending());
         assert_eq!(
             OrderType::default(),
             OrderType::new(Direction::Ascending, NullsAre::Largest)
@@ -450,41 +436,29 @@ mod tests {
         );
         assert_eq!(OrderType::default(), OrderType::from_bools(None, None));
 
-        assert_eq!(
-            OrderType::default_ascending(),
-            OrderType::ascending(NullsAre::Largest)
-        );
-        assert_eq!(
-            OrderType::default_descending(),
-            OrderType::descending(NullsAre::Largest)
-        );
+        assert!(OrderType::ascending().is_ascending());
+        assert!(OrderType::ascending().nulls_are_largest());
+        assert!(OrderType::ascending().nulls_are_last());
 
-        assert_eq!(
-            OrderType::nulls_first(Direction::Ascending),
-            OrderType::nulls_smallest(Direction::Ascending)
-        );
-        assert_eq!(
-            OrderType::nulls_first(Direction::Descending),
-            OrderType::nulls_largest(Direction::Descending)
-        );
-        assert_eq!(
-            OrderType::nulls_last(Direction::Ascending),
-            OrderType::nulls_largest(Direction::Ascending)
-        );
-        assert_eq!(
-            OrderType::nulls_last(Direction::Descending),
-            OrderType::nulls_smallest(Direction::Descending)
-        );
+        assert!(OrderType::descending().is_descending());
+        assert!(OrderType::descending().nulls_are_largest());
+        assert!(OrderType::descending().nulls_are_first());
 
-        assert_eq!(OrderType::default().direction(), Direction::default());
-        assert_eq!(OrderType::default().nulls_are(), NullsAre::default());
+        assert!(OrderType::ascending_nulls_first().is_ascending());
+        assert!(OrderType::ascending_nulls_first().nulls_are_smallest());
+        assert!(OrderType::ascending_nulls_first().nulls_are_first());
 
-        assert!(OrderType::default_ascending().is_ascending());
-        assert!(OrderType::default_descending().is_descending());
-        assert!(OrderType::default_ascending().nulls_are_largest());
-        assert!(OrderType::default_ascending().nulls_are_last());
-        assert!(OrderType::default_descending().nulls_are_largest());
-        assert!(OrderType::default_descending().nulls_are_first());
+        assert!(OrderType::ascending_nulls_last().is_ascending());
+        assert!(OrderType::ascending_nulls_last().nulls_are_largest());
+        assert!(OrderType::ascending_nulls_last().nulls_are_last());
+
+        assert!(OrderType::descending_nulls_first().is_descending());
+        assert!(OrderType::descending_nulls_first().nulls_are_largest());
+        assert!(OrderType::descending_nulls_first().nulls_are_first());
+
+        assert!(OrderType::descending_nulls_last().is_descending());
+        assert!(OrderType::descending_nulls_last().nulls_are_smallest());
+        assert!(OrderType::descending_nulls_last().nulls_are_last());
     }
 
     #[test]
@@ -503,8 +477,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::default_ascending()),
-            ColumnOrder::new(1, OrderType::default_descending()),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
         assert_eq!(
@@ -565,7 +539,7 @@ mod tests {
         ]);
 
         let column_orders = (0..row1.len())
-            .map(|i| ColumnOrder::new(i, OrderType::default_ascending()))
+            .map(|i| ColumnOrder::new(i, OrderType::ascending()))
             .collect_vec();
 
         let chunk = DataChunk::from_rows(
@@ -618,15 +592,7 @@ mod tests {
             compare_datum(
                 Some(ScalarImpl::from(42)),
                 Some(ScalarImpl::from(100)),
-                OrderType::default_ascending(),
-            )
-        );
-        assert_eq!(
-            Ordering::Less,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::nulls_largest(Direction::Ascending),
+                OrderType::ascending(),
             )
         );
         assert_eq!(
@@ -634,15 +600,7 @@ mod tests {
             compare_datum(
                 Some(ScalarImpl::from(42)),
                 None as Datum,
-                OrderType::nulls_largest(Direction::Descending),
-            )
-        );
-        assert_eq!(
-            Ordering::Greater,
-            compare_datum(
-                Some(ScalarImpl::from(42)),
-                None as Datum,
-                OrderType::nulls_smallest(Direction::Ascending),
+                OrderType::ascending_nulls_first(),
             )
         );
         assert_eq!(
@@ -650,7 +608,23 @@ mod tests {
             compare_datum(
                 Some(ScalarImpl::from(42)),
                 None as Datum,
-                OrderType::nulls_smallest(Direction::Descending),
+                OrderType::ascending_nulls_last(),
+            )
+        );
+        assert_eq!(
+            Ordering::Greater,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::descending_nulls_first(),
+            )
+        );
+        assert_eq!(
+            Ordering::Less,
+            compare_datum(
+                Some(ScalarImpl::from(42)),
+                None as Datum,
+                OrderType::descending_nulls_last(),
             )
         );
     }

@@ -169,11 +169,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
 
@@ -219,11 +219,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -268,11 +268,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -338,15 +338,15 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 2,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_descending(),
+                order_type: OrderType::descending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -411,15 +411,15 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_descending(),
+                order_type: OrderType::descending(),
             },
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_descending(),
+                order_type: OrderType::descending(),
             },
             ColumnOrder {
                 column_index: 2,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -504,15 +504,15 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 2,
-                order_type: OrderType::default_descending(),
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(
@@ -683,11 +683,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_descending(),
+                order_type: OrderType::descending(),
             },
         ];
         let order_by_executor = Box::new(SortExecutor::new(

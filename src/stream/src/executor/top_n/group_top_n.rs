@@ -282,20 +282,20 @@ mod tests {
 
     fn storage_key() -> Vec<ColumnOrder> {
         vec![
-            ColumnOrder::new(1, OrderType::default_ascending()),
-            ColumnOrder::new(2, OrderType::default_ascending()),
-            ColumnOrder::new(0, OrderType::default_ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
+            ColumnOrder::new(2, OrderType::ascending()),
+            ColumnOrder::new(0, OrderType::ascending()),
         ]
     }
 
     /// group by 1, order by 2
     fn order_by_1() -> Vec<ColumnOrder> {
-        vec![ColumnOrder::new(2, OrderType::default_ascending())]
+        vec![ColumnOrder::new(2, OrderType::ascending())]
     }
 
     /// group by 1,2, order by 0
     fn order_by_2() -> Vec<ColumnOrder> {
-        vec![ColumnOrder::new(0, OrderType::default_ascending())]
+        vec![ColumnOrder::new(0, OrderType::ascending())]
     }
 
     fn pk_indices() -> PkIndices {
@@ -360,9 +360,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -456,9 +456,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -546,9 +546,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
-                OrderType::default_ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )

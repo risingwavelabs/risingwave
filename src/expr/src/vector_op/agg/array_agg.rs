@@ -270,8 +270,8 @@ mod tests {
             return_type.clone(),
             0,
             vec![
-                ColumnOrder::new(1, OrderType::default_ascending()),
-                ColumnOrder::new(0, OrderType::default_descending()),
+                ColumnOrder::new(1, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::descending()),
             ],
         )?;
         let mut builder = return_type.create_array_builder(0);

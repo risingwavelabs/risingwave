@@ -338,9 +338,7 @@ impl LogicalAgg {
                         .iter()
                         .find(|o| o.column_index == *group_by_idx)
                         .cloned()
-                        .unwrap_or_else(|| {
-                            ColumnOrder::new(*group_by_idx, OrderType::default_ascending())
-                        })
+                        .unwrap_or_else(|| ColumnOrder::new(*group_by_idx, OrderType::ascending()))
                 })
                 .collect(),
         };

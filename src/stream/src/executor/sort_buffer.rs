@@ -287,7 +287,7 @@ mod tests {
 
         let row_pretty = |s: &str| OwnedRow::from_pretty_with_tys(&tys, s);
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let mut state_table = StateTable::new_without_distribution(
             state_store.clone(),
             table_id,

@@ -262,7 +262,7 @@ mod tests {
         }
         let column_orders = Arc::new(vec![ColumnOrder {
             column_index: 0,
-            order_type: OrderType::default_ascending(),
+            order_type: OrderType::ascending(),
         }]);
 
         let executor = Box::new(MergeSortExchangeExecutorImpl::<

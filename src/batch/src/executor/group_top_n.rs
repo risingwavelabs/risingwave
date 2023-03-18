@@ -259,11 +259,11 @@ mod tests {
         let column_orders = vec![
             ColumnOrder {
                 column_index: 1,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
             ColumnOrder {
                 column_index: 0,
-                order_type: OrderType::default_ascending(),
+                order_type: OrderType::ascending(),
             },
         ];
         let top_n_executor = (GroupTopNExecutorBuilder {

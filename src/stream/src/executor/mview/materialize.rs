@@ -629,7 +629,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -649,7 +649,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -746,7 +746,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -766,7 +766,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -879,7 +879,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -899,7 +899,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1062,7 +1062,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1082,7 +1082,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),
@@ -1195,7 +1195,7 @@ mod tests {
             ],
         );
 
-        let order_types = vec![OrderType::default_ascending()];
+        let order_types = vec![OrderType::ascending()];
         let column_descs = vec![
             ColumnDesc::unnamed(column_ids[0], DataType::Int32),
             ColumnDesc::unnamed(column_ids[1], DataType::Int32),
@@ -1215,7 +1215,7 @@ mod tests {
                 Box::new(source),
                 memory_state_store,
                 table_id,
-                vec![ColumnOrder::new(0, OrderType::default_ascending())],
+                vec![ColumnOrder::new(0, OrderType::ascending())],
                 column_ids,
                 1,
                 Arc::new(AtomicU64::new(0)),

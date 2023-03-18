@@ -241,7 +241,7 @@ mod tests {
     use crate::array::{DataChunk, ListValue, StructValue};
     use crate::row::OwnedRow;
     use crate::types::{DataType, OrderedF32, ScalarImpl};
-    use crate::util::sort_util::{ColumnOrder, Direction, OrderType};
+    use crate::util::sort_util::{ColumnOrder, OrderType};
 
     #[test]
     fn test_memcomparable() {
@@ -251,7 +251,7 @@ mod tests {
 
         {
             // default ascending
-            let order_type = OrderType::default_ascending();
+            let order_type = OrderType::ascending();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_45745 = encode_num(Some(45745), order_type);
@@ -279,7 +279,7 @@ mod tests {
         }
         {
             // default descending
-            let order_type = OrderType::default_descending();
+            let order_type = OrderType::descending();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_none = encode_num(None, order_type);
@@ -290,7 +290,7 @@ mod tests {
         }
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_first();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_none = encode_num(None, order_type);
@@ -299,7 +299,7 @@ mod tests {
         }
         {
             // ASC NULLS LAST (NULLS LARGEST)
-            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_last();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_none = encode_num(None, order_type);
@@ -308,7 +308,7 @@ mod tests {
         }
         {
             // DESC NULLS FIRST (NULLS LARGEST)
-            let order_type = OrderType::nulls_first(Direction::Descending);
+            let order_type = OrderType::descending_nulls_first();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_none = encode_num(None, order_type);
@@ -317,7 +317,7 @@ mod tests {
         }
         {
             // DESC NULLS LAST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_last(Direction::Descending);
+            let order_type = OrderType::descending_nulls_last();
             let memcmp_minus_1 = encode_num(Some(-1), order_type);
             let memcmp_3874 = encode_num(Some(3874), order_type);
             let memcmp_none = encode_num(None, order_type);
@@ -341,7 +341,7 @@ mod tests {
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_first();
             let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
             let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
             let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
@@ -352,7 +352,7 @@ mod tests {
         }
         {
             // ASC NULLS LAST (NULLS LARGEST)
-            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_last();
             let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
             let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
             let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
@@ -363,7 +363,7 @@ mod tests {
         }
         {
             // DESC NULLS FIRST (NULLS LARGEST)
-            let order_type = OrderType::nulls_first(Direction::Descending);
+            let order_type = OrderType::descending_nulls_first();
             let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
             let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
             let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
@@ -374,7 +374,7 @@ mod tests {
         }
         {
             // DESC NULLS LAST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_last(Direction::Descending);
+            let order_type = OrderType::descending_nulls_last();
             let memcmp_struct_none = encode_value(&struct_none, order_type).unwrap();
             let memcmp_struct_1 = encode_value(&struct_1, order_type).unwrap();
             let memcmp_struct_2 = encode_value(&struct_2, order_type).unwrap();
@@ -398,7 +398,7 @@ mod tests {
 
         {
             // ASC NULLS FIRST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_first(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_first();
             let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
             let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
             let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
@@ -409,7 +409,7 @@ mod tests {
         }
         {
             // ASC NULLS LAST (NULLS LARGEST)
-            let order_type = OrderType::nulls_last(Direction::Ascending);
+            let order_type = OrderType::ascending_nulls_last();
             let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
             let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
             let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
@@ -420,7 +420,7 @@ mod tests {
         }
         {
             // DESC NULLS FIRST (NULLS LARGEST)
-            let order_type = OrderType::nulls_first(Direction::Descending);
+            let order_type = OrderType::descending_nulls_first();
             let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
             let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
             let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
@@ -431,7 +431,7 @@ mod tests {
         }
         {
             // DESC NULLS LAST (NULLS SMALLEST)
-            let order_type = OrderType::nulls_last(Direction::Descending);
+            let order_type = OrderType::descending_nulls_last();
             let memcmp_list_none = encode_value(&list_none, order_type).unwrap();
             let memcmp_list_1 = encode_value(&list_1, order_type).unwrap();
             let memcmp_list_2 = encode_value(&list_2, order_type).unwrap();
@@ -505,19 +505,19 @@ mod tests {
         let row1 = OwnedRow::new(vec![v10, v11, v12]);
         let row2 = OwnedRow::new(vec![v20, v21, v22]);
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::default_ascending()),
-            ColumnOrder::new(1, OrderType::default_descending()),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &column_orders);
         let encoded_v10 = encode_value(
             v10_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            OrderType::default_ascending(),
+            OrderType::ascending(),
         )
         .unwrap();
         let encoded_v11 = encode_value(
             v11_cloned.as_ref().map(|x| x.as_scalar_ref_impl()),
-            OrderType::default_descending(),
+            OrderType::descending(),
         )
         .unwrap();
         let concated_encoded_row1 = encoded_v10
@@ -546,8 +546,8 @@ mod tests {
             &[DataType::Int32, DataType::Varchar, DataType::Float32],
         );
         let column_orders = vec![
-            ColumnOrder::new(0, OrderType::default_ascending()),
-            ColumnOrder::new(1, OrderType::default_descending()),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::descending()),
         ];
 
         let encoded_row1 = encode_row(&row1, &column_orders);
