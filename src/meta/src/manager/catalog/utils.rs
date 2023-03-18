@@ -164,12 +164,27 @@ impl QueryRewriter<'_> {
         Ok(())
     }
 
-    /// Visit table with joins and update all references of relation named `from` to `to`.
-    fn visit_table_with_joins(&self, table_with_joins: &mut TableWithJoins) -> MetaResult<()> {
-        match &mut table_with_joins.relation {
+    /// Visit table factor and update all references of relation named `from` to `to`.
+    fn visit_table_factor(&self, table_factor: &mut TableFactor) -> MetaResult<()> {
+        match table_factor {
             TableFactor::Table { name, alias, .. } => {
                 self.check_alias(alias)?;
-                self.may_rewrite_idents(&mut name.0)?;
+                // Rewrite idents(i.e. `schema.table`, `table`) that contains the old name in the
+                // following pattern: 1. `FROM a` to `FROM new_a AS a`
+                // 2. `FROM a AS b` to `FROM new_a AS b`
+                // So that we don't have to rewrite the select and expr part like
+                // `schema.table.column`, `table.column`, `alias.column` etc. And we can also handle
+                // the case that the old name is used as alias by the target relation.
+                let idx = name.0.len() - 1;
+                if name.0[idx].real_value() == self.from {
+                    if alias.is_none() {
+                        *alias = Some(TableAlias {
+                            name: Ident::new_unchecked(self.from),
+                            columns: vec![],
+                        });
+                    }
+                    name.0[idx] = Ident::new_unchecked(self.to);
+                }
             }
             TableFactor::Derived {
                 subquery, alias, ..
@@ -184,10 +199,18 @@ impl QueryRewriter<'_> {
                 }
             }
             TableFactor::NestedJoin(table_with_joins) => {
-                self.visit_table_with_joins(table_with_joins)?
+                self.visit_table_with_joins(table_with_joins)?;
             }
         }
+        Ok(())
+    }
 
+    /// Visit table with joins and update all references of relation named `from` to `to`.
+    fn visit_table_with_joins(&self, table_with_joins: &mut TableWithJoins) -> MetaResult<()> {
+        self.visit_table_factor(&mut table_with_joins.relation)?;
+        for join in &mut table_with_joins.joins {
+            self.visit_table_factor(&mut join.relation)?;
+        }
         Ok(())
     }
 
@@ -227,26 +250,6 @@ impl QueryRewriter<'_> {
         Ok(())
     }
 
-    /// Rewrite idents like `schema.table`, `table` if the last ident is the same as `from`.
-    fn may_rewrite_idents(&self, idents: &mut [Ident]) -> MetaResult<()> {
-        let idx = idents.len() - 1;
-        if idents[idx].real_value() == self.from {
-            idents[idx] = Ident::new_unchecked(self.to);
-        }
-
-        Ok(())
-    }
-
-    /// Rewrite idents like `schema.table.column`, `table.column` if the last ident is the same as
-    /// `from`.
-    fn may_rewrite_idents_with_column(&self, idents: &mut [Ident]) -> MetaResult<()> {
-        if idents.len() >= 2 && let idx = idents.len() -2 && idents[idx].real_value() == self.from {
-            idents[idx] = Ident::new_unchecked(self.to);
-        }
-
-        Ok(())
-    }
-
     /// Visit function arguments and update all references.
     fn visit_function_args(&self, function_args: &mut FunctionArg) -> MetaResult<()> {
         match function_args {
@@ -254,10 +257,7 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(obj_name) => {
-                    self.may_rewrite_idents(&mut obj_name.0)
-                }
-                FunctionArgExpr::Wildcard => Ok(()),
+                FunctionArgExpr::QualifiedWildcard(_) | FunctionArgExpr::Wildcard => Ok(()),
             },
         }
     }
@@ -274,7 +274,6 @@ impl QueryRewriter<'_> {
     /// Visit expression and update all references.
     fn visit_expr(&self, expr: &mut Expr) -> MetaResult<()> {
         match expr {
-            Expr::CompoundIdentifier(idents) => self.may_rewrite_idents_with_column(idents),
             Expr::FieldIdentifier(expr, ..) => self.visit_expr(expr),
 
             Expr::IsNull(expr)
@@ -349,8 +348,7 @@ impl QueryRewriter<'_> {
             SelectItem::UnnamedExpr(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
-            SelectItem::QualifiedWildcard(obj_name) => self.may_rewrite_idents(&mut obj_name.0),
-            SelectItem::Wildcard => Ok(()),
+            SelectItem::QualifiedWildcard(_) | SelectItem::Wildcard => Ok(()),
         }
     }
 }
@@ -399,12 +397,12 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected =
-            "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, bar.v2 AS m2v FROM bar";
+            "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM bar AS foo";
         let actual = alter_relation_rename_refs("mv1", definition, from, to).unwrap();
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
-        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar WHERE bar.v1 = 1 AND (bar.v2).v3 IS TRUE";
+        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM bar AS foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let actual = alter_relation_rename_refs("mv1", definition, from, to).unwrap();
         assert_eq!(expected, actual);
 

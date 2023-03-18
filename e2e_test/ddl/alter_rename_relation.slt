@@ -22,6 +22,12 @@ statement ok
 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t, t AS t2 WHERE t.v1 = t2.v1);
 
 statement ok
+CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM t AS t);
+
+statement ok
+CREATE VIEW v4 AS (SELECT * FROM t join t as t2 on (t.v1 = t2.v1) ORDER BY t.v1, t2.v1);
+
+statement ok
 CREATE index idx ON t(v1);
 
 query TT
@@ -45,12 +51,22 @@ public.t3 CREATE TABLE t3 (v1 INT PRIMARY KEY, v2 STRUCT<v1 INT, v2 STRUCT<v1 IN
 query TT
 SHOW CREATE VIEW v2;
 ----
-public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t3, t3 AS t2 WHERE t3.v1 = t2.v1)
+public.v2 CREATE VIEW v2 AS (SELECT COUNT(*) FROM t3 AS t, t3 AS t2 WHERE t.v1 = t2.v1)
+
+query TT
+SHOW CREATE VIEW v3;
+----
+public.v3 CREATE VIEW v3 AS (SELECT MAX((t.v2).v1) FROM t3 AS t)
+
+query TT
+SHOW CREATE VIEW v4;
+----
+public.v4 CREATE VIEW v4 AS (SELECT * FROM t3 AS t JOIN t3 AS t2 ON (t.v1 = t2.v1) ORDER BY t.v1, t2.v1)
 
 query TT
 SHOW CREATE MATERIALIZED VIEW mv;
 ----
-public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t3.v2).v1 AS v21 FROM t3
+public.mv CREATE MATERIALIZED VIEW mv AS SELECT v1, (t.v2).v1 AS v21 FROM t3 AS t
 
 # alter mview rename
 statement ok
@@ -59,7 +75,7 @@ ALTER MATERIALIZED VIEW mv RENAME TO mv2;
 query TT
 SHOW CREATE MATERIALIZED VIEW mv2;
 ----
-public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t3.v2).v1 AS v21 FROM t3
+public.mv2 CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t.v2).v1 AS v21 FROM t3 AS t
 
 statement ok
 ALTER SINK sink RENAME TO sink1;
@@ -73,12 +89,12 @@ ALTER TABLE t_as RENAME TO t_as_1;
 
 # alter view rename
 statement ok
-ALTER VIEW v1 RENAME TO v3;
+ALTER VIEW v1 RENAME TO v5;
 
 query TT
-SHOW CREATE VIEW v3;
+SHOW CREATE VIEW v5;
 ----
-public.v3 CREATE VIEW v3 AS (SELECT * FROM t_as_1 WHERE id = 1)
+public.v5 CREATE VIEW v5 AS (SELECT * FROM t_as_1 AS t_as WHERE id = 1)
 
 statement ok
 ALTER INDEX idx RENAME TO idx1;
@@ -100,8 +116,25 @@ SELECT * from v2
 ----
 2
 
+query I
+SELECT * from v3
+----
+2
+
+query IIII
+SELECT * from v4
+----
+1 (1,(1,2)) 1 (1,(1,2))
+2 (2,(2,4)) 2 (2,(2,4))
+
 statement ok
 DROP SINK sink1;
+
+statement ok
+DROP VIEW v5;
+
+statement ok
+DROP VIEW v4;
 
 statement ok
 DROP VIEW v3;
