@@ -29,17 +29,12 @@ use crate::TableCatalog;
 /// ice: in the future, we may allow configurable width, boundaries, etc.
 pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> String {
     let mut output = String::with_capacity(2048);
-    let pretty = StreamGraphFormatter::new(is_verbose).explain_graph(graph);
     let mut config = PrettyConfig {
         need_boundaries: false,
         width: 80,
         ..Default::default()
     };
-    for p in pretty {
-        let width = config.unicode(&mut output, &p);
-        config.width = max(width, 80);
-        output.push('\n');
-    }
+    StreamGraphFormatter::new(is_verbose).explain_graph(graph, &mut config, &mut output);
     output
 }
 
@@ -71,19 +66,29 @@ impl StreamGraphFormatter {
         tb.id
     }
 
-    fn explain_graph<'a>(&mut self, graph: &StreamFragmentGraph) -> Vec<Pretty<'a>> {
+    fn explain_graph<'a>(
+        &mut self,
+        graph: &StreamFragmentGraph,
+        config: &mut PrettyConfig,
+        output: &mut String,
+    ) {
         self.edges.clear();
         for edge in &graph.edges {
             self.edges.insert(edge.link_id, edge.clone());
         }
-        let mut pretties = Vec::with_capacity(100);
+        let mut max_width = 80;
         for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
-            pretties.push(self.explain_fragment(fragment));
+            let width = config.unicode(output, &self.explain_fragment(fragment));
+            max_width = max(width, max_width);
+            config.width = max_width;
+            output.push_str("\n\n");
         }
         for tb in self.tables.values() {
-            pretties.push(self.explain_table(tb));
+            let width = config.unicode(output, &self.explain_table(tb));
+            max_width = max(width, max_width);
+            config.width = max_width;
+            output.push_str("\n\n");
         }
-        pretties
     }
 
     fn explain_table<'a>(&self, tb: &Table) -> Pretty<'a> {
