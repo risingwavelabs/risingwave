@@ -639,7 +639,8 @@
       └─StreamExchange { dist: HashShard(t.dst) }
         └─StreamTableScan { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
-    Fragment 0 StreamMaterialize { columns: [p1, p2, p3, t._row_id(hidden), t._row_id#1(hidden), t.src(hidden), t._row_id#2(hidden)], pk_columns: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_conflict: "no check" }
+    Fragment 0
+    StreamMaterialize { columns: [p1, p2, p3, t._row_id(hidden), t._row_id#1(hidden), t.src(hidden), t._row_id#2(hidden)], pk_columns: [t._row_id, t._row_id#1, p2, t._row_id#2, t.src, p1], pk_conflict: "no check" }
     ├── materialized table: 4294967294
     └── StreamHashJoin { type: Inner, predicate: t.src = t.dst AND t.src = t.dst, output: [t.src, t.dst, t.dst, t._row_id, t._row_id, t.src, t._row_id] }
         ├── left table: 0
@@ -649,19 +650,23 @@
         ├──  StreamExchange Hash([0]) from 1
         └──  StreamExchange Hash([0]) from 4
 
-    Fragment 1 StreamHashJoin { type: Inner, predicate: t.dst = t.src, output: [t.src, t.dst, t.src, t.dst, t._row_id, t._row_id] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
+    Fragment 1
+    StreamHashJoin { type: Inner, predicate: t.dst = t.src, output: [t.src, t.dst, t.src, t.dst, t._row_id, t._row_id] } { left table: 4, right table: 6, left degree table: 5, right degree table: 7 }
     ├──  StreamExchange Hash([1]) from 2
     └──  StreamExchange Hash([0]) from 3
 
-    Fragment 2 Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Fragment 2
+    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
-    Fragment 3 Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Fragment 3
+    Chain { table: t, columns: [t.src, t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
-    Fragment 4 Chain { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
+    Fragment 4
+    Chain { table: t, columns: [t.dst, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
     ├──  Upstream
     └──  BatchPlanNode
 
@@ -672,7 +677,12 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
 
-    Table 1 { columns: [ t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree ], primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ], value indices: [ 5 ], distribution key: [ 1 ], read pk prefix len hint: 2 }
+    Table 1
+    ├── columns: [ t_src, t_src_0, t__row_id, t__row_id_0, t_dst, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 5 ]
+    ├── distribution key: [ 1 ]
+    └── read pk prefix len hint: 2
 
     Table 2 { columns: [ t_dst, t__row_id ], primary key: [ $0 ASC, $0 ASC, $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 0 ], read pk prefix len hint: 2 }
 
