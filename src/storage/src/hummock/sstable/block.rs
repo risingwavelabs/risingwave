@@ -140,7 +140,8 @@ impl RestartPoint {
 
 #[derive(Clone, Default, Debug)]
 pub struct EpochDictionary {
-    epoch_group: Vec<u16>,
+    // epoch_group: Vec<u16>,
+    epoch_group_buf: Bytes,
     dictionary: Vec<HummockEpoch>,
 }
 
@@ -151,7 +152,8 @@ impl EpochDictionary {
         //     epoch_group_size += group.len() * std::mem::size_of::<u16>();
         // }
 
-        epoch_group_size += self.epoch_group.len() * std::mem::size_of::<u16>();
+        // epoch_group_size += self.epoch_group.len() * std::mem::size_of::<u16>();
+        epoch_group_size += self.epoch_group_buf.len();
 
         epoch_group_size + self.dictionary.len() * std::mem::size_of::<HummockEpoch>()
     }
@@ -235,13 +237,13 @@ impl Block {
         let epoch_group_begin =
             epoch_dictionary_begin - 4 - entry_count * std::mem::size_of::<u16>();
         let epoch_group_end = epoch_dictionary_begin - 4;
-        let mut epoch_group_buf = &buf[epoch_group_begin..epoch_group_end];
-        let mut epoch_group = Vec::with_capacity(entry_count);
+        let epoch_group_buf = &buf[epoch_group_begin..epoch_group_end];
+        // let mut epoch_group = Vec::with_capacity(entry_count);
 
-        for _ in 0..entry_count {
-            let epoch_index = epoch_group_buf.get_u16_le();
-            epoch_group.push(epoch_index);
-        }
+        // for _ in 0..entry_count {
+        //     let epoch_index = epoch_group_buf.get_u16_le();
+        //     epoch_group.push(epoch_index);
+        // }
 
         // println!("epoch_group {:?}", epoch_group);
 
@@ -298,14 +300,15 @@ impl Block {
         }
 
         Block {
-            data: buf,
             data_len,
             restart_points,
             table_id: TableId::new(table_id),
             epoch_dictionary: EpochDictionary {
-                epoch_group,
+                // epoch_group,
+                epoch_group_buf: Bytes::copy_from_slice(epoch_group_buf),
                 dictionary: epoch_dictionary,
             },
+            data: buf,
         }
     }
 
@@ -357,7 +360,10 @@ impl Block {
         // self.epoch_dictionary.dictionary[epoch_index]
         let rp = self.restart_point(group_index);
         let index = rp.entry_count as usize + key_index;
-        self.epoch_dictionary.dictionary[self.epoch_dictionary.epoch_group[index] as usize]
+        // self.epoch_dictionary.dictionary[self.epoch_dictionary.epoch_group[index] as usize]
+        let mut epoch_index_buf =
+            &self.epoch_dictionary.epoch_group_buf[index * size_of::<u16>()..];
+        self.epoch_dictionary.dictionary[epoch_index_buf.get_u16_le() as usize]
     }
 }
 
