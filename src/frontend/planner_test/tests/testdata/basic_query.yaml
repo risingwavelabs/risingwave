@@ -175,9 +175,9 @@
     create table t (v1 bigint, v2 double precision);
     select * from t order by v1 limit 1
   batch_plan: |
-    BatchTopN { order: "[t.v1 ASC NULLS LAST]", limit: 1, offset: 0 }
+    BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
-      └─BatchTopN { order: "[t.v1 ASC NULLS LAST]", limit: 1, offset: 0 }
+      └─BatchTopN { order: "[t.v1 ASC]", limit: 1, offset: 0 }
         └─BatchScan { table: t, columns: [t.v1, t.v2], distribution: SomeShard }
 - sql: |
     create table t (v1 int, v2 int);

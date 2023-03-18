@@ -12,7 +12,7 @@
     create index idx1 on t1(a, b) include(c);
     select * from t1 order by a, b
   batch_plan: |
-    BatchExchange { order: [idx1.a ASC NULLS LAST, idx1.b ASC NULLS LAST], dist: Single }
+    BatchExchange { order: [idx1.a ASC, idx1.b ASC], dist: Single }
     └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], distribution: UpstreamHashShard(idx1.a, idx1.b) }
 - sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -585,7 +585,7 @@
     select * from t1 order by a limit 1
   batch_plan: |
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [idx1.a ASC NULLS LAST], dist: Single }
+    └─BatchExchange { order: [idx1.a ASC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
 - name: topn on primary key
@@ -595,7 +595,7 @@
     select * from t1 order by a limit 1
   batch_plan: |
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [t1.a ASC NULLS LAST], dist: Single }
+    └─BatchExchange { order: [t1.a ASC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: t1, columns: [t1.a, t1.b], distribution: UpstreamHashShard(t1.a) }
 - name: topn on index with descending ordering
@@ -605,7 +605,7 @@
     select * from t1 order by a desc limit 1
   batch_plan: |
     BatchLimit { limit: 1, offset: 0 }
-    └─BatchExchange { order: [idx1.a DESC NULLS FIRST], dist: Single }
+    └─BatchExchange { order: [idx1.a DESC], dist: Single }
       └─BatchLimit { limit: 1, offset: 0 }
         └─BatchScan { table: idx1, columns: [idx1.a, idx1.b], distribution: UpstreamHashShard(idx1.a) }
 - name: topn on pk streaming case, should NOT optimized
@@ -615,9 +615,9 @@
   stream_plan: |
     StreamMaterialize { columns: [a], pk_columns: [a], pk_conflict: "no check" }
     └─StreamProject { exprs: [t1.a] }
-      └─StreamTopN { order: "[t1.a ASC NULLS LAST]", limit: 1, offset: 0 }
+      └─StreamTopN { order: "[t1.a ASC]", limit: 1, offset: 0 }
         └─StreamExchange { dist: Single }
-          └─StreamGroupTopN { order: "[t1.a ASC NULLS LAST]", limit: 1, offset: 0, group_key: [1] }
+          └─StreamGroupTopN { order: "[t1.a ASC]", limit: 1, offset: 0, group_key: [1] }
             └─StreamProject { exprs: [t1.a, Vnode(t1.a) as $expr1] }
               └─StreamTableScan { table: t1, columns: [t1.a], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
 - sql: |

@@ -35,7 +35,7 @@
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2] }
-      └─LogicalTopN { order: "[t2.v2 DESC NULLS FIRST]", limit: 1, offset: 0 }
+      └─LogicalTopN { order: "[t2.v2 DESC]", limit: 1, offset: 0 }
         └─LogicalProject { exprs: [t2.v2, t2.v2] }
           └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
@@ -77,7 +77,7 @@
     LogicalJoin { type: Inner, on: (t1.v1 > t2.v2), output: [t1.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1] }
     └─LogicalProject { exprs: [t2.v2] }
-      └─LogicalTopN { order: "[t2.v2 DESC NULLS FIRST]", limit: 2, offset: 0 }
+      └─LogicalTopN { order: "[t2.v2 DESC]", limit: 2, offset: 0 }
         └─LogicalProject { exprs: [t2.v2, t2.v2] }
           └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_error: |-
