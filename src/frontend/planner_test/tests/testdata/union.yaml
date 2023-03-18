@@ -18,26 +18,30 @@
       └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
         └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
           └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-  stream_dist_plan: |
+  stream_dist_plan: |+
     Fragment 0 StreamMaterialize { columns: [a, b, c, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32], pk_conflict: "no check" }
     ├── materialized table: 4294967294
     └── StreamUnion { all: true }
         ├──  StreamExchange Hash([3, 4, 5]) from 1
         └──  StreamExchange Hash([3, 4, 5]) from 2
+
     Fragment 1 StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Int64, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Fragment 2 StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Table 4294967294
     ├── columns: [ a, b, c, t1._row_id, null:Int64, 0:Int32 ]
     ├── primary key: [ $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 3, 4, 5 ]
     └── read pk prefix len hint: 3
+
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);
@@ -68,7 +72,7 @@
             └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
               └─StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
-  stream_dist_plan: |
+  stream_dist_plan: |+
     Fragment 0 StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
@@ -77,29 +81,35 @@
             ├── state tables: []
             ├── distinct tables: []
             └──  StreamExchange Hash([0, 1, 2]) from 1
+
     Fragment 1 StreamUnion { all: true }
     ├──  StreamExchange Hash([3, 4, 5]) from 2
     └──  StreamExchange Hash([3, 4, 5]) from 3
+
     Fragment 2 StreamProject { exprs: [t1.a, t1.b, t1.c, t1._row_id, null:Int64, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Fragment 3 StreamProject { exprs: [t2.a, t2.b, t2.c, null:Int64, t2._row_id, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Table 0
     ├── columns: [ t1_a, t1_b, t1_c, count ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
     Table 4294967294
     ├── columns: [ a, b, c ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
     create table t2 (a int, b numeric, c bigint, primary key(a));
@@ -130,7 +140,7 @@
             └─StreamExchange { dist: HashShard(t2.a, 1:Int32) }
               └─StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
                 └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
-  stream_dist_plan: |
+  stream_dist_plan: |+
     Fragment 0 StreamMaterialize { columns: [a, b, c], pk_columns: [a, b, c], pk_conflict: "no check" }
     ├── materialized table: 4294967294
     └── StreamProject { exprs: [t1.a, t1.b, t1.c] }
@@ -139,29 +149,35 @@
             ├── state tables: []
             ├── distinct tables: []
             └──  StreamExchange Hash([0, 1, 2]) from 1
+
     Fragment 1 StreamUnion { all: true }
     ├──  StreamExchange Hash([0, 3]) from 2
     └──  StreamExchange Hash([0, 3]) from 3
+
     Fragment 2 StreamProject { exprs: [t1.a, t1.b, t1.c, 0:Int32] }
     └── Chain { table: t1, columns: [t1.a, t1.b, t1.c], pk: [t1.a], dist: UpstreamHashShard(t1.a) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Fragment 3 StreamProject { exprs: [t2.a, t2.b, t2.c, 1:Int32] }
     └── Chain { table: t2, columns: [t2.a, t2.b, t2.c], pk: [t2.a], dist: UpstreamHashShard(t2.a) }
         ├──  Upstream
         └──  BatchPlanNode
+
     Table 0
     ├── columns: [ t1_a, t1_b, t1_c, count ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
     Table 4294967294
     ├── columns: [ a, b, c ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
+
 - sql: |
     create table t1 (a int, b numeric, c bigint);
     create table t2 (a int, b numeric, c bigint);

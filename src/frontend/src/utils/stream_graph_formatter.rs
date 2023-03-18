@@ -78,7 +78,10 @@ impl StreamGraphFormatter {
         }
         let mut max_width = 80;
         for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
-            let width = config.unicode(output, &self.explain_fragment(fragment));
+            output.push_str("Fragment ");
+            output.push_str(&fragment.get_fragment_id().to_string());
+            output.push_str("\n");
+            let width = config.unicode(output, &self.explain_node(fragment.node.as_ref().unwrap()));
             max_width = max(width, max_width);
             config.width = max_width;
             output.push_str("\n\n");
@@ -131,12 +134,7 @@ impl StreamGraphFormatter {
         Pretty::childless_record(name, fields)
     }
 
-    fn explain_fragment<'a>(&mut self, fragment: &StreamFragment) -> Pretty<'a> {
-        let id = Some(fragment.get_fragment_id());
-        self.explain_node(id, fragment.node.as_ref().unwrap())
-    }
-
-    fn explain_node<'a>(&mut self, fragment_id: Option<u32>, node: &StreamNode) -> Pretty<'a> {
+    fn explain_node<'a>(&mut self, node: &StreamNode) -> Pretty<'a> {
         let one_line_explain = match node.get_node_body().unwrap() {
             stream_node::NodeBody::Exchange(_) => {
                 let edge = self.edges.get(&node.operator_id).unwrap();
@@ -155,11 +153,6 @@ impl StreamGraphFormatter {
                 )
             }
             _ => node.identity.clone(),
-        };
-        let one_line_explain = if let Some(id) = fragment_id {
-            format!("Fragment {} {}", id, one_line_explain)
-        } else {
-            one_line_explain
         };
 
         let mut fields = Vec::with_capacity(7);
@@ -285,7 +278,7 @@ impl StreamGraphFormatter {
         let children = node
             .input
             .iter()
-            .map(|input| self.explain_node(None, input))
+            .map(|input| self.explain_node(input))
             .collect();
         Pretty::simple_record(one_line_explain, fields, children)
     }
