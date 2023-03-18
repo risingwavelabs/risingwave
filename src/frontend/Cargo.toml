@@ -44,7 +44,7 @@ petgraph = "0.6"
 pgwire = { path = "../utils/pgwire" }
 pin-project-lite = "0.2"
 postgres-types = { version = "0.2.4" }
-pretty-xmlish = "0.1.9"
+pretty-xmlish = "0.1.10"
 prometheus = { version = "0.13", features = ["process"] }
 rand = "0.8"
 risingwave_batch = { path = "../batch" }
