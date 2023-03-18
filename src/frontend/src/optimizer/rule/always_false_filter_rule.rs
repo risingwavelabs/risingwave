@@ -18,9 +18,9 @@ use super::Rule;
 use crate::optimizer::plan_node::{LogicalFilter, LogicalValues};
 use crate::PlanRef;
 
-pub struct AlwaysFalseFilterFule;
+pub struct AlwaysFalseFilterRule;
 
-impl Rule for AlwaysFalseFilterFule {
+impl Rule for AlwaysFalseFilterRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let always_false = filter
@@ -51,8 +51,8 @@ impl Rule for AlwaysFalseFilterFule {
     }
 }
 
-impl AlwaysFalseFilterFule {
+impl AlwaysFalseFilterRule {
     pub fn create() -> Box<dyn Rule> {
-        Box::new(AlwaysFalseFilterFule)
+        Box::new(AlwaysFalseFilterRule)
     }
 }

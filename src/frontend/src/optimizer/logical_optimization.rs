@@ -245,7 +245,7 @@ lazy_static! {
 
     static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
         "Void always-false filter's downstream",
-        vec![AlwaysFalseFilterFule::create()],
+        vec![AlwaysFalseFilterRule::create()],
         ApplyOrder::TopDown,
     );
 }

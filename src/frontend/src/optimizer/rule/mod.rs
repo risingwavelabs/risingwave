@@ -135,7 +135,7 @@ macro_rules! for_all_rules {
             , { RewriteLikeExprRule }
             , { AvoidExchangeShareRule }
             , { MinMaxOnIndexRule }
-            , { AlwaysFalseFilterFule }
+            , { AlwaysFalseFilterRule }
         }
     };
 }
