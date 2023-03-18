@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
@@ -35,7 +36,8 @@ pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> St
         ..Default::default()
     };
     for p in pretty {
-        config.width = config.unicode(&mut output, &p);
+        let width = config.unicode(&mut output, &p);
+        config.width = max(width, 80);
         output.push('\n');
     }
     output

@@ -158,9 +158,7 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 1
-    ├── columns:
-    │   ┌── string_agg(s_s, ',':Varchar order_by(s_v ASC))
-    │   └── count
+    ├── columns: [ string_agg(s_s, ',':Varchar order_by(s_v ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -213,31 +211,20 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 1
-    ├── columns:
-    │   ┌── max(max(t_v))
-    │   └── count
+    ├── columns: [ max(max(t_v)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 2
-    ├── columns:
-    │   ┌── $expr1
-    │   ├── t_v
-    │   └── t__row_id
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 DESC
-    │   └── $2 ASC
+    ├── columns: [ $expr1, t_v, t__row_id ]
+    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
     Table 3
-    ├── columns:
-    │   ┌── $expr1
-    │   ├── max(t_v)
-    │   └── count
+    ├── columns: [ $expr1, max(t_v), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: []
@@ -481,9 +468,7 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 1
-    ├── columns:
-    │   ┌── string_agg(t_s, ',':Varchar order_by(t_o ASC))
-    │   └── count
+    ├── columns: [ string_agg(t_s, ',':Varchar order_by(t_o ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
@@ -573,33 +558,20 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 1
-    ├── columns:
-    │   ┌── max(max(t_v))
-    │   ├── sum0(count(t_v))
-    │   └── count
+    ├── columns: [ max(max(t_v)), sum0(count(t_v)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 2
-    ├── columns:
-    │   ┌── $expr1
-    │   ├── t_v
-    │   └── t__row_id
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 DESC
-    │   └── $2 ASC
+    ├── columns: [ $expr1, t_v, t__row_id ]
+    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
     Table 3
-    ├── columns:
-    │   ┌── $expr1
-    │   ├── max(t_v)
-    │   ├── count(t_v)
-    │   └── count
+    ├── columns: [ $expr1, max(t_v), count(t_v), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: []
@@ -773,20 +745,13 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 1
-    ├── columns:
-    │   ┌── t_o
-    │   ├── t__row_id
-    │   ├── t_s
-    │   └── ',':Varchar
+    ├── columns: [ t_o, t__row_id, t_s, ',':Varchar ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 2
-    ├── columns:
-    │   ┌── max(t_v)
-    │   ├── string_agg(t_s, ',':Varchar order_by(t_o ASC))
-    │   └── count
+    ├── columns: [ max(t_v), string_agg(t_s, ',':Varchar order_by(t_o ASC)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: []
@@ -1356,10 +1321,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── t_k
-    │   ├── string_agg(t_s, ',':Varchar order_by(t_o ASC))
-    │   └── count
+    ├── columns: [ t_k, string_agg(t_s, ',':Varchar order_by(t_o ASC)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -1406,10 +1368,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── tk_k
-    │   ├── string_agg(tk_s, ',':Varchar order_by(tk_o ASC))
-    │   └── count
+    ├── columns: [ tk_k, string_agg(tk_s, ',':Varchar order_by(tk_o ASC)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -1459,10 +1418,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── s_k
-    │   ├── string_agg(s_s, ',':Varchar order_by(s_o ASC))
-    │   └── count
+    ├── columns: [ s_k, string_agg(s_s, ',':Varchar order_by(s_o ASC)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]

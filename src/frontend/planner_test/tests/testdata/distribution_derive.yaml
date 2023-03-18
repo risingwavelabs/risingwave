@@ -42,22 +42,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── ak1.a._row_id
-    │   ├── ak1.k1
-    │   └── bk1.b._row_id
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $4 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ]
+    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2, 3, 4 ]
     └── read pk prefix len hint: 3
 - id: Ak1_join_B_onk1
@@ -95,22 +82,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── ak1.a._row_id
-    │   ├── ak1.k1
-    │   └── bk1.b._row_id
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $4 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ]
+    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2, 3, 4 ]
     └── read pk prefix len hint: 3
 - id: A_join_Bk1_onk1
@@ -148,22 +122,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── ak1.a._row_id
-    │   ├── ak1.k1
-    │   └── bk1.b._row_id
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $4 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ]
+    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2, 3, 4 ]
     └── read pk prefix len hint: 3
 - id: Ak1_join_Bk1_onk1
@@ -201,22 +162,9 @@
     ├──  StreamExchange Hash([0]) from 2
     └──  StreamExchange NoShuffle from 3
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── ak1.a._row_id
-    │   ├── ak1.k1
-    │   └── bk1.b._row_id
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $4 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, bk1.b._row_id ]
+    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2, 3, 4 ]
     └── read pk prefix len hint: 3
 - id: aggk1_from_A
@@ -539,10 +487,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── a_k1
-    │   ├── max(count)
-    │   └── count
+    ├── columns: [ a_k1, max(count), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -772,11 +717,7 @@
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 1
-    ├── columns:
-    │   ┌── a_k1
-    │   ├── a_k2
-    │   ├── max(count)
-    │   └── count
+    ├── columns: [ a_k1, a_k2, max(count), count ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3 ]
     ├── distribution key: [ 0, 1 ]
@@ -788,10 +729,7 @@
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 4294967294
-    ├── columns:
-    │   ┌── max_num
-    │   ├── a.k1
-    │   └── a.k2
+    ├── columns: [ max_num, a.k1, a.k2 ]
     ├── primary key: [ $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 1, 2 ]
@@ -850,10 +788,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── ak1_k1
-    │   ├── ak1_a__row_id
-    │   └── _degree
+    ├── columns: [ ak1_k1, ak1_a__row_id, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
@@ -877,22 +812,9 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── ak1.a._row_id
-    │   ├── ak1.k1
-    │   └── a.k1
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $4 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── columns: [ v, bv, ak1.a._row_id, ak1.k1, a.k1 ]
+    ├── primary key: [ $2 ASC, $4 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 3
 - id: aggk1_join_Ak1_onk1
@@ -954,24 +876,14 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 2
-    ├── columns:
-    │   ┌── ak1_k1
-    │   ├── ak1_v
-    │   └── ak1_a__row_id
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $2 ASC
+    ├── columns: [ ak1_k1, ak1_v, ak1_a__row_id ]
+    ├── primary key: [ $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── ak1_k1
-    │   ├── ak1_a__row_id
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ ak1_k1, ak1_a__row_id, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -982,19 +894,9 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── v
-    │   ├── bv
-    │   ├── a.k1
-    │   └── ak1.a._row_id
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── columns: [ v, bv, a.k1, ak1.a._row_id ]
+    ├── primary key: [ $2 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 2
 - id: aggk1_join_aggk1_onk1
@@ -1092,19 +994,9 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── num
-    │   ├── bv
-    │   ├── a.k1
-    │   └── b.k1
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── columns: [ num, bv, a.k1, b.k1 ]
+    ├── primary key: [ $2 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 2
 - sql: |

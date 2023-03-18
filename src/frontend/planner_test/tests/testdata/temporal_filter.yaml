@@ -101,9 +101,7 @@
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 4294967294
-    ├── columns:
-    │   ┌── ts
-    │   └── t1._row_id
+    ├── columns: [ ts, t1._row_id ]
     ├── primary key: [ $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]

@@ -576,15 +576,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns: region_r_regionkey
+    ├── columns: [ region_r_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── region_r_regionkey
-    │   └── _degree
+    ├── columns: [ region_r_regionkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -606,30 +604,8 @@
     │   ├── supplier_s_suppkey
     │   ├── supplier_s_nationkey
     │   └── nation_n_nationkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $2 ASC
-    │   ├── $10 ASC
-    │   ├── $11 ASC
-    │   ├── $12 ASC
-    │   ├── $14 ASC
-    │   └── $13 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   ├── 12
-    │   ├── 13
-    │   └── 14
+    ├── primary key: [ $0 ASC, $2 ASC, $10 ASC, $11 ASC, $12 ASC, $14 ASC, $13 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
     Table 7
@@ -642,30 +618,18 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   └── $6 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
     ├── value indices: [ 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
     Table 8
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── min(partsupp_ps_supplycost)
+    ├── columns: [ part_p_partkey, min(partsupp_ps_supplycost) ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 2
     Table 9
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   ├── min(partsupp_ps_supplycost)
-    │   └── _degree
+    ├── columns: [ part_p_partkey, min(partsupp_ps_supplycost), _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
@@ -684,25 +648,8 @@
     │   ├── partsupp_ps_partkey
     │   ├── partsupp_ps_suppkey
     │   └── supplier_s_suppkey
-    ├── primary key:
-    │   ┌── $5 ASC
-    │   ├── $0 ASC
-    │   ├── $9 ASC
-    │   ├── $10 ASC
-    │   └── $11 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   └── 11
+    ├── primary key: [ $5 ASC, $0 ASC, $9 ASC, $10 ASC, $11 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
     ├── distribution key: [ 5 ]
     └── read pk prefix len hint: 1
     Table 11
@@ -713,28 +660,18 @@
     │   ├── partsupp_ps_suppkey
     │   ├── supplier_s_suppkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
     ├── value indices: [ 5 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   ├── nation_n_name
-    │   └── nation_n_regionkey
+    ├── columns: [ nation_n_nationkey, nation_n_name, nation_n_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 13
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -746,16 +683,8 @@
     │   ├── partsupp_ps_suppkey
     │   ├── partsupp_ps_supplycost
     │   └── partsupp_ps_partkey
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $0 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $2 ASC, $0 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
     Table 15
@@ -764,10 +693,7 @@
     │   ├── part_p_partkey
     │   ├── partsupp_ps_partkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -781,36 +707,23 @@
     │   ├── supplier_s_acctbal
     │   └── supplier_s_comment
     ├── primary key: [ $0 ASC ]
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 17
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 18
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── part_p_mfgr
+    ├── columns: [ part_p_partkey, part_p_mfgr ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 19
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -820,20 +733,13 @@
     │   ┌── partsupp_ps_partkey
     │   ├── partsupp_ps_suppkey
     │   └── partsupp_ps_supplycost
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 21
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -858,23 +764,11 @@
     │   ├── $6 ASC
     │   ├── $7 ASC
     │   └── $8 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   └── 8
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 23
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   ├── min(partsupp_ps_supplycost)
-    │   └── count
+    ├── columns: [ part_p_partkey, min(partsupp_ps_supplycost), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -886,9 +780,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 25
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -903,23 +795,8 @@
     │   ├── supplier_s_nationkey
     │   ├── nation_n_regionkey
     │   └── region_r_regionkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $7 ASC
-    │   └── $6 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $0 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $7 ASC, $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 27
@@ -932,21 +809,12 @@
     │   ├── region_r_regionkey
     │   ├── nation_n_regionkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   └── $6 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
     ├── value indices: [ 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 28
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── count
+    ├── columns: [ part_p_partkey, count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -960,21 +828,8 @@
     │   ├── supplier_s_suppkey
     │   ├── supplier_s_nationkey
     │   └── nation_n_nationkey
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $0 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $6 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── primary key: [ $2 ASC, $0 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
     Table 30
@@ -986,26 +841,18 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   └── $5 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 31
-    ├── columns: region_r_regionkey
+    ├── columns: [ region_r_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 32
-    ├── columns:
-    │   ┌── region_r_regionkey
-    │   └── _degree
+    ├── columns: [ region_r_regionkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1017,17 +864,8 @@
     │   ├── supplier_s_nationkey
     │   ├── partsupp_ps_suppkey
     │   └── supplier_s_suppkey
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $0 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $2 ASC, $0 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
     Table 34
@@ -1037,26 +875,18 @@
     │   ├── partsupp_ps_suppkey
     │   ├── supplier_s_suppkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 35
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_regionkey
+    ├── columns: [ nation_n_nationkey, nation_n_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 36
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1066,35 +896,24 @@
     │   ┌── partsupp_ps_partkey
     │   ├── partsupp_ps_suppkey
     │   └── partsupp_ps_supplycost
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 38
-    ├── columns:
-    │   ┌── partsupp_ps_suppkey
-    │   ├── partsupp_ps_partkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_suppkey, partsupp_ps_partkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 39
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 40
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1132,24 +951,7 @@
     │   ├── $14 ASC
     │   ├── $16 ASC
     │   └── $15 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   ├── 12
-    │   ├── 13
-    │   ├── 14
-    │   ├── 15
-    │   └── 16
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: []
     └── read pk prefix len hint: 10
 - id: tpch_q3
@@ -1320,10 +1122,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
@@ -1335,9 +1134,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1348,43 +1145,20 @@
     │   ├── orders_o_custkey
     │   ├── orders_o_orderdate
     │   └── orders_o_shippriority
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 10
-    ├── columns:
-    │   ┌── orders_o_custkey
-    │   ├── orders_o_orderkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── l_orderkey
-    │   ├── revenue
-    │   ├── o_orderdate
-    │   └── o_shippriority
-    ├── primary key:
-    │   ┌── $1 DESC
-    │   ├── $2 ASC
-    │   ├── $0 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── columns: [ l_orderkey, revenue, o_orderdate, o_shippriority ]
+    ├── primary key: [ $1 DESC, $2 ASC, $0 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: []
     └── read pk prefix len hint: 3
 - id: tpch_q4
@@ -1493,26 +1267,19 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   └── lineitem_l_linenumber
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── o_orderpriority
-    │   └── order_count
+    ├── columns: [ o_orderpriority, order_count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
@@ -1720,19 +1487,7 @@
     │   ├── $9 ASC
     │   ├── $11 ASC
     │   └── $10 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   └── 11
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
     Table 2
@@ -1761,15 +1516,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns: region_r_regionkey
+    ├── columns: [ region_r_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── region_r_regionkey
-    │   └── _degree
+    ├── columns: [ region_r_regionkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1785,24 +1538,8 @@
     │   ├── customer_c_nationkey
     │   ├── lineitem_l_orderkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   ├── $7 ASC
-    │   └── $8 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   └── 8
+    ├── primary key: [ $0 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
@@ -1815,30 +1552,18 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   └── $6 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
     ├── value indices: [ 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   ├── nation_n_name
-    │   └── nation_n_regionkey
+    ├── columns: [ nation_n_nationkey, nation_n_name, nation_n_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -1850,17 +1575,8 @@
     │   ├── supplier_s_nationkey
     │   ├── customer_c_custkey
     │   └── customer_c_nationkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $0 ASC, $1 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 10
@@ -1870,11 +1586,7 @@
     │   ├── customer_c_custkey
     │   ├── customer_c_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
@@ -1885,16 +1597,8 @@
     │   ├── lineitem_l_extendedprice
     │   ├── lineitem_l_discount
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $0 ASC, $1 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 12
@@ -1903,22 +1607,13 @@
     │   ├── lineitem_l_suppkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 13
-    ├── columns:
-    │   ┌── customer_c_nationkey
-    │   ├── orders_o_orderkey
-    │   └── customer_c_custkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $2 ASC
-    │   └── $1 ASC
+    ├── columns: [ customer_c_nationkey, orders_o_orderkey, customer_c_custkey ]
+    ├── primary key: [ $0 ASC, $2 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -1928,78 +1623,49 @@
     │   ├── customer_c_custkey
     │   ├── orders_o_orderkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 16
-    ├── columns:
-    │   ┌── supplier_s_nationkey
-    │   ├── supplier_s_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 17
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── customer_c_nationkey
+    ├── columns: [ customer_c_custkey, customer_c_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 18
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 19
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── orders_o_custkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── columns: [ orders_o_orderkey, orders_o_custkey ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 20
-    ├── columns:
-    │   ┌── orders_o_custkey
-    │   ├── orders_o_orderkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── n_name
-    │   └── revenue
-    ├── primary key:
-    │   ┌── $1 DESC
-    │   └── $0 ASC
+    ├── columns: [ n_name, revenue ]
+    ├── primary key: [ $1 DESC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -2303,17 +1969,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_name
+    ├── columns: [ nation_n_nationkey, nation_n_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -2331,26 +1993,8 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── orders_o_orderkey
-    ├── primary key:
-    │   ┌── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   ├── $7 ASC
-    │   ├── $8 ASC
-    │   ├── $9 ASC
-    │   └── $10 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   └── 10
+    ├── primary key: [ $4 ASC, $5 ASC, $6 ASC, $7 ASC, $8 ASC, $9 ASC, $10 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
     Table 6
@@ -2363,29 +2007,18 @@
     │   ├── supplier_s_nationkey
     │   ├── orders_o_orderkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   └── $6 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
     ├── value indices: [ 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── customer_c_nationkey
+    ├── columns: [ customer_c_custkey, customer_c_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -2401,22 +2034,8 @@
     │   ├── lineitem_l_linenumber
     │   ├── supplier_s_nationkey
     │   └── nation_n_nationkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   ├── $8 ASC
-    │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   └── 8
+    ├── primary key: [ $0 ASC, $5 ASC, $6 ASC, $8 ASC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 10
@@ -2427,27 +2046,18 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
     ├── value indices: [ 5 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── orders_o_custkey
+    ├── columns: [ orders_o_orderkey, orders_o_custkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── _degree
+    ├── columns: [ orders_o_orderkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -2461,19 +2071,8 @@
     │   ├── lineitem_l_shipdate
     │   ├── supplier_s_suppkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $5 ASC
-    │   ├── $1 ASC
-    │   └── $6 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── primary key: [ $0 ASC, $5 ASC, $1 ASC, $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 14
@@ -2483,42 +2082,30 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_name
+    ├── columns: [ nation_n_nationkey, nation_n_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 16
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 17
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 18
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -2531,17 +2118,8 @@
     │   ├── lineitem_l_discount
     │   ├── lineitem_l_shipdate
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $0 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $1 ASC, $0 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 20
@@ -2550,32 +2128,15 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── supp_nation
-    │   ├── cust_nation
-    │   ├── l_year
-    │   └── revenue
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
-    ├── distribution key:
-    │   ┌── 0
-    │   ├── 1
-    │   └── 2
+    ├── columns: [ supp_nation, cust_nation, l_year, revenue ]
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 - id: tpch_q8
   before:
@@ -2823,24 +2384,7 @@
     │   ├── $14 ASC
     │   ├── $16 ASC
     │   └── $15 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   ├── 12
-    │   ├── 13
-    │   ├── 14
-    │   ├── 15
-    │   └── 16
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
     Table 2
@@ -2877,15 +2421,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns: region_r_regionkey
+    ├── columns: [ region_r_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── region_r_regionkey
-    │   └── _degree
+    ├── columns: [ region_r_regionkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -2919,22 +2461,7 @@
     │   ├── $12 ASC
     │   ├── $14 ASC
     │   └── $13 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   ├── 12
-    │   ├── 13
-    │   └── 14
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
     Table 6
@@ -2967,17 +2494,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_regionkey
+    ├── columns: [ nation_n_nationkey, nation_n_regionkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3007,20 +2530,7 @@
     │   ├── $10 ASC
     │   ├── $11 ASC
     │   └── $12 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   └── 12
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
     Table 10
@@ -3049,17 +2559,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── customer_c_nationkey
+    ├── columns: [ customer_c_custkey, customer_c_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3076,25 +2582,8 @@
     │   ├── lineitem_l_suppkey
     │   ├── supplier_s_nationkey
     │   └── nation_n_nationkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   ├── $7 ASC
-    │   ├── $9 ASC
-    │   └── $8 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   └── 9
+    ├── primary key: [ $0 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC, $9 ASC, $8 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 14
@@ -3107,30 +2596,18 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   └── $6 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC ]
     ├── value indices: [ 7 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   ├── orders_o_custkey
-    │   └── orders_o_orderdate
+    ├── columns: [ orders_o_orderkey, orders_o_custkey, orders_o_orderdate ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 16
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── _degree
+    ├── columns: [ orders_o_orderkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3145,22 +2622,8 @@
     │   ├── lineitem_l_linenumber
     │   ├── lineitem_l_suppkey
     │   └── supplier_s_suppkey
-    ├── primary key:
-    │   ┌── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $0 ASC
-    │   ├── $5 ASC
-    │   ├── $7 ASC
-    │   └── $6 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $3 ASC, $4 ASC, $0 ASC, $5 ASC, $7 ASC, $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
     Table 18
@@ -3172,28 +2635,18 @@
     │   ├── supplier_s_suppkey
     │   ├── lineitem_l_suppkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   └── $5 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 19
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_name
+    ├── columns: [ nation_n_nationkey, nation_n_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 20
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3206,18 +2659,8 @@
     │   ├── lineitem_l_discount
     │   ├── part_p_partkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $4 ASC
-    │   ├── $0 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $1 ASC, $4 ASC, $0 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 22
@@ -3227,40 +2670,30 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 23
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 24
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 25
-    ├── columns: part_p_partkey
+    ├── columns: [ part_p_partkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 26
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3273,17 +2706,8 @@
     │   ├── lineitem_l_extendedprice
     │   ├── lineitem_l_discount
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $0 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $1 ASC, $0 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 28
@@ -3292,17 +2716,12 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── o_year
-    │   └── mkt_share
+    ├── columns: [ o_year, mkt_share ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
@@ -3513,22 +2932,7 @@
     │   ├── $13 ASC
     │   ├── $14 ASC
     │   └── $12 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   ├── 11
-    │   ├── 12
-    │   ├── 13
-    │   └── 14
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 2
@@ -3559,17 +2963,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── orders_o_orderdate
+    ├── columns: [ orders_o_orderkey, orders_o_orderdate ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── _degree
+    ├── columns: [ orders_o_orderkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3597,19 +2997,7 @@
     │   ├── $9 ASC
     │   ├── $11 ASC
     │   └── $10 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   ├── 9
-    │   ├── 10
-    │   └── 11
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 ]
     ├── distribution key: [ 1, 2 ]
     └── read pk prefix len hint: 2
     Table 6
@@ -3640,20 +3028,13 @@
     │   ┌── partsupp_ps_partkey
     │   ├── partsupp_ps_suppkey
     │   └── partsupp_ps_supplycost
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 8
-    ├── columns:
-    │   ┌── partsupp_ps_suppkey
-    │   ├── partsupp_ps_partkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_suppkey, partsupp_ps_partkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 1, 0 ]
     └── read pk prefix len hint: 2
@@ -3669,24 +3050,8 @@
     │   ├── part_p_partkey
     │   ├── lineitem_l_linenumber
     │   └── supplier_s_suppkey
-    ├── primary key:
-    │   ┌── $6 ASC
-    │   ├── $7 ASC
-    │   ├── $0 ASC
-    │   ├── $8 ASC
-    │   ├── $9 ASC
-    │   └── $2 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   ├── 7
-    │   ├── 8
-    │   └── 9
+    ├── primary key: [ $6 ASC, $7 ASC, $0 ASC, $8 ASC, $9 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 ]
     ├── distribution key: [ 6 ]
     └── read pk prefix len hint: 1
     Table 10
@@ -3698,28 +3063,18 @@
     │   ├── supplier_s_suppkey
     │   ├── lineitem_l_suppkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   └── $5 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_name
+    ├── columns: [ nation_n_nationkey, nation_n_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3734,20 +3089,8 @@
     │   ├── lineitem_l_discount
     │   ├── part_p_partkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   ├── $6 ASC
-    │   ├── $0 ASC
-    │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $2 ASC, $6 ASC, $0 ASC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
     Table 14
@@ -3757,40 +3100,30 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 16
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 17
-    ├── columns: part_p_partkey
+    ├── columns: [ part_p_partkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 18
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -3804,18 +3137,8 @@
     │   ├── lineitem_l_extendedprice
     │   ├── lineitem_l_discount
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $0 ASC
-    │   └── $6 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── primary key: [ $1 ASC, $0 ASC, $6 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 20
@@ -3824,21 +3147,13 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── nation
-    │   ├── o_year
-    │   └── sum_profit
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 DESC
+    ├── columns: [ nation, o_year, sum_profit ]
+    ├── primary key: [ $0 ASC, $1 DESC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
@@ -4052,10 +3367,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
@@ -4070,19 +3382,8 @@
     │   ├── customer_c_acctbal
     │   ├── customer_c_comment
     │   └── orders_o_orderkey
-    ├── primary key:
-    │   ┌── $3 ASC
-    │   ├── $0 ASC
-    │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $3 ASC, $0 ASC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
     Table 8
@@ -4091,25 +3392,18 @@
     │   ├── customer_c_custkey
     │   ├── orders_o_orderkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── nation_n_name
+    ├── columns: [ nation_n_nationkey, nation_n_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 10
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -4124,42 +3418,24 @@
     │   ├── customer_c_acctbal
     │   └── customer_c_comment
     ├── primary key: [ $0 ASC ]
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 13
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── orders_o_custkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── columns: [ orders_o_orderkey, orders_o_custkey ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 14
-    ├── columns:
-    │   ┌── orders_o_custkey
-    │   ├── orders_o_orderkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -4182,15 +3458,7 @@
     │   ├── $4 ASC
     │   ├── $5 ASC
     │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: []
     └── read pk prefix len hint: 7
 - id: tpch_q11
@@ -4404,9 +3672,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -4417,58 +3683,37 @@
     │   ├── partsupp_ps_suppkey
     │   ├── partsupp_ps_availqty
     │   └── partsupp_ps_supplycost
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── partsupp_ps_suppkey
-    │   ├── partsupp_ps_partkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_suppkey, partsupp_ps_partkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 10
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── sum(sum($expr2))
-    │   └── count
+    ├── columns: [ sum(sum($expr2)), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 4294967294
-    ├── columns:
-    │   ┌── ps_partkey
-    │   └── value
-    ├── primary key:
-    │   ┌── $1 DESC
-    │   └── $0 ASC
+    ├── columns: [ ps_partkey, value ]
+    ├── primary key: [ $1 DESC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -4691,41 +3936,26 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── orders_o_custkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
+    ├── columns: [ orders_o_orderkey, orders_o_custkey ]
+    ├── primary key: [ $1 ASC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── orders_o_custkey
-    │   ├── orders_o_orderkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── c_count
-    │   └── custdist
-    ├── primary key:
-    │   ┌── $1 DESC
-    │   └── $0 DESC
+    ├── columns: [ c_count, custdist ]
+    ├── primary key: [ $1 DESC, $0 DESC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -4840,17 +4070,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── part_p_type
+    ├── columns: [ part_p_partkey, part_p_type ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5005,11 +4231,7 @@
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 1
     Table 1
-    ├── columns:
-    │   ┌── sum($expr1)
-    │   ├── supplier_s_suppkey
-    │   ├── lineitem_l_suppkey
-    │   └── _degree
+    ├── columns: [ sum($expr1), supplier_s_suppkey, lineitem_l_suppkey, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
@@ -5021,9 +4243,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── max(max(sum($expr1)))
-    │   └── _degree
+    ├── columns: [ max(max(sum($expr1))), _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5035,82 +4255,54 @@
     │   ├── supplier_s_address
     │   └── supplier_s_phone
     ├── primary key: [ $0 ASC ]
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── lineitem_l_suppkey
-    │   └── sum($expr1)
+    ├── columns: [ lineitem_l_suppkey, sum($expr1) ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── lineitem_l_suppkey
-    │   └── _degree
+    ├── columns: [ lineitem_l_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── lineitem_l_suppkey
-    │   ├── sum($expr1)
-    │   └── count
+    ├── columns: [ lineitem_l_suppkey, sum($expr1), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── max(sum($expr1))
-    │   └── $expr2
-    ├── primary key:
-    │   ┌── $0 DESC
-    │   └── $1 ASC
+    ├── columns: [ max(sum($expr1)), $expr2 ]
+    ├── primary key: [ $0 DESC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 10
-    ├── columns:
-    │   ┌── max(max(sum($expr1)))
-    │   └── count
+    ├── columns: [ max(max(sum($expr1))), count ]
     ├── primary key: []
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 0
     Table 11
-    ├── columns:
-    │   ┌── $expr2
-    │   ├── sum($expr1)
-    │   └── lineitem_l_suppkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 DESC
-    │   └── $2 ASC
+    ├── columns: [ $expr2, sum($expr1), lineitem_l_suppkey ]
+    ├── primary key: [ $0 ASC, $1 DESC, $2 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 2 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
     Table 12
-    ├── columns:
-    │   ┌── $expr2
-    │   ├── max(sum($expr1))
-    │   └── count
+    ├── columns: [ $expr2, max(sum($expr1)), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: []
@@ -5124,17 +4316,8 @@
     │   ├── s_phone
     │   ├── total_revenue
     │   └── lineitem.l_suppkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $5 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $0 ASC, $5 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 4 ]
     └── read pk prefix len hint: 3
 - id: tpch_q16
@@ -5295,76 +4478,40 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   └── partsupp_ps_suppkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   ├── part_p_brand
-    │   ├── part_p_type
-    │   └── part_p_size
+    ├── columns: [ part_p_partkey, part_p_brand, part_p_type, part_p_size ]
     ├── primary key: [ $0 ASC ]
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── p_brand
-    │   ├── p_type
-    │   ├── p_size
-    │   └── supplier_cnt
-    ├── primary key:
-    │   ┌── $3 DESC
-    │   ├── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
-    ├── distribution key:
-    │   ┌── 0
-    │   ├── 1
-    │   └── 2
+    ├── columns: [ p_brand, p_type, p_size, supplier_cnt ]
+    ├── primary key: [ $3 DESC, $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 - id: tpch_q17
   before:
@@ -5533,9 +4680,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5547,16 +4692,8 @@
     │   ├── lineitem_l_extendedprice
     │   ├── lineitem_l_orderkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $0 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
@@ -5565,23 +4702,18 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns: part_p_partkey
+    ├── columns: [ part_p_partkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5603,9 +4735,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5616,15 +4746,8 @@
     │   ├── lineitem_l_quantity
     │   ├── lineitem_l_orderkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── primary key: [ $0 ASC, $2 ASC, $3 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 13
@@ -5633,17 +4756,12 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 14
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── count
+    ├── columns: [ part_p_partkey, count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5864,9 +4982,7 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   └── _degree
+    ├── columns: [ lineitem_l_orderkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5878,62 +4994,36 @@
     │   ├── orders_o_orderkey
     │   ├── orders_o_totalprice
     │   └── orders_o_orderdate
-    ├── primary key:
-    │   ┌── $2 ASC
-    │   └── $0 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $2 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   ├── customer_c_custkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_orderkey, customer_c_custkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_quantity
-    │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $2 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_quantity, lineitem_l_linenumber ]
+    ├── primary key: [ $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 10
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 11
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── customer_c_name
+    ├── columns: [ customer_c_custkey, customer_c_name ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 12
-    ├── columns:
-    │   ┌── customer_c_custkey
-    │   └── _degree
+    ├── columns: [ customer_c_custkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -5944,32 +5034,18 @@
     │   ├── orders_o_custkey
     │   ├── orders_o_totalprice
     │   └── orders_o_orderdate
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   └── $0 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   └── 3
+    ├── primary key: [ $1 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 14
-    ├── columns:
-    │   ┌── orders_o_custkey
-    │   ├── orders_o_orderkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ orders_o_custkey, orders_o_orderkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── sum(lineitem_l_quantity)
-    │   └── count
+    ├── columns: [ lineitem_l_orderkey, sum(lineitem_l_quantity), count ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2 ]
     ├── distribution key: [ 0 ]
@@ -5982,19 +5058,8 @@
     │   ├── o_orderdate
     │   ├── o_totalprice
     │   └── quantity
-    ├── primary key:
-    │   ┌── $4 DESC
-    │   ├── $3 ASC
-    │   ├── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $4 DESC, $3 ASC, $0 ASC, $1 ASC, $2 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: []
     └── read pk prefix len hint: 5
 - id: tpch_q19
@@ -6124,19 +5189,13 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 3
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   ├── part_p_brand
-    │   ├── part_p_size
-    │   └── part_p_container
+    ├── columns: [ part_p_partkey, part_p_brand, part_p_size, part_p_container ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -6366,10 +5425,7 @@
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── supplier_s_nationkey
-    │   ├── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_nationkey, supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
@@ -6381,89 +5437,55 @@
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 7
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 8
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── $expr1
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, $expr1 ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 9
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 10
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── $expr2
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, $expr2 ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 11
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 12
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── partsupp_ps_availqty
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, partsupp_ps_availqty ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 13
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 14
-    ├── columns: part_p_partkey
+    ├── columns: [ part_p_partkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 15
-    ├── columns:
-    │   ┌── part_p_partkey
-    │   └── _degree
+    ├── columns: [ part_p_partkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -6474,30 +5496,19 @@
     │   ├── partsupp_ps_suppkey
     │   ├── sum(lineitem_l_quantity)
     │   └── count
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2, 3 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 17
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   └── partsupp_ps_suppkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 18
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
@@ -6508,17 +5519,8 @@
     │   ├── lineitem_l_quantity
     │   ├── lineitem_l_orderkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $0 ASC, $1 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 20
@@ -6528,22 +5530,13 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
     Table 21
-    ├── columns:
-    │   ┌── partsupp_ps_partkey
-    │   ├── partsupp_ps_suppkey
-    │   └── count
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ partsupp_ps_partkey, partsupp_ps_suppkey, count ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0, 1 ]
     └── read pk prefix len hint: 2
@@ -6554,17 +5547,8 @@
     │   ├── supplier.s_suppkey
     │   ├── nation.n_nationkey
     │   └── supplier.s_nationkey
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   └── 4
+    ├── primary key: [ $0 ASC, $2 ASC, $3 ASC, $4 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4 ]
     ├── distribution key: [ 2 ]
     └── read pk prefix len hint: 3
 - id: tpch_q21
@@ -6797,22 +5781,8 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── orders_o_orderkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $1 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 4
@@ -6824,35 +5794,19 @@
     │   ├── supplier_s_nationkey
     │   ├── orders_o_orderkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   └── $5 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 5
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_suppkey
-    │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $2 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_suppkey, lineitem_l_linenumber ]
+    ├── primary key: [ $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 6
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -6866,22 +5820,8 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── orders_o_orderkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $5 ASC
-    │   ├── $6 ASC
-    │   └── $7 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   ├── 6
-    │   └── 7
+    ├── primary key: [ $1 ASC, $3 ASC, $4 ASC, $5 ASC, $6 ASC, $7 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 8
@@ -6893,35 +5833,19 @@
     │   ├── supplier_s_nationkey
     │   ├── orders_o_orderkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   └── $5 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC, $5 ASC ]
     ├── value indices: [ 6 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 9
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_suppkey
-    │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $2 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_suppkey, lineitem_l_linenumber ]
+    ├── primary key: [ $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 10
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_linenumber
-    │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   └── $1 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_linenumber, _degree ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
     ├── value indices: [ 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
@@ -6934,20 +5858,8 @@
     │   ├── lineitem_l_linenumber
     │   ├── supplier_s_nationkey
     │   └── nation_n_nationkey
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $3 ASC
-    │   ├── $4 ASC
-    │   ├── $6 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   ├── 5
-    │   └── 6
+    ├── primary key: [ $1 ASC, $3 ASC, $4 ASC, $6 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5, 6 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 12
@@ -6958,25 +5870,18 @@
     │   ├── nation_n_nationkey
     │   ├── supplier_s_nationkey
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   ├── $3 ASC
-    │   └── $4 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC, $4 ASC ]
     ├── value indices: [ 5 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 13
-    ├── columns: orders_o_orderkey
+    ├── columns: [ orders_o_orderkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 14
-    ├── columns:
-    │   ┌── orders_o_orderkey
-    │   └── _degree
+    ├── columns: [ orders_o_orderkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
@@ -6989,18 +5894,8 @@
     │   ├── lineitem_l_suppkey
     │   ├── supplier_s_suppkey
     │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $4 ASC
-    │   ├── $2 ASC
-    │   └── $5 ASC
-    ├── value indices:
-    │   ┌── 0
-    │   ├── 1
-    │   ├── 2
-    │   ├── 3
-    │   ├── 4
-    │   └── 5
+    ├── primary key: [ $1 ASC, $4 ASC, $2 ASC, $5 ASC ]
+    ├── value indices: [ 0, 1, 2, 3, 4, 5 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
     Table 16
@@ -7010,54 +5905,37 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   ├── $2 ASC
-    │   └── $3 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 17
-    ├── columns: nation_n_nationkey
+    ├── columns: [ nation_n_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 18
-    ├── columns:
-    │   ┌── nation_n_nationkey
-    │   └── _degree
+    ├── columns: [ nation_n_nationkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 19
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   ├── supplier_s_name
-    │   └── supplier_s_nationkey
+    ├── columns: [ supplier_s_suppkey, supplier_s_name, supplier_s_nationkey ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 20
-    ├── columns:
-    │   ┌── supplier_s_suppkey
-    │   └── _degree
+    ├── columns: [ supplier_s_suppkey, _degree ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 21
-    ├── columns:
-    │   ┌── lineitem_l_orderkey
-    │   ├── lineitem_l_suppkey
-    │   └── lineitem_l_linenumber
-    ├── primary key:
-    │   ┌── $1 ASC
-    │   ├── $0 ASC
-    │   └── $2 ASC
+    ├── columns: [ lineitem_l_orderkey, lineitem_l_suppkey, lineitem_l_linenumber ]
+    ├── primary key: [ $1 ASC, $0 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 1 ]
     └── read pk prefix len hint: 1
@@ -7067,20 +5945,13 @@
     │   ├── lineitem_l_orderkey
     │   ├── lineitem_l_linenumber
     │   └── _degree
-    ├── primary key:
-    │   ┌── $0 ASC
-    │   ├── $1 ASC
-    │   └── $2 ASC
+    ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
     Table 4294967294
-    ├── columns:
-    │   ┌── s_name
-    │   └── numwait
-    ├── primary key:
-    │   ┌── $1 DESC
-    │   └── $0 ASC
+    ├── columns: [ s_name, numwait ]
+    ├── primary key: [ $1 DESC, $0 ASC ]
     ├── value indices: [ 0, 1 ]
     ├── distribution key: []
     └── read pk prefix len hint: 1
