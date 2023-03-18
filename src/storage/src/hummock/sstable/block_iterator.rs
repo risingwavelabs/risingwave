@@ -171,9 +171,9 @@ impl BlockIterator {
             self.key_index_in_restart_point += 1;
         }
 
-        // self.epoch = self
-        //     .block
-        //     .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
+        self.epoch = self
+            .block
+            .decode_epoch(self.restart_point_index, self.key_index_in_restart_point);
 
         let prefix =
             self.decode_prefix_at(offset, self.last_key_len_type, self.last_value_len_type);
@@ -262,6 +262,7 @@ impl BlockIterator {
                      offset: probe,
                      key_len_type,
                      value_len_type,
+                     entry_count: _,
                  }| {
                     let prefix =
                         self.decode_prefix_at(probe as usize, key_len_type, value_len_type);
@@ -306,7 +307,7 @@ impl BlockIterator {
 
         self.last_key_len_type = restart_point.key_len_type;
         self.last_value_len_type = restart_point.value_len_type;
-        // self.epoch = self.block.decode_epoch(index, 0)
+        self.epoch = self.block.decode_epoch(index, 0)
     }
 }
 

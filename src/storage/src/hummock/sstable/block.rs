@@ -127,6 +127,7 @@ pub struct RestartPoint {
     pub offset: u32,
     pub key_len_type: LenType,
     pub value_len_type: LenType,
+    pub entry_count: u16,
 }
 
 impl RestartPoint {
@@ -139,16 +140,18 @@ impl RestartPoint {
 
 #[derive(Clone, Default, Debug)]
 pub struct EpochDictionary {
-    epoch_group: Vec<Vec<u16>>,
+    epoch_group: Vec<u16>,
     dictionary: Vec<HummockEpoch>,
 }
 
 impl EpochDictionary {
     pub fn size_of(&self) -> usize {
         let mut epoch_group_size = 0;
-        for group in &self.epoch_group {
-            epoch_group_size += group.len() * std::mem::size_of::<u16>();
-        }
+        // for group in &self.epoch_group {
+        //     epoch_group_size += group.len() * std::mem::size_of::<u16>();
+        // }
+
+        epoch_group_size += self.epoch_group.len() * std::mem::size_of::<u16>();
 
         epoch_group_size + self.dictionary.len() * std::mem::size_of::<HummockEpoch>()
     }
@@ -225,23 +228,22 @@ impl Block {
             epoch_dictionary.push(epoch)
         }
 
-        let epoch_group_len = (&buf[epoch_dictionary_begin - 2..]).get_u16_le() as usize;
-        let entry_count = (&buf[epoch_dictionary_begin - 6..]).get_u32_le() as usize;
-        let epoch_group_begin = epoch_dictionary_begin - 6 - entry_count * 2 - epoch_group_len * 2;
-        let epoch_group_end = epoch_dictionary_begin - 6;
+        // println!("epoch_dictionary {:?}", epoch_dictionary);
+
+        // let epoch_group_len = (&buf[epoch_dictionary_begin - 2..]).get_u16_le() as usize;
+        let entry_count = (&buf[epoch_dictionary_begin - 4..]).get_u32_le() as usize;
+        let epoch_group_begin =
+            epoch_dictionary_begin - 4 - entry_count * std::mem::size_of::<u16>();
+        let epoch_group_end = epoch_dictionary_begin - 4;
         let mut epoch_group_buf = &buf[epoch_group_begin..epoch_group_end];
-        let mut epoch_group = Vec::with_capacity(epoch_group_len);
+        let mut epoch_group = Vec::with_capacity(entry_count);
 
-        for _ in 0..epoch_group_len {
-            let group_len = epoch_group_buf.get_u16_le();
-            epoch_group.push(vec![]);
-            let group = epoch_group.last_mut().unwrap();
-
-            for _ in 0..group_len {
-                let epoch_index = epoch_group_buf.get_u16_le();
-                group.push(epoch_index);
-            }
+        for _ in 0..entry_count {
+            let epoch_index = epoch_group_buf.get_u16_le();
+            epoch_group.push(epoch_index);
         }
+
+        // println!("epoch_group {:?}", epoch_group);
 
         // decode restart_points_type_index
         let buf_len = epoch_group_begin;
@@ -261,30 +263,37 @@ impl Block {
                 offset,
                 key_len_type,
                 value_len_type,
+                entry_count: 0,
             });
         }
 
         // Decode restart points.
         let n_restarts = ((&buf[data_len - 4..]).get_u32_le()) as usize;
-        let restart_points_len = size_of::<u32>() + n_restarts * (size_of::<u32>());
+        let restart_points_len =
+            size_of::<u32>() + n_restarts * (size_of::<u32>() + size_of::<u16>());
         let restarts_end = data_len - 4;
         let data_len = data_len - restart_points_len;
         let mut restart_points = Vec::with_capacity(n_restarts);
         let mut restart_points_buf = &buf[data_len..restarts_end];
+        // println!("n_restarts {:?}", n_restarts);
 
         let mut type_index: usize = 0;
         for _ in 0..n_restarts {
             let offset = restart_points_buf.get_u32_le();
+            let entry_count = restart_points_buf.get_u16_le();
             if type_index < index_key_vec.len() - 1
                 && offset >= index_key_vec[type_index + 1].offset
             {
                 type_index += 1;
             }
 
+            // println!("offset {} entry_count {}", offset, entry_count);
+
             restart_points.push(RestartPoint {
                 offset,
                 key_len_type: index_key_vec[type_index].key_len_type,
                 value_len_type: index_key_vec[type_index].value_len_type,
+                entry_count,
             });
         }
 
@@ -344,8 +353,11 @@ impl Block {
     }
 
     pub fn decode_epoch(&self, group_index: usize, key_index: usize) -> HummockEpoch {
-        let epoch_index = (self.epoch_dictionary.epoch_group[group_index][key_index]) as usize;
-        self.epoch_dictionary.dictionary[epoch_index]
+        // let epoch_index = (self.epoch_dictionary.epoch_group[group_index][key_index]) as usize;
+        // self.epoch_dictionary.dictionary[epoch_index]
+        let rp = self.restart_point(group_index);
+        let index = rp.entry_count as usize + key_index;
+        self.epoch_dictionary.dictionary[self.epoch_dictionary.epoch_group[index] as usize]
     }
 }
 
@@ -453,7 +465,7 @@ pub struct BlockBuilder {
     /// Entry interval between restart points.
     restart_count: usize,
     /// Restart points.
-    restart_points: Vec<u32>,
+    restart_points: Vec<(u32, u16)>,
     /// Last key.
     last_key: Vec<u8>,
     /// Count of entries in current block.
@@ -467,7 +479,7 @@ pub struct BlockBuilder {
     restart_points_type_index: Vec<RestartPoint>,
 
     // epoch group by RestartPoint
-    epoch_group: Vec<Vec<u16>>,
+    epoch_group: Vec<u16>,
     epoch_dictionary: HashMap<HummockEpoch, u16>,
 
     // last_epoch: HummockEpoch,
@@ -561,6 +573,7 @@ impl BlockBuilder {
             offset: _,
             key_len_type: last_key_len_type,
             value_len_type: last_value_len_type,
+            entry_count: _,
         }) = self.restart_points_type_index.last()
         {
             k_type != *last_key_len_type || v_type != *last_value_len_type
@@ -571,14 +584,15 @@ impl BlockBuilder {
         let diff_key = if self.entry_count % self.restart_count == 0 || type_mismatch {
             let offset = self.buf.len() as u32;
 
-            self.restart_points.push(offset);
-            self.epoch_group.push(Vec::default());
+            self.restart_points.push((offset, self.entry_count as u16));
+            // self.epoch_group.push(Vec::default());
 
             if type_mismatch {
                 self.restart_points_type_index.push(RestartPoint {
                     offset,
                     key_len_type: k_type,
                     value_len_type: v_type,
+                    entry_count: self.entry_count as u16,
                 });
             }
 
@@ -588,7 +602,8 @@ impl BlockBuilder {
             bytes_diff_below_max_key_length(last_block_key, block_key)
         };
 
-        self.epoch_group.last_mut().unwrap().push(epoch_index);
+        // self.epoch_group.last_mut().unwrap().push(epoch_index);
+        self.epoch_group.push(epoch_index);
         let prefix = KeyPrefix::new_without_len(
             block_key.len() - diff_key.len(),
             diff_key.len(),
@@ -629,14 +644,15 @@ impl BlockBuilder {
     /// Calculate block size without compression.
     pub fn uncompressed_block_size(&self) -> usize {
         self.buf.len()
-            + (self.restart_points.len() + 1) * std::mem::size_of::<u32>()
+            + (self.restart_points.len() + 1) * (std::mem::size_of::<u32>() + std::mem::size_of::<u16>())
             + (RestartPoint::size_of()) // (offset + len_type(u8)) * len
                 * self.restart_points_type_index.len()
             + std::mem::size_of::<u32>() // restart_points_type_index len
             + self.epoch_group.len() * std::mem::size_of::<u16>()
-            + self.epoch_group.iter().map(|group| group.iter().len() * std::mem::size_of::<u16>()).sum::<usize>()
+            // + self.epoch_group.iter().map(|group| group.iter().len() * std::mem::size_of::<u16>()).sum::<usize>()
+            + self.epoch_group.len() *std::mem::size_of::<u16>()
             +std::mem::size_of::<u32>() // entry_count
-            +std::mem::size_of::<u16>()  // epoch_group count
+            // +std::mem::size_of::<u16>()  // epoch_group count
             + self.epoch_dictionary.iter().len() * std::mem::size_of::<HummockEpoch>()
             + std::mem::size_of::<u16>() // epoch_dictionary_len
             + std::mem::size_of::<u32>() // table_id len
@@ -657,8 +673,10 @@ impl BlockBuilder {
     pub fn build(&mut self) -> &[u8] {
         assert!(self.entry_count > 0);
 
-        for restart_point in &self.restart_points {
+        // println!("self.restart_points {:?}", self.restart_points);
+        for (restart_point, entry_count) in &self.restart_points {
             self.buf.put_u32_le(*restart_point);
+            self.buf.put_u16_le(*entry_count)
         }
 
         self.buf.put_u32_le(self.restart_points.len() as u32);
@@ -666,6 +684,7 @@ impl BlockBuilder {
             offset,
             key_len_type,
             value_len_type,
+            entry_count: _,
         } in &self.restart_points_type_index
         {
             self.buf.put_u32_le(*offset);
@@ -682,16 +701,19 @@ impl BlockBuilder {
             .put_u32_le(self.restart_points_type_index.len() as u32);
 
         // encode epoch_group
-        for group in &self.epoch_group {
-            let group_len = group.len();
-            self.buf.put_u16_le(group_len as u16);
-            for epoch_index in group {
-                self.buf.put_u16_le(*epoch_index);
-            }
+        // for group in &self.epoch_group {
+        //     let group_len = group.len();
+        //     self.buf.put_u16_le(group_len as u16);
+        //     for epoch_index in group {
+        //         self.buf.put_u16_le(*epoch_index);
+        //     }
+        // }
+        for epoch_index in &self.epoch_group {
+            self.buf.put_u16_le(*epoch_index);
         }
 
         self.buf.put_u32_le(self.entry_count as u32);
-        self.buf.put_u16_le(self.epoch_group.len() as u16);
+        // self.buf.put_u16_le(self.epoch_group.len() as u16);
 
         // encode epoch_dictionary
         let mut epoch_group_vec: Vec<u64> = vec![0; self.epoch_dictionary.len()];
