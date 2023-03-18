@@ -80,7 +80,7 @@ impl StreamGraphFormatter {
         for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
             output.push_str("Fragment ");
             output.push_str(&fragment.get_fragment_id().to_string());
-            output.push_str("\n");
+            output.push('\n');
             let width = config.unicode(output, &self.explain_node(fragment.node.as_ref().unwrap()));
             max_width = max(width, max_width);
             config.width = max_width;
