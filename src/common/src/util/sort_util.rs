@@ -216,16 +216,19 @@ impl OrderType {
 
 impl fmt::Display for OrderType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{} NULLS {}",
-            self.direction,
-            if self.nulls_are_first() {
-                "FIRST"
-            } else {
-                "LAST"
-            }
-        )
+        write!(f, "{}", self.direction)?;
+        if self.nulls_are != NullsAre::default() {
+            write!(
+                f,
+                " NULLS {}",
+                if self.nulls_are_first() {
+                    "FIRST"
+                } else {
+                    "LAST"
+                }
+            )?;
+        }
+        Ok(())
     }
 }
 
