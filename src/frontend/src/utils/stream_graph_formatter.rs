@@ -66,7 +66,7 @@ impl StreamGraphFormatter {
         tb.id
     }
 
-    fn explain_graph<'a>(
+    fn explain_graph(
         &mut self,
         graph: &StreamFragmentGraph,
         config: &mut PrettyConfig,
