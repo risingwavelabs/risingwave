@@ -22,12 +22,12 @@ use risingwave_storage::hummock::{
     Block, BlockBuilder, BlockBuilderOptions, BlockHolder, BlockIterator, CompressionAlgorithm,
 };
 
-const TABLES_PER_SSTABLE: u32 = 5;
-const KEYS_PER_TABLE: u64 = 10000;
+const TABLES_PER_SSTABLE: u32 = 1;
+const KEYS_PER_TABLE: u64 = 1000;
 const RESTART_INTERVAL: usize = 16;
 const BLOCK_CAPACITY: usize = TABLES_PER_SSTABLE as usize * KEYS_PER_TABLE as usize * 64;
 const EXCHANGE_INTERVAL: usize = RESTART_INTERVAL;
-const EPOCH_COUNT: usize = 500;
+const EPOCH_COUNT: usize = 50;
 
 fn block_iter_next(block: BlockHolder) {
     let mut iter = BlockIterator::new(block);
@@ -118,8 +118,8 @@ criterion_main!(benches);
 
 static DATA_LEN_SET: LazyLock<Vec<(Vec<u8>, Vec<u8>)>> = LazyLock::new(|| {
     vec![
-        (vec![b'a'; 1], vec![b'a'; 100]), // U8U8
-        (vec![b'a'; 1], vec![b'a'; 300]), /* U8U16
+        (vec![b'a'; 80], vec![b'a'; 50]), // U8U8
+           /*(vec![b'a'; 80], vec![b'a'; 300]), U8U16
                                            * (vec![b'a'; 100], vec![b'a'; 65550]),   // U8U32
                                            * (vec![b'a'; 300], vec![b'a'; 100]),     // U16U8
                                            * (vec![b'a'; 300], vec![b'a'; 300]),     // U16U16
