@@ -605,6 +605,7 @@ message CompactionConfig {
   bool split_by_state_table = 14;
   // soft limit for max number of sub level number
   uint64 level0_stop_write_threshold_sub_level_number = 15;
+  uint64 level0_max_compact_file_number = 16;
 }
 
 message TableStats {

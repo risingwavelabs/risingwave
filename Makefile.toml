@@ -371,7 +371,6 @@ description = "Download all available components at once"
 dependencies = [
   "download-connector",
   "download-maven",
-  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -415,6 +414,7 @@ dependencies = [
   "create-user-profiles-file",
   "download-all",
   "build-risingwave",
+  "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
   "export-dashboard-v2",
@@ -441,6 +441,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
+dependencies = ["download-connector"]
 script = '''
 #!/usr/bin/env bash
 

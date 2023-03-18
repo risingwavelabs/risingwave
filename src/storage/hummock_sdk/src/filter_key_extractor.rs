@@ -347,9 +347,9 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::Table as ProstTable;
+    use risingwave_pb::catalog::PbTable;
     use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
-    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
+    use risingwave_pb::plan_common::PbColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -377,15 +377,15 @@ mod tests {
         assert_eq!(full_key, output_key);
     }
 
-    fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
-        ProstTable {
+    fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
+        PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
             table_type: TableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Int64,
@@ -398,7 +398,7 @@ mod tests {
                     ),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Int64,
@@ -411,7 +411,7 @@ mod tests {
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Float64,
@@ -424,7 +424,7 @@ mod tests {
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Varchar,

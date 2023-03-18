@@ -19,6 +19,7 @@ import static io.grpc.Status.*;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
+import com.risingwave.proto.Catalog.SinkType;
 import java.util.Map;
 
 public class FileSinkFactory implements SinkFactory {
@@ -26,15 +27,13 @@ public class FileSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
         String sinkPath = tableProperties.get(OUTPUT_PATH_PROP);
         return new FileSink(sinkPath, tableSchema);
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
         if (!tableProperties.containsKey(OUTPUT_PATH_PROP)) {
             throw INVALID_ARGUMENT
                     .withDescription(String.format("%s is not specified", OUTPUT_PATH_PROP))

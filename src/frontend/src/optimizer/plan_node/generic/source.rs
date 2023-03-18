@@ -96,8 +96,8 @@ impl Source {
             type_name: "".to_string(),
         };
         let value = Field {
-            data_type: DataType::Bytea,
-            name: "offset".to_string(),
+            data_type: DataType::Jsonb,
+            name: "offset_info".to_string(),
             sub_fields: vec![],
             type_name: "".to_string(),
         };

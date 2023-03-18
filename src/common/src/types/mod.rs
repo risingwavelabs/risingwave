@@ -20,7 +20,7 @@ use bytes::{Buf, BufMut, Bytes};
 use num_traits::Float;
 use parse_display::{Display, FromStr};
 use postgres_types::FromSql;
-use risingwave_pb::data::DataType as ProstDataType;
+use risingwave_pb::data::PbDataType;
 use serde::{Deserialize, Serialize};
 
 use crate::array::{ArrayError, ArrayResult, NULL_VAL_FOR_HASH};
@@ -207,8 +207,8 @@ pub fn unnested_list_type(datatype: DataType) -> DataType {
     }
 }
 
-impl From<&ProstDataType> for DataType {
-    fn from(proto: &ProstDataType) -> DataType {
+impl From<&PbDataType> for DataType {
+    fn from(proto: &PbDataType) -> DataType {
         match proto.get_type_name().expect("missing type field") {
             TypeName::Int16 => DataType::Int16,
             TypeName::Int32 => DataType::Int32,
@@ -296,8 +296,8 @@ impl DataType {
         }
     }
 
-    pub fn to_protobuf(&self) -> ProstDataType {
-        let mut pb = ProstDataType {
+    pub fn to_protobuf(&self) -> PbDataType {
+        let mut pb = PbDataType {
             type_name: self.prost_type_name() as i32,
             is_nullable: true,
             ..Default::default()
@@ -397,7 +397,7 @@ impl DataType {
     }
 }
 
-impl From<DataType> for ProstDataType {
+impl From<DataType> for PbDataType {
     fn from(data_type: DataType) -> Self {
         data_type.to_protobuf()
     }

@@ -570,6 +570,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "aws-sdk-ec2"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d77e41e0567b874c884661a1eb777f006679464110e6f95c7bafafe0fb607e10"
+dependencies = [
+ "aws-endpoint",
+ "aws-http",
+ "aws-sig-auth",
+ "aws-smithy-async",
+ "aws-smithy-client",
+ "aws-smithy-http",
+ "aws-smithy-http-tower",
+ "aws-smithy-query",
+ "aws-smithy-types",
+ "aws-smithy-xml",
+ "aws-types",
+ "bytes",
+ "fastrand",
+ "http",
+ "tokio-stream",
+ "tower",
+]
+
+[[package]]
 name = "aws-sdk-kinesis"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3620,7 +3644,7 @@ dependencies = [
  "http",
  "madsim",
  "serde",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "spin 0.9.5",
  "thiserror",
  "tokio",
@@ -3644,8 +3668,7 @@ dependencies = [
 [[package]]
 name = "madsim-rdkafka"
 version = "0.2.14-alpha"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "945034b3d7c612f5bed8a34dcefd9278801bab180470e92d4b2297ddb3023cc8"
+source = "git+https://github.com/madsim-rs/madsim.git?rev=43e025d#43e025db997df923cf6b891cfb874fe6dabba994"
 dependencies = [
  "async-channel",
  "async-trait",
@@ -5435,8 +5458,7 @@ dependencies = [
 [[package]]
 name = "rdkafka-sys"
 version = "4.3.0+1.9.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d222a401698c7f2010e3967353eae566d9934dcda49c29910da922414ab4e3f4"
+source = "git+https://github.com/MaterializeInc/rust-rdkafka?rev=8ea07c4#8ea07c4d2b96636ff093e670bc921892aee0d56a"
 dependencies = [
  "cmake",
  "libc",
@@ -5650,7 +5672,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "serde_yaml",
  "tempfile",
  "workspace-hack",
@@ -6000,6 +6022,7 @@ dependencies = [
  "apache-avro",
  "async-trait",
  "aws-config",
+ "aws-sdk-ec2",
  "aws-sdk-kinesis",
  "aws-sdk-s3",
  "aws-smithy-http",
@@ -6043,7 +6066,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "simd-json",
  "tempfile",
  "thiserror",
@@ -6139,6 +6162,7 @@ dependencies = [
  "fixedbitset",
  "futures",
  "futures-async-stream",
+ "iana-time-zone",
  "itertools",
  "lazy_static",
  "madsim-tokio",
@@ -6253,6 +6277,8 @@ dependencies = [
  "arc-swap",
  "assert_matches",
  "async-trait",
+ "aws-config",
+ "aws-sdk-ec2",
  "axum",
  "bytes",
  "clap 4.1.8",
@@ -6338,6 +6364,7 @@ dependencies = [
 name = "risingwave_pb"
 version = "0.2.0-alpha"
 dependencies = [
+ "enum-as-inner",
  "madsim-tonic",
  "madsim-tonic-build",
  "pbjson",
@@ -6362,7 +6389,7 @@ dependencies = [
  "risingwave_frontend",
  "risingwave_sqlparser",
  "serde",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "serde_yaml",
  "tempfile",
  "walkdir",
@@ -6506,7 +6533,7 @@ dependencies = [
  "madsim-tokio",
  "risingwave_sqlparser",
  "serde",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "serde_yaml",
  "walkdir",
  "workspace-hack",
@@ -6548,7 +6575,7 @@ dependencies = [
  "regex",
  "risingwave_rt",
  "serde",
- "serde_with 2.2.0",
+ "serde_with 2.3.1",
  "tokio-postgres",
  "tokio-stream",
  "toml 0.4.10",
@@ -6656,6 +6683,7 @@ dependencies = [
  "risingwave_rpc_client",
  "risingwave_source",
  "risingwave_storage",
+ "serde_json",
  "smallvec",
  "static_assertions",
  "task_stats_alloc",
@@ -7067,9 +7095,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with"
-version = "2.2.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "30d904179146de381af4c93d3af6ca4984b3152db687dacb9c3c35e86f39809c"
+checksum = "85456ffac572dc8826334164f2fb6fb40a7c766aebe195a2a21ee69ee2885ecf"
 dependencies = [
  "base64 0.13.1",
  "chrono",
@@ -7077,7 +7105,7 @@ dependencies = [
  "indexmap",
  "serde",
  "serde_json",
- "serde_with_macros 2.2.0",
+ "serde_with_macros 2.3.1",
  "time 0.3.17",
 ]
 
@@ -7095,9 +7123,9 @@ dependencies = [
 
 [[package]]
 name = "serde_with_macros"
-version = "2.2.0"
+version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a1966009f3c05f095697c537312f5415d1e3ed31ce0a56942bac4c771c5c335e"
+checksum = "7cbcd6104f8a4ab6af7f6be2a0da6be86b9de3c401f6e86bb856ab2af739232f"
 dependencies = [
  "darling 0.14.3",
  "proc-macro2",
@@ -8846,6 +8874,8 @@ dependencies = [
  "ring",
  "scopeguard",
  "serde",
+ "serde_json",
+ "serde_with 2.3.1",
  "smallvec",
  "socket2",
  "strum",

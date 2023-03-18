@@ -20,8 +20,8 @@ use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, ColumnOrderDisplay, OrderType};
 use risingwave_expr::expr::AggKind;
-use risingwave_pb::expr::AggCall as ProstAggCall;
-use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStateProst};
+use risingwave_pb::expr::PbAggCall;
+use risingwave_pb::stream_plan::{agg_call_state, AggCallState as AggCallStatePb};
 
 use super::super::utils::TableCatalogBuilder;
 use super::{stream, GenericPlanNode, GenericPlanRef};
@@ -124,8 +124,8 @@ pub enum AggCallState {
 }
 
 impl AggCallState {
-    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStateProst {
-        AggCallStateProst {
+    pub fn into_prost(self, state: &mut BuildFragmentGraphState) -> AggCallStatePb {
+        AggCallStatePb {
             inner: Some(match self {
                 AggCallState::ResultValue => {
                     agg_call_state::Inner::ResultValueState(agg_call_state::ResultValueState {})
@@ -581,8 +581,8 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self) -> ProstAggCall {
-        ProstAggCall {
+    pub fn to_protobuf(&self) -> PbAggCall {
+        PbAggCall {
             r#type: self.agg_kind.to_prost().into(),
             return_type: Some(self.return_type.to_protobuf()),
             args: self.inputs.iter().map(InputRef::to_proto).collect(),

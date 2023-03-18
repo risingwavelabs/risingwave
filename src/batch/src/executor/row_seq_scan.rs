@@ -29,7 +29,7 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
+use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
@@ -75,7 +75,7 @@ impl ScanRange {
 
     /// Create a scan range from the prost representation.
     pub fn new(
-        scan_range: ProstScanRange,
+        scan_range: PbScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
         let pk_prefix = OwnedRow::new(
@@ -202,19 +202,19 @@ impl BoxedExecutorBuilder for RowSeqScanExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         let distribution = match &seq_scan_node.vnode_bitmap {
             Some(vnodes) => Distribution {
                 vnodes: Bitmap::from(vnodes).into(),
-                dist_key_indices,
+                dist_key_in_pk_indices,
             },
             // This is possible for dml. vnode_bitmap is not filled by scheduler.
             // Or it's single distribution, e.g., distinct agg. We scan in a single executor.
-            None => Distribution::all_vnodes(dist_key_indices),
+            None => Distribution::all_vnodes(dist_key_in_pk_indices),
         };
 
         let table_option = TableOption {

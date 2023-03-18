@@ -51,6 +51,8 @@ use super::expr_unary::{
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
+use crate::expr::expr_binary_nonnull::new_tumble_start;
+use crate::expr::expr_ternary::new_tumble_start_offset;
 use crate::expr::{
     build_from_prost as expr_build_from_prost, BoxedExpression, Expression, InputRefExpression,
     LiteralExpression,
@@ -69,9 +71,9 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             build_unary_expr_prost(prost)
         }
         Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual | Add
-        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | TumbleStart
-        | Position | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor
-        | ConcatOp | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
+        | Subtract | Multiply | Divide | Modulus | Extract | RoundDigit | Pow | Position
+        | BitwiseShiftLeft | BitwiseShiftRight | BitwiseAnd | BitwiseOr | BitwiseXor | ConcatOp
+        | AtTimeZone | CastWithTimeZone | JsonbAccessInner | JsonbAccessStr => {
             build_binary_expr_prost(prost)
         }
         And | Or | IsDistinctFrom | IsNotDistinctFrom | ArrayAccess | FormatType => {
@@ -87,6 +89,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         Translate => build_translate_expr(prost),
 
         // Variable number of arguments and based on `Unary/Binary/Ternary/...Expression`
+        TumbleStart => build_tumble_start_expr(prost),
         Substr => build_substr_expr(prost),
         Overlay => build_overlay_expr(prost),
         Trim => build_trim_expr(prost),
@@ -272,6 +275,21 @@ fn build_date_trunc_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     Ok(new_date_trunc_expr(ret_type, field, source, time_zone))
 }
 
+fn build_tumble_start_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+    let (children, ret_type) = get_children_and_return_type(prost)?;
+    ensure!(children.len() == 2 || children.len() == 3);
+    let time = expr_build_from_prost(&children[0])?;
+    let window_size = expr_build_from_prost(&children[1])?;
+    if children.len() == 2 {
+        new_tumble_start(time, window_size, ret_type)
+    } else if children.len() == 3 {
+        let offset = expr_build_from_prost(&children[2])?;
+        new_tumble_start_offset(time, window_size, offset, ret_type)
+    } else {
+        unreachable!()
+    }
+}
+
 fn build_length_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let (children, ret_type) = get_children_and_return_type(prost)?;
     // TODO: add encoding length expr
@@ -437,7 +455,7 @@ mod tests {
     use risingwave_common::types::Scalar;
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+    use risingwave_pb::data::{PbDataType, PbDatum};
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
@@ -449,21 +467,21 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some("foo".into()).as_ref()),
                     })),
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Varchar as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some("bar".into()).as_ref()),
                     })),
                 },
@@ -473,9 +491,9 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::Array as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::List as i32,
-                        field_type: vec![ProstDataType {
+                        field_type: vec![PbDataType {
                             type_name: TypeName::Varchar as i32,
                             ..Default::default()
                         }],
@@ -485,11 +503,11 @@ mod tests {
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
-                    rex_node: Some(RexNode::Constant(ProstDatum {
+                    rex_node: Some(RexNode::Constant(PbDatum {
                         body: serialize_datum(Some(1_i32.to_scalar_value()).as_ref()),
                     })),
                 },
@@ -497,7 +515,7 @@ mod tests {
         };
         let access = ExprNode {
             expr_type: Type::ArrayAccess as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 ..Default::default()
             }),
@@ -514,18 +532,18 @@ mod tests {
     fn test_build_extract_expr() {
         let left = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Varchar as i32,
                 precision: 11,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some("DAY".into()).as_ref()),
             })),
         };
         let right_date = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Date as i32,
                 ..Default::default()
             }),
@@ -533,7 +551,7 @@ mod tests {
         };
         let right_time = ExprNode {
             expr_type: Type::ConstantValue as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Timestamp as i32,
                 ..Default::default()
             }),
@@ -542,7 +560,7 @@ mod tests {
 
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
@@ -553,7 +571,7 @@ mod tests {
         assert!(build_binary_expr_prost(&expr).is_ok());
         let expr = ExprNode {
             expr_type: Type::Extract as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),

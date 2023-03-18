@@ -41,7 +41,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_hummock_sdk::to_committed_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
-use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
+use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_source::connector_test_utils::create_source_desc_builder;
 use risingwave_source::dml_manager::DmlManager;
 use risingwave_storage::memory::MemoryStateStore;
@@ -111,7 +111,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         ],
     };
     let source_info = StreamSourceInfo {
-        row_format: ProstRowFormatType::Json as i32,
+        row_format: PbRowFormatType::Json as i32,
         ..Default::default()
     };
     let properties = convert_args!(hashmap!(

@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
+use risingwave_pb::catalog::{PbIndex, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
@@ -47,7 +47,7 @@ pub(crate) fn gen_create_index_plan(
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
     distributed_by: Vec<Ident>,
-) -> Result<(PlanRef, ProstTable, ProstIndex)> {
+) -> Result<(PlanRef, PbTable, PbIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -191,7 +191,7 @@ pub(crate) fn gen_create_index_plan(
 
     index_table_prost.owner = session.user_id();
 
-    let index_prost = ProstIndex {
+    let index_prost = PbIndex {
         id: IndexId::placeholder().index_id,
         schema_id: index_schema_id,
         database_id: index_database_id,

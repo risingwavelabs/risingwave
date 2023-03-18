@@ -31,7 +31,7 @@ use risingwave_common::error::Result;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, DatumRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::plan_common::JoinType as JoinTypeProst;
+use risingwave_pb::plan_common::JoinType as JoinTypePb;
 
 use crate::error::BatchError;
 
@@ -61,17 +61,17 @@ impl JoinType {
         )
     }
 
-    pub fn from_prost(prost: JoinTypeProst) -> Self {
+    pub fn from_prost(prost: JoinTypePb) -> Self {
         match prost {
-            JoinTypeProst::Inner => JoinType::Inner,
-            JoinTypeProst::LeftOuter => JoinType::LeftOuter,
-            JoinTypeProst::LeftSemi => JoinType::LeftSemi,
-            JoinTypeProst::LeftAnti => JoinType::LeftAnti,
-            JoinTypeProst::RightOuter => JoinType::RightOuter,
-            JoinTypeProst::RightSemi => JoinType::RightSemi,
-            JoinTypeProst::RightAnti => JoinType::RightAnti,
-            JoinTypeProst::FullOuter => JoinType::FullOuter,
-            JoinTypeProst::Unspecified => unreachable!(),
+            JoinTypePb::Inner => JoinType::Inner,
+            JoinTypePb::LeftOuter => JoinType::LeftOuter,
+            JoinTypePb::LeftSemi => JoinType::LeftSemi,
+            JoinTypePb::LeftAnti => JoinType::LeftAnti,
+            JoinTypePb::RightOuter => JoinType::RightOuter,
+            JoinTypePb::RightSemi => JoinType::RightSemi,
+            JoinTypePb::RightAnti => JoinType::RightAnti,
+            JoinTypePb::FullOuter => JoinType::FullOuter,
+            JoinTypePb::Unspecified => unreachable!(),
         }
     }
 
