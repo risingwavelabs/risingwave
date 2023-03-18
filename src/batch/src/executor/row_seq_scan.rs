@@ -29,7 +29,7 @@ use risingwave_common::util::select_all;
 use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
+use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
@@ -75,7 +75,7 @@ impl ScanRange {
 
     /// Create a scan range from the prost representation.
     pub fn new(
-        scan_range: ProstScanRange,
+        scan_range: PbScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
         let pk_prefix = OwnedRow::new(

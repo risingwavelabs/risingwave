@@ -22,7 +22,7 @@ use risingwave_pb::batch_plan::ProjectSetNode;
 use super::ExprRewritable;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{
-    LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    LogicalProjectSet, PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::PlanRef;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -77,7 +77,7 @@ impl ToDistributedBatch for BatchProjectSet {
     // TODO: implement to_distributed_with_required like BatchProject
 }
 
-impl ToBatchProst for BatchProjectSet {
+impl ToBatchPb for BatchProjectSet {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::ProjectSet(ProjectSetNode {
             select_list: self

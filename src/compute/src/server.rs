@@ -34,6 +34,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -287,7 +288,20 @@ pub async fn compute_node_serve(
 
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
+            None | Some("json") => SinkPayloadFormat::Json,
+            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            _ => {
+                unreachable!(
+                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
+                    opts.connector_rpc_sink_payload_format
+                )
+            }
+        },
     };
+
+    info!("connector param: {:?}", connector_params);
+
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),

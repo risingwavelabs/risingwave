@@ -26,7 +26,7 @@ use risingwave_connector::sink::{
     SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
@@ -282,10 +282,10 @@ impl fmt::Display for StreamSink {
 }
 
 impl StreamNode for StreamSink {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::Sink(SinkNode {
+        PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
         })
     }

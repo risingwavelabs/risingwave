@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use risingwave_common::catalog::{ColumnDesc, INITIAL_TABLE_VERSION_ID};
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -78,10 +78,10 @@ impl PlanTreeNodeUnary for StreamDml {
 impl_plan_tree_node_for_unary! {StreamDml}
 
 impl StreamNode for StreamDml {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::Dml(DmlNode {
+        PbNodeBody::Dml(DmlNode {
             table_id: 0,                                // Meta will fill this table id.
             table_version_id: INITIAL_TABLE_VERSION_ID, // Meta will fill this version id.
             column_descs: self.column_descs.iter().map(Into::into).collect(),

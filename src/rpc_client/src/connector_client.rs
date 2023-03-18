@@ -120,6 +120,7 @@ impl ConnectorClient {
         connector_type: String,
         properties: HashMap<String, String>,
         table_schema: Option<TableSchema>,
+        sink_payload_format: SinkPayloadFormat,
     ) -> Result<(UnboundedSender<SinkStreamRequest>, Streaming<SinkResponse>)> {
         let (request_sender, request_receiver) = unbounded_channel::<SinkStreamRequest>();
 
@@ -127,7 +128,7 @@ impl ConnectorClient {
         request_sender
             .send(SinkStreamRequest {
                 request: Some(SinkRequest::Start(StartSink {
-                    format: SinkPayloadFormat::Json as i32,
+                    format: sink_payload_format as i32,
                     sink_config: Some(SinkConfig {
                         connector_type,
                         properties,

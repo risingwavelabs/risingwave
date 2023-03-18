@@ -39,9 +39,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Connection, Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
-    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
-    View as ProstView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
@@ -57,7 +55,7 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
+use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
@@ -262,14 +260,14 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<(DatabaseId, CatalogVersion)> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.database_id, resp.version))
     }
 
-    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<(SchemaId, CatalogVersion)> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
@@ -280,7 +278,7 @@ impl MetaClient {
 
     pub async fn create_materialized_view(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
@@ -301,7 +299,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
         };
@@ -312,7 +310,7 @@ impl MetaClient {
 
     pub async fn create_sink(
         &self,
-        sink: ProstSink,
+        sink: PbSink,
         graph: StreamFragmentGraph,
     ) -> Result<(u32, CatalogVersion)> {
         let request = CreateSinkRequest {
@@ -326,7 +324,7 @@ impl MetaClient {
 
     pub async fn create_function(
         &self,
-        function: ProstFunction,
+        function: PbFunction,
     ) -> Result<(FunctionId, CatalogVersion)> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -337,8 +335,8 @@ impl MetaClient {
 
     pub async fn create_table(
         &self,
-        source: Option<ProstSource>,
-        table: ProstTable,
+        source: Option<PbSource>,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
@@ -366,7 +364,7 @@ impl MetaClient {
 
     pub async fn replace_table(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
@@ -380,7 +378,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_view(&self, view: PbView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -389,8 +387,8 @@ impl MetaClient {
 
     pub async fn create_index(
         &self,
-        index: ProstIndex,
-        table: ProstTable,
+        index: PbIndex,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateIndexRequest {
@@ -602,7 +600,7 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn risectl_list_state_tables(&self) -> Result<Vec<ProstTable>> {
+    pub async fn risectl_list_state_tables(&self) -> Result<Vec<PbTable>> {
         let request = RisectlListStateTablesRequest {};
         let resp = self.inner.risectl_list_state_tables(request).await?;
         Ok(resp.tables)
@@ -649,7 +647,7 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
+    pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
         let request = RescheduleRequest { reschedules };
         let resp = self.inner.reschedule(request).await?;
         Ok(resp.success)
@@ -675,7 +673,7 @@ impl MetaClient {
 
     pub async fn init_metadata_for_replay(
         &self,
-        tables: Vec<ProstTable>,
+        tables: Vec<PbTable>,
         compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {

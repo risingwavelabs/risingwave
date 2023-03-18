@@ -20,8 +20,7 @@ use risingwave_pb::batch_plan::SortAggNode;
 
 use super::generic::PlanAggCall;
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
-    ToDistributedBatch,
+    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{BatchExchange, ToLocalBatch};
@@ -108,7 +107,7 @@ impl ToDistributedBatch for BatchSimpleAgg {
     }
 }
 
-impl ToBatchProst for BatchSimpleAgg {
+impl ToBatchPb for BatchSimpleAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::SortAgg(SortAggNode {
             agg_calls: self

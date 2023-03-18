@@ -25,8 +25,13 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 buildkite-agent artifact download risingwave-"$profile" target/debug/
 buildkite-agent artifact download risedev-dev-"$profile" target/debug/
+buildkite-agent artifact download librisingwave_java_binding.so-"$profile" target/debug
 mv target/debug/risingwave-"$profile" target/debug/risingwave
 mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
+mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
+
+export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -64,7 +69,11 @@ psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY,
 
 node_port=50051
 node_timeout=10
-./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-source.log 2>&1 &
+
+echo "--- starting risingwave cluster with connector node"
+cargo make ci-start ci-1cn-1fe
+./connector-node/start-service.sh -p $node_port > .risingwave/log/connector-node.log 2>&1 &
+
 echo "waiting for connector node to start"
 start_time=$(date +%s)
 while :
@@ -83,8 +92,6 @@ do
     sleep 0.1
 done
 
-echo "--- starting risingwave cluster with connector node"
-cargo make ci-start ci-1cn-1fe
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'

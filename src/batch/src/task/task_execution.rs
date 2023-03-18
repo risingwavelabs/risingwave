@@ -22,9 +22,7 @@ use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
-};
+use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -139,8 +137,8 @@ impl Debug for TaskOutputId {
     }
 }
 
-impl From<&ProstTaskId> for TaskId {
-    fn from(prost: &ProstTaskId) -> Self {
+impl From<&PbTaskId> for TaskId {
+    fn from(prost: &PbTaskId) -> Self {
         TaskId {
             task_id: prost.task_id,
             stage_id: prost.stage_id,
@@ -150,8 +148,8 @@ impl From<&ProstTaskId> for TaskId {
 }
 
 impl TaskId {
-    pub fn to_prost(&self) -> ProstTaskId {
-        ProstTaskId {
+    pub fn to_prost(&self) -> PbTaskId {
+        PbTaskId {
             task_id: self.task_id,
             stage_id: self.stage_id,
             query_id: self.query_id.clone(),
@@ -159,10 +157,10 @@ impl TaskId {
     }
 }
 
-impl TryFrom<&ProstOutputId> for TaskOutputId {
+impl TryFrom<&PbTaskOutputId> for TaskOutputId {
     type Error = RwError;
 
-    fn try_from(prost: &ProstOutputId) -> Result<Self> {
+    fn try_from(prost: &PbTaskOutputId) -> Result<Self> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),
             output_id: prost.get_output_id(),
@@ -171,8 +169,8 @@ impl TryFrom<&ProstOutputId> for TaskOutputId {
 }
 
 impl TaskOutputId {
-    pub fn to_prost(&self) -> ProstOutputId {
-        ProstOutputId {
+    pub fn to_prost(&self) -> PbTaskOutputId {
+        PbTaskOutputId {
             task_id: Some(self.task_id.to_prost()),
             output_id: self.output_id,
         }
@@ -299,7 +297,7 @@ pub struct BatchTaskExecution<C> {
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
-        prost_tid: &ProstTaskId,
+        prost_tid: &PbTaskId,
         plan: PlanFragment,
         context: C,
         epoch: BatchQueryEpoch,
@@ -572,7 +570,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         };
     }
 
-    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn get_task_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()

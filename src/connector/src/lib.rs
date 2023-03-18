@@ -30,6 +30,7 @@
 use std::time::Duration;
 
 use duration_str::parse_std;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use serde::de;
 
 pub mod aws_utils;
@@ -45,12 +46,17 @@ pub mod common;
 #[derive(Clone, Debug, Default)]
 pub struct ConnectorParams {
     pub connector_rpc_endpoint: Option<String>,
+    pub sink_payload_format: SinkPayloadFormat,
 }
 
 impl ConnectorParams {
-    pub fn new(connector_rpc_endpoint: Option<String>) -> Self {
+    pub fn new(
+        connector_rpc_endpoint: Option<String>,
+        sink_payload_format: SinkPayloadFormat,
+    ) -> Self {
         Self {
             connector_rpc_endpoint,
+            sink_payload_format,
         }
     }
 }

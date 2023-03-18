@@ -20,7 +20,7 @@ use std::io::Error as IoError;
 use std::time::{Duration, SystemTime};
 
 use memcomparable::Error as MemComparableError;
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use thiserror::Error;
 use tokio::task::JoinError;
 use tonic::Code;
@@ -250,8 +250,8 @@ impl PartialEq for ErrorCode {
     }
 }
 
-impl From<ProstFieldNotFound> for RwError {
-    fn from(err: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for RwError {
+    fn from(err: PbFieldNotFound) -> Self {
         ErrorCode::InternalError(format!(
             "Failed to decode prost: field not found `{}`",
             err.0

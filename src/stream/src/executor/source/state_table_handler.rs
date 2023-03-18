@@ -27,7 +27,7 @@ use risingwave_common::{bail, row};
 use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
 use risingwave_hummock_sdk::key::next_key;
 use risingwave_pb::catalog::table::TableType;
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
@@ -46,7 +46,7 @@ pub struct SourceStateTableHandler<S: StateStore> {
 }
 
 impl<S: StateStore> SourceStateTableHandler<S> {
-    pub async fn from_table_catalog(table_catalog: &ProstTable, store: S) -> Self {
+    pub async fn from_table_catalog(table_catalog: &PbTable, store: S) -> Self {
         // The state of source should not be cleaned up by retention_seconds
         assert!(!table_catalog
             .properties
@@ -199,7 +199,7 @@ impl<S: StateStore> SourceStateTableHandler<S> {
 
 // align with schema defined in `LogicalSource::infer_internal_table_catalog`. The function is used
 // for test purpose and should not be used in production.
-pub fn default_source_internal_table(id: u32) -> ProstTable {
+pub fn default_source_internal_table(id: u32) -> PbTable {
     let make_column = |column_type: TypeName, column_id: i32| -> ColumnCatalog {
         ColumnCatalog {
             column_desc: Some(ColumnDesc {
@@ -218,7 +218,7 @@ pub fn default_source_internal_table(id: u32) -> ProstTable {
         make_column(TypeName::Varchar, 0),
         make_column(TypeName::Jsonb, 1),
     ];
-    ProstTable {
+    PbTable {
         id,
         schema_id: SchemaId::placeholder().schema_id,
         database_id: DatabaseId::placeholder().database_id,
