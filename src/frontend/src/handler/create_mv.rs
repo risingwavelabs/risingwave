@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_pb::catalog::PbTable;
@@ -88,15 +89,9 @@ pub fn gen_create_mv_plan(
     let bound = {
         let mut binder = Binder::new_for_stream(session);
         let bound = binder.bind_query(query)?;
-        // FIXME: Here we temporarily disallow MV to contain views even it's supported naturally
-        // now. In the current implementation, it is difficult to maintain dependency relationships
-        // and rename views when they have mviews that depend on them.
-        if !binder.shared_views().is_empty() {
-            return Err(ErrorCode::PermissionDenied(
-                "Materialized view cannot contain views".to_string(),
-            )
-            .into());
-        }
+        // FIXME: We should record the views into mv's dependent relations to to refine the drop
+        // check and recursive rename of the views.
+        let _views = binder.shared_views().keys().cloned().collect_vec();
         bound
     };
 
