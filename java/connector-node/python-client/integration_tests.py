@@ -33,10 +33,30 @@ def make_mock_schema():
     )
     return schema
 
+def make_mock_schema_stream_chunk():
+    schema = connector_service_pb2.TableSchema(
+        columns=[
+            connector_service_pb2.TableSchema.Column(name="v1", data_type=1),
+            connector_service_pb2.TableSchema.Column(name="v2", data_type=2),
+            connector_service_pb2.TableSchema.Column(name="v3", data_type=3),
+            connector_service_pb2.TableSchema.Column(name="v4", data_type=4),
+            connector_service_pb2.TableSchema.Column(name="v5", data_type=5),
+            connector_service_pb2.TableSchema.Column(name="v6", data_type=6),
+            connector_service_pb2.TableSchema.Column(name="v7", data_type=7),
+        ],
+        pk_indices=[0]
+    )
+    return schema
+
 
 def load_input(input_file):
     with open(input_file, 'r') as file:
         sink_input = json.load(file)
+    return sink_input
+
+def load_binary_input(input_file):
+    with open(input_file, 'rb') as file:
+        sink_input = file.read()
     return sink_input
 
 
@@ -121,6 +141,43 @@ def test_sink(type, prop, input_file):
                 exit(1)
 
 
+def test_sink_stream_chunk(type, prop, input_file):
+    sink_input = load_binary_input(input_file)
+    with grpc.insecure_channel('localhost:50051') as channel:
+        stub = connector_service_pb2_grpc.ConnectorServiceStub(channel)
+        request_list = [
+            connector_service_pb2.SinkStreamRequest(start=connector_service_pb2.SinkStreamRequest.StartSink(
+                format=connector_service_pb2.SinkPayloadFormat.STREAM_CHUNK,
+                sink_config=connector_service_pb2.SinkConfig(
+                    connector_type=type,
+                    properties=prop,
+                    table_schema=make_mock_schema_stream_chunk()
+                )
+            ))]
+        epoch = 0
+        batch_id = 1
+        for batch in sink_input:
+            request_list.append(connector_service_pb2.SinkStreamRequest(
+                start_epoch=connector_service_pb2.SinkStreamRequest.StartEpoch(epoch=epoch)))
+            request_list.append(connector_service_pb2.SinkStreamRequest(write=connector_service_pb2.SinkStreamRequest.WriteBatch(
+                stream_chunk_payload=connector_service_pb2.SinkStreamRequest.WriteBatch.StreamChunkPayload(binary_data=sink_input),
+                batch_id=batch_id,
+                epoch=epoch
+            )))
+            request_list.append(connector_service_pb2.SinkStreamRequest(sync=connector_service_pb2.SinkStreamRequest.SyncBatch(epoch=epoch)))
+            epoch += 1
+            batch_id += 1
+
+        response_iter = stub.SinkStream(iter(request_list))
+        for req in request_list:
+            try:
+                print("REQUEST", req)
+                print("RESPONSE OK:", next(response_iter))
+            except Exception as e:
+                print("Integration test failed: ", e)
+                exit(1)
+
+
 def test_file_sink(input_file):
     test_sink("file", {"output.path": "/tmp/connector",}, input_file)
 
@@ -159,6 +216,8 @@ def validate_jdbc_sink(input_file):
 def test_print_sink(input_file):
     test_sink("print", {}, input_file)
 
+def test_print_stream_chunk_sink(input_file):
+    test_sink_stream_chunk("print", {}, input_file)
 
 def test_iceberg_sink(input_file):
     test_sink("iceberg",
@@ -196,10 +255,12 @@ if __name__ == "__main__":
     parser.add_argument('--file_sink', action='store_true', help="run file sink test")
     parser.add_argument('--jdbc_sink', action='store_true', help="run jdbc sink test")
     parser.add_argument('--print_sink', action='store_true', help="run print sink test")
+    parser.add_argument('--print_stream_chunk_sink', action='store_true', help="run print stream chunk sink test")
     parser.add_argument('--iceberg_sink', action='store_true', help="run iceberg sink test")
     parser.add_argument('--upsert_iceberg_sink', action='store_true', help="run upsert iceberg sink test")
     parser.add_argument('--deltalake_sink', action='store_true', help="run deltalake sink test")
     parser.add_argument('--input_file', default="./data/sink_input.json", help="input data to run tests")
+    parser.add_argument('--input_binary_file', default="./data/stream_chunk_data", help="input stream chunk data to run tests")
     args = parser.parse_args()
     if args.file_sink:
         test_file_sink(args.input_file)
@@ -207,6 +268,8 @@ if __name__ == "__main__":
         test_jdbc_sink(args.input_file)
     if args.print_sink:
         test_print_sink(args.input_file)
+    if args.print_stream_chunk_sink:
+        test_print_stream_chunk_sink(args.input_binary_file)
     if args.iceberg_sink:
         test_iceberg_sink(args.input_file)
     if args.upsert_iceberg_sink:
