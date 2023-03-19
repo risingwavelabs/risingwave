@@ -27,6 +27,12 @@ impl OpendalObjectStore {
 
         builder.root(&root);
 
+        // if credential env is set, use it. Otherwise, ADC will be used.
+        let cred = std::env::var("GOOGLE_APPLICATION_CREDENTIALS");
+        if let Ok(cred) = cred {
+            builder.credential(&cred);
+        }
+
         let op: Operator = Operator::create(builder)?.finish();
         Ok(Self {
             op,
