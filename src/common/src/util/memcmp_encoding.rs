@@ -42,9 +42,9 @@ pub(crate) fn serialize_datum(
     } else {
         (0u8, 1u8) // None < Some
     };
-    if let Some(datum) = datum.to_datum_ref() {
+    if let Some(scalar) = datum.to_datum_ref() {
         null_tag_some.serialize(&mut *serializer)?;
-        datum.serialize(serializer)?;
+        scalar.serialize(serializer)?;
     } else {
         null_tag_none.serialize(serializer)?;
     }
@@ -57,9 +57,9 @@ pub(crate) fn serialize_datum_in_composite(
 ) -> memcomparable::Result<()> {
     // NOTE: No need to call `serializer.set_reverse` because we are inside a
     // composite type value, we should follow the outside order, except for `NULL`s.
-    if let Some(datum) = datum.to_datum_ref() {
+    if let Some(scalar) = datum.to_datum_ref() {
         DEFAULT_NULL_TAG_SOME.serialize(&mut *serializer)?;
-        datum.serialize(serializer)?;
+        scalar.serialize(serializer)?;
     } else {
         DEFAULT_NULL_TAG_NONE.serialize(serializer)?;
     }
