@@ -14,10 +14,10 @@
 
 use risingwave_common::array::{ArrayBuilder, ArrayBuilderImpl, DataChunk, ListValue, RowRef};
 use risingwave_common::bail;
-use risingwave_common::row::{Row, RowExt};
+use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, Scalar, ToOwnedDatum};
-use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -91,43 +91,36 @@ impl Aggregator for ArrayAggUnordered {
     }
 }
 
+type OrderKey = Vec<u8>;
+
 #[derive(Clone)]
 struct ArrayAggOrdered {
     return_type: DataType,
     agg_col_idx: usize,
-    order_col_indices: Vec<usize>,
-    order_types: Vec<OrderType>,
-    unordered_values: Vec<(OrderedRow, Datum)>,
+    column_orders: Vec<ColumnOrder>,
+    unordered_values: Vec<(OrderKey, Datum)>,
 }
 
 impl ArrayAggOrdered {
     fn new(return_type: DataType, agg_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
-        debug_assert!(matches!(return_type, DataType::List { datatype: _ }));
-        let (order_col_indices, order_types) = column_orders
-            .into_iter()
-            .map(|p| (p.column_index, p.order_type))
-            .unzip();
+        assert!(matches!(return_type, DataType::List { datatype: _ }));
         ArrayAggOrdered {
             return_type,
             agg_col_idx,
-            order_col_indices,
-            order_types,
+            column_orders,
             unordered_values: vec![],
         }
     }
 
     fn push_row(&mut self, row: RowRef<'_>) {
-        let key = OrderedRow::new(
-            row.project(&self.order_col_indices).into_owned_row(),
-            &self.order_types,
-        );
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
         let datum = row.datum_at(self.agg_col_idx).to_owned_datum();
         self.unordered_values.push((key, datum));
     }
 
     fn get_result_and_reset(&mut self) -> ListValue {
         let mut rows = std::mem::take(&mut self.unordered_values);
-        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
         ListValue::new(rows.into_iter().map(|(_, datum)| datum).collect())
     }
 }
@@ -190,6 +183,7 @@ mod tests {
     use risingwave_common::array::Array;
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::ScalarRef;
+    use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
 
