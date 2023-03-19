@@ -132,11 +132,6 @@ pub struct OverrideConfigOpts {
     #[override_opts(path = system.barrier_interval_ms)]
     barrier_interval_ms: Option<u32>,
 
-    /// There will be a checkpoint for every n barriers
-    #[clap(long, env = "RW_CHECKPOINT_FREQUENCY")]
-    #[override_opts(path = system.checkpoint_frequency)]
-    checkpoint_frequency: Option<u64>,
-
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
     #[override_opts(path = system.sstable_size_mb)]
