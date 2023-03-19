@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::meta::SystemParams as ProstSystemParams;
+use risingwave_pb::meta::PbSystemParams;
 use tracing::warn;
 
 use super::system_params_to_kv;
@@ -23,11 +23,11 @@ use super::system_params_to_kv;
 ///   compatibility.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemParamsReader {
-    prost: ProstSystemParams,
+    prost: PbSystemParams,
 }
 
-impl From<ProstSystemParams> for SystemParamsReader {
-    fn from(prost: ProstSystemParams) -> Self {
+impl From<PbSystemParams> for SystemParamsReader {
+    fn from(prost: PbSystemParams) -> Self {
         Self { prost }
     }
 }

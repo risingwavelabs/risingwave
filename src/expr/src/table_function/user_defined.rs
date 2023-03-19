@@ -64,10 +64,7 @@ impl TableFunction for UserDefinedTableFunction {
 }
 
 #[cfg(not(madsim))]
-pub fn new_user_defined(
-    prost: &TableFunctionProst,
-    chunk_size: usize,
-) -> Result<BoxedTableFunction> {
+pub fn new_user_defined(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
     let Some(udtf) = &prost.udtf else {
         bail!("expect UDTF");
     };
@@ -108,7 +105,7 @@ impl TableFunction for UserDefinedTableFunction {
 
 #[cfg(madsim)]
 pub fn new_user_defined(
-    _prost: &TableFunctionProst,
+    _prost: &TableFunctionPb,
     _chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     panic!("UDF is not supported in simulation yet");

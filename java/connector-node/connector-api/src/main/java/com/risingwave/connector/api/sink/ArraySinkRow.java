@@ -16,11 +16,11 @@ package com.risingwave.connector.api.sink;
 
 import com.risingwave.proto.Data;
 
-public class ArraySinkrow implements SinkRow {
+public class ArraySinkRow implements SinkRow {
     public final Object[] values;
     public final Data.Op op;
 
-    public ArraySinkrow(Data.Op op, Object... value) {
+    public ArraySinkRow(Data.Op op, Object... value) {
         this.op = op;
         this.values = value;
     }
@@ -39,4 +39,7 @@ public class ArraySinkrow implements SinkRow {
     public int size() {
         return values.length;
     }
+
+    @Override
+    public void close() throws Exception {}
 }

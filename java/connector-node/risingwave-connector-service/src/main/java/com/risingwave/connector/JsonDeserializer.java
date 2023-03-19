@@ -18,11 +18,10 @@ import static io.grpc.Status.INVALID_ARGUMENT;
 
 import com.google.gson.Gson;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
-import com.risingwave.connector.api.sink.SinkRow;
+import com.risingwave.connector.api.sink.*;
+import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
-import java.util.Iterator;
 import java.util.Map;
 
 public class JsonDeserializer implements Deserializer {
@@ -33,34 +32,39 @@ public class JsonDeserializer implements Deserializer {
     }
 
     @Override
-    public Iterator<SinkRow> deserialize(Object payload) {
-        if (!(payload instanceof JsonPayload)) {
+    public CloseableIterator<SinkRow> deserialize(
+            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch) {
+        if (!writeBatch.hasJsonPayload()) {
             throw INVALID_ARGUMENT
-                    .withDescription("expected JsonPayload, got " + payload.getClass().getName())
+                    .withDescription("expected JsonPayload, got " + writeBatch.getPayloadCase())
                     .asRuntimeException();
         }
-        JsonPayload jsonPayload = (JsonPayload) payload;
-        return jsonPayload.getRowOpsList().stream()
-                .map(
-                        rowOp -> {
-                            Map columnValues = new Gson().fromJson(rowOp.getLine(), Map.class);
-                            Object[] values = new Object[columnValues.size()];
-                            for (String columnName : tableSchema.getColumnNames()) {
-                                if (!columnValues.containsKey(columnName)) {
-                                    throw INVALID_ARGUMENT
-                                            .withDescription(
-                                                    "column " + columnName + " not found in json")
-                                            .asRuntimeException();
-                                }
-                                Data.DataType.TypeName typeName =
-                                        tableSchema.getColumnType(columnName);
-                                values[tableSchema.getColumnIndex(columnName)] =
-                                        validateJsonDataTypes(
-                                                typeName, columnValues.get(columnName));
-                            }
-                            return (SinkRow) new ArraySinkrow(rowOp.getOpType(), values);
-                        })
-                .iterator();
+        JsonPayload jsonPayload = writeBatch.getJsonPayload();
+        return new TrivialCloseIterator<>(
+                jsonPayload.getRowOpsList().stream()
+                        .map(
+                                rowOp -> {
+                                    Map columnValues =
+                                            new Gson().fromJson(rowOp.getLine(), Map.class);
+                                    Object[] values = new Object[columnValues.size()];
+                                    for (String columnName : tableSchema.getColumnNames()) {
+                                        if (!columnValues.containsKey(columnName)) {
+                                            throw INVALID_ARGUMENT
+                                                    .withDescription(
+                                                            "column "
+                                                                    + columnName
+                                                                    + " not found in json")
+                                                    .asRuntimeException();
+                                        }
+                                        Data.DataType.TypeName typeName =
+                                                tableSchema.getColumnType(columnName);
+                                        values[tableSchema.getColumnIndex(columnName)] =
+                                                validateJsonDataTypes(
+                                                        typeName, columnValues.get(columnName));
+                                    }
+                                    return (SinkRow) new ArraySinkRow(rowOp.getOpType(), values);
+                                })
+                        .iterator());
     }
 
     private static Long castLong(Object value) {

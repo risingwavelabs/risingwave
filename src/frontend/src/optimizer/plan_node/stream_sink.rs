@@ -23,9 +23,10 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkId, SinkType};
 use risingwave_connector::sink::{
-    SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    SINK_USER_FORCE_APPEND_ONLY_OPTION,
 };
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use tracing::info;
 
 use super::derive::{derive_columns, derive_pk};
@@ -112,26 +113,21 @@ impl StreamSink {
         definition: String,
         properties: WithOptions,
     ) -> Result<SinkDesc> {
+        const DOWNSTREAM_PK_KEY: &str = "primary_key";
+
         let distribution_key = input.distribution().dist_column_indices().to_vec();
         let sink_type = Self::derive_sink_type(input.append_only(), &properties)?;
-        let (pk, stream_key) = derive_pk(input, user_order_by, &columns);
+        let (pk, _) = derive_pk(input, user_order_by, &columns);
 
-        // TODO(Yuanxin): Remove this constraint.
-        if sink_type == SinkType::Upsert && pk.is_empty() {
-            return Err(ErrorCode::SinkError(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                "No primary key for the upsert sink. Please include the primary key explicitly in sink definition or make the sink append-only.",
-            )))
-            .into());
-        }
+        let downstream_pk = Self::parse_downstream_pk(&columns, properties.get(DOWNSTREAM_PK_KEY))?;
 
         Ok(SinkDesc {
             id: SinkId::placeholder(),
             name,
             definition,
             columns,
-            pk,
-            stream_key,
+            plan_pk: pk,
+            downstream_pk,
             distribution_key,
             properties: properties.into_inner(),
             sink_type,
@@ -139,9 +135,28 @@ impl StreamSink {
     }
 
     fn derive_sink_type(input_append_only: bool, properties: &WithOptions) -> Result<SinkType> {
+        if let Some(sink_type) = properties.get(SINK_TYPE_OPTION) {
+            if sink_type != SINK_TYPE_APPEND_ONLY
+                && sink_type != SINK_TYPE_DEBEZIUM
+                && sink_type != SINK_TYPE_UPSERT
+            {
+                return Err(ErrorCode::SinkError(Box::new(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!(
+                        "`{}` must be {}, {}, or {}",
+                        SINK_TYPE_OPTION,
+                        SINK_TYPE_APPEND_ONLY,
+                        SINK_TYPE_DEBEZIUM,
+                        SINK_TYPE_UPSERT
+                    ),
+                )))
+                .into());
+            }
+        }
+
         let frontend_derived_append_only = input_append_only;
         let user_defined_append_only =
-            properties.value_eq_ignore_case(SINK_FORMAT_OPTION, SINK_FORMAT_APPEND_ONLY);
+            properties.value_eq_ignore_case(SINK_TYPE_OPTION, SINK_TYPE_APPEND_ONLY);
         let user_force_append_only =
             properties.value_eq_ignore_case(SINK_USER_FORCE_APPEND_ONLY_OPTION, "true");
 
@@ -163,9 +178,52 @@ impl StreamSink {
             (_, false, true) => {
                 Err(ErrorCode::SinkError(Box::new(Error::new(
                     ErrorKind::InvalidInput,
-                    "Cannot force the sink to be append-only without \"format='append_only'\"in WITH options.",
+                    "Cannot force the sink to be append-only without \"type='append-only'\"in WITH options.",
                 )))
                 .into())
+            }
+        }
+    }
+
+    /// Extract user-defined downstream pk columns from with options. Return the indices of the pk
+    /// columns.
+    ///
+    /// The format of `downstream_pk_str` should be 'col1,col2,...' (delimited by `,`) in order to
+    /// get parsed.
+    fn parse_downstream_pk(
+        columns: &[ColumnCatalog],
+        downstream_pk_str: Option<&String>,
+    ) -> Result<Vec<usize>> {
+        match downstream_pk_str {
+            Some(downstream_pk_str) => {
+                // If the user defines the downstream primary key, we find out their indices.
+                let downstream_pk = downstream_pk_str.split(',').collect_vec();
+                let mut downstream_pk_indices = Vec::with_capacity(downstream_pk.len());
+                for key in downstream_pk {
+                    let trimmed_key = key.trim();
+                    if trimmed_key.is_empty() {
+                        continue;
+                    }
+                    match columns
+                        .iter()
+                        .position(|col| col.column_desc.name == trimmed_key)
+                    {
+                        Some(index) => downstream_pk_indices.push(index),
+                        None => {
+                            return Err(ErrorCode::SinkError(Box::new(Error::new(
+                                ErrorKind::InvalidInput,
+                                format!("Sink primary key column not found: {}. Please use ',' as the delimiter for different primary key columns.", trimmed_key),
+                            )))
+                            .into());
+                        }
+                    }
+                }
+                Ok(downstream_pk_indices)
+            }
+            None => {
+                // The user doesn't define the downstream primary key and we simply return an empty
+                // vector.
+                Ok(Vec::new())
             }
         }
     }
@@ -210,7 +268,7 @@ impl fmt::Display for StreamSink {
                 &IndicesDisplay {
                     indices: &self
                         .sink_desc
-                        .pk
+                        .plan_pk
                         .iter()
                         .map(|k| k.column_index)
                         .collect_vec(),
@@ -224,10 +282,10 @@ impl fmt::Display for StreamSink {
 }
 
 impl StreamNode for StreamSink {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
 
-        ProstStreamNode::Sink(SinkNode {
+        PbNodeBody::Sink(SinkNode {
             sink_desc: Some(self.sink_desc.to_proto()),
         })
     }

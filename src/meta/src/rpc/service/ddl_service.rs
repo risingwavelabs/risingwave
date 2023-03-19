@@ -24,7 +24,7 @@ use risingwave_connector::source::KAFKA_CONNECTOR;
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
 use risingwave_pb::catalog::{connection, Connection};
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
-use risingwave_pb::ddl_service::drop_table_request::SourceId as ProstSourceId;
+use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use tonic::{Request, Response, Status};
@@ -457,7 +457,7 @@ where
         let version = self
             .ddl_controller
             .run_command(DdlCommand::DropStreamingJob(StreamingJobId::Table(
-                source_id.map(|ProstSourceId::Id(id)| id),
+                source_id.map(|PbSourceId::Id(id)| id),
                 table_id,
             )))
             .await?;
