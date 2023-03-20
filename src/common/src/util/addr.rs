@@ -16,7 +16,7 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use anyhow::anyhow;
-use risingwave_pb::common::HostAddress as ProstHostAddress;
+use risingwave_pb::common::PbHostAddress;
 
 /// General host address and port.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -71,8 +71,8 @@ impl FromStr for HostAddr {
     }
 }
 
-impl From<&ProstHostAddress> for HostAddr {
-    fn from(addr: &ProstHostAddress) -> Self {
+impl From<&PbHostAddress> for HostAddr {
+    fn from(addr: &PbHostAddress) -> Self {
         HostAddr {
             host: addr.get_host().to_string(),
             port: addr.get_port() as u16,
@@ -81,8 +81,8 @@ impl From<&ProstHostAddress> for HostAddr {
 }
 
 impl HostAddr {
-    pub fn to_protobuf(&self) -> ProstHostAddress {
-        ProstHostAddress {
+    pub fn to_protobuf(&self) -> PbHostAddress {
+        PbHostAddress {
             host: self.host.clone(),
             port: self.port as i32,
         }

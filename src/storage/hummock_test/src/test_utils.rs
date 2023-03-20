@@ -29,7 +29,7 @@ use risingwave_meta::hummock::test_utils::{
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_meta::manager::MetaSrvEnv;
 use risingwave_meta::storage::{MemStore, MetaStore};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::version_update_payload;
 use risingwave_rpc_client::HummockMetaClient;
@@ -179,7 +179,7 @@ pub async fn register_tables_with_id_for_test<S: MetaStore>(
 pub async fn register_tables_with_catalog_for_test<S: MetaStore>(
     filter_key_extractor_manager: &FilterKeyExtractorManagerRef,
     hummock_manager_ref: &HummockManagerRef<S>,
-    tables: &[ProstTable],
+    tables: &[PbTable],
 ) {
     update_filter_key_extractor_for_tables(filter_key_extractor_manager, tables);
     let table_ids = tables.iter().map(|t| t.id).collect_vec();
@@ -207,7 +207,7 @@ impl HummockTestEnv {
         .await;
     }
 
-    pub async fn register_table(&self, table: ProstTable) {
+    pub async fn register_table(&self, table: PbTable) {
         register_tables_with_catalog_for_test(
             self.storage.filter_key_extractor_manager(),
             &self.manager,

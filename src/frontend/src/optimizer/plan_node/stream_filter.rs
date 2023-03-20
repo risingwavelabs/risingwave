@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::FilterNode;
 
 use super::{ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -73,8 +73,8 @@ impl PlanTreeNodeUnary for StreamFilter {
 impl_plan_tree_node_for_unary! { StreamFilter }
 
 impl StreamNode for StreamFilter {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Filter(FilterNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Filter(FilterNode {
             search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
         })
     }

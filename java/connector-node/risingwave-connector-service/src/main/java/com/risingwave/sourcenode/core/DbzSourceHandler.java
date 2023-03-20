@@ -14,33 +14,28 @@
 
 package com.risingwave.sourcenode.core;
 
-import com.risingwave.connector.api.source.SourceConfig;
 import com.risingwave.connector.api.source.SourceHandler;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
+import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import io.grpc.Context;
 import io.grpc.stub.ServerCallStreamObserver;
 import java.util.concurrent.TimeUnit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Default handler for RPC request */
-public class DefaultSourceHandler implements SourceHandler {
-    static final Logger LOG = LoggerFactory.getLogger(DefaultSourceHandler.class);
+/** * handler for starting a debezium source connectors */
+public class DbzSourceHandler implements SourceHandler {
+    static final Logger LOG = LoggerFactory.getLogger(DbzSourceHandler.class);
 
-    private final SourceConfig config;
+    private final DbzConnectorConfig config;
 
-    private DefaultSourceHandler(SourceConfig config) {
+    public DbzSourceHandler(DbzConnectorConfig config) {
         this.config = config;
     }
 
-    public static DefaultSourceHandler newWithConfig(SourceConfig config) {
-        return new DefaultSourceHandler(config);
-    }
-
     @Override
-    public void handle(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
-        var runner =
-                DefaultCdcEngineRunner.newCdcEngineRunner(config.getId(), config, responseObserver);
+    public void startSource(ServerCallStreamObserver<GetEventStreamResponse> responseObserver) {
+        var runner = DbzCdcEngineRunner.newCdcEngineRunner(config, responseObserver);
         if (runner == null) {
             responseObserver.onCompleted();
             return;
@@ -49,7 +44,7 @@ public class DefaultSourceHandler implements SourceHandler {
         try {
             // Start the engine
             runner.start();
-            LOG.info("Start consuming events of table {}", config.getId());
+            LOG.info("Start consuming events of table {}", config.getSourceId());
             while (runner.isRunning()) {
                 try {
                     // Thread will block on the channel to get output from engine
@@ -65,7 +60,7 @@ public class DefaultSourceHandler implements SourceHandler {
 
                         LOG.debug(
                                 "Engine#{}: emit one chunk {} events to network ",
-                                config.getId(),
+                                config.getSourceId(),
                                 resp.getEventsCount());
                         responseObserver.onNext(resp);
                     }
@@ -73,7 +68,7 @@ public class DefaultSourceHandler implements SourceHandler {
                     if (Context.current().isCancelled()) {
                         LOG.info(
                                 "Engine#{}: Connection broken detected, stop the engine",
-                                config.getId());
+                                config.getSourceId());
                         runner.stop();
                     }
                 } catch (InterruptedException e) {
@@ -85,9 +80,9 @@ public class DefaultSourceHandler implements SourceHandler {
             try {
                 runner.stop();
             } catch (Exception e) {
-                LOG.warn("Failed to stop Engine#{}", config.getId(), e);
+                LOG.warn("Failed to stop Engine#{}", config.getSourceId(), e);
             }
         }
-        LOG.info("End consuming events of table {}", config.getId());
+        LOG.info("End consuming events of table {}", config.getSourceId());
     }
 }

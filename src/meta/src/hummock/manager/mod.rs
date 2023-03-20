@@ -161,11 +161,11 @@ macro_rules! read_lock {
 pub(crate) use read_lock;
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::{
-    add_prost_table_stats_map, purge_prost_table_stats, ProstTableStatsMap,
+    add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
-use risingwave_pb::hummock::CompactionGroupInfo as ProstCompactionGroup;
+use risingwave_pb::hummock::PbCompactionGroupInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -1071,7 +1071,7 @@ where
         &self,
         context_id: HummockContextId,
         compact_task: &mut CompactTask,
-        table_stats_change: Option<ProstTableStatsMap>,
+        table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let ret = self
             .report_compact_task_impl(Some(context_id), compact_task, None, table_stats_change)
@@ -1093,7 +1093,7 @@ where
         context_id: Option<HummockContextId>,
         compact_task: &mut CompactTask,
         compaction_guard: Option<RwLockWriteGuard<'_, Compaction>>,
-        table_stats_change: Option<ProstTableStatsMap>,
+        table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<bool> {
         let mut compaction_guard = match compaction_guard {
             None => write_lock!(self, compaction).await,
@@ -1345,7 +1345,7 @@ where
         .await?;
 
         // Consume and aggregate table stats.
-        let mut table_stats_change = ProstTableStatsMap::default();
+        let mut table_stats_change = PbTableStatsMap::default();
         for s in &mut sstables {
             add_prost_table_stats_map(&mut table_stats_change, &std::mem::take(&mut s.table_stats));
         }
@@ -1700,7 +1700,7 @@ where
     pub async fn init_metadata_for_version_replay(
         &self,
         table_catalogs: Vec<Table>,
-        compaction_groups: Vec<ProstCompactionGroup>,
+        compaction_groups: Vec<PbCompactionGroupInfo>,
     ) -> Result<()> {
         for table in &table_catalogs {
             table.insert(self.env.meta_store()).await?;

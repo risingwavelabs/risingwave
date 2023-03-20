@@ -46,8 +46,8 @@ impl Task for ConnectorNodeService {
         if !path.exists() {
             return Err(anyhow!("RisingWave connector binary not found in {:?}\nDid you enable risingwave connector feature in `./risedev configure`?", path));
         }
-        let mut cmd = Command::new("sh");
-        cmd.arg(path).arg("-p").arg(self.config.port.to_string());
+        let mut cmd = Command::new(path);
+        cmd.arg("-p").arg(self.config.port.to_string());
         ctx.run_command(ctx.tmux_run(cmd)?)?;
         ctx.pb.set_message("started");
 

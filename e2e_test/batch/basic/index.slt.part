@@ -11,23 +11,23 @@ statement ok
 create index idx2 on t1(v2);
 
 statement ok
-insert into t1 values(1, 2),(3,4),(5,6);
+insert into t1 values (1, 2), (3, 4), (5, 6);
 
 statement ok
-explain select v1,v2 from t1 where v1 = 1;
+explain select v1, v2 from t1 where v1 = 1;
 
 query II
-select v1,v2 from t1 where v1 = 1;
+select v1, v2 from t1 where v1 = 1;
 ----
 1 2
 
 query II
-select v1,v2 from t1 where v2 = 4;
+select v1, v2 from t1 where v2 = 4;
 ----
 3 4
 
 query II
-select v1,v2 from t1 where v1 = 1 or v2 = 4 order by v1, v2;
+select v1, v2 from t1 where v1 = 1 or v2 = 4 order by v1, v2;
 ----
 1 2
 3 4
@@ -36,10 +36,57 @@ statement ok
 delete from t1 where v1 = 1;
 
 query II
-select v1,v2 from t1 order by v1, v2;
+select v1, v2 from t1 order by v1, v2;
 ----
 3 4
 5 6
+
+statement ok
+insert into t1 values (NULL, 5);
+
+statement ok
+create index idx3 on t1(v1 desc);
+
+statement ok
+create index idx4 on t1(v1 nulls first);
+
+statement ok
+create index idx5 on t1(v1 desc nulls last);
+
+query II
+select v1, v2 from t1 order by v1;
+----
+3    4
+5    6
+NULL 5
+
+query II
+select v1, v2 from t1 order by v1 desc;
+----
+NULL 5
+5    6
+3    4
+
+query II
+select v1, v2 from t1 order by v1 asc nulls first;
+----
+NULL 5
+3    4
+5    6
+
+query II
+select v1, v2 from t1 order by v1 desc nulls last;
+----
+5    6
+3    4
+NULL 5
+
+query II
+select v1, v2 from t1 order by v1 desc nulls first;
+----
+NULL 5
+5    6
+3    4
 
 statement ok
 drop table t1;

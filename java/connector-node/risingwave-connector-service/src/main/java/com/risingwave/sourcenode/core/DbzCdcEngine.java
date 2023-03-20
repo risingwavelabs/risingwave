@@ -15,37 +15,34 @@
 package com.risingwave.sourcenode.core;
 
 import com.risingwave.connector.api.source.CdcEngine;
-import com.risingwave.connector.api.source.SourceConfig;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
 import io.debezium.heartbeat.Heartbeat;
+import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 
-public class DefaultCdcEngine implements CdcEngine {
+public class DbzCdcEngine implements CdcEngine {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
 
     private final DebeziumEngine<?> engine;
-    private final CdcEventConsumer consumer;
-    private final SourceConfig config;
+    private final DbzCdcEventConsumer consumer;
+    private final long id;
 
     /** If config is not valid will throw exceptions */
-    public DefaultCdcEngine(SourceConfig config, DebeziumEngine.CompletionCallback callback) {
-        var dbzHeartbeatPrefix =
-                config.getProperties().getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
+    public DbzCdcEngine(long id, Properties config, DebeziumEngine.CompletionCallback callback) {
+        var dbzHeartbeatPrefix = config.getProperty(Heartbeat.HEARTBEAT_TOPICS_PREFIX.name());
         var consumer =
-                new CdcEventConsumer(
-                        config.getId(),
-                        dbzHeartbeatPrefix,
-                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+                new DbzCdcEventConsumer(
+                        id, dbzHeartbeatPrefix, new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
 
         // Builds a debezium engine but not start it
-        this.config = config;
+        this.id = id;
         this.consumer = consumer;
         this.engine =
                 DebeziumEngine.create(Connect.class)
-                        .using(config.getProperties())
+                        .using(config)
                         .using(callback)
                         .notifying(consumer)
                         .build();
@@ -59,7 +56,7 @@ public class DefaultCdcEngine implements CdcEngine {
 
     @Override
     public long getId() {
-        return config.getId();
+        return id;
     }
 
     public void stop() throws Exception {

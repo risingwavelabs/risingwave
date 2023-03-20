@@ -7,13 +7,13 @@ SET IntervalStyle to postgres;
 
 -- check acceptance of "time zone style"
 SELECT INTERVAL '01:00' AS "One hour";
---@ SELECT INTERVAL '+02:00' AS "Two hours";
+SELECT INTERVAL '+02:00' AS "Two hours";
 SELECT INTERVAL '-08:00' AS "Eight hours";
 --@ SELECT INTERVAL '-1 +02:03' AS "22 hours ago...";
---@ SELECT INTERVAL '-1 days +02:03' AS "22 hours ago...";
+SELECT INTERVAL '-1 days +02:03' AS "22 hours ago...";
 --@ SELECT INTERVAL '1.5 weeks' AS "Ten days twelve hours";
 --@ SELECT INTERVAL '1.5 months' AS "One month 15 days";
---@ SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
+SELECT INTERVAL '10 years -11 month -12 days +13:14' AS "9 years...";
 
 CREATE TABLE INTERVAL_TBL (f1 interval);
 
@@ -69,24 +69,24 @@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES
   ('-2147483648 days 2147483647 months'),
   ('-2147483648 days -2147483648 months');
 -- these should fail as out-of-range
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
---@ INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483648 days');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483649 days');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('2147483647 years');
+INSERT INTO INTERVAL_TBL_OF (f1) VALUES ('-2147483648 years');
 
 -- Test edge-case overflow detection in interval multiplication
 --@ select extract(epoch from '256 microseconds'::interval * (2^55)::float8);
 
---@ SELECT r1.*, r2.*
---@    FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
---@    WHERE r1.f1 > r2.f1
---@    ORDER BY r1.f1, r2.f1;
+SELECT r1.*, r2.*
+   FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
+   WHERE r1.f1 > r2.f1
+   ORDER BY r1.f1, r2.f1;
 
 --@ CREATE INDEX ON INTERVAL_TBL_OF USING btree (f1);
 --@ SET enable_seqscan TO false;
 --@ EXPLAIN (COSTS OFF)
 --@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
---@ SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
+SELECT f1 FROM INTERVAL_TBL_OF r1 ORDER BY f1;
 --@ RESET enable_seqscan;
 
 DROP TABLE INTERVAL_TBL_OF;
@@ -101,27 +101,27 @@ DROP TABLE INTERVAL_TBL_OF;
 
 CREATE TABLE INTERVAL_MULDIV_TBL (span interval);
 -- COPY INTERVAL_MULDIV_TBL FROM STDIN;
---@ INSERT INTO INTERVAL_MULDIV_TBL VALUES
---@ ('41 mon 12 days 360:00'),
---@ ('-41 mon -12 days +360:00'),
---@ ('-12 days'),
---@ ('9 mon -27 days 12:34:56'),
---@ ('-3 years 482 days 76:54:32.189'),
---@ ('4 mon'),
---@ ('14 mon'),
---@ ('999 mon 999 days');
+INSERT INTO INTERVAL_MULDIV_TBL VALUES
+('41 mon 12 days 360:00'),
+('-41 mon -12 days +360:00'),
+('-12 days'),
+('9 mon -27 days 12:34:56'),
+('-3 years 482 days 76:54:32.189'),
+('4 mon'),
+('14 mon'),
+('999 mon 999 days');
 
---@ SELECT span * 0.3 AS product
---@ FROM INTERVAL_MULDIV_TBL;
---@ 
---@ SELECT span * 8.2 AS product
---@ FROM INTERVAL_MULDIV_TBL;
---@ 
---@ SELECT span / 10 AS quotient
---@ FROM INTERVAL_MULDIV_TBL;
---@ 
---@ SELECT span / 100 AS quotient
---@ FROM INTERVAL_MULDIV_TBL;
+SELECT span * 0.3 AS product
+FROM INTERVAL_MULDIV_TBL;
+
+SELECT span * 8.2 AS product
+FROM INTERVAL_MULDIV_TBL;
+
+SELECT span / 10 AS quotient
+FROM INTERVAL_MULDIV_TBL;
+
+SELECT span / 100 AS quotient
+FROM INTERVAL_MULDIV_TBL;
 
 DROP TABLE INTERVAL_MULDIV_TBL;
 
@@ -284,8 +284,8 @@ SET IntervalStyle to postgres;
 --@         interval 'PT10:30'                AS "hour minute";
 
 -- test a couple rounding cases that changed since 8.3 w/ HAVE_INT64_TIMESTAMP.
---@ select interval '-10 mons -3 days +03:55:06.70';
---@ select interval '1 year 2 mons 3 days 04:05:06.699999';
+select interval '-10 mons -3 days +03:55:06.70';
+select interval '1 year 2 mons 3 days 04:05:06.699999';
 --@ select interval '0:0:0.7', interval '@ 0.70 secs', interval '0.7 seconds';
 
 -- check that '30 days' equals '1 month' according to the hash function

@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, IntervalUnit, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::{DataType as ProstDataType, Datum as ProstDatum};
+use risingwave_pb::data::{PbDataType, PbDatum};
 use risingwave_pb::expr::expr_node::Type::{Field, InputRef};
 use risingwave_pb::expr::expr_node::{self, RexNode, Type};
 use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -38,7 +38,7 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> Expr
         exprs.push(make_input_ref(*idx, *ret));
     }
     let function_call = FunctionCall { children: exprs };
-    let return_type = ProstDataType {
+    let return_type = PbDataType {
         type_name: TypeName::Timestamp as i32,
         ..Default::default()
     };
@@ -52,7 +52,7 @@ pub fn make_expression(kind: Type, rets: &[TypeName], indices: &[usize]) -> Expr
 pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: InputRef as i32,
-        return_type: Some(ProstDataType {
+        return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
         }),
@@ -63,11 +63,11 @@ pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
 pub fn make_i32_literal(data: i32) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,
-        return_type: Some(ProstDataType {
+        return_type: Some(PbDataType {
             type_name: TypeName::Int32 as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::Constant(ProstDatum {
+        rex_node: Some(RexNode::Constant(PbDatum {
             body: serialize_datum(Some(ScalarImpl::Int32(data)).as_ref()),
         })),
     }
@@ -76,11 +76,11 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
 pub fn make_string_literal(data: &str) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,
-        return_type: Some(ProstDataType {
+        return_type: Some(PbDataType {
             type_name: TypeName::Varchar as i32,
             ..Default::default()
         }),
-        rex_node: Some(RexNode::Constant(ProstDatum {
+        rex_node: Some(RexNode::Constant(PbDatum {
             body: serialize_datum(Some(ScalarImpl::Utf8(data.into())).as_ref()),
         })),
     }
@@ -89,7 +89,7 @@ pub fn make_string_literal(data: &str) -> ExprNode {
 pub fn make_field_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
     ExprNode {
         expr_type: Field as i32,
-        return_type: Some(ProstDataType {
+        return_type: Some(PbDataType {
             type_name: ret as i32,
             ..Default::default()
         }),

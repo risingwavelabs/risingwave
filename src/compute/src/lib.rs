@@ -65,6 +65,10 @@ pub struct ComputeNodeOpts {
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
 
+    /// Payload format of connector sink rpc
+    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
+    pub connector_rpc_sink_payload_format: Option<String>,
+
     /// One of:
     /// 1. `hummock+{object_store}` where `object_store`
     /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,

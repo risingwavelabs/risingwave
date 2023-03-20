@@ -4971,6 +4971,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "pretty-xmlish"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32a14b10003fc996819269d0f74cc1c241707eec6d53f2bba6980758977ce386"
+
+[[package]]
 name = "pretty_assertions"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6177,6 +6183,7 @@ dependencies = [
  "pgwire",
  "pin-project-lite",
  "postgres-types",
+ "pretty-xmlish",
  "prometheus",
  "rand 0.8.5",
  "risingwave_batch",

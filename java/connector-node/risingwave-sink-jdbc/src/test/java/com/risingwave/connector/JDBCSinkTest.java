@@ -18,7 +18,7 @@ import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
 import org.junit.Test;
@@ -33,7 +33,7 @@ public class JDBCSinkTest {
         JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
         createMockTable(conn, sink.getTableName());
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         sink.sync();
 
         Statement stmt = conn.createStatement();
@@ -44,7 +44,7 @@ public class JDBCSinkTest {
         }
         assertEquals(1, count);
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         stmt = conn.createStatement();
         rs = stmt.executeQuery("SELECT * FROM test");
@@ -83,11 +83,11 @@ public class JDBCSinkTest {
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkrow(Op.INSERT, 2, "Bob"),
-                        new ArraySinkrow(Op.UPDATE_DELETE, 1, "Alice"),
-                        new ArraySinkrow(Op.UPDATE_INSERT, 1, "Clare"),
-                        new ArraySinkrow(Op.DELETE, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                        new ArraySinkRow(Op.INSERT, 2, "Bob"),
+                        new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
+                        new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare"),
+                        new ArraySinkRow(Op.DELETE, 2, "Bob")));
         sink.sync();
 
         Statement stmt = conn.createStatement();
