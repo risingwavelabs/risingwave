@@ -155,8 +155,9 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
             .map_err(SinkError::from)?;
         response.next().await.unwrap().map_err(|e| {
             let msg = format!(
-                "failed to start sink stream for connector `{}`: {:?}",
+                "failed to start sink stream for connector `{}` with error code: {}, message: {:?}",
                 &config.connector_type,
+                e.code(),
                 e.message()
             );
             tracing::warn!(msg);
