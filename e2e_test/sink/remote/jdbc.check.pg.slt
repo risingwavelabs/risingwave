@@ -3,7 +3,7 @@
 query I
 select * from t_remote order by id;
 ----
-1 Alex
+1 Alex 
 3 Carl
 4 Doris
 5 Eve

@@ -55,7 +55,7 @@ mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXIST
 # grant access to `test` for ci test user
 mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
 # create a table named t_remote
-mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE TABLE IF NOT EXISTS test.t_remote (id INT, name VARCHAR(255), PRIMARY KEY (id));"
+mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/sink/remote/mysql_create_table.sql
 
 echo "--- preparing postgresql"
 
@@ -65,7 +65,7 @@ export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
-psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
+psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
 node_port=50051
 node_timeout=10
