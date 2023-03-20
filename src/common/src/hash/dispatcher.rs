@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use super::HashKey;
+use crate::array::serial_array::Serial;
 use crate::hash;
 use crate::types::DataType;
 
@@ -90,6 +91,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
         DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
         DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
         DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),

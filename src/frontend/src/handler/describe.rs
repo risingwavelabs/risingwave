@@ -22,7 +22,6 @@ use pgwire::types::Row;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::error::Result;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::Direction;
 use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
 
 use super::RwPgResponse;
@@ -34,7 +33,7 @@ use crate::handler::HandlerArgs;
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new(&session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
         let (column_catalogs, pk_column_catalogs, indices) = match relation {
@@ -120,11 +119,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
             .filter(|x| !index_table.columns[x.column_index].is_hidden)
             .map(|x| {
                 let index_column_name = index_table.columns[x.column_index].name().to_string();
-                if Direction::Descending == x.order_type.direction() {
-                    index_column_name + " DESC"
-                } else {
-                    index_column_name
-                }
+                format!("{} {}", index_column_name, x.order_type)
             })
             .collect_vec();
 
@@ -241,7 +236,7 @@ mod tests {
             "v3".into() => "Int32".into(),
             "v4".into() => "Int32".into(),
             "primary key".into() => "v3".into(),
-            "idx1".into() => "index(v1 DESC, v2, v3) include(v4) distributed by(v1, v2)".into(),
+            "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);

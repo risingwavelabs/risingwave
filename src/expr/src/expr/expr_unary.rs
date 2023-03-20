@@ -17,7 +17,7 @@
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::*;
-use risingwave_pb::expr::expr_node::Type as ProstType;
+use risingwave_pb::expr::expr_node::PbType;
 
 use super::expr_is_null::{IsNotNullExpression, IsNullExpression};
 use super::template::{UnaryBytesExpression, UnaryExpression};
@@ -125,7 +125,7 @@ macro_rules! gen_round_expr {
 
 /// Create a new unary expression.
 pub fn new_unary_expr(
-    expr_type: ProstType,
+    expr_type: PbType,
     return_type: DataType,
     child_expr: BoxedExpression,
 ) -> Result<BoxedExpression> {
@@ -133,7 +133,7 @@ pub fn new_unary_expr(
 
     let expr: BoxedExpression = match (expr_type, return_type.clone(), child_expr.return_type()) {
         (
-            ProstType::Cast,
+            PbType::Cast,
             DataType::List {
                 datatype: target_elem_type,
             },
@@ -143,7 +143,7 @@ pub fn new_unary_expr(
             return_type,
             move |input| str_to_list(input, &target_elem_type),
         )),
-        (ProstType::Cast, DataType::Struct(rty), DataType::Struct(lty)) => {
+        (PbType::Cast, DataType::Struct(rty), DataType::Struct(lty)) => {
             Box::new(UnaryExpression::<StructArray, StructArray, _>::new(
                 child_expr,
                 return_type,
@@ -151,7 +151,7 @@ pub fn new_unary_expr(
             ))
         }
         (
-            ProstType::Cast,
+            PbType::Cast,
             DataType::List {
                 datatype: target_elem_type,
             },
@@ -163,7 +163,7 @@ pub fn new_unary_expr(
             return_type,
             move |input| list_cast(input, &source_elem_type, &target_elem_type),
         )),
-        (ProstType::Cast, _, _) => {
+        (PbType::Cast, _, _) => {
             macro_rules! gen_cast_impl {
                 ($( { $input:ident, $cast:ident, $func:expr, $infallible:ident } ),*) => {
                     match (child_expr.return_type(), return_type.clone()) {
@@ -200,86 +200,86 @@ pub fn new_unary_expr(
 
             for_all_cast_variants! { gen_cast_impl }
         }
-        (ProstType::BoolOut, _, DataType::Boolean) => Box::new(
+        (PbType::BoolOut, _, DataType::Boolean) => Box::new(
             UnaryBytesExpression::<BoolArray, _>::new(child_expr, return_type, bool_out),
         ),
-        (ProstType::Not, _, _) => Box::new(BooleanUnaryExpression::new(
+        (PbType::Not, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.data() & a.null_bitmap(), a.null_bitmap().clone()),
             conjunction::not,
         )),
-        (ProstType::IsTrue, _, _) => Box::new(BooleanUnaryExpression::new(
+        (PbType::IsTrue, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len())),
             is_true,
         )),
-        (ProstType::IsNotTrue, _, _) => Box::new(BooleanUnaryExpression::new(
+        (PbType::IsNotTrue, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.to_bitmap(), Bitmap::ones(a.len())),
             is_not_true,
         )),
-        (ProstType::IsFalse, _, _) => Box::new(BooleanUnaryExpression::new(
+        (PbType::IsFalse, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(!a.data() & a.null_bitmap(), Bitmap::ones(a.len())),
             is_false,
         )),
-        (ProstType::IsNotFalse, _, _) => Box::new(BooleanUnaryExpression::new(
+        (PbType::IsNotFalse, _, _) => Box::new(BooleanUnaryExpression::new(
             child_expr,
             |a| BoolArray::new(a.data() | !a.null_bitmap(), Bitmap::ones(a.len())),
             is_not_false,
         )),
-        (ProstType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),
-        (ProstType::IsNotNull, _, _) => Box::new(IsNotNullExpression::new(child_expr)),
-        (ProstType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+        (PbType::IsNull, _, _) => Box::new(IsNullExpression::new(child_expr)),
+        (PbType::IsNotNull, _, _) => Box::new(IsNotNullExpression::new(child_expr)),
+        (PbType::Upper, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
             child_expr,
             return_type,
             upper,
         )),
-        (ProstType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+        (PbType::Lower, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
             child_expr,
             return_type,
             lower,
         )),
-        (ProstType::Md5, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
+        (PbType::Md5, _, _) => Box::new(UnaryBytesExpression::<Utf8Array, _>::new(
             child_expr,
             return_type,
             md5,
         )),
-        (ProstType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+        (PbType::Ascii, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
             ascii,
         )),
-        (ProstType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+        (PbType::CharLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
             length_default,
         )),
-        (ProstType::OctetLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+        (PbType::OctetLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
             octet_length,
         )),
-        (ProstType::BitLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
+        (PbType::BitLength, _, _) => Box::new(UnaryExpression::<Utf8Array, I32Array, _>::new(
             child_expr,
             return_type,
             bit_length,
         )),
-        (ProstType::Neg, _, _) => {
+        (PbType::Neg, _, _) => {
             gen_unary_atm_expr! { "Neg", child_expr, return_type, general_neg,
                 {
                     { decimal, decimal, general_neg },
                 }
             }
         }
-        (ProstType::Abs, _, _) => {
+        (PbType::Abs, _, _) => {
             gen_unary_atm_expr! { "Abs", child_expr, return_type, general_abs,
                 {
                     {decimal, decimal, decimal_abs},
                 }
             }
         }
-        (ProstType::BitwiseNot, _, _) => {
+        (PbType::BitwiseNot, _, _) => {
             gen_unary_impl_fast! {
                 [ "BitwiseNot", child_expr, return_type],
                 { int16, int16, general_bitnot::<i16> },
@@ -287,32 +287,32 @@ pub fn new_unary_expr(
                 { int64, int64, general_bitnot::<i64> },
             }
         }
-        (ProstType::Ceil, _, _) => {
+        (PbType::Ceil, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, ceil_f64, ceil_decimal}
         }
-        (ProstType::Floor, DataType::Float64, DataType::Float64) => {
+        (PbType::Floor, DataType::Float64, DataType::Float64) => {
             gen_round_expr! {"Floor", child_expr, return_type, floor_f64, floor_decimal}
         }
-        (ProstType::Round, _, _) => {
+        (PbType::Round, _, _) => {
             gen_round_expr! {"Ceil", child_expr, return_type, round_f64, round_decimal}
         }
-        (ProstType::Exp, _, _) => Box::new(UnaryExpression::<F64Array, F64Array, _>::new(
+        (PbType::Exp, _, _) => Box::new(UnaryExpression::<F64Array, F64Array, _>::new(
             child_expr,
             return_type,
             exp_f64,
         )),
-        (ProstType::ToTimestamp, DataType::Timestamptz, DataType::Float64) => {
+        (PbType::ToTimestamp, DataType::Timestamptz, DataType::Float64) => {
             Box::new(UnaryExpression::<F64Array, I64Array, _>::new(
                 child_expr,
                 return_type,
                 f64_sec_to_timestamptz,
             ))
         }
-        (ProstType::JsonbTypeof, DataType::Varchar, DataType::Jsonb) => {
+        (PbType::JsonbTypeof, DataType::Varchar, DataType::Jsonb) => {
             UnaryBytesExpression::<JsonbArray, _>::new(child_expr, return_type, jsonb_typeof)
                 .boxed()
         }
-        (ProstType::JsonbArrayLength, DataType::Int32, DataType::Jsonb) => {
+        (PbType::JsonbArrayLength, DataType::Int32, DataType::Jsonb) => {
             UnaryExpression::<JsonbArray, I32Array, _>::new(
                 child_expr,
                 return_type,
@@ -377,15 +377,15 @@ mod tests {
     use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::cast::{str_parse, try_cast};
 
-    #[test]
-    fn test_unary() {
-        test_unary_bool::<BoolArray, _>(|x| !x, Type::Not);
-        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), Type::Cast);
-        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap());
+    #[tokio::test]
+    async fn test_unary() {
+        test_unary_bool::<BoolArray, _>(|x| !x, Type::Not).await;
+        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), Type::Cast).await;
+        test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
     }
 
-    #[test]
-    fn test_i16_to_i32() {
+    #[tokio::test]
+    async fn test_i16_to_i32() {
         let mut input = Vec::<Option<i16>>::new();
         let mut target = Vec::<Option<i32>>::new();
         for i in 0..100i16 {
@@ -412,7 +412,7 @@ mod tests {
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -421,14 +421,14 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    #[test]
-    fn test_neg() {
+    #[tokio::test]
+    async fn test_neg() {
         let mut input = Vec::<Option<i32>>::new();
         let mut target = Vec::<Option<i32>>::new();
 
@@ -455,7 +455,7 @@ mod tests {
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -464,13 +464,13 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    fn test_str_to_int16<A, F>(f: F)
+    async fn test_str_to_int16<A, F>(f: F)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -505,7 +505,7 @@ mod tests {
             })),
         };
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -517,13 +517,13 @@ mod tests {
                 .as_ref()
                 .cloned()
                 .map(|str| str.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    fn test_unary_bool<A, F>(f: F, kind: Type)
+    async fn test_unary_bool<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -549,7 +549,7 @@ mod tests {
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Boolean], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -558,13 +558,13 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|b| b.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    fn test_unary_date<A, F>(f: F, kind: Type)
+    async fn test_unary_date<A, F>(f: F, kind: Type)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -588,7 +588,7 @@ mod tests {
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = make_expression(kind, &[TypeName::Date], &[0]);
         let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).unwrap();
+        let res = vec_executor.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -597,7 +597,7 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|d| d.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).unwrap();
+            let result = vec_executor.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }

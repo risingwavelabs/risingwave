@@ -49,6 +49,8 @@ src/log/
 
 log/
 
+*.log
+
 .risingwave/
 .bin/
 

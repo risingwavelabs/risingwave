@@ -93,6 +93,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<T: Array, S: Array, const STOP_INCLUSIVE: bool> TableFunction
     for GenerateSeries<T, S, STOP_INCLUSIVE>
 where
@@ -106,13 +107,13 @@ where
         self.start.return_type()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_start = self.start.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        let ret_start = self.start.eval_checked(input).await?;
         let arr_start: &T = ret_start.as_ref().into();
-        let ret_stop = self.stop.eval_checked(input)?;
+        let ret_stop = self.stop.eval_checked(input).await?;
         let arr_stop: &T = ret_stop.as_ref().into();
 
-        let ret_step = self.step.eval_checked(input)?;
+        let ret_step = self.step.eval_checked(input).await?;
         let arr_step: &S = ret_step.as_ref().into();
 
         let bitmap = input.visibility();
@@ -153,7 +154,7 @@ where
 }
 
 pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
-    prost: &TableFunctionProst,
+    prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
@@ -188,15 +189,15 @@ mod tests {
 
     const CHUNK_SIZE: usize = 1024;
 
-    #[test]
-    fn test_generate_i32_series() {
-        generate_series_test_case(2, 4, 1);
-        generate_series_test_case(4, 2, -1);
-        generate_series_test_case(0, 9, 2);
-        generate_series_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1);
+    #[tokio::test]
+    async fn test_generate_i32_series() {
+        generate_series_test_case(2, 4, 1).await;
+        generate_series_test_case(4, 2, -1).await;
+        generate_series_test_case(0, 9, 2).await;
+        generate_series_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
     }
 
-    fn generate_series_test_case(start: i32, stop: i32, step: i32) {
+    async fn generate_series_test_case(start: i32, stop: i32, step: i32) {
         fn to_lit_expr(v: i32) -> BoxedExpression {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
@@ -211,26 +212,27 @@ mod tests {
         let expect_cnt = ((stop - start) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).unwrap();
+        let arrays = function.eval(&dummy_chunk).await.unwrap();
 
         let cnt: usize = arrays.iter().map(|a| a.len()).sum();
         assert_eq!(cnt, expect_cnt);
     }
 
-    #[test]
-    fn test_generate_time_series() {
+    #[tokio::test]
+    async fn test_generate_time_series() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = IntervalUnit::from_minutes(1);
         let one_hour_step = IntervalUnit::from_minutes(60);
         let one_day_step = IntervalUnit::from_days(1);
-        generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1);
-        generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1);
-        generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1);
-        generate_time_series_test_case(stop_time, start_time, -one_day_step, 8 + 1);
+        generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
+            .await;
+        generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
+        generate_time_series_test_case(start_time, stop_time, one_day_step, 8 + 1).await;
+        generate_time_series_test_case(stop_time, start_time, -one_day_step, 8 + 1).await;
     }
 
-    fn generate_time_series_test_case(
+    async fn generate_time_series_test_case(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
         step: IntervalUnit,
@@ -248,21 +250,21 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).unwrap();
+        let arrays = function.eval(&dummy_chunk).await.unwrap();
 
         let cnt: usize = arrays.iter().map(|a| a.len()).sum();
         assert_eq!(cnt, expect_cnt);
     }
 
-    #[test]
-    fn test_i32_range() {
-        range_test_case(2, 4, 1);
-        range_test_case(4, 2, -1);
-        range_test_case(0, 9, 2);
-        range_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1);
+    #[tokio::test]
+    async fn test_i32_range() {
+        range_test_case(2, 4, 1).await;
+        range_test_case(4, 2, -1).await;
+        range_test_case(0, 9, 2).await;
+        range_test_case(0, (CHUNK_SIZE * 2 + 3) as i32, 1).await;
     }
 
-    fn range_test_case(start: i32, stop: i32, step: i32) {
+    async fn range_test_case(start: i32, stop: i32, step: i32) {
         fn to_lit_expr(v: i32) -> BoxedExpression {
             LiteralExpression::new(DataType::Int32, Some(v.into())).boxed()
         }
@@ -277,26 +279,26 @@ mod tests {
         let expect_cnt = ((stop - start - step.signum()) / step + 1) as usize;
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).unwrap();
+        let arrays = function.eval(&dummy_chunk).await.unwrap();
 
         let cnt: usize = arrays.iter().map(|a| a.len()).sum();
         assert_eq!(cnt, expect_cnt);
     }
 
-    #[test]
-    fn test_time_range() {
+    #[tokio::test]
+    async fn test_time_range() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
         let one_minute_step = IntervalUnit::from_minutes(1);
         let one_hour_step = IntervalUnit::from_minutes(60);
         let one_day_step = IntervalUnit::from_days(1);
-        time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8);
-        time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8);
-        time_range_test_case(start_time, stop_time, one_day_step, 8);
-        time_range_test_case(stop_time, start_time, -one_day_step, 8);
+        time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8).await;
+        time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8).await;
+        time_range_test_case(start_time, stop_time, one_day_step, 8).await;
+        time_range_test_case(stop_time, start_time, -one_day_step, 8).await;
     }
 
-    fn time_range_test_case(
+    async fn time_range_test_case(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
         step: IntervalUnit,
@@ -314,7 +316,7 @@ mod tests {
         );
 
         let dummy_chunk = DataChunk::new_dummy(1);
-        let arrays = function.eval(&dummy_chunk).unwrap();
+        let arrays = function.eval(&dummy_chunk).await.unwrap();
 
         let cnt: usize = arrays.iter().map(|a| a.len()).sum();
         assert_eq!(cnt, expect_cnt);

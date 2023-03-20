@@ -27,8 +27,8 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
-use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
+use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
+use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
@@ -106,7 +106,7 @@ impl DispatchExecutorInner {
     /// Add new dispatchers to the executor. Will check whether their ids are unique.
     fn add_dispatchers<'a>(
         &mut self,
-        new_dispatchers: impl IntoIterator<Item = &'a ProstDispatcher>,
+        new_dispatchers: impl IntoIterator<Item = &'a PbDispatcher>,
     ) -> StreamResult<()> {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
@@ -136,7 +136,7 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
     /// outputs.
-    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let outputs: Vec<_> = update
             .added_downstream_actor_id
             .iter()
@@ -151,7 +151,7 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and finally
     /// update the hash mapping.
-    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn post_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let ids = update.removed_downstream_actor_id.iter().copied().collect();
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
@@ -291,7 +291,7 @@ impl DispatcherImpl {
     pub fn new(
         context: &SharedContext,
         actor_id: ActorId,
-        dispatcher: &ProstDispatcher,
+        dispatcher: &PbDispatcher,
     ) -> StreamResult<Self> {
         let outputs = dispatcher
             .downstream_actor_id
@@ -446,14 +446,20 @@ pub trait Dispatcher: Debug + 'static {
 #[derive(Debug)]
 pub struct RoundRobinDataDispatcher {
     outputs: Vec<BoxedOutput>,
+    output_indices: Vec<usize>,
     cur: usize,
     dispatcher_id: DispatcherId,
 }
 
 impl RoundRobinDataDispatcher {
-    pub fn new(outputs: Vec<BoxedOutput>, dispatcher_id: DispatcherId) -> Self {
+    pub fn new(
+        outputs: Vec<BoxedOutput>,
+        output_indices: Vec<usize>,
+        dispatcher_id: DispatcherId,
+    ) -> Self {
         Self {
             outputs,
+            output_indices,
             cur: 0,
             dispatcher_id,
         }
@@ -465,6 +471,7 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_data(&mut self, chunk: StreamChunk) -> Self::DataFuture<'_> {
         async move {
+            let chunk = chunk.reorder_columns(&self.output_indices);
             self.outputs[self.cur].send(Message::Chunk(chunk)).await?;
             self.cur += 1;
             self.cur %= self.outputs.len();
@@ -484,9 +491,11 @@ impl Dispatcher for RoundRobinDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -569,9 +578,11 @@ impl Dispatcher for HashDataDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            // always broadcast watermark
-            for output in &mut self.outputs {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in &mut self.outputs {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -751,8 +762,11 @@ impl Dispatcher for BroadcastDispatcher {
 
     fn dispatch_watermark(&mut self, watermark: Watermark) -> Self::WatermarkFuture<'_> {
         async move {
-            for output in self.outputs.values_mut() {
-                output.send(Message::Watermark(watermark.clone())).await?;
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                // always broadcast watermark
+                for output in self.outputs.values_mut() {
+                    output.send(Message::Watermark(watermark.clone())).await?;
+                }
             }
             Ok(())
         }
@@ -851,7 +865,10 @@ impl Dispatcher for SimpleDispatcher {
                 .exactly_one()
                 .expect("expect exactly one output");
 
-            output.send(Message::Watermark(watermark)).await
+            if let Some(watermark) = watermark.transform_with_indices(&self.output_indices) {
+                output.send(Message::Watermark(watermark)).await?;
+            }
+            Ok(())
         }
     }
 
@@ -1018,7 +1035,7 @@ mod tests {
         let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
                 downstream_actor_id: vec![untouched, old],
@@ -1031,7 +1048,7 @@ mod tests {
         let simple_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
                 downstream_actor_id: vec![old_simple],
@@ -1068,7 +1085,7 @@ mod tests {
 
         // 4. Send a configuration change barrier for broadcast dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![new],
@@ -1119,7 +1136,7 @@ mod tests {
 
         // 9. Send a configuration change barrier for simple dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: simple_dispatcher_id,
                 added_downstream_actor_id: vec![new_simple],

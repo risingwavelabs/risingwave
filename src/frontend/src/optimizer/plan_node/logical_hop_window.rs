@@ -16,9 +16,8 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::{DataType, IntervalUnit};
+use risingwave_common::types::IntervalUnit;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -47,54 +46,24 @@ impl LogicalHopWindow {
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
         let output_indices =
             output_indices.unwrap_or_else(|| (0..input.schema().len() + 2).collect_vec());
-        let output_type = DataType::window_of(&time_col.data_type).unwrap();
-        let original_schema: Schema = input
-            .schema()
-            .clone()
-            .into_fields()
-            .into_iter()
-            .chain([
-                Field::with_name(output_type.clone(), "window_start"),
-                Field::with_name(output_type, "window_end"),
-            ])
-            .collect();
-        let window_start_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len());
-        let window_end_index = output_indices
-            .iter()
-            .position(|&idx| idx == input.schema().len() + 1);
-
         let core = generic::HopWindow {
             input,
             time_col,
             window_slide,
             window_size,
+            window_offset,
             output_indices,
         };
 
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
+        let _schema = core.schema();
+        let _pk_indices = core.logical_pk();
         let ctx = core.ctx();
-        let functional_dependency = {
-            let mut fd_set =
-                ColIndexMapping::identity_or_none(core.input.schema().len(), original_schema.len())
-                    .composite(&ColIndexMapping::with_remaining_columns(
-                        &core.output_indices,
-                        original_schema.len(),
-                    ))
-                    .rewrite_functional_dependency_set(core.input.functional_dependency().clone());
-            if let Some(start_idx) = window_start_index && let Some(end_idx) = window_end_index {
-                fd_set.add_functional_dependency_by_column_indices(&[start_idx], &[end_idx]);
-                fd_set.add_functional_dependency_by_column_indices(&[end_idx], &[start_idx]);
-            }
-            fd_set
-        };
 
         // NOTE(st1page): add join keys in the pk_indices a work around before we really have stream
         // key.
@@ -107,15 +76,24 @@ impl LogicalHopWindow {
 
         let base = PlanBase::new_logical(
             ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
+            core.schema(),
+            core.logical_pk().unwrap_or_default(),
+            core.functional_dependency(),
         );
 
         LogicalHopWindow { base, core }
     }
 
-    pub fn into_parts(self) -> (PlanRef, InputRef, IntervalUnit, IntervalUnit, Vec<usize>) {
+    pub fn into_parts(
+        self,
+    ) -> (
+        PlanRef,
+        InputRef,
+        IntervalUnit,
+        IntervalUnit,
+        IntervalUnit,
+        Vec<usize>,
+    ) {
         self.core.into_parts()
     }
 
@@ -126,6 +104,7 @@ impl LogicalHopWindow {
         time_col: InputRef,
         window_slide: IntervalUnit,
         window_size: IntervalUnit,
+        window_offset: IntervalUnit,
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
@@ -133,7 +112,15 @@ impl LogicalHopWindow {
                 .unwrap()
                 .into(),
         );
-        Self::new(input, time_col, window_slide, window_size, None).into()
+        Self::new(
+            input,
+            time_col,
+            window_slide,
+            window_size,
+            window_offset,
+            None,
+        )
+        .into()
     }
 
     pub fn internal_window_start_col_idx(&self) -> usize {
@@ -166,6 +153,7 @@ impl LogicalHopWindow {
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(output_indices),
         )
     }
@@ -201,6 +189,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             self.core.time_col.clone(),
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(self.core.output_indices.clone()),
         )
     }
@@ -242,6 +231,7 @@ impl PlanTreeNodeUnary for LogicalHopWindow {
             time_col,
             self.core.window_slide,
             self.core.window_size,
+            self.core.window_offset,
             Some(new_output_indices),
         );
         (
@@ -374,7 +364,8 @@ impl ToStream for LogicalHopWindow {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (hop, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        let (input, time_col, window_slide, window_size, mut output_indices) = hop.into_parts();
+        let (input, time_col, window_slide, window_size, window_offset, mut output_indices) =
+            hop.into_parts();
         if !output_indices.contains(&input.schema().len())
             && !output_indices.contains(&(input.schema().len() + 1))
         // When both `window_start` and `window_end` are not in `output_indices`,
@@ -395,6 +386,7 @@ impl ToStream for LogicalHopWindow {
             time_col,
             window_slide,
             window_size,
+            window_offset,
             Some(output_indices),
         );
         Ok((new_hop.into(), out_col_change))
@@ -442,8 +434,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();
@@ -497,8 +490,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::new(0, 1, 0),
-            IntervalUnit::new(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 1, 0),
+            IntervalUnit::from_month_day_usec(0, 3, 0),
+            IntervalUnit::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();

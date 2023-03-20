@@ -20,17 +20,15 @@ use std::sync::Arc;
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType, StructArrayData};
+use risingwave_pb::data::{PbArray, PbArrayType, StructArrayData};
 
 use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayResult};
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
-use crate::types::{
-    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
-    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
-};
+use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
+use crate::util::memcmp_encoding;
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
@@ -173,11 +171,11 @@ impl Array for StructArray {
         self.len
     }
 
-    fn to_protobuf(&self) -> ProstArray {
+    fn to_protobuf(&self) -> PbArray {
         let children_array = self.children.iter().map(|a| a.to_protobuf()).collect();
         let children_type = self.children_type.iter().map(|t| t.to_protobuf()).collect();
-        ProstArray {
-            array_type: ProstArrayType::Struct as i32,
+        PbArray {
+            array_type: PbArrayType::Struct as i32,
             struct_array_data: Some(StructArrayData {
                 children_array,
                 children_type,
@@ -220,7 +218,7 @@ impl Array for StructArray {
 }
 
 impl StructArray {
-    pub fn from_protobuf(array: &ProstArray) -> ArrayResult<ArrayImpl> {
+    pub fn from_protobuf(array: &PbArray) -> ArrayResult<ArrayImpl> {
         ensure!(
             array.values.is_empty(),
             "Must have no buffer in a struct array"
@@ -345,7 +343,7 @@ impl StructValue {
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -384,7 +382,7 @@ impl<'a> StructRef<'a> {
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                memcmp_serialize_datum_into(datum_ref, serializer)?
+                memcmp_encoding::serialize_datum_in_composite(datum_ref, serializer)?
             }
             Ok(())
         })

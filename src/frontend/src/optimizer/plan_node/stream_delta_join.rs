@@ -156,17 +156,13 @@ impl StreamNode for StreamDeltaJoin {
         let left = self.left();
         let right = self.right();
 
-        let left_table = if let Some(stream_index_scan) = left.as_stream_index_scan() {
-            stream_index_scan.logical()
-        } else if let Some(stream_table_scan) = left.as_stream_table_scan() {
+        let left_table = if let Some(stream_table_scan) = left.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();
         };
         let left_table_desc = left_table.table_desc();
-        let right_table = if let Some(stream_index_scan) = right.as_stream_index_scan() {
-            stream_index_scan.logical()
-        } else if let Some(stream_table_scan) = right.as_stream_table_scan() {
+        let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();

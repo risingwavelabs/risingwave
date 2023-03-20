@@ -33,7 +33,7 @@ impl OpendalObjectStore {
             builder.credential(&cred);
         }
 
-        let op: Operator = Operator::create(builder)?.finish();
+        let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Gcs,

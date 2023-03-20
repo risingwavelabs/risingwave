@@ -25,9 +25,7 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
-};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::ordered::*;
@@ -88,11 +86,6 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
     pk_indices: Vec<usize>,
-
-    /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the all columns of the table, instead of the output ones.
-    // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
@@ -188,7 +181,7 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes,
         }: Distribution,
         table_option: TableOption,
@@ -249,7 +242,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             }
         };
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         let key_output_indices = match key_output_indices.is_empty() {
             true => None,
             false => Some(key_output_indices),
@@ -266,7 +258,6 @@ impl<S: StateStore> StorageTableInner<S, EitherSerde> {
             mapping: Arc::new(mapping),
             row_serde: Arc::new(row_serde),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
             table_option,
@@ -286,6 +277,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    pub fn output_indices(&self) -> &[usize] {
+        &self.output_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
     }
 }
 
@@ -578,23 +583,21 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
-                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
                     self.table_id,
                     pk_prefix,
-                    self.dist_key_indices,
                     pk_prefix_indices
                 );
             None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}" ,
             self.table_id,
             prefix_hint,
             start_key,
             end_key,
             pk_prefix,
-            self.dist_key_indices,
             pk_prefix_indices
         );
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_hummock_sdk::{HummockContextId, HummockSstableId};
+use risingwave_hummock_sdk::{HummockContextId, HummockSstableObjectId};
 use thiserror::Error;
 
 use crate::model::MetadataModelError;
@@ -30,10 +30,10 @@ pub enum Error {
     CompactorUnreachable(HummockContextId),
     #[error("compaction task {0} already assigned to compactor {1}")]
     CompactionTaskAlreadyAssigned(u64, HummockContextId),
-    #[error("compaction group error {0}")]
+    #[error("compaction group error: {0}")]
     CompactionGroup(String),
     #[error("SST {0} is invalid")]
-    InvalidSst(HummockSstableId),
+    InvalidSst(HummockSstableObjectId),
     #[error(transparent)]
     Internal(anyhow::Error),
 }

@@ -26,10 +26,16 @@ use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::source::{SourceFormat, SourceMessage, SourceMeta, SplitId, StreamChunkWithState};
 
+pub enum FieldDesc {
+    // field is invisible, generate None
+    Invisible,
+    Visible(FieldGeneratorImpl),
+}
+
 pub struct DatagenEventGenerator {
     // fields_map: HashMap<String, FieldGeneratorImpl>,
     field_names: Vec<String>,
-    fields_vec: Vec<FieldGeneratorImpl>,
+    fields_vec: Vec<FieldDesc>,
     source_format: SourceFormat,
     data_types: Vec<DataType>,
     offset: u64,
@@ -46,7 +52,7 @@ pub struct DatagenMeta {
 impl DatagenEventGenerator {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        fields_vec: Vec<FieldGeneratorImpl>,
+        fields_vec: Vec<FieldDesc>,
         field_names: Vec<String>,
         source_format: SourceFormat,
         data_types: Vec<DataType>,
@@ -96,16 +102,23 @@ impl DatagenEventGenerator {
                                 .iter()
                                 .zip_eq_fast(self.fields_vec.iter_mut())
                             {
-                                let value = field_generator.generate_json(self.offset);
-                                if value.is_null() {
-                                    reach_end = true;
-                                    tracing::info!(
-                                        "datagen split {} stop generate, offset {}",
-                                        self.split_id,
-                                        self.offset
-                                    );
-                                    break 'outer;
-                                }
+                                let value = match field_generator {
+                                    FieldDesc::Invisible => continue,
+                                    FieldDesc::Visible(field_generator) => {
+                                        let value = field_generator.generate_json(self.offset);
+                                        if value.is_null() {
+                                            reach_end = true;
+                                            tracing::info!(
+                                                "datagen split {} stop generate, offset {}",
+                                                self.split_id,
+                                                self.offset
+                                            );
+                                            break 'outer;
+                                        }
+                                        value
+                                    }
+                                };
+
                                 map.insert(name.clone(), value);
                             }
                             Bytes::from(serde_json::Value::from(map).to_string())
@@ -159,16 +172,24 @@ impl DatagenEventGenerator {
                 'outer: for _ in 0..num_rows_to_generate {
                     let mut row = Vec::with_capacity(self.fields_vec.len());
                     for field_generator in &mut self.fields_vec {
-                        let datum = field_generator.generate_datum(self.offset);
-                        if datum.is_none() {
-                            reach_end = true;
-                            tracing::info!(
-                                "datagen split {} stop generate, offset {}",
-                                self.split_id,
-                                self.offset
-                            );
-                            break 'outer;
-                        }
+                        let datum = match field_generator {
+                            FieldDesc::Invisible => None,
+                            FieldDesc::Visible(field_generator) => {
+                                let datum = field_generator.generate_datum(self.offset);
+                                if datum.is_none() {
+                                    reach_end = true;
+                                    tracing::info!(
+                                        "datagen split {} stop generate, offset {}",
+                                        self.split_id,
+                                        self.offset
+                                    );
+                                    break 'outer;
+                                };
+
+                                datum
+                            }
+                        };
+
                         row.push(datum);
                     }
 
@@ -214,22 +235,26 @@ mod tests {
 
         let data_types = vec![DataType::Int32, DataType::Float32];
         let fields_vec = vec![
-            FieldGeneratorImpl::with_number_sequence(
-                data_types[0].clone(),
-                Some(start.to_string()),
-                Some(end.to_string()),
-                split_index,
-                split_num,
-            )
-            .unwrap(),
-            FieldGeneratorImpl::with_number_sequence(
-                data_types[1].clone(),
-                Some(start.to_string()),
-                Some(end.to_string()),
-                split_index,
-                split_num,
-            )
-            .unwrap(),
+            FieldDesc::Visible(
+                FieldGeneratorImpl::with_number_sequence(
+                    data_types[0].clone(),
+                    Some(start.to_string()),
+                    Some(end.to_string()),
+                    split_index,
+                    split_num,
+                )
+                .unwrap(),
+            ),
+            FieldDesc::Visible(
+                FieldGeneratorImpl::with_number_sequence(
+                    data_types[1].clone(),
+                    Some(start.to_string()),
+                    Some(end.to_string()),
+                    split_index,
+                    split_num,
+                )
+                .unwrap(),
+            ),
         ];
 
         let generator = DatagenEventGenerator::new(

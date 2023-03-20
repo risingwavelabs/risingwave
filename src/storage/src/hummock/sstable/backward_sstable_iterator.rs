@@ -17,7 +17,6 @@ use std::future::Future;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use crate::hummock::iterator::{Backward, HummockIterator};
 use crate::hummock::sstable::SstableIteratorReadOptions;
@@ -55,7 +54,11 @@ impl BackwardSstableIterator {
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: isize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: isize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         if idx >= self.sst.value().block_count() as isize || idx < 0 {
             self.block_iter = None;
         } else {
@@ -104,7 +107,7 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -128,8 +131,6 @@ impl HummockIterator for BackwardSstableIterator {
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let encoded_key = key.encode();
-            let encoded_key_slice = encoded_key.as_slice();
             let block_idx = self
                 .sst
                 .value()
@@ -139,16 +140,13 @@ impl HummockIterator for BackwardSstableIterator {
                     // Compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord = KeyComparator::compare_encoded_full_key(
-                        block_meta.smallest_key.as_slice(),
-                        encoded_key_slice,
-                    );
+                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
             let block_idx = block_idx as isize;
 
-            self.seek_idx(block_idx, Some(encoded_key_slice)).await?;
+            self.seek_idx(block_idx, Some(key)).await?;
             if !self.is_valid() {
                 // Seek to prev block
                 self.seek_idx(block_idx - 1, None).await?;

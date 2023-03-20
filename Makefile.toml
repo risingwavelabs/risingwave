@@ -9,6 +9,7 @@ extend = [
   { path = "src/risedevtool/redis.toml" },
   { path = "src/risedevtool/connector.toml" },
   { path = "src/risedevtool/risedev-components.toml" },
+  { path = "src/sqlparser/test_runner/sqlparser_test.toml"},
   { path = "src/frontend/planner_test/planner_test.toml" },
   { path = "src/tests/compaction_test/Makefile.toml" },
   { path = "src/storage/backup/integration_tests/Makefile.toml" },
@@ -370,7 +371,6 @@ description = "Download all available components at once"
 dependencies = [
   "download-connector",
   "download-maven",
-  "build-connector-node",
   "download-etcd",
   "download-grafana",
   "download-jaeger",
@@ -414,6 +414,7 @@ dependencies = [
   "create-user-profiles-file",
   "download-all",
   "build-risingwave",
+  "build-connector-node",
   "post-build-risingwave",
   "extract-dashboard-artifact",
   "export-dashboard-v2",
@@ -440,6 +441,7 @@ alias = "playground"
 [tasks.playground]
 category = "RiseDev - Start"
 description = "Start a lite RisingWave playground using risingwave all-in-one binary"
+dependencies = ["download-connector"]
 script = '''
 #!/usr/bin/env bash
 
@@ -700,7 +702,7 @@ script = """
 #!/usr/bin/env bash
 set -e
 
-cargo check -p risingwave_simulation "$@"
+cargo check -p risingwave_simulation --all-targets "$@"
 """
 
 [tasks.sslt]

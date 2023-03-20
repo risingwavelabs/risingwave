@@ -35,15 +35,13 @@ pub mod error;
 pub mod meta_snapshot;
 pub mod storage;
 
+use std::collections::HashSet;
 use std::hash::Hasher;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
-use risingwave_hummock_sdk::{HummockSstableId, HummockVersionId};
-use risingwave_pb::backup_service::{
-    MetaSnapshotManifest as ProstMetaSnapshotManifest,
-    MetaSnapshotMetadata as ProstMetaSnapshotMetadata,
-};
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
+use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -57,7 +55,7 @@ pub type MetaBackupJobId = u64;
 pub struct MetaSnapshotMetadata {
     pub id: MetaSnapshotId,
     pub hummock_version_id: HummockVersionId,
-    pub ssts: Vec<HummockSstableId>,
+    pub ssts: Vec<HummockSstableObjectId>,
     pub max_committed_epoch: u64,
     pub safe_epoch: u64,
 }
@@ -67,7 +65,9 @@ impl MetaSnapshotMetadata {
         Self {
             id,
             hummock_version_id: v.id,
-            ssts: v.get_sst_ids(),
+            ssts: HashSet::<HummockSstableObjectId>::from_iter(v.get_object_ids())
+                .into_iter()
+                .collect_vec(),
             max_committed_epoch: v.max_committed_epoch,
             safe_epoch: v.safe_epoch,
         }
@@ -99,7 +99,7 @@ pub fn xxhash64_verify(data: &[u8], checksum: u64) -> BackupResult<()> {
     Ok(())
 }
 
-impl From<&MetaSnapshotMetadata> for ProstMetaSnapshotMetadata {
+impl From<&MetaSnapshotMetadata> for PbMetaSnapshotMetadata {
     fn from(m: &MetaSnapshotMetadata) -> Self {
         Self {
             id: m.id,
@@ -110,7 +110,7 @@ impl From<&MetaSnapshotMetadata> for ProstMetaSnapshotMetadata {
     }
 }
 
-impl From<&MetaSnapshotManifest> for ProstMetaSnapshotManifest {
+impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
     fn from(m: &MetaSnapshotManifest) -> Self {
         Self {
             manifest_id: m.manifest_id,

@@ -18,11 +18,8 @@ use std::time::Duration;
 
 use either::Either;
 use etcd_client::ConnectOptions;
-use risingwave_backup::storage::ObjectStoreMetaSnapshotStorage;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common_service::metrics_manager::MetricsManager;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::parse_remote_object_store;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
@@ -54,6 +51,7 @@ use crate::manager::{
     CatalogManager, ClusterManager, FragmentManager, IdleManager, MetaOpts, MetaSrvEnv,
     SystemParamsManager,
 };
+use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election_client::{ElectionClient, EtcdElectionClient};
 use crate::rpc::metrics::{start_worker_info_monitor, MetaMetrics};
 use crate::rpc::service::backup_service::BackupServiceImpl;
@@ -426,31 +424,17 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
                 .await
                 .expect("list_table_fragments"),
         )
-        .await
-        .unwrap();
+        .await?;
 
     // Initialize services.
-    let backup_object_store = Arc::new(
-        parse_remote_object_store(
-            system_params_reader.backup_storage_url(),
-            Arc::new(ObjectStoreMetrics::unused()),
-            "Meta Backup",
-        )
-        .await,
-    );
-    let backup_storage = Arc::new(
-        ObjectStoreMetaSnapshotStorage::new(
-            system_params_reader.backup_storage_directory(),
-            backup_object_store,
-        )
-        .await?,
-    );
-    let backup_manager = Arc::new(BackupManager::new(
+    let backup_manager = BackupManager::new(
         env.clone(),
         hummock_manager.clone(),
-        backup_storage,
         meta_metrics.registry().clone(),
-    ));
+        system_params_reader.backup_storage_url(),
+        system_params_reader.backup_storage_directory(),
+    )
+    .await?;
     let vacuum_manager = Arc::new(hummock::VacuumManager::new(
         env.clone(),
         hummock_manager.clone(),
@@ -458,8 +442,15 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
         compactor_manager.clone(),
     ));
 
+    let mut aws_cli = None;
+    if let Some(my_vpc_id) = &env.opts.vpc_id && let Some(security_group_id) = &env.opts.security_group_id {
+        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
+        aws_cli = Some(cli);
+    }
+
     let ddl_srv = DdlServiceImpl::<S>::new(
         env.clone(),
+        aws_cli,
         catalog_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),

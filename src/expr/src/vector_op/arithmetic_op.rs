@@ -137,8 +137,10 @@ pub fn timestamp_timestamp_sub<T1, T2, T3>(
 ) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
     let days = tmp.num_days();
-    let ms = (tmp - Duration::days(tmp.num_days())).num_milliseconds();
-    Ok(IntervalUnit::new(0, days as i32, ms))
+    let usecs = (tmp - Duration::days(tmp.num_days()))
+        .num_microseconds()
+        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    Ok(IntervalUnit::from_month_day_usec(0, days as i32, usecs))
 }
 
 #[inline(always)]
@@ -258,7 +260,7 @@ fn timestamptz_interval_inner(
     }
 
     let result: Option<i64> = try {
-        let delta_usecs = r.get_ms().checked_mul(1000)?;
+        let delta_usecs = r.get_usecs();
         f(l, delta_usecs)?
     };
 
@@ -301,8 +303,10 @@ pub fn time_date_add<T1, T2, T3>(
 #[inline(always)]
 pub fn time_time_sub<T1, T2, T3>(l: NaiveTimeWrapper, r: NaiveTimeWrapper) -> Result<IntervalUnit> {
     let tmp = l.0 - r.0; // this does not overflow or underflow
-    let ms = tmp.num_milliseconds();
-    Ok(IntervalUnit::new(0, 0, ms))
+    let usecs = tmp
+        .num_microseconds()
+        .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    Ok(IntervalUnit::from_month_day_usec(0, 0, usecs))
 }
 
 #[inline(always)]
@@ -311,7 +315,7 @@ pub fn time_interval_sub<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
     let time = l.0;
-    let (new_time, ignored) = time.overflowing_sub_signed(Duration::milliseconds(r.get_ms()));
+    let (new_time, ignored) = time.overflowing_sub_signed(Duration::microseconds(r.get_usecs()));
     if ignored == 0 {
         Ok(NaiveTimeWrapper::new(new_time))
     } else {
@@ -325,7 +329,7 @@ pub fn time_interval_add<T1, T2, T3>(
     r: IntervalUnit,
 ) -> Result<NaiveTimeWrapper> {
     let time = l.0;
-    let (new_time, ignored) = time.overflowing_add_signed(Duration::milliseconds(r.get_ms()));
+    let (new_time, ignored) = time.overflowing_add_signed(Duration::microseconds(r.get_usecs()));
     if ignored == 0 {
         Ok(NaiveTimeWrapper::new(new_time))
     } else {

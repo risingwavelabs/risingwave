@@ -23,9 +23,7 @@ use risingwave_common::catalog::{
     USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::{
-    Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
@@ -290,9 +288,9 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
-    let properties = context.with_options().inner().clone().into_iter().collect();
+    let mut properties = context.with_options().inner().clone().into_iter().collect();
 
     let (mut columns, mut pk_column_ids, mut row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
@@ -311,7 +309,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     let source_info = resolve_source_schema(
         source_schema,
         &mut columns,
-        &properties,
+        &mut properties,
         &mut row_id_index,
         &mut pk_column_ids,
         true,
@@ -322,6 +320,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         Some(source_info),
@@ -342,16 +341,18 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let (column_descs, pk_column_id_from_columns) = bind_sql_columns(columns, &mut col_id_gen)?;
 
+    let properties = context.with_options().inner().clone().into_iter().collect();
     gen_create_table_plan_without_bind(
         context,
         table_name,
         column_descs,
         pk_column_id_from_columns,
         constraints,
+        properties,
         definition,
         source_watermarks,
         append_only,
@@ -366,11 +367,12 @@ pub(crate) fn gen_create_table_plan_without_bind(
     column_descs: Vec<ColumnDesc>,
     pk_column_id_from_columns: Option<ColumnId>,
     constraints: Vec<TableConstraint>,
+    properties: HashMap<String, String>,
     definition: String,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     version: Option<TableVersion>,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let (columns, pk_column_ids, row_id_index) =
         bind_sql_table_constraints(column_descs, pk_column_id_from_columns, constraints)?;
 
@@ -385,6 +387,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
         context.into(),
         table_name,
         columns,
+        properties,
         pk_column_ids,
         row_id_index,
         None,
@@ -400,6 +403,7 @@ fn gen_table_plan_inner(
     context: OptimizerContextRef,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
+    properties: HashMap<String, String>,
     pk_column_ids: Vec<ColumnId>,
     row_id_index: Option<usize>,
     source_info: Option<StreamSourceInfo>,
@@ -408,13 +412,13 @@ fn gen_table_plan_inner(
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let source = source_info.map(|source_info| ProstSource {
+    let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
         database_id,
@@ -425,7 +429,7 @@ fn gen_table_plan_inner(
             .map(|column| column.to_protobuf())
             .collect_vec(),
         pk_column_ids: pk_column_ids.iter().map(Into::into).collect_vec(),
-        properties: context.with_options().inner().clone().into_iter().collect(),
+        properties,
         info: Some(source_info),
         owner: session.user_id(),
         watermark_descs: watermark_descs.clone(),

@@ -347,9 +347,9 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
-    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+    use risingwave_pb::plan_common::PbColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -358,6 +358,10 @@ mod tests {
         MultiFilterKeyExtractor,
     };
     use crate::key::TABLE_PREFIX_LEN;
+
+    const fn dummy_vnode() -> [u8; VirtualNode::SIZE] {
+        VirtualNode::from_index(233).to_be_bytes()
+    }
 
     #[test]
     fn test_default_filter_key_extractor() {
@@ -373,15 +377,15 @@ mod tests {
         assert_eq!(full_key, output_key);
     }
 
-    fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
-        ProstTable {
+    fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
+        PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
             table_type: TableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Int64,
@@ -394,7 +398,7 @@ mod tests {
                     ),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Int64,
@@ -407,7 +411,7 @@ mod tests {
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Float64,
@@ -420,7 +424,7 @@ mod tests {
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc {
                             data_type: DataType::Varchar,
@@ -439,12 +443,14 @@ mod tests {
                     column_index: 1,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
                 PbColumnOrder {
                     column_index: 3,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
             ],
@@ -492,8 +498,7 @@ mod tests {
             buf.to_vec()
         };
 
-        let vnode_prefix = "v".as_bytes();
-        assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+        let vnode_prefix = &dummy_vnode()[..];
 
         let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
         let output_key = schema_filter_key_extractor.extract(&full_key);
@@ -527,8 +532,7 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);
@@ -565,8 +569,7 @@ mod tests {
                 buf.to_vec()
             };
 
-            let vnode_prefix = "v".as_bytes();
-            assert_eq!(VirtualNode::SIZE, vnode_prefix.len());
+            let vnode_prefix = &dummy_vnode()[..];
 
             let full_key = [&table_prefix, vnode_prefix, &row_bytes].concat();
             let output_key = multi_filter_key_extractor.extract(&full_key);

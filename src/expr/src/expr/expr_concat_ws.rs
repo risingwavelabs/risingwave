@@ -34,20 +34,20 @@ pub struct ConcatWsExpression {
     string_exprs: Vec<BoxedExpression>,
 }
 
+#[async_trait::async_trait]
 impl Expression for ConcatWsExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let sep_column = self.sep_expr.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let sep_column = self.sep_expr.eval_checked(input).await?;
         let sep_column = sep_column.as_utf8();
 
-        let string_columns = self
-            .string_exprs
-            .iter()
-            .map(|c| c.eval_checked(input))
-            .collect::<Result<Vec<_>>>()?;
+        let mut string_columns = Vec::with_capacity(self.string_exprs.len());
+        for expr in &self.string_exprs {
+            string_columns.push(expr.eval_checked(input).await?);
+        }
         let string_columns_ref = string_columns
             .iter()
             .map(|c| c.as_utf8())
@@ -92,18 +92,17 @@ impl Expression for ConcatWsExpression {
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let sep = self.sep_expr.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let sep = self.sep_expr.eval_row(input).await?;
         let sep = match sep {
             Some(sep) => sep,
             None => return Ok(None),
         };
 
-        let strings = self
-            .string_exprs
-            .iter()
-            .map(|c| c.eval_row(input))
-            .collect::<Result<Vec<_>>>()?;
+        let mut strings = Vec::with_capacity(self.string_exprs.len());
+        for expr in &self.string_exprs {
+            strings.push(expr.eval_row(input).await?);
+        }
         let mut final_string = String::new();
 
         let mut strings_iter = strings.iter();
@@ -163,7 +162,7 @@ mod tests {
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::Datum;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::ConcatWs;
     use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -175,7 +174,7 @@ mod tests {
     pub fn make_concat_ws_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
             expr_type: ConcatWs as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: ret as i32,
                 ..Default::default()
             }),
@@ -183,8 +182,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_eval_concat_ws_expr() {
+    #[tokio::test]
+    async fn test_eval_concat_ws_expr() {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
@@ -205,7 +204,7 @@ mod tests {
             . . . .",
         );
 
-        let actual = concat_ws_expr.eval(&chunk).unwrap();
+        let actual = concat_ws_expr.eval(&chunk).await.unwrap();
         let actual = actual
             .iter()
             .map(|r| r.map(|s| s.into_utf8()))
@@ -216,8 +215,8 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    #[test]
-    fn test_eval_row_concat_ws_expr() {
+    #[tokio::test]
+    async fn test_eval_row_concat_ws_expr() {
         let input_node1 = make_input_ref(0, TypeName::Varchar);
         let input_node2 = make_input_ref(1, TypeName::Varchar);
         let input_node3 = make_input_ref(2, TypeName::Varchar);
@@ -242,7 +241,7 @@ mod tests {
             let datum_vec: Vec<Datum> = row_input.iter().map(|e| e.map(|s| s.into())).collect();
             let row = OwnedRow::new(datum_vec);
 
-            let result = concat_ws_expr.eval_row(&row).unwrap();
+            let result = concat_ws_expr.eval_row(&row).await.unwrap();
             let expected = expected[i].map(|s| s.into());
 
             assert_eq!(result, expected);

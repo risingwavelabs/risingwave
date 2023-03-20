@@ -19,7 +19,7 @@ import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -40,7 +40,7 @@ public class FileSinkTest {
 
         Path file = Paths.get(filePath);
         try {
-            sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice")));
+            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
             sink.sync();
             String[] expectedA = {"[1,\"Alice\"]"};
             String[] actualA = Files.lines(file).toArray(String[]::new);
@@ -48,7 +48,7 @@ public class FileSinkTest {
             IntStream.range(0, expectedA.length)
                     .forEach(i -> assertEquals(expectedA[i], actualA[i]));
 
-            sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob")));
+            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
             String[] expectedB = new String[] {"[1,\"Alice\"]"};
             String[] actualB = Files.lines(file).toArray(String[]::new);
             assertEquals(expectedB.length, actualB.length);
@@ -84,8 +84,8 @@ public class FileSinkTest {
             String[] expected = {"[1,\"Alice\"]", "[2,\"Bob\"]"};
             sink.write(
                     Iterators.forArray(
-                            new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                            new ArraySinkrow(Op.INSERT, 2, "Bob")));
+                            new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                            new ArraySinkRow(Op.INSERT, 2, "Bob")));
 
             sink.sync();
             String[] actual = Files.lines(Paths.get(filePath)).toArray(String[]::new);

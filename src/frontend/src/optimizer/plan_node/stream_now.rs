@@ -90,7 +90,7 @@ impl StreamNode for StreamNow {
         });
 
         let table_catalog = internal_table_catalog_builder
-            .build(dist_keys)
+            .build(dist_keys, 0)
             .with_id(state.gen_table_id_wrapped());
         NodeBody::Now(NowNode {
             state_table: Some(table_catalog.to_internal_table_prost()),

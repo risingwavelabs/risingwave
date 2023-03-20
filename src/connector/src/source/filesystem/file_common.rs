@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 use anyhow::anyhow;
+use risingwave_common::array::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::source::{SplitId, SplitMetaData};
@@ -30,12 +31,12 @@ impl SplitMetaData for FsSplit {
         self.name.as_str().into()
     }
 
-    fn encode_to_bytes(&self) -> bytes::Bytes {
-        bytes::Bytes::from(serde_json::to_string(self).unwrap())
+    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
 
-    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    fn encode_to_json(&self) -> JsonbVal {
+        serde_json::to_value(self.clone()).unwrap().into()
     }
 }
 

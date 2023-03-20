@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
@@ -26,7 +26,7 @@ use crate::impl_common_split_reader_logic;
 use crate::parser::{ParserConfig, SpecificParserConfig};
 use crate::source::data_gen_util::spawn_data_generation_stream;
 use crate::source::datagen::source::SEQUENCE_FIELD_KIND;
-use crate::source::datagen::{DatagenProperties, DatagenSplit};
+use crate::source::datagen::{DatagenProperties, DatagenSplit, FieldDesc};
 use crate::source::{
     BoxSourceStream, BoxSourceWithStateStream, Column, DataType, SourceContextRef, SplitId,
     SplitImpl, SplitMetaData, SplitReader,
@@ -106,13 +106,18 @@ impl SplitReader for DatagenSplitReader {
         for column in columns {
             // let name = column.name.clone();
             let data_type = column.data_type.clone();
-            let gen = generator_from_data_type(
-                column.data_type,
-                &fields_option_map,
-                &column.name,
-                split_index,
-                split_num,
-            )?;
+
+            let gen = if column.is_visible {
+                FieldDesc::Visible(generator_from_data_type(
+                    column.data_type,
+                    &fields_option_map,
+                    &column.name,
+                    split_index,
+                    split_num,
+                )?)
+            } else {
+                FieldDesc::Invisible
+            };
             fields_vec.push(gen);
             data_types.push(data_type);
             field_names.push(column.name);
@@ -199,8 +204,22 @@ fn generator_from_data_type(
             let max_past_mode_value = fields_option_map
                 .get(&max_past_mode_key)
                 .map(|s| s.to_lowercase());
+            let basetime = match fields_option_map.get(format!("fields.{}.basetime", name).as_str())
+            {
+                Some(base) => {
+                    Some(chrono::DateTime::parse_from_rfc3339(base).map_err(|e| {
+                        anyhow!("cannot parse {:?} to rfc3339 due to {:?}", base, e)
+                    })?)
+                }
+                None => None,
+            };
 
-            FieldGeneratorImpl::with_timestamp(max_past_value, max_past_mode_value, random_seed)
+            FieldGeneratorImpl::with_timestamp(
+                basetime,
+                max_past_value,
+                max_past_mode_value,
+                random_seed,
+            )
         }
         DataType::Varchar => {
             let length_key = format!("fields.{}.length", name);
@@ -284,14 +303,17 @@ mod tests {
             Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,
+                is_visible: true,
             },
             Column {
                 name: "random_float".to_string(),
                 data_type: DataType::Float32,
+                is_visible: true,
             },
             Column {
                 name: "sequence_int".to_string(),
                 data_type: DataType::Int32,
+                is_visible: true,
             },
             Column {
                 name: "struct".to_string(),
@@ -299,6 +321,7 @@ mod tests {
                     fields: vec![DataType::Int32],
                     field_names: vec!["random_int".to_string()],
                 })),
+                is_visible: true,
             },
         ];
         let state = vec![SplitImpl::Datagen(DatagenSplit {
@@ -364,10 +387,12 @@ mod tests {
             Column {
                 name: "_".to_string(),
                 data_type: DataType::Int64,
+                is_visible: true,
             },
             Column {
                 name: "random_int".to_string(),
                 data_type: DataType::Int32,
+                is_visible: true,
             },
         ];
         let state = vec![SplitImpl::Datagen(DatagenSplit {

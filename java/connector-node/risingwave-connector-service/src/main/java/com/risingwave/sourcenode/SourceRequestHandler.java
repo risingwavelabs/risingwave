@@ -14,10 +14,10 @@
 
 package com.risingwave.sourcenode;
 
-import com.risingwave.connector.api.source.ConnectorConfig;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType;
+import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import com.risingwave.sourcenode.core.SourceHandlerFactory;
 import io.grpc.Status;
 import io.grpc.StatusException;
@@ -46,19 +46,19 @@ public class SourceRequestHandler {
                 break;
             case START:
                 var startRequest = request.getStart();
-                var handler =
-                        SourceHandlerFactory.createSourceHandler(
-                                SourceTypeE.valueOf(startRequest.getSourceType()),
-                                startRequest.getSourceId(),
-                                startRequest.getStartOffset(),
-                                startRequest.getPropertiesMap());
-                if (handler == null) {
-                    LOG.error("failed to create source handler");
-                    responseObserver.onCompleted();
-                } else {
-                    handler.handle(
+                try {
+                    var handler =
+                            SourceHandlerFactory.createSourceHandler(
+                                    SourceTypeE.valueOf(startRequest.getSourceType()),
+                                    startRequest.getSourceId(),
+                                    startRequest.getStartOffset(),
+                                    startRequest.getPropertiesMap());
+                    handler.startSource(
                             (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                                     responseObserver);
+                } catch (Throwable t) {
+                    LOG.error("failed to start source", t);
+                    responseObserver.onError(t);
                 }
                 break;
             case REQUEST_NOT_SET:
@@ -75,11 +75,11 @@ public class SourceRequestHandler {
         String jdbcUrl =
                 toJdbcPrefix(validate.getSourceType())
                         + "://"
-                        + props.get(ConnectorConfig.HOST)
+                        + props.get(DbzConnectorConfig.HOST)
                         + ":"
-                        + props.get(ConnectorConfig.PORT)
+                        + props.get(DbzConnectorConfig.PORT)
                         + "/"
-                        + props.get(ConnectorConfig.DB_NAME);
+                        + props.get(DbzConnectorConfig.DB_NAME);
         LOG.debug("validate jdbc url: {}", jdbcUrl);
 
         var sqlStmts = new Properties();
@@ -93,8 +93,8 @@ public class SourceRequestHandler {
         try (var conn =
                 DriverManager.getConnection(
                         jdbcUrl,
-                        props.get(ConnectorConfig.USER),
-                        props.get(ConnectorConfig.PASSWORD))) {
+                        props.get(DbzConnectorConfig.USER),
+                        props.get(DbzConnectorConfig.PASSWORD))) {
             // usernamed and password are correct
             var dbMeta = conn.getMetaData();
 
@@ -138,8 +138,8 @@ public class SourceRequestHandler {
                     }
                     // check whether table exist
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("mysql.table"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.DB_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.DB_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             var ret = res.getInt(1);
@@ -152,8 +152,8 @@ public class SourceRequestHandler {
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("mysql.table_schema"))) {
                         var sourceSchema = validate.getTableSchema();
-                        stmt.setString(1, props.get(ConnectorConfig.DB_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.DB_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         var pkFields = new HashSet<String>();
                         int index = 0;
@@ -203,8 +203,8 @@ public class SourceRequestHandler {
                     }
                     // check schema name and table name
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("postgres.table"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             var ret = res.getString(1);
@@ -219,9 +219,9 @@ public class SourceRequestHandler {
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("postgres.pk"))) {
                         stmt.setString(
                                 1,
-                                props.get(ConnectorConfig.PG_SCHEMA_NAME)
+                                props.get(DbzConnectorConfig.PG_SCHEMA_NAME)
                                         + "."
-                                        + props.get(ConnectorConfig.TABLE_NAME));
+                                        + props.get(DbzConnectorConfig.TABLE_NAME));
 
                         var res = stmt.executeQuery();
                         var pkFields = new HashSet<String>();
@@ -237,8 +237,8 @@ public class SourceRequestHandler {
                     // check whether source schema match table schema on upstream
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("postgres.table_schema"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         var sourceSchema = validate.getTableSchema();
                         int index = 0;
