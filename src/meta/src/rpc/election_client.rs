@@ -267,11 +267,7 @@ impl ElectionClient for EtcdElectionClient {
             }
         }
 
-        tracing::warn!("client {} lost leadership", self.id);
-
-        self.is_leader_sender.send_replace(false);
-
-        Ok(())
+        panic!("client {} lost leadership", self.id);
     }
 
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>> {
