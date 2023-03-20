@@ -310,20 +310,19 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let call_visibilities: Vec<_> = this
-            .agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    &this.actor_ctx,
-                    &this.info.identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut call_visibilities = Vec::with_capacity(this.agg_calls.len());
+        for agg_call in &this.agg_calls {
+            let agg_call_filter_res = agg_call_filter_res(
+                &this.actor_ctx,
+                &this.info.identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            call_visibilities.push(agg_call_filter_res);
+        }
 
         // Materialize input chunk if needed.
         this.storages

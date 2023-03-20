@@ -71,60 +71,65 @@ public class IcebergSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            switch (row.getOp()) {
-                case INSERT:
-                    Record record = GenericRecord.create(rowSchema);
-                    if (row.size() != getTableSchema().getColumnNames().length) {
-                        throw INTERNAL.withDescription("row values do not match table schema")
-                                .asRuntimeException();
-                    }
-                    for (int i = 0; i < rowSchema.columns().size(); i++) {
-                        record.set(i, row.get(i));
-                    }
-                    PartitionKey partitionKey =
-                            new PartitionKey(
-                                    transaction.table().spec(), transaction.table().schema());
-                    partitionKey.partition(record);
-                    DataWriter<Record> dataWriter;
-                    if (dataWriterMap.containsKey(partitionKey)) {
-                        dataWriter = dataWriterMap.get(partitionKey);
-                    } else {
-                        try {
-                            String filename = fileFormat.addExtension(UUID.randomUUID().toString());
-                            OutputFile outputFile =
-                                    transaction
-                                            .table()
-                                            .io()
-                                            .newOutputFile(
-                                                    transaction.table().location()
-                                                            + "/data/"
-                                                            + transaction
-                                                                    .table()
-                                                                    .spec()
-                                                                    .partitionToPath(partitionKey)
-                                                            + "/"
-                                                            + filename);
-                            dataWriter =
-                                    Parquet.writeData(outputFile)
-                                            .schema(rowSchema)
-                                            .withSpec(transaction.table().spec())
-                                            .withPartition(partitionKey)
-                                            .createWriterFunc(GenericParquetWriter::buildWriter)
-                                            .overwrite()
-                                            .build();
-                        } catch (Exception e) {
-                            throw INTERNAL.withDescription("failed to create dataWriter")
+            try (SinkRow row = rows.next()) {
+                switch (row.getOp()) {
+                    case INSERT:
+                        Record record = GenericRecord.create(rowSchema);
+                        if (row.size() != getTableSchema().getColumnNames().length) {
+                            throw INTERNAL.withDescription("row values do not match table schema")
                                     .asRuntimeException();
                         }
-                        dataWriterMap.put(partitionKey, dataWriter);
-                    }
-                    dataWriter.write(record);
-                    break;
-                default:
-                    throw UNIMPLEMENTED
-                            .withDescription("unsupported operation: " + row.getOp())
-                            .asRuntimeException();
+                        for (int i = 0; i < rowSchema.columns().size(); i++) {
+                            record.set(i, row.get(i));
+                        }
+                        PartitionKey partitionKey =
+                                new PartitionKey(
+                                        transaction.table().spec(), transaction.table().schema());
+                        partitionKey.partition(record);
+                        DataWriter<Record> dataWriter;
+                        if (dataWriterMap.containsKey(partitionKey)) {
+                            dataWriter = dataWriterMap.get(partitionKey);
+                        } else {
+                            try {
+                                String filename =
+                                        fileFormat.addExtension(UUID.randomUUID().toString());
+                                OutputFile outputFile =
+                                        transaction
+                                                .table()
+                                                .io()
+                                                .newOutputFile(
+                                                        transaction.table().location()
+                                                                + "/data/"
+                                                                + transaction
+                                                                        .table()
+                                                                        .spec()
+                                                                        .partitionToPath(
+                                                                                partitionKey)
+                                                                + "/"
+                                                                + filename);
+                                dataWriter =
+                                        Parquet.writeData(outputFile)
+                                                .schema(rowSchema)
+                                                .withSpec(transaction.table().spec())
+                                                .withPartition(partitionKey)
+                                                .createWriterFunc(GenericParquetWriter::buildWriter)
+                                                .overwrite()
+                                                .build();
+                            } catch (Exception e) {
+                                throw INTERNAL.withDescription("failed to create dataWriter")
+                                        .asRuntimeException();
+                            }
+                            dataWriterMap.put(partitionKey, dataWriter);
+                        }
+                        dataWriter.write(record);
+                        break;
+                    default:
+                        throw UNIMPLEMENTED
+                                .withDescription("unsupported operation: " + row.getOp())
+                                .asRuntimeException();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }

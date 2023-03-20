@@ -268,7 +268,7 @@ impl<S: MetaStore> CreateMviewProgressTracker<S> {
         None
     }
 
-    /// Update the progress of `actor` according to the Prost struct.
+    /// Update the progress of `actor` according to the Pb struct.
     ///
     /// If all actors in this MV have finished, returns the command.
     pub fn update(

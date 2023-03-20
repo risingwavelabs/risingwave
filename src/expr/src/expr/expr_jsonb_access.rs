@@ -78,6 +78,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<A, O, F> Expression for JsonbAccessExpression<A, O, F>
 where
     A: Array,
@@ -89,14 +90,14 @@ where
         O::return_type()
     }
 
-    fn eval(&self, input: &DataChunk) -> crate::Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> crate::Result<ArrayRef> {
         let Either::Left(path_expr) = &self.path else {
             unreachable!("optimization for const path not implemented yet");
         };
-        let path_array = path_expr.eval_checked(input)?;
+        let path_array = path_expr.eval_checked(input).await?;
         let path_array: &A = path_array.as_ref().into();
 
-        let input_array = self.input.eval_checked(input)?;
+        let input_array = self.input.eval_checked(input).await?;
         let input_array: &JsonbArray = input_array.as_ref().into();
 
         let mut builder = O::new(input.capacity());
@@ -123,16 +124,16 @@ where
         Ok(std::sync::Arc::new(builder.finish().into()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> crate::Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> crate::Result<Datum> {
         let Either::Left(path_expr) = &self.path else {
             unreachable!("optimization for const path not implemented yet");
         };
-        let p = path_expr.eval_row(input)?;
+        let p = path_expr.eval_row(input).await?;
         let p = p
             .as_ref()
             .map(|p| p.as_scalar_ref_impl().try_into().unwrap());
 
-        let v = self.input.eval_row(input)?;
+        let v = self.input.eval_row(input).await?;
         let v = v
             .as_ref()
             .map(|v| v.as_scalar_ref_impl().try_into().unwrap());

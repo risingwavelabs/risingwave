@@ -14,12 +14,11 @@
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 
 use super::error::StreamExecutorError;
 use super::{expect_first_barrier, BoxedExecutor, Executor, ExecutorInfo, Message};
-use crate::executor::{PkIndices, Watermark};
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// [`ChainExecutor`] is an executor that enables synchronization between the existing stream and
@@ -31,8 +30,6 @@ pub struct ChainExecutor {
 
     upstream: BoxedExecutor,
 
-    upstream_indices: Vec<usize>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
@@ -43,24 +40,10 @@ pub struct ChainExecutor {
     upstream_only: bool,
 }
 
-fn mapping_chunk(chunk: StreamChunk, upstream_indices: &[usize]) -> StreamChunk {
-    let (ops, columns, visibility) = chunk.into_inner();
-    let mapped_columns = upstream_indices
-        .iter()
-        .map(|&i| columns[i].clone())
-        .collect();
-    StreamChunk::new(ops, mapped_columns, visibility)
-}
-
-fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    watermark.transform_with_indices(upstream_indices)
-}
-
 impl ChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -74,7 +57,6 @@ impl ChainExecutor {
             },
             snapshot,
             upstream,
-            upstream_indices,
             actor_id: progress.actor_id(),
             progress,
             upstream_only,
@@ -117,21 +99,11 @@ impl ChainExecutor {
         // first barrier.
         #[for_await]
         for msg in upstream {
-            match msg? {
-                Message::Watermark(watermark) => {
-                    match mapping_watermark(watermark, &self.upstream_indices) {
-                        Some(mapped_watermark) => yield Message::Watermark(mapped_watermark),
-                        None => continue,
-                    }
-                }
-                Message::Chunk(chunk) => {
-                    yield Message::Chunk(mapping_chunk(chunk, &self.upstream_indices));
-                }
-                Message::Barrier(barrier) => {
-                    self.progress.finish(barrier.epoch.curr);
-                    yield Message::Barrier(barrier);
-                }
+            let msg = msg?;
+            if let Message::Barrier(barrier) = &msg {
+                self.progress.finish(barrier.epoch.curr);
             }
+            yield msg;
         }
     }
 }
@@ -209,15 +181,7 @@ mod test {
             ],
         ));
 
-        let chain = ChainExecutor::new(
-            first,
-            second,
-            vec![0],
-            progress,
-            schema,
-            PkIndices::new(),
-            false,
-        );
+        let chain = ChainExecutor::new(first, second, progress, schema, PkIndices::new(), false);
 
         let mut chain = Box::new(chain).execute();
         chain.next().await;

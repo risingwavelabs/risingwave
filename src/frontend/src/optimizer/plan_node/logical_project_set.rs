@@ -14,18 +14,18 @@
 
 use std::fmt;
 
+use itertools::Itertools;
 use risingwave_common::error::Result;
 
 use super::{
-    generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalFilter, LogicalProject, PlanBase,
-    PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
+    gen_filter_and_pushdown, generic, BatchProjectSet, ColPrunable, ExprRewritable, LogicalProject,
+    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamProjectSet, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, FunctionCall, InputRef, TableFunction};
-use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet, Order};
+use crate::optimizer::property::Order;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
 /// `LogicalProjectSet` projects one row multiple times according to `select_list`.
@@ -50,13 +50,7 @@ impl LogicalProjectSet {
         );
 
         let core = generic::ProjectSet { select_list, input };
-
-        let ctx = core.ctx();
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(&core, core.input.functional_dependency());
-
-        let base = PlanBase::new_logical(ctx, schema, pk_indices.unwrap(), functional_dependency);
+        let base = PlanBase::new_logical_with_core(&core);
 
         LogicalProjectSet { base, core }
     }
@@ -94,6 +88,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     } = table_func;
                     let args = args
                         .into_iter()
@@ -105,6 +100,7 @@ impl LogicalProjectSet {
                         args,
                         return_type,
                         function_type,
+                        udtf_catalog,
                     }
                     .into()
                 } else {
@@ -172,14 +168,6 @@ impl LogicalProjectSet {
                 LogicalProject::new(inner, select_list).into()
             }
         }
-    }
-
-    fn derive_fd(
-        core: &generic::ProjectSet<PlanRef>,
-        input_fd_set: &FunctionalDependencySet,
-    ) -> FunctionalDependencySet {
-        let i2o = core.i2o_col_mapping();
-        i2o.rewrite_functional_dependency_set(input_fd_set.clone())
     }
 
     pub fn select_list(&self) -> &Vec<ExprImpl> {
@@ -250,10 +238,15 @@ impl fmt::Display for LogicalProjectSet {
 }
 
 impl ColPrunable for LogicalProjectSet {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        // TODO: column pruning for ProjectSet
+    fn prune_col(&self, required_cols: &[usize], ctx: &mut ColumnPruningContext) -> PlanRef {
+        // TODO: column pruning for ProjectSet https://github.com/risingwavelabs/risingwave/issues/8593
         let mapping = ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-        LogicalProject::with_mapping(self.clone().into(), mapping).into()
+        let new_input = {
+            let input = self.input();
+            let required = (0..input.schema().len()).collect_vec();
+            input.prune_col(&required, ctx)
+        };
+        LogicalProject::with_mapping(self.clone_with_input(new_input).into(), mapping).into()
     }
 }
 
@@ -277,10 +270,10 @@ impl PredicatePushdown for LogicalProjectSet {
     fn predicate_pushdown(
         &self,
         predicate: Condition,
-        _ctx: &mut PredicatePushdownContext,
+        ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // TODO: predicate pushdown for ProjectSet
-        LogicalFilter::create(self.clone().into(), predicate)
+        // TODO: predicate pushdown https://github.com/risingwavelabs/risingwave/issues/8591
+        gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx)
     }
 }
 

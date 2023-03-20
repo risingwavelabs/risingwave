@@ -28,7 +28,7 @@ public class SinkStreamObserverTest {
     public SinkConfig fileSinkConfig =
             SinkConfig.newBuilder()
                     .setTableSchema(TableSchema.getMockTableProto())
-                    .setSinkType("file")
+                    .setConnectorType("file")
                     .putAllProperties(Map.of("output.path", "/tmp/rw-connector"))
                     .build();
 
@@ -92,6 +92,7 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
                                         .setSinkConfig(fileSinkConfig)
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstSync =
@@ -133,6 +134,7 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
                                         .setSinkConfig(fileSinkConfig)
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstSync =
@@ -197,6 +199,7 @@ public class SinkStreamObserverTest {
                 ConnectorServiceProto.SinkStreamRequest.newBuilder()
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .setSinkConfig(fileSinkConfig))
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstStartEpoch =

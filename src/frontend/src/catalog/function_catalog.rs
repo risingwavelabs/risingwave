@@ -14,13 +14,15 @@
 
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::Function as ProstFunction;
+use risingwave_pb::catalog::function::PbKind;
+use risingwave_pb::catalog::PbFunction;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub struct FunctionCatalog {
     pub id: FunctionId,
     pub name: String,
     pub owner: u32,
+    pub kind: FunctionKind,
     pub arg_types: Vec<DataType>,
     pub return_type: DataType,
     pub language: String,
@@ -28,12 +30,31 @@ pub struct FunctionCatalog {
     pub link: String,
 }
 
-impl From<&ProstFunction> for FunctionCatalog {
-    fn from(prost: &ProstFunction) -> Self {
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub enum FunctionKind {
+    Scalar,
+    Table,
+    Aggregate,
+}
+
+impl From<&PbKind> for FunctionKind {
+    fn from(prost: &PbKind) -> Self {
+        use risingwave_pb::catalog::function::*;
+        match prost {
+            Kind::Scalar(ScalarFunction {}) => Self::Scalar,
+            Kind::Table(TableFunction {}) => Self::Table,
+            Kind::Aggregate(AggregateFunction {}) => Self::Aggregate,
+        }
+    }
+}
+
+impl From<&PbFunction> for FunctionCatalog {
+    fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
             id: prost.id.into(),
             name: prost.name.clone(),
             owner: prost.owner,
+            kind: prost.kind.as_ref().unwrap().into(),
             arg_types: prost.arg_types.iter().map(|arg| arg.into()).collect(),
             return_type: prost.return_type.as_ref().expect("no return type").into(),
             language: prost.language.clone(),

@@ -27,8 +27,8 @@ use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::stream_plan::update_mutation::DispatcherUpdate as ProstDispatcherUpdate;
-use risingwave_pb::stream_plan::Dispatcher as ProstDispatcher;
+use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
+use risingwave_pb::stream_plan::PbDispatcher;
 use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
@@ -106,7 +106,7 @@ impl DispatchExecutorInner {
     /// Add new dispatchers to the executor. Will check whether their ids are unique.
     fn add_dispatchers<'a>(
         &mut self,
-        new_dispatchers: impl IntoIterator<Item = &'a ProstDispatcher>,
+        new_dispatchers: impl IntoIterator<Item = &'a PbDispatcher>,
     ) -> StreamResult<()> {
         let new_dispatchers: Vec<_> = new_dispatchers
             .into_iter()
@@ -136,7 +136,7 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
     /// outputs.
-    fn pre_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let outputs: Vec<_> = update
             .added_downstream_actor_id
             .iter()
@@ -151,7 +151,7 @@ impl DispatchExecutorInner {
 
     /// Update the dispatcher AFTER we dispatch this barrier. We'll remove some outputs and finally
     /// update the hash mapping.
-    fn post_update_dispatcher(&mut self, update: &ProstDispatcherUpdate) -> StreamResult<()> {
+    fn post_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let ids = update.removed_downstream_actor_id.iter().copied().collect();
 
         let dispatcher = self.find_dispatcher(update.dispatcher_id);
@@ -291,7 +291,7 @@ impl DispatcherImpl {
     pub fn new(
         context: &SharedContext,
         actor_id: ActorId,
-        dispatcher: &ProstDispatcher,
+        dispatcher: &PbDispatcher,
     ) -> StreamResult<Self> {
         let outputs = dispatcher
             .downstream_actor_id
@@ -1035,7 +1035,7 @@ mod tests {
         let broadcast_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Broadcast as _,
                 dispatcher_id: broadcast_dispatcher_id,
                 downstream_actor_id: vec![untouched, old],
@@ -1048,7 +1048,7 @@ mod tests {
         let simple_dispatcher = DispatcherImpl::new(
             &ctx,
             actor_id,
-            &ProstDispatcher {
+            &PbDispatcher {
                 r#type: DispatcherType::Simple as _,
                 dispatcher_id: simple_dispatcher_id,
                 downstream_actor_id: vec![old_simple],
@@ -1085,7 +1085,7 @@ mod tests {
 
         // 4. Send a configuration change barrier for broadcast dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: broadcast_dispatcher_id,
                 added_downstream_actor_id: vec![new],
@@ -1136,7 +1136,7 @@ mod tests {
 
         // 9. Send a configuration change barrier for simple dispatcher.
         let dispatcher_updates = maplit::hashmap! {
-            actor_id => vec![ProstDispatcherUpdate {
+            actor_id => vec![PbDispatcherUpdate {
                 actor_id,
                 dispatcher_id: simple_dispatcher_id,
                 added_downstream_actor_id: vec![new_simple],

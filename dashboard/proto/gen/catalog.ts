@@ -165,11 +165,12 @@ export interface Sink {
   databaseId: number;
   name: string;
   columns: ColumnCatalog[];
-  pk: ColumnOrder[];
+  /** Primary key derived from the SQL by the frontend. */
+  planPk: ColumnOrder[];
   dependentRelations: number[];
   distributionKey: number[];
-  /** pk_indices of the corresponding materialize operator's output. */
-  streamKey: number[];
+  /** User-defined primary key indices for the upsert sink. */
+  downstreamPk: number[];
   sinkType: SinkType;
   owner: number;
   properties: { [key: string]: string };
@@ -177,6 +178,23 @@ export interface Sink {
 }
 
 export interface Sink_PropertiesEntry {
+  key: string;
+  value: string;
+}
+
+export interface Connection {
+  id: number;
+  name: string;
+  info?: { $case: "privateLinkService"; privateLinkService: Connection_PrivateLinkService };
+}
+
+export interface Connection_PrivateLinkService {
+  provider: string;
+  endpointId: string;
+  dnsEntries: { [key: string]: string };
+}
+
+export interface Connection_PrivateLinkService_DnsEntriesEntry {
   key: string;
   value: string;
 }
@@ -208,6 +226,19 @@ export interface Function {
   language: string;
   link: string;
   identifier: string;
+  kind?: { $case: "scalar"; scalar: Function_ScalarFunction } | { $case: "table"; table: Function_TableFunction } | {
+    $case: "aggregate";
+    aggregate: Function_AggregateFunction;
+  };
+}
+
+export interface Function_ScalarFunction {
+}
+
+export interface Function_TableFunction {
+}
+
+export interface Function_AggregateFunction {
 }
 
 /** See `TableCatalog` struct in frontend crate for more information. */
@@ -250,6 +281,10 @@ export interface Table {
   valueIndices: number[];
   definition: string;
   handlePkConflictBehavior: HandleConflictBehavior;
+  /**
+   * Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+   * for implementing the table's bloom filter or other storage optimization techniques.
+   */
   readPrefixLenHint: number;
   watermarkIndices: number[];
   distKeyInPk: number[];
@@ -601,10 +636,10 @@ function createBaseSink(): Sink {
     databaseId: 0,
     name: "",
     columns: [],
-    pk: [],
+    planPk: [],
     dependentRelations: [],
     distributionKey: [],
-    streamKey: [],
+    downstreamPk: [],
     sinkType: SinkType.UNSPECIFIED,
     owner: 0,
     properties: {},
@@ -620,14 +655,14 @@ export const Sink = {
       databaseId: isSet(object.databaseId) ? Number(object.databaseId) : 0,
       name: isSet(object.name) ? String(object.name) : "",
       columns: Array.isArray(object?.columns) ? object.columns.map((e: any) => ColumnCatalog.fromJSON(e)) : [],
-      pk: Array.isArray(object?.pk) ? object.pk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
+      planPk: Array.isArray(object?.planPk) ? object.planPk.map((e: any) => ColumnOrder.fromJSON(e)) : [],
       dependentRelations: Array.isArray(object?.dependentRelations)
         ? object.dependentRelations.map((e: any) => Number(e))
         : [],
       distributionKey: Array.isArray(object?.distributionKey)
         ? object.distributionKey.map((e: any) => Number(e))
         : [],
-      streamKey: Array.isArray(object?.streamKey) ? object.streamKey.map((e: any) => Number(e)) : [],
+      downstreamPk: Array.isArray(object?.downstreamPk) ? object.downstreamPk.map((e: any) => Number(e)) : [],
       sinkType: isSet(object.sinkType) ? sinkTypeFromJSON(object.sinkType) : SinkType.UNSPECIFIED,
       owner: isSet(object.owner) ? Number(object.owner) : 0,
       properties: isObject(object.properties)
@@ -651,10 +686,10 @@ export const Sink = {
     } else {
       obj.columns = [];
     }
-    if (message.pk) {
-      obj.pk = message.pk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
+    if (message.planPk) {
+      obj.planPk = message.planPk.map((e) => e ? ColumnOrder.toJSON(e) : undefined);
     } else {
-      obj.pk = [];
+      obj.planPk = [];
     }
     if (message.dependentRelations) {
       obj.dependentRelations = message.dependentRelations.map((e) => Math.round(e));
@@ -666,10 +701,10 @@ export const Sink = {
     } else {
       obj.distributionKey = [];
     }
-    if (message.streamKey) {
-      obj.streamKey = message.streamKey.map((e) => Math.round(e));
+    if (message.downstreamPk) {
+      obj.downstreamPk = message.downstreamPk.map((e) => Math.round(e));
     } else {
-      obj.streamKey = [];
+      obj.downstreamPk = [];
     }
     message.sinkType !== undefined && (obj.sinkType = sinkTypeToJSON(message.sinkType));
     message.owner !== undefined && (obj.owner = Math.round(message.owner));
@@ -690,10 +725,10 @@ export const Sink = {
     message.databaseId = object.databaseId ?? 0;
     message.name = object.name ?? "";
     message.columns = object.columns?.map((e) => ColumnCatalog.fromPartial(e)) || [];
-    message.pk = object.pk?.map((e) => ColumnOrder.fromPartial(e)) || [];
+    message.planPk = object.planPk?.map((e) => ColumnOrder.fromPartial(e)) || [];
     message.dependentRelations = object.dependentRelations?.map((e) => e) || [];
     message.distributionKey = object.distributionKey?.map((e) => e) || [];
-    message.streamKey = object.streamKey?.map((e) => e) || [];
+    message.downstreamPk = object.downstreamPk?.map((e) => e) || [];
     message.sinkType = object.sinkType ?? SinkType.UNSPECIFIED;
     message.owner = object.owner ?? 0;
     message.properties = Object.entries(object.properties ?? {}).reduce<{ [key: string]: string }>(
@@ -728,6 +763,128 @@ export const Sink_PropertiesEntry = {
 
   fromPartial<I extends Exact<DeepPartial<Sink_PropertiesEntry>, I>>(object: I): Sink_PropertiesEntry {
     const message = createBaseSink_PropertiesEntry();
+    message.key = object.key ?? "";
+    message.value = object.value ?? "";
+    return message;
+  },
+};
+
+function createBaseConnection(): Connection {
+  return { id: 0, name: "", info: undefined };
+}
+
+export const Connection = {
+  fromJSON(object: any): Connection {
+    return {
+      id: isSet(object.id) ? Number(object.id) : 0,
+      name: isSet(object.name) ? String(object.name) : "",
+      info: isSet(object.privateLinkService)
+        ? {
+          $case: "privateLinkService",
+          privateLinkService: Connection_PrivateLinkService.fromJSON(object.privateLinkService),
+        }
+        : undefined,
+    };
+  },
+
+  toJSON(message: Connection): unknown {
+    const obj: any = {};
+    message.id !== undefined && (obj.id = Math.round(message.id));
+    message.name !== undefined && (obj.name = message.name);
+    message.info?.$case === "privateLinkService" && (obj.privateLinkService = message.info?.privateLinkService
+      ? Connection_PrivateLinkService.toJSON(message.info?.privateLinkService)
+      : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection>, I>>(object: I): Connection {
+    const message = createBaseConnection();
+    message.id = object.id ?? 0;
+    message.name = object.name ?? "";
+    if (
+      object.info?.$case === "privateLinkService" &&
+      object.info?.privateLinkService !== undefined &&
+      object.info?.privateLinkService !== null
+    ) {
+      message.info = {
+        $case: "privateLinkService",
+        privateLinkService: Connection_PrivateLinkService.fromPartial(object.info.privateLinkService),
+      };
+    }
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService(): Connection_PrivateLinkService {
+  return { provider: "", endpointId: "", dnsEntries: {} };
+}
+
+export const Connection_PrivateLinkService = {
+  fromJSON(object: any): Connection_PrivateLinkService {
+    return {
+      provider: isSet(object.provider) ? String(object.provider) : "",
+      endpointId: isSet(object.endpointId) ? String(object.endpointId) : "",
+      dnsEntries: isObject(object.dnsEntries)
+        ? Object.entries(object.dnsEntries).reduce<{ [key: string]: string }>((acc, [key, value]) => {
+          acc[key] = String(value);
+          return acc;
+        }, {})
+        : {},
+    };
+  },
+
+  toJSON(message: Connection_PrivateLinkService): unknown {
+    const obj: any = {};
+    message.provider !== undefined && (obj.provider = message.provider);
+    message.endpointId !== undefined && (obj.endpointId = message.endpointId);
+    obj.dnsEntries = {};
+    if (message.dnsEntries) {
+      Object.entries(message.dnsEntries).forEach(([k, v]) => {
+        obj.dnsEntries[k] = v;
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService {
+    const message = createBaseConnection_PrivateLinkService();
+    message.provider = object.provider ?? "";
+    message.endpointId = object.endpointId ?? "";
+    message.dnsEntries = Object.entries(object.dnsEntries ?? {}).reduce<{ [key: string]: string }>(
+      (acc, [key, value]) => {
+        if (value !== undefined) {
+          acc[key] = String(value);
+        }
+        return acc;
+      },
+      {},
+    );
+    return message;
+  },
+};
+
+function createBaseConnection_PrivateLinkService_DnsEntriesEntry(): Connection_PrivateLinkService_DnsEntriesEntry {
+  return { key: "", value: "" };
+}
+
+export const Connection_PrivateLinkService_DnsEntriesEntry = {
+  fromJSON(object: any): Connection_PrivateLinkService_DnsEntriesEntry {
+    return { key: isSet(object.key) ? String(object.key) : "", value: isSet(object.value) ? String(object.value) : "" };
+  },
+
+  toJSON(message: Connection_PrivateLinkService_DnsEntriesEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = message.key);
+    message.value !== undefined && (obj.value = message.value);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Connection_PrivateLinkService_DnsEntriesEntry>, I>>(
+    object: I,
+  ): Connection_PrivateLinkService_DnsEntriesEntry {
+    const message = createBaseConnection_PrivateLinkService_DnsEntriesEntry();
     message.key = object.key ?? "";
     message.value = object.value ?? "";
     return message;
@@ -814,6 +971,7 @@ function createBaseFunction(): Function {
     language: "",
     link: "",
     identifier: "",
+    kind: undefined,
   };
 }
 
@@ -832,6 +990,13 @@ export const Function = {
       language: isSet(object.language) ? String(object.language) : "",
       link: isSet(object.link) ? String(object.link) : "",
       identifier: isSet(object.identifier) ? String(object.identifier) : "",
+      kind: isSet(object.scalar)
+        ? { $case: "scalar", scalar: Function_ScalarFunction.fromJSON(object.scalar) }
+        : isSet(object.table)
+        ? { $case: "table", table: Function_TableFunction.fromJSON(object.table) }
+        : isSet(object.aggregate)
+        ? { $case: "aggregate", aggregate: Function_AggregateFunction.fromJSON(object.aggregate) }
+        : undefined,
     };
   },
 
@@ -852,6 +1017,14 @@ export const Function = {
     message.language !== undefined && (obj.language = message.language);
     message.link !== undefined && (obj.link = message.link);
     message.identifier !== undefined && (obj.identifier = message.identifier);
+    message.kind?.$case === "scalar" &&
+      (obj.scalar = message.kind?.scalar ? Function_ScalarFunction.toJSON(message.kind?.scalar) : undefined);
+    message.kind?.$case === "table" &&
+      (obj.table = message.kind?.table ? Function_TableFunction.toJSON(message.kind?.table) : undefined);
+    message.kind?.$case === "aggregate" &&
+      (obj.aggregate = message.kind?.aggregate
+        ? Function_AggregateFunction.toJSON(message.kind?.aggregate)
+        : undefined);
     return obj;
   },
 
@@ -869,6 +1042,75 @@ export const Function = {
     message.language = object.language ?? "";
     message.link = object.link ?? "";
     message.identifier = object.identifier ?? "";
+    if (object.kind?.$case === "scalar" && object.kind?.scalar !== undefined && object.kind?.scalar !== null) {
+      message.kind = { $case: "scalar", scalar: Function_ScalarFunction.fromPartial(object.kind.scalar) };
+    }
+    if (object.kind?.$case === "table" && object.kind?.table !== undefined && object.kind?.table !== null) {
+      message.kind = { $case: "table", table: Function_TableFunction.fromPartial(object.kind.table) };
+    }
+    if (object.kind?.$case === "aggregate" && object.kind?.aggregate !== undefined && object.kind?.aggregate !== null) {
+      message.kind = { $case: "aggregate", aggregate: Function_AggregateFunction.fromPartial(object.kind.aggregate) };
+    }
+    return message;
+  },
+};
+
+function createBaseFunction_ScalarFunction(): Function_ScalarFunction {
+  return {};
+}
+
+export const Function_ScalarFunction = {
+  fromJSON(_: any): Function_ScalarFunction {
+    return {};
+  },
+
+  toJSON(_: Function_ScalarFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_ScalarFunction>, I>>(_: I): Function_ScalarFunction {
+    const message = createBaseFunction_ScalarFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_TableFunction(): Function_TableFunction {
+  return {};
+}
+
+export const Function_TableFunction = {
+  fromJSON(_: any): Function_TableFunction {
+    return {};
+  },
+
+  toJSON(_: Function_TableFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_TableFunction>, I>>(_: I): Function_TableFunction {
+    const message = createBaseFunction_TableFunction();
+    return message;
+  },
+};
+
+function createBaseFunction_AggregateFunction(): Function_AggregateFunction {
+  return {};
+}
+
+export const Function_AggregateFunction = {
+  fromJSON(_: any): Function_AggregateFunction {
+    return {};
+  },
+
+  toJSON(_: Function_AggregateFunction): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<Function_AggregateFunction>, I>>(_: I): Function_AggregateFunction {
+    const message = createBaseFunction_AggregateFunction();
     return message;
   },
 };

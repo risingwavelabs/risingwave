@@ -16,7 +16,7 @@ use std::cmp;
 use std::ops::Add;
 use std::time::{Duration, SystemTime};
 
-use risingwave_hummock_sdk::HummockSstableId;
+use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::meta::heartbeat_request::extra_info::Info;
 
@@ -41,22 +41,22 @@ pub struct Worker {
     // Monotonic increasing id since meta node bootstrap.
     info_version_id: u64,
     // GC watermark.
-    hummock_gc_watermark: Option<HummockSstableId>,
+    hummock_gc_watermark: Option<HummockSstableObjectId>,
 }
 
 impl MetadataModel for Worker {
     type KeyType = HostAddress;
-    type ProstType = WorkerNode;
+    type PbType = WorkerNode;
 
     fn cf_name() -> String {
         WORKER_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.worker_node.clone()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         Self {
             worker_node: prost,
             expire_at: INVALID_EXPIRE_AT,
@@ -106,7 +106,7 @@ impl Worker {
         }
     }
 
-    pub fn hummock_gc_watermark(&self) -> Option<HummockSstableId> {
+    pub fn hummock_gc_watermark(&self) -> Option<HummockSstableObjectId> {
         self.hummock_gc_watermark
     }
 

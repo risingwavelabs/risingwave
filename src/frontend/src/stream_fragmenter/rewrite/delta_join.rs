@@ -16,7 +16,7 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_pb::plan_common::Field as ProstField;
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::stream_plan::lookup_node::ArrangementTableId;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
@@ -89,7 +89,7 @@ fn dispatch_consistent_hash_shuffle(
 fn build_lookup_for_delta_join(
     state: &mut BuildFragmentGraphState,
     (exchange_node_arrangement, exchange_node_stream): (&StreamNode, &StreamNode),
-    (output_fields, output_stream_key): (Vec<ProstField>, Vec<u32>),
+    (output_fields, output_stream_key): (Vec<PbField>, Vec<u32>),
     lookup_node: LookupNode,
 ) -> StreamNode {
     StreamNode {

@@ -131,16 +131,16 @@ mod tests {
         )
     }
 
-    fn test_evals_dummy(expr: &BoxedExpression, expected: Datum) {
-        let res = expr.eval(&DataChunk::new_dummy(1)).unwrap();
+    async fn test_evals_dummy(expr: &BoxedExpression, expected: Datum) {
+        let res = expr.eval(&DataChunk::new_dummy(1)).await.unwrap();
         assert_eq!(res.to_datum(), expected);
 
-        let res = expr.eval_row(&OwnedRow::new(vec![])).unwrap();
+        let res = expr.eval_row(&OwnedRow::new(vec![])).await.unwrap();
         assert_eq!(res, expected);
     }
 
-    #[test]
-    fn test_substr() {
+    #[tokio::test]
+    async fn test_substr() {
         let text = "quick brown";
         let start_pos = 3;
         let for_pos = 4;
@@ -155,14 +155,15 @@ mod tests {
             Some(ScalarImpl::from(String::from(
                 &text[start_pos as usize - 1..],
             ))),
-        );
+        )
+        .await;
 
         let substr_start_i32_none = create_str_i32_binary_expr(
             new_substr_start,
             Some(ScalarImpl::from(String::from(text))),
             None,
         );
-        test_evals_dummy(&substr_start_i32_none, None);
+        test_evals_dummy(&substr_start_i32_none, None).await;
 
         let substr_for_normal = create_str_i32_binary_expr(
             new_substr_for,
@@ -172,10 +173,11 @@ mod tests {
         test_evals_dummy(
             &substr_for_normal,
             Some(ScalarImpl::from(String::from(&text[..for_pos as usize]))),
-        );
+        )
+        .await;
 
         let substr_for_str_none =
             create_str_i32_binary_expr(new_substr_for, None, Some(ScalarImpl::Int32(for_pos)));
-        test_evals_dummy(&substr_for_str_none, None);
+        test_evals_dummy(&substr_for_str_none, None).await;
     }
 }
