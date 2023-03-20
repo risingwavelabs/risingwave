@@ -262,15 +262,12 @@ impl StreamConsumer for DispatchExecutor {
             #[for_await]
             for msg in input {
                 let msg: Message = msg?;
-                let (barrier, message) = match msg {
+                let (barrier, span) = match msg {
                     Message::Chunk(_) => (None, "dispatch_chunk"),
                     Message::Barrier(ref barrier) => (Some(barrier.clone()), "dispatch_barrier"),
                     Message::Watermark(_) => (None, "dispatch_watermark"),
                 };
-                self.inner
-                    .dispatch(msg)
-                    .verbose_instrument_await(message)
-                    .await?;
+                self.inner.dispatch(msg).instrument_await(span).await?;
                 if let Some(barrier) = barrier {
                     yield barrier;
                 }
