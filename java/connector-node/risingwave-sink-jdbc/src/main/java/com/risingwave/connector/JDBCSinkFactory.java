@@ -56,12 +56,18 @@ public class JDBCSinkFactory implements SinkFactory {
         String tableName = tableProperties.get(TABLE_NAME_PROP);
         Set<String> jdbcColumns = new HashSet<>();
         Set<String> jdbcPk = new HashSet<>();
+        Set<String> jdbcTableNames = new HashSet<>();
 
         try (Connection conn = DriverManager.getConnection(jdbcUrl);
+                ResultSet tableNamesResultSet =
+                        conn.getMetaData().getTables(null, null, "%", null);
                 ResultSet columnResultSet =
                         conn.getMetaData().getColumns(null, null, tableName, null);
                 ResultSet pkResultSet =
                         conn.getMetaData().getPrimaryKeys(null, null, tableName); ) {
+            while (tableNamesResultSet.next()) {
+                jdbcTableNames.add(tableNamesResultSet.getString("TABLE_NAME"));
+            }
             while (columnResultSet.next()) {
                 jdbcColumns.add(columnResultSet.getString("COLUMN_NAME"));
             }
@@ -70,6 +76,12 @@ public class JDBCSinkFactory implements SinkFactory {
             }
         } catch (SQLException e) {
             throw Status.INTERNAL.withCause(e).asRuntimeException();
+        }
+
+        if (!jdbcTableNames.contains(tableName)) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("table not found: " + tableName)
+                    .asRuntimeException();
         }
 
         // Check that all columns in tableSchema exist in the JDBC table.
