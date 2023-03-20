@@ -119,7 +119,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::Coalesce;
     use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -131,7 +131,7 @@ mod tests {
     pub fn make_coalesce_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Coalesce as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: ret as i32,
                 ..Default::default()
             }),

@@ -52,7 +52,7 @@ use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::error::Result;
 use risingwave_common::hash::{ParallelUnitId, ParallelUnitMapping};
 use risingwave_pb::batch_plan::exchange_info::{
-    ConsistentHashInfo, Distribution as DistributionProst, DistributionMode, HashInfo,
+    ConsistentHashInfo, Distribution as DistributionPb, DistributionMode, HashInfo,
 };
 use risingwave_pb::batch_plan::ExchangeInfo;
 
@@ -131,7 +131,7 @@ impl Distribution {
                         !key.is_empty(),
                         "hash key should not be empty, use `Single` instead"
                     );
-                    Some(DistributionProst::HashInfo(HashInfo {
+                    Some(DistributionPb::HashInfo(HashInfo {
                         output_count,
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))
@@ -155,7 +155,7 @@ impl Distribution {
                         .map(|(i, pu)| (pu, i as u32))
                         .collect();
 
-                    Some(DistributionProst::ConsistentHashInfo(ConsistentHashInfo {
+                    Some(DistributionPb::ConsistentHashInfo(ConsistentHashInfo {
                         vmap: vnode_mapping.iter().map(|x| pu2id_map[&x]).collect_vec(),
                         key: key.iter().map(|num| *num as u32).collect(),
                     }))

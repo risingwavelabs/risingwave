@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use bytes::Bytes;
+use risingwave_common::array::JsonbVal;
 use serde::{Deserialize, Serialize};
 
 use crate::source::base::SplitMetaData;
@@ -32,12 +32,12 @@ impl SplitMetaData for DatagenSplit {
         format!("{}-{}", self.split_num, self.split_index).into()
     }
 
-    fn encode_to_bytes(&self) -> Bytes {
-        Bytes::from(serde_json::to_string(self).unwrap())
+    fn restore_from_json(value: JsonbVal) -> anyhow::Result<Self> {
+        serde_json::from_value(value.take()).map_err(|e| anyhow!(e))
     }
 
-    fn restore_from_bytes(bytes: &[u8]) -> anyhow::Result<Self> {
-        serde_json::from_slice(bytes).map_err(|e| anyhow!(e))
+    fn encode_to_json(&self) -> JsonbVal {
+        serde_json::to_value(self.clone()).unwrap().into()
     }
 }
 

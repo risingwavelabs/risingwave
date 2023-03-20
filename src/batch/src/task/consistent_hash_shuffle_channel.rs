@@ -21,7 +21,7 @@ use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::hash::VirtualNode;
 use risingwave_pb::batch_plan::exchange_info::ConsistentHashInfo;
 use risingwave_pb::batch_plan::*;
 use tokio::sync::mpsc;
@@ -54,20 +54,20 @@ fn generate_hash_values(
     chunk: &DataChunk,
     consistent_hash_info: &ConsistentHashInfo,
 ) -> BatchResult<Vec<usize>> {
-    let hasher_builder = Crc32FastBuilder;
+    let vnodes = VirtualNode::compute_chunk(
+        chunk,
+        &consistent_hash_info
+            .key
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect::<Vec<_>>(),
+    );
 
-    let hash_values = chunk
-        .get_hash_values(
-            &consistent_hash_info
-                .key
-                .iter()
-                .map(|idx| *idx as usize)
-                .collect::<Vec<_>>(),
-            hasher_builder,
-        )
-        .iter_mut()
-        .map(|hash_value| consistent_hash_info.vmap[hash_value.to_vnode().to_index()] as usize)
+    let hash_values = vnodes
+        .iter()
+        .map(|vnode| consistent_hash_info.vmap[vnode.to_index()] as usize)
         .collect::<Vec<_>>();
+
     Ok(hash_values)
 }
 

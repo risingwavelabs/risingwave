@@ -16,7 +16,7 @@ use std::collections::HashMap;
 
 use itertools::Itertools;
 use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
-use risingwave_pb::catalog::{Database as ProstDatabase, Schema as ProstSchema};
+use risingwave_pb::catalog::{PbDatabase, PbSchema};
 
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -32,7 +32,7 @@ pub struct DatabaseCatalog {
 }
 
 impl DatabaseCatalog {
-    pub fn create_schema(&mut self, proto: &ProstSchema) {
+    pub fn create_schema(&mut self, proto: &PbSchema) {
         let name = proto.name.clone();
         let id = proto.id;
         let schema = proto.into();
@@ -51,11 +51,11 @@ impl DatabaseCatalog {
         self.schema_by_name.keys().cloned().collect_vec()
     }
 
-    pub fn get_all_schema_info(&self) -> Vec<ProstSchema> {
+    pub fn get_all_schema_info(&self) -> Vec<PbSchema> {
         self.schema_by_name
             .values()
             .cloned()
-            .map(|schema| ProstSchema {
+            .map(|schema| PbSchema {
                 id: schema.id(),
                 database_id: self.id,
                 name: schema.name(),
@@ -94,8 +94,8 @@ impl DatabaseCatalog {
         self.owner
     }
 }
-impl From<&ProstDatabase> for DatabaseCatalog {
-    fn from(db: &ProstDatabase) -> Self {
+impl From<&PbDatabase> for DatabaseCatalog {
+    fn from(db: &PbDatabase) -> Self {
         Self {
             id: db.id,
             name: db.name.clone(),

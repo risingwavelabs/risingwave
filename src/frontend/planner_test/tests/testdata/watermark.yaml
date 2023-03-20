@@ -8,46 +8,40 @@
     └─LogicalSource { source: t, columns: [v1, _row_id], time_range: [(Unbounded, Unbounded)] }
   stream_plan: |
     StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check", watermark_columns: [v1] }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(v1, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1, _row_id], output_watermarks: [$expr1] }
-        └─StreamRowIdGen { row_id_index: 1 }
-          └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
-            └─StreamSource { source: "t", columns: ["v1", "_row_id"] }
-  stream_dist_plan: |
+    └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(v1, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1, _row_id], output_watermarks: [$expr1] }
+      └─StreamRowIdGen { row_id_index: 1 }
+        └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
+          └─StreamSource { source: "t", columns: ["v1", "_row_id"] }
+  stream_dist_plan: |+
     Fragment 0
-      StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check", watermark_columns: [v1] }
-          materialized table: 4294967294
-        StreamExchange Hash([1]) from 1
+    StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check", watermark_columns: [v1] } { materialized table: 4294967294 }
+    └── StreamProject { exprs: [(AtTimeZone((AtTimeZone(v1, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1, _row_id], output_watermarks: [$expr1] }
+        └── StreamRowIdGen { row_id_index: 1 }
+            └── StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
+                └──  StreamSource { source: "t", columns: ["v1", "_row_id"] } { source state table: 1 }
 
-    Fragment 1
-      StreamProject { exprs: [(AtTimeZone((AtTimeZone(v1, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1, _row_id], output_watermarks: [$expr1] }
-        StreamRowIdGen { row_id_index: 1 }
-          StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
-            StreamSource { source: "t", columns: ["v1", "_row_id"] }
-                source state table: 1
+    Table 1 { columns: [ partition_id, offset_info ], primary key: [ $0 ASC ], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 1 }
 
-     Table 1 { columns: [partition_id, offset], primary key: [$0 ASC], value indices: [0, 1], distribution key: [], read pk prefix len hint: 1 }
-     Table 4294967294 { columns: [v1, _row_id], primary key: [$1 ASC], value indices: [0, 1], distribution key: [1], read pk prefix len hint: 1 }
+    Table 4294967294 { columns: [ v1, _row_id ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
 - name: watermark on append only table with source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only with (connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest') ROW FORMAT JSON;
   explain_output: |
     StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check", watermark_columns: [v1] }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 1 }
-        └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
-          └─StreamDml { columns: [v1, _row_id] }
-            └─StreamSource { source: "t", columns: ["v1", "_row_id"] }
+    └─StreamRowIdGen { row_id_index: 1 }
+      └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
+        └─StreamDml { columns: [v1, _row_id] }
+          └─StreamSource { source: "t", columns: ["v1", "_row_id"] }
 - name: watermark on append only table without source
   sql: |
     explain create table t (v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '1' SECOND) append only;
   explain_output: |
     StreamMaterialize { columns: [v1, _row_id(hidden)], pk_columns: [_row_id], pk_conflict: "no check", watermark_columns: [v1] }
-    └─StreamExchange { dist: HashShard(_row_id) }
-      └─StreamRowIdGen { row_id_index: 1 }
-        └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
-          └─StreamDml { columns: [v1, _row_id] }
-            └─StreamSource
+    └─StreamRowIdGen { row_id_index: 1 }
+      └─StreamWatermarkFilter { watermark_descs: [idx: 0, expr: (v1 - '00:00:01':Interval)] }
+        └─StreamDml { columns: [v1, _row_id] }
+          └─StreamSource
 - name: hash agg
   sql: |
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
@@ -76,13 +70,13 @@
     create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from t1 Union all select * from t2;
   stream_plan: |
-    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), null:Int64(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Int64, 0:Int32], pk_conflict: "no check", watermark_columns: [ts] }
+    StreamMaterialize { columns: [ts, v1, v2, t1._row_id(hidden), null:Serial(hidden), 0:Int32(hidden)], pk_columns: [t1._row_id, null:Serial, 0:Int32], pk_conflict: "no check", watermark_columns: [ts] }
     └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-      ├─StreamExchange { dist: HashShard(t1._row_id, null:Int64, 0:Int32) }
-      | └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Int64, 0:Int32], output_watermarks: [t1.ts] }
+      ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
+      | └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
       |   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-      └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
-        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Int64, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+      └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
+        └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
           └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: union
   sql: |
@@ -95,11 +89,11 @@
       └─StreamAppendOnlyHashAgg { group_key: [t1.ts, t1.v1, t1.v2], aggs: [count], output_watermarks: [t1.ts] }
         └─StreamExchange { dist: HashShard(t1.ts, t1.v1, t1.v2) }
           └─StreamUnion { all: true, output_watermarks: [t1.ts] }
-            ├─StreamExchange { dist: HashShard(t1._row_id, null:Int64, 0:Int32) }
-            | └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Int64, 0:Int32], output_watermarks: [t1.ts] }
+            ├─StreamExchange { dist: HashShard(t1._row_id, null:Serial, 0:Int32) }
+            | └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t1._row_id, null:Serial, 0:Int32], output_watermarks: [t1.ts] }
             |   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
-            └─StreamExchange { dist: HashShard(null:Int64, t2._row_id, 1:Int32) }
-              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Int64, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
+            └─StreamExchange { dist: HashShard(null:Serial, t2._row_id, 1:Int32) }
+              └─StreamProject { exprs: [t2.ts, t2.v1, t2.v2, null:Serial, t2._row_id, 1:Int32], output_watermarks: [t2.ts] }
                 └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: tumble
   sql: |

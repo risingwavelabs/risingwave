@@ -17,6 +17,7 @@ mod search_path;
 mod transaction_isolation_level;
 mod visibility_mode;
 
+use std::num::NonZeroU64;
 use std::ops::Deref;
 
 use chrono_tz::Tz;
@@ -33,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 20] = [
+const CONFIG_KEYS: [&str; 22] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -54,6 +55,8 @@ const CONFIG_KEYS: [&str; 20] = [
     "RW_FORCE_TWO_PHASE_AGG",
     "RW_ENABLE_SHARE_PLAN",
     "INTERVALSTYLE",
+    "BATCH_PARALLELISM",
+    "RW_STREAMING_ENABLE_BUSHY_JOIN",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -78,6 +81,8 @@ const ENABLE_TWO_PHASE_AGG: usize = 16;
 const FORCE_TWO_PHASE_AGG: usize = 17;
 const RW_ENABLE_SHARE_PLAN: usize = 18;
 const INTERVAL_STYLE: usize = 19;
+const BATCH_PARALLELISM: usize = 20;
+const STREAMING_ENABLE_BUSHY_JOIN: usize = 21;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -274,10 +279,12 @@ type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
+type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
 type IntervalStyle = ConfigString<INTERVAL_STYLE>;
+type BatchParallelism = ConfigU64<BATCH_PARALLELISM, 0>;
 
 #[derive(Derivative)]
 #[derivative(Default)]
@@ -338,6 +345,9 @@ pub struct ConfigMap {
     /// Enable delta join in streaming query. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
 
+    /// Enable bushy join in the streaming query. Defaults to false.
+    streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
     enable_two_phase_agg: EnableTwoPhaseAgg,
@@ -354,6 +364,8 @@ pub struct ConfigMap {
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-INTERVALSTYLE>
     interval_style: IntervalStyle,
+
+    batch_parallelism: BatchParallelism,
 }
 
 impl ConfigMap {
@@ -396,6 +408,8 @@ impl ConfigMap {
             self.streaming_parallelism = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            self.streaming_enable_bushy_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
             if !*self.enable_two_phase_agg {
@@ -410,6 +424,8 @@ impl ConfigMap {
             self.enable_share_plan = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
             self.interval_style = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
+            self.batch_parallelism = val.as_slice().try_into()?;
         } else {
             return Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into());
         }
@@ -450,6 +466,8 @@ impl ConfigMap {
             Ok(self.streaming_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             Ok(self.streaming_enable_delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            Ok(self.streaming_enable_bushy_join.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
@@ -458,6 +476,8 @@ impl ConfigMap {
             Ok(self.enable_share_plan.to_string())
         } else if key.eq_ignore_ascii_case(IntervalStyle::entry_name()) {
             Ok(self.interval_style.to_string())
+        } else if key.eq_ignore_ascii_case(BatchParallelism::entry_name()) {
+            Ok(self.batch_parallelism.to_string())
         } else {
             Err(ErrorCode::UnrecognizedConfigurationParameter(key.to_string()).into())
         }
@@ -541,6 +561,11 @@ impl ConfigMap {
                 description: String::from("Enable delta join in streaming query.")
             },
             VariableInfo{
+                name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
+                setting : self.streaming_enable_bushy_join.to_string(),
+                description: String::from("Enable bushy join in streaming query.")
+            },
+            VariableInfo{
                 name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
                 setting : self.enable_two_phase_agg.to_string(),
                 description: String::from("Enable two phase aggregation.")
@@ -559,6 +584,11 @@ impl ConfigMap {
                 name : IntervalStyle::entry_name().to_lowercase(),
                 setting : self.interval_style.to_string(),
                 description : String::from("It is typically set by an application upon connection to the server.")
+            },
+            VariableInfo{
+                name : BatchParallelism::entry_name().to_lowercase(),
+                setting : self.batch_parallelism.to_string(),
+                description: String::from("Sets the parallelism for batch. If 0, use default value.")
             },
         ]
     }
@@ -633,6 +663,10 @@ impl ConfigMap {
         *self.streaming_enable_delta_join
     }
 
+    pub fn get_streaming_enable_bushy_join(&self) -> bool {
+        *self.streaming_enable_bushy_join
+    }
+
     pub fn get_enable_two_phase_agg(&self) -> bool {
         *self.enable_two_phase_agg
     }
@@ -647,5 +681,12 @@ impl ConfigMap {
 
     pub fn get_interval_style(&self) -> &str {
         &self.interval_style
+    }
+
+    pub fn get_batch_parallelism(&self) -> Option<NonZeroU64> {
+        if self.batch_parallelism.0 != 0 {
+            return Some(NonZeroU64::new(self.batch_parallelism.0).unwrap());
+        }
+        None
     }
 }
