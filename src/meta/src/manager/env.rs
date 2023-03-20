@@ -102,6 +102,9 @@ pub struct MetaOpts {
 
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
+    pub max_compactor_task_multiplier: u32,
 }
 
 impl MetaOpts {
@@ -124,6 +127,7 @@ impl MetaOpts {
             connector_rpc_endpoint: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            max_compactor_task_multiplier: 2,
         }
     }
 }
