@@ -320,7 +320,12 @@ public class SourceRequestHandler {
                                 for (int i = 0; i < sourceSchema.getColumnsCount(); i++) {
                                     String columnName = sourceSchema.getColumns(i).getName();
                                     if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
-                                        break;
+                                        throw new StatusException(
+                                                Status.INTERNAL.withDescription(
+                                                        "The publication 'dbz_publication' does not cover all necessary columns in table "
+                                                                + props.get(
+                                                                        DbzConnectorConfig
+                                                                                .TABLE_NAME)));
                                     }
                                     if (i == sourceSchema.getColumnsCount() - 1) {
                                         publicationExists = true;
