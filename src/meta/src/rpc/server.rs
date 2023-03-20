@@ -480,7 +480,6 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        compactor_manager.clone(),
         vacuum_manager.clone(),
         fragment_manager.clone(),
     );

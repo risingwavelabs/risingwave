@@ -99,6 +99,9 @@ pub use min_max_on_index_rule::*;
 mod always_false_filter_rule;
 pub use always_false_filter_rule::*;
 
+mod apply_offset_rewriter;
+use apply_offset_rewriter::ApplyOffsetRewriter;
+
 #[macro_export]
 macro_rules! for_all_rules {
     ($macro:ident) => {

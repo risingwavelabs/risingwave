@@ -86,7 +86,7 @@ where
     {
         hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, u64::MAX);
+            .add_compactor(context_id, u64::MAX, 16);
         temp_compactor = true;
     }
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
