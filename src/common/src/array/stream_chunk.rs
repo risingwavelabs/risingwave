@@ -61,15 +61,6 @@ impl Op {
         };
         Ok(op)
     }
-
-    pub fn to_pretty_str(&self) -> &str {
-        match self {
-            Op::Insert => "+",
-            Op::Delete => "-",
-            Op::UpdateDelete => "U-",
-            Op::UpdateInsert => "U+",
-        }
-    }
 }
 
 pub type Ops<'a> = &'a [Op];
@@ -235,7 +226,15 @@ impl StreamChunk {
         table.load_preset("||--+-++|    ++++++");
         for (op, row_ref) in self.rows() {
             let mut cells = Vec::with_capacity(row_ref.len() + 1);
-            cells.push(Cell::new(op.to_pretty_str()).set_alignment(CellAlignment::Right));
+            cells.push(
+                Cell::new(match op {
+                    Op::Insert => "+",
+                    Op::Delete => "-",
+                    Op::UpdateDelete => "U-",
+                    Op::UpdateInsert => "U+",
+                })
+                .set_alignment(CellAlignment::Right),
+            );
             for datum in row_ref.iter() {
                 let str = match datum {
                     None => "".to_owned(), // NULL

@@ -92,11 +92,11 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
             )
         }
 
-        write!(f, "  low:\n")?;
+        writeln!(f, "  low:")?;
         format_cache(f, &self.low, &self.data_types)?;
-        write!(f, "\n  middle:\n")?;
+        writeln!(f, "\n  middle:")?;
         format_cache(f, &self.middle, &self.data_types)?;
-        write!(f, "\n  high:\n")?;
+        writeln!(f, "\n  high:")?;
         format_cache(f, &self.high, &self.data_types)?;
 
         write!(f, "\n}}")?;
