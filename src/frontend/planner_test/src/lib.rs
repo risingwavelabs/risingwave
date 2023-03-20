@@ -635,7 +635,7 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if self.stream_dist_plan.is_some() {
                     let graph = build_graph(stream_plan);
-                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false));
                 }
             }
         }

@@ -114,8 +114,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type as ProstType;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
     use crate::expr::test_utils::{
@@ -191,7 +190,7 @@ mod tests {
     async fn test_selective_agg() -> Result<()> {
         // filter (where $1 > 5)
         let prost = make_expression(
-            ProstType::GreaterThan,
+            PbType::GreaterThan,
             TypeName::Boolean,
             vec![make_input_ref(0, TypeName::Int64), make_i64_literal(5)],
         );
@@ -230,7 +229,7 @@ mod tests {
     #[tokio::test]
     async fn test_selective_agg_null_condition() -> Result<()> {
         let prost = make_expression(
-            ProstType::Equal,
+            PbType::Equal,
             TypeName::Boolean,
             vec![
                 make_input_ref(0, TypeName::Int64),

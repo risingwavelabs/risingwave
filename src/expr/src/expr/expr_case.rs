@@ -161,7 +161,8 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
     use crate::expr::test_utils::{
@@ -171,8 +172,8 @@ mod tests {
     #[test]
     fn test_case_expr() {
         let p = make_expression(
-            Type::Case,
-            TypeName::Int32,
+            PbType::Case,
+            PbDataType::Int32,
             vec![make_bool_literal(false), make_i32_literal(1)],
         );
         assert!(CaseExpression::try_from(&p).is_ok());

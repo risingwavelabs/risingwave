@@ -23,19 +23,18 @@ use rdkafka::message::ToBytes;
 use rdkafka::producer::{BaseRecord, DefaultProducerContext, Producer, ThreadedProducer};
 use rdkafka::types::RDKafkaErrorCode;
 use rdkafka::ClientConfig;
-use risingwave_common::array::{ArrayError, ArrayResult, Op, RowRef, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::to_text::ToText;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
-use risingwave_common::util::iter_util::ZipEqFast;
 use serde_derive::Deserialize;
 use serde_json::{json, Map, Value};
 use tracing::warn;
 
-use super::{Sink, SinkError, SINK_FORMAT_APPEND_ONLY, SINK_FORMAT_DEBEZIUM, SINK_FORMAT_UPSERT};
+use super::{
+    Sink, SinkError, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+};
 use crate::common::KafkaCommon;
-use crate::sink::Result;
+use crate::sink::{datum_to_json_object, record_to_json, Result};
 use crate::{deserialize_bool_from_string, deserialize_duration_from_string};
 
 pub const KAFKA_SINK: &str = "kafka";
@@ -61,7 +60,7 @@ pub struct KafkaConfig {
     #[serde(flatten)]
     pub common: KafkaCommon,
 
-    pub format: String, // accept "append_only", "debezium", or "upsert"
+    pub r#type: String, // accept "append-only", "debezium", or "upsert"
 
     pub identifier: String,
 
@@ -94,12 +93,16 @@ impl KafkaConfig {
         let config = serde_json::from_value::<KafkaConfig>(serde_json::to_value(values).unwrap())
             .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
-        if config.format != SINK_FORMAT_APPEND_ONLY
-            && config.format != SINK_FORMAT_DEBEZIUM
-            && config.format != SINK_FORMAT_UPSERT
+        if config.r#type != SINK_TYPE_APPEND_ONLY
+            && config.r#type != SINK_TYPE_DEBEZIUM
+            && config.r#type != SINK_TYPE_UPSERT
         {
             return Err(SinkError::Config(anyhow!(
-                "format must be append_only, debezium, or upsert"
+                "`{}` must be {}, {}, or {}",
+                SINK_TYPE_OPTION,
+                SINK_TYPE_APPEND_ONLY,
+                SINK_TYPE_DEBEZIUM,
+                SINK_TYPE_UPSERT
             )));
         }
         Ok(config)
@@ -132,6 +135,21 @@ impl<const APPEND_ONLY: bool> KafkaSink<APPEND_ONLY> {
             schema,
             pk_indices,
         })
+    }
+
+    pub async fn validate(config: KafkaConfig, pk_indices: Vec<usize>) -> Result<()> {
+        // For upsert Kafka sink, the primary key must be defined.
+        if !APPEND_ONLY && pk_indices.is_empty() {
+            return Err(SinkError::Config(anyhow!(
+                "primary key not defined for upsert kafka sink (please define in `primary_key` field)"
+            )));
+        }
+
+        // Try Kafka connection.
+        // TODO: Reuse the conductor instance we create during validation.
+        KafkaTransactionConductor::new(config).await?;
+
+        Ok(())
     }
 
     // any error should report to upper level and requires revert to previous epoch.
@@ -305,7 +323,7 @@ impl<const APPEND_ONLY: bool> Sink for KafkaSink<APPEND_ONLY> {
             self.append_only(chunk).await
         } else {
             // Debezium
-            if self.config.format == SINK_FORMAT_DEBEZIUM {
+            if self.config.r#type == SINK_TYPE_DEBEZIUM {
                 self.debezium_update(
                     chunk,
                     SystemTime::now()
@@ -363,96 +381,6 @@ impl<const APPEND_ONLY: bool> Debug for KafkaSink<APPEND_ONLY> {
     fn fmt(&self, _f: &mut Formatter<'_>) -> std::fmt::Result {
         unimplemented!();
     }
-}
-
-fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
-    let scalar_ref = match datum {
-        None => return Ok(Value::Null),
-        Some(datum) => datum,
-    };
-
-    let data_type = field.data_type();
-
-    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
-
-    let value = match (data_type, scalar_ref) {
-        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
-            json!(v)
-        }
-        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
-            json!(v)
-        }
-        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
-            json!(v)
-        }
-        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
-            json!(v)
-        }
-        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
-            json!(f32::from(v))
-        }
-        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
-            json!(f64::from(v))
-        }
-        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
-            json!(v)
-        }
-        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
-            // fixme
-            json!(v.to_text())
-        }
-        (
-            dt @ DataType::Date
-            | dt @ DataType::Time
-            | dt @ DataType::Timestamp
-            | dt @ DataType::Timestamptz
-            | dt @ DataType::Interval
-            | dt @ DataType::Bytea,
-            scalar,
-        ) => {
-            json!(scalar.to_text_with_type(&dt))
-        }
-        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
-            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
-            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
-            for sub_datum_ref in list_ref.values_ref() {
-                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
-                vec.push(value);
-            }
-            json!(vec)
-        }
-        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
-            let mut map = Map::with_capacity(st.fields.len());
-            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
-                st.fields
-                    .iter()
-                    .zip_eq_fast(st.field_names.iter())
-                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
-            ) {
-                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
-                map.insert(sub_field.name.clone(), value);
-            }
-            json!(map)
-        }
-        _ => {
-            return Err(ArrayError::internal(
-                "datum_to_json_object: unsupported data type".to_string(),
-            ));
-        }
-    };
-
-    Ok(value)
-}
-
-fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, Value>> {
-    let mut mappings = Map::with_capacity(schema.len());
-    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
-        let key = field.name.clone();
-        let value = datum_to_json_object(field, datum_ref)
-            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
-        mappings.insert(key, value);
-    }
-    Ok(mappings)
 }
 
 fn pk_to_json(
@@ -590,6 +518,7 @@ impl KafkaTransactionConductor {
 mod test {
     use maplit::hashmap;
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::DataType;
 
     use super::*;
 
@@ -598,7 +527,7 @@ mod test {
         let properties: HashMap<String, String> = hashmap! {
             "properties.bootstrap.server".to_string() => "localhost:9092".to_string(),
             "topic".to_string() => "test".to_string(),
-            "format".to_string() => "append_only".to_string(),
+            "type".to_string() => "append-only".to_string(),
             "use_transaction".to_string() => "False".to_string(),
             "security_protocol".to_string() => "SASL".to_string(),
             "sasl_mechanism".to_string() => "SASL".to_string(),
@@ -618,7 +547,7 @@ mod test {
         let properties = hashmap! {
             "kafka.brokers".to_string() => "localhost:29092".to_string(),
             "identifier".to_string() => "test_sink_1".to_string(),
-            "sink.type".to_string() => "append_only".to_string(),
+            "type".to_string() => "append-only".to_string(),
             "kafka.topic".to_string() => "test_topic".to_string(),
         };
         let schema = Schema::new(vec![

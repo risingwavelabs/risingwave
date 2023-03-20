@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use clap::ValueEnum;
+use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -113,7 +114,7 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    pub backup: BackupConfig,
+    pub system: SystemConfig,
 
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
@@ -252,17 +253,9 @@ impl Default for BatchConfig {
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamingConfig {
-    /// The interval of periodic barrier.
-    #[serde(default = "default::streaming::barrier_interval_ms")]
-    pub barrier_interval_ms: u32,
-
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
-
-    /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::streaming::checkpoint_frequency")]
-    pub checkpoint_frequency: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -297,24 +290,6 @@ impl Default for StreamingConfig {
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StorageConfig {
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Target size of the Sstable.
-    #[serde(default = "default::storage::sst_size_mb")]
-    pub sstable_size_mb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Size of each block in bytes in SST.
-    #[serde(default = "default::storage::block_size_kb")]
-    pub block_size_kb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// False positive probability of bloom filter.
-    #[serde(default = "default::storage::bloom_false_positive")]
-    pub bloom_false_positive: f64,
-
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::storage::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
@@ -328,12 +303,6 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::storage::data_directory")]
-    pub data_directory: String,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
@@ -486,27 +455,64 @@ impl Default for DeveloperConfig {
     }
 }
 
-/// Configs for meta node backup
+/// The section `[system]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BackupConfig {
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote storage url for storing snapshots.
-    #[serde(default = "default::backup::storage_url")]
-    pub storage_url: String,
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote directory for storing snapshots.
-    #[serde(default = "default::backup::storage_directory")]
-    pub storage_directory: String,
+pub struct SystemConfig {
+    /// The interval of periodic barrier.
+    #[serde(default = "default::system::barrier_interval_ms")]
+    pub barrier_interval_ms: u32,
 
-    #[serde(flatten)]
-    pub unrecognized: HashMap<String, Value>,
+    /// There will be a checkpoint for every n barriers
+    #[serde(default = "default::system::checkpoint_frequency")]
+    pub checkpoint_frequency: u64,
+
+    /// Target size of the Sstable.
+    #[serde(default = "default::system::sstable_size_mb")]
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    #[serde(default = "default::system::block_size_kb")]
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    #[serde(default = "default::system::bloom_false_positive")]
+    pub bloom_false_positive: f64,
+
+    #[serde(default = "default::system::state_store")]
+    pub state_store: String,
+
+    /// Remote directory for storing data and metadata objects.
+    #[serde(default = "default::system::data_directory")]
+    pub data_directory: String,
+
+    /// Remote storage url for storing snapshots.
+    #[serde(default = "default::system::backup_storage_url")]
+    pub backup_storage_url: String,
+
+    /// Remote directory for storing snapshots.
+    #[serde(default = "default::system::backup_storage_directory")]
+    pub backup_storage_directory: String,
 }
 
-impl Default for BackupConfig {
+impl Default for SystemConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl SystemConfig {
+    pub fn into_init_system_params(self) -> SystemParams {
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval_ms),
+            checkpoint_frequency: Some(self.checkpoint_frequency),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            block_size_kb: Some(self.block_size_kb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            state_store: Some(self.state_store),
+            data_directory: Some(self.data_directory),
+            backup_storage_url: Some(self.backup_storage_url),
+            backup_storage_directory: Some(self.backup_storage_directory),
+        }
     }
 }
 
@@ -576,18 +582,6 @@ mod default {
 
     pub mod storage {
 
-        pub fn sst_size_mb() -> u32 {
-            256
-        }
-
-        pub fn block_size_kb() -> u32 {
-            64
-        }
-
-        pub fn bloom_false_positive() -> f64 {
-            0.001
-        }
-
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
         }
@@ -598,10 +592,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn data_directory() -> String {
-            "hummock_001".to_string()
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -657,18 +647,10 @@ mod default {
     pub mod streaming {
         use crate::config::AsyncStackTraceOption;
 
-        pub fn barrier_interval_ms() -> u32 {
-            1000
-        }
-
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
             // TODO: remove this limitation from code
             10000
-        }
-
-        pub fn checkpoint_frequency() -> usize {
-            10
         }
 
         pub fn enable_jaegar_tracing() -> bool {
@@ -746,13 +728,43 @@ mod default {
         }
     }
 
-    pub mod backup {
-        pub fn storage_url() -> String {
-            "memory".to_string()
+    pub mod system {
+        use crate::system_param;
+
+        pub fn barrier_interval_ms() -> u32 {
+            system_param::default::barrier_interval_ms()
         }
 
-        pub fn storage_directory() -> String {
-            "backup".to_string()
+        pub fn checkpoint_frequency() -> u64 {
+            system_param::default::checkpoint_frequency()
+        }
+
+        pub fn sstable_size_mb() -> u32 {
+            system_param::default::sstable_size_mb()
+        }
+
+        pub fn block_size_kb() -> u32 {
+            system_param::default::block_size_kb()
+        }
+
+        pub fn bloom_false_positive() -> f64 {
+            system_param::default::bloom_false_positive()
+        }
+
+        pub fn state_store() -> String {
+            system_param::default::state_store()
+        }
+
+        pub fn data_directory() -> String {
+            system_param::default::data_directory()
+        }
+
+        pub fn backup_storage_url() -> String {
+            system_param::default::backup_storage_url()
+        }
+
+        pub fn backup_storage_directory() -> String {
+            system_param::default::backup_storage_directory()
         }
     }
 }

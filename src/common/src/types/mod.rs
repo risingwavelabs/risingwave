@@ -580,57 +580,6 @@ for_all_scalar_variants! { scalar_impl_partial_ord }
 pub type Datum = Option<ScalarImpl>;
 pub type DatumRef<'a> = Option<ScalarRefImpl<'a>>;
 
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-// TODO: specify `NULL FIRST` or `NULL LAST`.
-pub fn memcmp_serialize_datum_into(
-    datum: impl ToDatumRef,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    // By default, `null` is treated as largest in PostgreSQL.
-    if let Some(datum) = datum.to_datum_ref() {
-        0u8.serialize(&mut *serializer)?;
-        datum.serialize(serializer)?;
-    } else {
-        1u8.serialize(serializer)?;
-    }
-    Ok(())
-}
-
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-#[cfg_attr(not(test), expect(dead_code))]
-fn memcmp_serialize_datum_not_null_into(
-    datum: impl ToDatumRef,
-    serializer: &mut memcomparable::Serializer<impl BufMut>,
-) -> memcomparable::Result<()> {
-    datum
-        .to_datum_ref()
-        .as_ref()
-        .expect("datum cannot be null")
-        .serialize(serializer)
-}
-
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-pub fn memcmp_deserialize_datum_from(
-    ty: &DataType,
-    deserializer: &mut memcomparable::Deserializer<impl Buf>,
-) -> memcomparable::Result<Datum> {
-    let null_tag = u8::deserialize(&mut *deserializer)?;
-    match null_tag {
-        1 => Ok(None),
-        0 => Ok(Some(ScalarImpl::deserialize(ty, deserializer)?)),
-        _ => Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
-    }
-}
-
-// TODO(MrCroxx): turn Datum into a struct, and impl ser/de as its member functions. (#477)
-#[cfg_attr(not(test), expect(dead_code))]
-fn memcmp_deserialize_datum_not_null_from(
-    ty: &DataType,
-    deserializer: &mut memcomparable::Deserializer<impl Buf>,
-) -> memcomparable::Result<Datum> {
-    Ok(Some(ScalarImpl::deserialize(ty, deserializer)?))
-}
-
 /// This trait is to implement `to_owned_datum` for `Option<ScalarImpl>`
 pub trait ToOwnedDatum {
     /// Convert the datum to an owned [`Datum`].
@@ -1133,64 +1082,6 @@ impl ScalarImpl {
         })
     }
 
-    /// Deserialize the `data_size` of `input_data_type` in `storage_encoding`. This function will
-    /// consume the offset of deserializer then return the length (without memcopy, only length
-    /// calculation). The difference between `encoding_data_size` and `ScalarImpl::data_size` is
-    /// that `ScalarImpl::data_size` calculates the `memory_length` of type instead of
-    /// `storage_encoding`
-    pub fn encoding_data_size(
-        data_type: &DataType,
-        deserializer: &mut memcomparable::Deserializer<impl Buf>,
-    ) -> memcomparable::Result<usize> {
-        let base_position = deserializer.position();
-        let null_tag = u8::deserialize(&mut *deserializer)?;
-        match null_tag {
-            1 => {}
-            0 => {
-                use std::mem::size_of;
-                let len = match data_type {
-                    DataType::Int16 => size_of::<i16>(),
-                    DataType::Int32 => size_of::<i32>(),
-                    DataType::Int64 => size_of::<i64>(),
-                    DataType::Serial => size_of::<Serial>(),
-                    DataType::Float32 => size_of::<OrderedF32>(),
-                    DataType::Float64 => size_of::<OrderedF64>(),
-                    DataType::Date => size_of::<NaiveDateWrapper>(),
-                    DataType::Time => size_of::<NaiveTimeWrapper>(),
-                    DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
-                    DataType::Timestamptz => size_of::<i64>(),
-                    DataType::Boolean => size_of::<u8>(),
-                    // IntervalUnit is serialized as (i32, i32, i64)
-                    DataType::Interval => size_of::<(i32, i32, i64)>(),
-                    DataType::Decimal => {
-                        deserializer.deserialize_decimal()?;
-                        0 // the len is not used since decimal is not a fixed length type
-                    }
-                    // these two types is var-length and should only be determine at runtime.
-                    // TODO: need some test for this case (e.g. e2e test)
-                    DataType::List { .. } => deserializer.skip_bytes()?,
-                    DataType::Struct(t) => t
-                        .fields
-                        .iter()
-                        .map(|field| Self::encoding_data_size(field, deserializer))
-                        .try_fold(0, |a, b| b.map(|b| a + b))?,
-                    DataType::Jsonb => deserializer.skip_bytes()?,
-                    DataType::Varchar => deserializer.skip_bytes()?,
-                    DataType::Bytea => deserializer.skip_bytes()?,
-                };
-
-                // consume offset of fixed_type
-                if deserializer.position() == base_position + 1 {
-                    // fixed type
-                    deserializer.advance(len);
-                }
-            }
-            _ => return Err(memcomparable::Error::InvalidTagEncoding(null_tag as _)),
-        }
-
-        Ok(deserializer.position() - base_position)
-    }
-
     pub fn as_integral(&self) -> i64 {
         match self {
             Self::Int16(v) => *v as i64,
@@ -1257,88 +1148,11 @@ pub fn literal_type_match(data_type: &DataType, literal: Option<&ScalarImpl>) ->
 #[cfg(test)]
 mod tests {
     use std::hash::{BuildHasher, Hasher};
-    use std::ops::Neg;
 
-    use itertools::Itertools;
-    use rand::thread_rng;
     use strum::IntoEnumIterator;
 
     use super::*;
     use crate::util::hash_util::Crc32FastBuilder;
-
-    fn serialize_datum_not_null_into_vec(data: i64) -> Vec<u8> {
-        let mut serializer = memcomparable::Serializer::new(vec![]);
-        memcmp_serialize_datum_not_null_into(&Some(ScalarImpl::Int64(data)), &mut serializer)
-            .unwrap();
-        serializer.into_inner()
-    }
-
-    #[test]
-    fn test_memcomparable() {
-        let memcmp_minus_1 = serialize_datum_not_null_into_vec(-1);
-        let memcmp_3874 = serialize_datum_not_null_into_vec(3874);
-        let memcmp_45745 = serialize_datum_not_null_into_vec(45745);
-        let memcmp_21234 = serialize_datum_not_null_into_vec(21234);
-        assert!(memcmp_3874 < memcmp_45745);
-        assert!(memcmp_3874 < memcmp_21234);
-        assert!(memcmp_21234 < memcmp_45745);
-
-        assert!(memcmp_minus_1 < memcmp_3874);
-        assert!(memcmp_minus_1 < memcmp_21234);
-        assert!(memcmp_minus_1 < memcmp_45745);
-    }
-
-    #[test]
-    fn test_issue_legacy_2057_ordered_float_memcomparable() {
-        use num_traits::*;
-        use rand::seq::SliceRandom;
-
-        fn serialize(f: OrderedF32) -> Vec<u8> {
-            let mut serializer = memcomparable::Serializer::new(vec![]);
-            memcmp_serialize_datum_not_null_into(&Some(f.into()), &mut serializer).unwrap();
-            serializer.into_inner()
-        }
-
-        fn deserialize(data: Vec<u8>) -> OrderedF32 {
-            let mut deserializer = memcomparable::Deserializer::new(data.as_slice());
-            let datum =
-                memcmp_deserialize_datum_not_null_from(&DataType::Float32, &mut deserializer)
-                    .unwrap();
-            datum.unwrap().try_into().unwrap()
-        }
-
-        let floats = vec![
-            // -inf
-            OrderedF32::neg_infinity(),
-            // -1
-            OrderedF32::one().neg(),
-            // 0, -0 should be treated the same
-            OrderedF32::zero(),
-            OrderedF32::neg_zero(),
-            OrderedF32::zero(),
-            // 1
-            OrderedF32::one(),
-            // inf
-            OrderedF32::infinity(),
-            // nan, -nan should be treated the same
-            OrderedF32::nan(),
-            OrderedF32::nan().neg(),
-            OrderedF32::nan(),
-        ];
-        assert!(floats.is_sorted());
-
-        let mut floats_clone = floats.clone();
-        floats_clone.shuffle(&mut thread_rng());
-        floats_clone.sort();
-        assert_eq!(floats, floats_clone);
-
-        let memcomparables = floats.clone().into_iter().map(serialize).collect_vec();
-        assert!(memcomparables.is_sorted());
-
-        let decoded_floats = memcomparables.into_iter().map(deserialize).collect_vec();
-        assert!(decoded_floats.is_sorted());
-        assert_eq!(floats, decoded_floats);
-    }
 
     #[test]
     fn test_size() {

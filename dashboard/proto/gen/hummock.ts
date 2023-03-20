@@ -795,6 +795,7 @@ export interface CompactionConfig {
   splitByStateTable: boolean;
   /** soft limit for max number of sub level number */
   level0StopWriteThresholdSubLevelNumber: number;
+  level0MaxCompactFileNumber: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -4361,6 +4362,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     maxSpaceReclaimBytes: 0,
     splitByStateTable: false,
     level0StopWriteThresholdSubLevelNumber: 0,
+    level0MaxCompactFileNumber: 0,
   };
 }
 
@@ -4393,6 +4395,9 @@ export const CompactionConfig = {
       level0StopWriteThresholdSubLevelNumber: isSet(object.level0StopWriteThresholdSubLevelNumber)
         ? Number(object.level0StopWriteThresholdSubLevelNumber)
         : 0,
+      level0MaxCompactFileNumber: isSet(object.level0MaxCompactFileNumber)
+        ? Number(object.level0MaxCompactFileNumber)
+        : 0,
     };
   },
 
@@ -4421,6 +4426,8 @@ export const CompactionConfig = {
     message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     message.level0StopWriteThresholdSubLevelNumber !== undefined &&
       (obj.level0StopWriteThresholdSubLevelNumber = Math.round(message.level0StopWriteThresholdSubLevelNumber));
+    message.level0MaxCompactFileNumber !== undefined &&
+      (obj.level0MaxCompactFileNumber = Math.round(message.level0MaxCompactFileNumber));
     return obj;
   },
 
@@ -4440,6 +4447,7 @@ export const CompactionConfig = {
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     message.splitByStateTable = object.splitByStateTable ?? false;
     message.level0StopWriteThresholdSubLevelNumber = object.level0StopWriteThresholdSubLevelNumber ?? 0;
+    message.level0MaxCompactFileNumber = object.level0MaxCompactFileNumber ?? 0;
     return message;
   },
 };

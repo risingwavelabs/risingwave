@@ -159,9 +159,15 @@ lazy_static! {
         ApplyOrder::TopDown,
     );
 
-    static ref JOIN_REORDER: OptimizationStage = OptimizationStage::new(
+    static ref LEFT_DEEP_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
         "Join Reorder".to_string(),
-        vec![ReorderMultiJoinRule::create()],
+        vec![LeftDeepTreeJoinOrderingRule::create()],
+        ApplyOrder::TopDown,
+    );
+
+    static ref BUSHY_TREE_JOIN_REORDER: OptimizationStage = OptimizationStage::new(
+        "Bushy tree join ordering Rule".to_string(),
+        vec![BushyTreeJoinOrderingRule::create()],
         ApplyOrder::TopDown,
     );
 
@@ -365,9 +371,17 @@ impl LogicalOptimizer {
         // their relevant joins.
         plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
 
-        // Reorder multijoin into left-deep join tree.
-        plan = plan.optimize_by_rules(&JOIN_REORDER);
-
+        // Reorder multijoin into join tree.
+        if plan
+            .ctx()
+            .session_ctx()
+            .config()
+            .get_streaming_enable_bushy_join()
+        {
+            plan = plan.optimize_by_rules(&BUSHY_TREE_JOIN_REORDER);
+        } else {
+            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_REORDER);
+        }
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.
         plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
@@ -438,7 +452,7 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TO_MULTI_JOIN);
 
         // Reorder multijoin into left-deep join tree.
-        plan = plan.optimize_by_rules(&JOIN_REORDER);
+        plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_REORDER);
 
         // Predicate Push-down: apply filter pushdown rules again since we pullup all join
         // conditions into a filter above the multijoin.

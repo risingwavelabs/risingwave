@@ -23,11 +23,16 @@ use std::collections::HashMap;
 use anyhow::anyhow;
 use async_trait::async_trait;
 use enum_as_inner::EnumAsInner;
-use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::Schema;
+use risingwave_common::array::{ArrayError, ArrayResult, RowRef, StreamChunk};
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{ErrorCode, RwError};
+use risingwave_common::row::Row;
+use risingwave_common::types::to_text::ToText;
+use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_rpc_client::error::RpcError;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Map, Value};
 use thiserror::Error;
 pub use tracing;
 
@@ -37,11 +42,10 @@ use crate::sink::kafka::{KafkaConfig, KafkaSink, KAFKA_SINK};
 use crate::sink::redis::{RedisConfig, RedisSink};
 use crate::sink::remote::{RemoteConfig, RemoteSink};
 use crate::ConnectorParams;
-
-pub const SINK_FORMAT_OPTION: &str = "format";
-pub const SINK_FORMAT_APPEND_ONLY: &str = "append_only";
-pub const SINK_FORMAT_DEBEZIUM: &str = "debezium";
-pub const SINK_FORMAT_UPSERT: &str = "upsert";
+pub const SINK_TYPE_OPTION: &str = "type";
+pub const SINK_TYPE_APPEND_ONLY: &str = "append-only";
+pub const SINK_TYPE_DEBEZIUM: &str = "debezium";
+pub const SINK_TYPE_UPSERT: &str = "upsert";
 pub const SINK_USER_FORCE_APPEND_ONLY_OPTION: &str = "force_append_only";
 
 #[async_trait]
@@ -82,10 +86,10 @@ pub const BLACKHOLE_SINK: &str = "blackhole";
 
 impl SinkConfig {
     pub fn from_hashmap(properties: HashMap<String, String>) -> Result<Self> {
-        const SINK_TYPE_KEY: &str = "connector";
+        const CONNECTOR_TYPE_KEY: &str = "connector";
         let sink_type = properties
-            .get(SINK_TYPE_KEY)
-            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", SINK_TYPE_KEY)))?;
+            .get(CONNECTOR_TYPE_KEY)
+            .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?;
         match sink_type.to_lowercase().as_str() {
             KAFKA_SINK => Ok(SinkConfig::Kafka(Box::new(KafkaConfig::from_hashmap(
                 properties,
@@ -169,15 +173,10 @@ impl SinkImpl {
         match cfg {
             SinkConfig::Redis(cfg) => RedisSink::new(cfg, sink_catalog.schema()).map(|_| ()),
             SinkConfig::Kafka(cfg) => {
-                // We simply call `KafkaSink::new` here to validate a Kafka sink.
                 if sink_catalog.sink_type.is_append_only() {
-                    KafkaSink::<true>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<true>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 } else {
-                    KafkaSink::<false>::new(*cfg, sink_catalog.schema(), sink_catalog.pk_indices())
-                        .await
-                        .map(|_| ())
+                    KafkaSink::<false>::validate(*cfg, sink_catalog.downstream_pk_indices()).await
                 }
             }
             SinkConfig::Remote(cfg) => {
@@ -261,4 +260,94 @@ impl From<SinkError> for RwError {
     fn from(e: SinkError) -> Self {
         ErrorCode::SinkError(Box::new(e)).into()
     }
+}
+
+pub fn record_to_json(row: RowRef<'_>, schema: &[Field]) -> Result<Map<String, Value>> {
+    let mut mappings = Map::with_capacity(schema.len());
+    for (field, datum_ref) in schema.iter().zip_eq_fast(row.iter()) {
+        let key = field.name.clone();
+        let value = datum_to_json_object(field, datum_ref)
+            .map_err(|e| SinkError::JsonParse(e.to_string()))?;
+        mappings.insert(key, value);
+    }
+    Ok(mappings)
+}
+
+fn datum_to_json_object(field: &Field, datum: DatumRef<'_>) -> ArrayResult<Value> {
+    let scalar_ref = match datum {
+        None => return Ok(Value::Null),
+        Some(datum) => datum,
+    };
+
+    let data_type = field.data_type();
+
+    tracing::debug!("datum_to_json_object: {:?}, {:?}", data_type, scalar_ref);
+
+    let value = match (data_type, scalar_ref) {
+        (DataType::Boolean, ScalarRefImpl::Bool(v)) => {
+            json!(v)
+        }
+        (DataType::Int16, ScalarRefImpl::Int16(v)) => {
+            json!(v)
+        }
+        (DataType::Int32, ScalarRefImpl::Int32(v)) => {
+            json!(v)
+        }
+        (DataType::Int64, ScalarRefImpl::Int64(v)) => {
+            json!(v)
+        }
+        (DataType::Float32, ScalarRefImpl::Float32(v)) => {
+            json!(f32::from(v))
+        }
+        (DataType::Float64, ScalarRefImpl::Float64(v)) => {
+            json!(f64::from(v))
+        }
+        (DataType::Varchar, ScalarRefImpl::Utf8(v)) => {
+            json!(v)
+        }
+        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => {
+            // fixme
+            json!(v.to_text())
+        }
+        (
+            dt @ DataType::Date
+            | dt @ DataType::Time
+            | dt @ DataType::Timestamp
+            | dt @ DataType::Timestamptz
+            | dt @ DataType::Interval
+            | dt @ DataType::Bytea,
+            scalar,
+        ) => {
+            json!(scalar.to_text_with_type(&dt))
+        }
+        (DataType::List { datatype }, ScalarRefImpl::List(list_ref)) => {
+            let mut vec = Vec::with_capacity(list_ref.values_ref().len());
+            let inner_field = Field::unnamed(Box::<DataType>::into_inner(datatype));
+            for sub_datum_ref in list_ref.values_ref() {
+                let value = datum_to_json_object(&inner_field, sub_datum_ref)?;
+                vec.push(value);
+            }
+            json!(vec)
+        }
+        (DataType::Struct(st), ScalarRefImpl::Struct(struct_ref)) => {
+            let mut map = Map::with_capacity(st.fields.len());
+            for (sub_datum_ref, sub_field) in struct_ref.fields_ref().into_iter().zip_eq_fast(
+                st.fields
+                    .iter()
+                    .zip_eq_fast(st.field_names.iter())
+                    .map(|(dt, name)| Field::with_name(dt.clone(), name)),
+            ) {
+                let value = datum_to_json_object(&sub_field, sub_datum_ref)?;
+                map.insert(sub_field.name.clone(), value);
+            }
+            json!(map)
+        }
+        _ => {
+            return Err(ArrayError::internal(
+                "datum_to_json_object: unsupported data type".to_string(),
+            ));
+        }
+    };
+
+    Ok(value)
 }

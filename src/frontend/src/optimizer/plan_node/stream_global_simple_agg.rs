@@ -15,7 +15,8 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use itertools::Itertools;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::PlanAggCall;
 use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -100,13 +101,13 @@ impl PlanTreeNodeUnary for StreamGlobalSimpleAgg {
 impl_plan_tree_node_for_unary! { StreamGlobalSimpleAgg }
 
 impl StreamNode for StreamGlobalSimpleAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(None);
         let agg_states = self.logical.infer_stream_agg_state(None);
         let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(None);
 
-        ProstStreamNode::GlobalSimpleAgg(SimpleAggNode {
+        PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
             agg_calls: self
                 .agg_calls()
                 .iter()
@@ -131,6 +132,7 @@ impl StreamNode for StreamGlobalSimpleAgg {
             ),
             distinct_dedup_tables: distinct_dedup_tables
                 .into_iter()
+                .sorted_by_key(|(i, _)| *i)
                 .map(|(key_idx, table)| {
                     (
                         key_idx as u32,
