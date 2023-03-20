@@ -470,19 +470,17 @@ impl From<&StructArray> for arrow_array::StructArray {
         let struct_data_vector: Vec<(arrow_schema::Field, arrow_array::ArrayRef)> =
             if array.children_names().len() != array.children_array_types().len() {
                 array
-                    .field_arrays()
-                    .iter()
+                    .fields()
                     .zip_eq_fast(array.children_array_types())
-                    .map(|(arr, datatype)| (Field::new("", datatype.into(), true), (*arr).into()))
+                    .map(|(arr, datatype)| (Field::new("", datatype.into(), true), arr.into()))
                     .collect()
             } else {
                 array
-                    .field_arrays()
-                    .iter()
+                    .fields()
                     .zip_eq_fast(array.children_array_types())
                     .zip_eq_fast(array.children_names())
                     .map(|((arr, datatype), field_name)| {
-                        (Field::new(field_name, datatype.into(), true), (*arr).into())
+                        (Field::new(field_name, datatype.into(), true), arr.into())
                     })
                     .collect()
             };

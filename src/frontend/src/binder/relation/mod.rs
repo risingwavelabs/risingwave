@@ -18,9 +18,11 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    Field, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME, RW_INTERNAL_TABLE_FUNCTION_NAME,
+    Field, Schema, TableId, DEFAULT_SCHEMA_NAME, PG_CATALOG_SCHEMA_NAME,
+    RW_INTERNAL_TABLE_FUNCTION_NAME,
 };
 use risingwave_common::error::{internal_error, ErrorCode, Result, RwError};
+use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{
     Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias, TableFactor,
 };
@@ -447,16 +449,12 @@ impl Binder {
                     )
                     .into());
                 };
-                let columns = [(
-                    false,
-                    Field {
-                        data_type: tf.return_type(),
-                        name: tf.name().to_string(),
-                        sub_fields: vec![],
-                        type_name: "".to_string(),
-                    },
-                )]
-                .into_iter();
+                let columns = if let DataType::Struct(s) = tf.return_type() {
+                    let schema = Schema::from(&*s);
+                    schema.fields.into_iter().map(|f| (false, f)).collect_vec()
+                } else {
+                    vec![(false, Field::with_name(tf.return_type(), tf.name()))]
+                };
 
                 self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
 
