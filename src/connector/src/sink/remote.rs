@@ -125,10 +125,12 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
         })?;
         let host_addr = HostAddr::try_from(&address).map_err(SinkError::from)?;
         let client = ConnectorClient::new(host_addr).await.map_err(|err| {
-            SinkError::Remote(format!(
+            let msg = format!(
                 "failed to connect to connector endpoint `{}`: {:?}",
                 &address, err
-            ))
+            );
+            tracing::warn!(msg);
+            SinkError::Remote(msg)
         })?;
 
         let table_schema = Some(TableSchema {
@@ -151,7 +153,20 @@ impl<const APPEND_ONLY: bool> RemoteSink<APPEND_ONLY> {
             )
             .await
             .map_err(SinkError::from)?;
-        let _ = response.next().await.unwrap();
+        response.next().await.unwrap().map_err(|e| {
+            let msg = format!(
+                "failed to start sink stream for connector `{}`: {:?}",
+                &config.connector_type,
+                e.message()
+            );
+            tracing::warn!(msg);
+            SinkError::Remote(msg)
+        })?;
+        tracing::info!(
+            "{:?} sink stream started with properties: {:?}",
+            &config.connector_type,
+            &config.properties
+        );
 
         Ok(RemoteSink {
             connector_type: config.connector_type,
