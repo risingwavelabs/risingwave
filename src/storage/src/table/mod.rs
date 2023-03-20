@@ -21,11 +21,11 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::util::hash_util::Crc32FastBuilder;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use crate::error::StorageResult;
+
 /// For tables without distribution (singleton), the `DEFAULT_VNODE` is encoded.
 pub const DEFAULT_VNODE: VirtualNode = VirtualNode::ZERO;
 
@@ -123,7 +123,7 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
     let vnode = if indices.is_empty() {
         DEFAULT_VNODE
     } else {
-        let vnode = (&row).project(indices).hash(Crc32FastBuilder).to_vnode();
+        let vnode = VirtualNode::compute_row(&row, indices);
         check_vnode_is_set(vnode, vnodes);
         vnode
     };
@@ -147,12 +147,11 @@ pub fn compute_chunk_vnode(
             .iter()
             .map(|idx| pk_indices[*idx])
             .collect_vec();
-        chunk
-            .get_hash_values(&dist_key_indices, Crc32FastBuilder)
+
+        VirtualNode::compute_chunk(chunk, &dist_key_indices)
             .into_iter()
             .zip_eq_fast(chunk.vis().iter())
-            .map(|(h, vis)| {
-                let vnode = h.to_vnode();
+            .map(|(vnode, vis)| {
                 // Ignore the invisible rows.
                 if vis {
                     check_vnode_is_set(vnode, vnodes);
