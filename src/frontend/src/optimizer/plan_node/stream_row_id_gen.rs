@@ -15,11 +15,10 @@
 use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use crate::optimizer::property::Distribution;
 
 use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-
 use crate::optimizer::plan_node::stream::StreamPlanRef;
+use crate::optimizer::property::Distribution;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

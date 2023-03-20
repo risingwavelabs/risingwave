@@ -28,7 +28,6 @@ use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
-use risingwave_common::util::row_id::extract_vnode_id_from_row_id;
 use smallvec::{smallvec, SmallVec};
 use tracing::event;
 
