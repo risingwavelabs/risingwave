@@ -266,7 +266,7 @@ public class SourceRequestHandler {
                     // check whether user is superuser or replication role
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("postgres.role.check"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.USER));
+                        stmt.setString(1, props.get(DbzConnectorConfig.USER));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             if (!res.getBoolean(1)) {
@@ -280,15 +280,16 @@ public class SourceRequestHandler {
                     try (var stmt =
                             conn.prepareStatement(
                                     sqlStmts.getProperty("postgres.table_privilege.check"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.TABLE_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.USER));
+                        stmt.setString(1, props.get(DbzConnectorConfig.TABLE_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.USER));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             if (!res.getBoolean(1)) {
                                 throw new StatusException(
                                         Status.INTERNAL.withDescription(
                                                 "Postgres user must have select privilege on table "
-                                                        + props.get(ConnectorConfig.TABLE_NAME)));
+                                                        + props.get(
+                                                                DbzConnectorConfig.TABLE_NAME)));
                             }
                         }
                     }
@@ -305,7 +306,7 @@ public class SourceRequestHandler {
                         throw new StatusException(
                                 Status.INTERNAL.withDescription(
                                         "Failed to get postgres version"
-                                                + props.get(ConnectorConfig.TABLE_NAME)));
+                                                + props.get(DbzConnectorConfig.TABLE_NAME)));
                     }
                     // pg 15 and up supports partial publication of table
                     // check whether publication covers all columns
@@ -313,8 +314,8 @@ public class SourceRequestHandler {
                         try (var stmt =
                                 conn.prepareStatement(
                                         sqlStmts.getProperty("postgres.publication_att"))) {
-                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                             var res = stmt.executeQuery();
                             while (res.next()) {
                                 String[] columnsPub =
@@ -339,8 +340,8 @@ public class SourceRequestHandler {
                         try (var stmt =
                                 conn.prepareStatement(
                                         sqlStmts.getProperty("postgres.publication_cnt"))) {
-                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                             var res = stmt.executeQuery();
                             while (res.next()) {
                                 if (res.getInt("count") > 0) {
@@ -358,16 +359,17 @@ public class SourceRequestHandler {
                                 conn.prepareStatement(
                                         sqlStmts.getProperty(
                                                 "postgres.database_privilege.check"))) {
-                            stmt.setString(1, props.get(ConnectorConfig.USER));
-                            stmt.setString(2, props.get(ConnectorConfig.DB_NAME));
-                            stmt.setString(3, props.get(ConnectorConfig.USER));
+                            stmt.setString(1, props.get(DbzConnectorConfig.USER));
+                            stmt.setString(2, props.get(DbzConnectorConfig.DB_NAME));
+                            stmt.setString(3, props.get(DbzConnectorConfig.USER));
                             var res = stmt.executeQuery();
                             while (res.next()) {
                                 if (!res.getBoolean(1)) {
                                     throw new StatusException(
                                             Status.INTERNAL.withDescription(
                                                     "Postgres user must have create privilege on database"
-                                                            + props.get(ConnectorConfig.DB_NAME)));
+                                                            + props.get(
+                                                                    DbzConnectorConfig.DB_NAME)));
                                 }
                             }
                         }
@@ -378,12 +380,12 @@ public class SourceRequestHandler {
                         try (var stmt =
                                 conn.prepareStatement(
                                         sqlStmts.getProperty("postgres.table_owner"))) {
-                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                             var res = stmt.executeQuery();
                             while (res.next()) {
                                 owner = res.getString("tableowner");
-                                if (owner.equals(props.get(ConnectorConfig.USER))) {
+                                if (owner.equals(props.get(DbzConnectorConfig.USER))) {
                                     isTableOwner = true;
                                     break;
                                 }
@@ -399,7 +401,7 @@ public class SourceRequestHandler {
                                 while (res.next()) {
                                     String[] users = (String[]) res.getArray("members").getArray();
                                     if (Arrays.stream(users)
-                                            .anyMatch(props.get(ConnectorConfig.USER)::equals)) {
+                                            .anyMatch(props.get(DbzConnectorConfig.USER)::equals)) {
                                         isTableOwner = true;
                                         break;
                                     }
@@ -410,7 +412,7 @@ public class SourceRequestHandler {
                             throw new StatusException(
                                     Status.INTERNAL.withDescription(
                                             "Postgres user must be owner of table "
-                                                    + props.get(ConnectorConfig.TABLE_NAME)));
+                                                    + props.get(DbzConnectorConfig.TABLE_NAME)));
                         }
                     }
                     break;
