@@ -102,7 +102,6 @@ pub struct MetaMetrics {
 
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
-    pub waiting_compaction_bytes: IntGauge,
 }
 
 impl MetaMetrics {
@@ -284,13 +283,6 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let waiting_compaction_bytes = register_int_gauge_with_registry!(
-            "storage_compactor_waiting_compaction_bytes",
-            "compaction bytes to be schedule",
-            registry
-        )
-        .unwrap();
-
         let meta_type = register_int_gauge_vec_with_registry!(
             "meta_num",
             "role of meta nodes in the cluster",
@@ -348,7 +340,6 @@ impl MetaMetrics {
             compact_pending_bytes,
             compact_level_compression_ratio,
             scale_compactor_core_num,
-            waiting_compaction_bytes,
         }
     }
 

@@ -1988,9 +1988,6 @@ where
         self.metrics
             .scale_compactor_core_num
             .set(suggest_scale_out_core as i64);
-        self.metrics
-            .waiting_compaction_bytes
-            .set(info.waiting_compaction_bytes as i64);
 
         tracing::info!(
             "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
