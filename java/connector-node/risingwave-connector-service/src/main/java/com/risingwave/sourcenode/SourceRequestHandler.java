@@ -294,27 +294,60 @@ public class SourceRequestHandler {
                     }
                     // check whether publication exists
                     boolean publicationExists = false;
-                    try (var stmt =
-                            conn.prepareStatement(
-                                    sqlStmts.getProperty("postgres.publication_att"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
-                        var res = stmt.executeQuery();
+                    float version = 0;
+                    try (var stmt = conn.createStatement()) {
+                        var res = stmt.executeQuery(sqlStmts.getProperty("postgres.version"));
                         while (res.next()) {
-                            String[] columnsPub = (String[]) res.getArray("attnames").getArray();
-                            var sourceSchema = validate.getTableSchema();
-                            for (int i = 0; i < sourceSchema.getColumnsCount(); i++) {
-                                String columnName = sourceSchema.getColumns(i).getName();
-                                if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
+                            version = res.getFloat("setting");
+                        }
+                    }
+                    if (version == 0) {
+                        throw new StatusException(
+                                Status.INTERNAL.withDescription(
+                                        "Failed to get postgres version"
+                                                + props.get(ConnectorConfig.TABLE_NAME)));
+                    }
+                    // pg 15 and up supports partial publication of table
+                    // check whether publication covers all columns
+                    if (version >= 15) {
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.publication_att"))) {
+                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                String[] columnsPub =
+                                        (String[]) res.getArray("attnames").getArray();
+                                var sourceSchema = validate.getTableSchema();
+                                for (int i = 0; i < sourceSchema.getColumnsCount(); i++) {
+                                    String columnName = sourceSchema.getColumns(i).getName();
+                                    if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
+                                        break;
+                                    }
+                                    if (i == sourceSchema.getColumnsCount() - 1) {
+                                        publicationExists = true;
+                                    }
+                                }
+                                if (publicationExists) {
+                                    LOG.info("publication exists");
                                     break;
                                 }
-                                if (i == sourceSchema.getColumnsCount() - 1) {
-                                    publicationExists = true;
-                                }
                             }
-                            if (publicationExists) {
-                                LOG.error("PUBLICATION FOUND!");
-                                break;
+                        }
+                    } else { // check directly whether publication exists
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.publication_cnt"))) {
+                            stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                if (res.getInt("count") > 0) {
+                                    publicationExists = true;
+                                    LOG.info("publication exists");
+                                    break;
+                                }
                             }
                         }
                     }
@@ -350,7 +383,7 @@ public class SourceRequestHandler {
                             var res = stmt.executeQuery();
                             while (res.next()) {
                                 owner = res.getString("tableowner");
-                                if (owner == props.get(ConnectorConfig.USER)) {
+                                if (owner.equals(props.get(ConnectorConfig.USER))) {
                                     isTableOwner = true;
                                     break;
                                 }
