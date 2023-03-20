@@ -926,7 +926,8 @@ where
         table.name = table_name.to_string();
         table.definition = alter_relation_rename(&table.definition, table_name);
 
-        // 3. update all relations that depend on this table, note that indexes are not included.
+        // 3. update, commit and notify all relations that depend on this table, note that indexes
+        // are not included.
         self.alter_relation_name_refs_inner(
             database_core,
             table_id,
@@ -993,8 +994,8 @@ where
         to_update_sinks.iter().for_each(|sink| {
             sinks.insert(sink.id, sink.clone());
         });
-        if let Some(source) = to_update_source {
-            sources.insert(source.id, source);
+        if let Some(source) = &to_update_source {
+            sources.insert(source.id, source.clone());
         }
         commit_meta!(self, tables, views, sinks, sources)?;
 
@@ -1013,6 +1014,11 @@ where
         for sink in to_update_sinks {
             version = self
                 .notify_frontend(Operation::Update, Info::Sink(sink))
+                .await;
+        }
+        if let Some(source) = to_update_source {
+            version = self
+                .notify_frontend(Operation::Update, Info::Source(source))
                 .await;
         }
 
@@ -1086,6 +1092,41 @@ where
             .await;
 
         Ok(version)
+    }
+
+    pub async fn alter_source_name(
+        &self,
+        source_id: SourceId,
+        source_name: &str,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut *self.core.lock().await;
+        let database_core = &mut core.database;
+        database_core.ensure_source_id(source_id)?;
+
+        // 1. validate new source name.
+        let mut source = database_core.sources.get(&source_id).unwrap().clone();
+        database_core.check_relation_name_duplicated(&(
+            source.database_id,
+            source.schema_id,
+            source_name.to_string(),
+        ))?;
+
+        // 2. rename source and its definition.
+        let old_name = source.name.clone();
+        source.name = source_name.to_string();
+
+        // 3. update, commit and notify all relations that depend on this source.
+        self.alter_relation_name_refs_inner(
+            database_core,
+            source_id,
+            &old_name,
+            source_name,
+            vec![],
+            vec![],
+            vec![],
+            Some(source),
+        )
+        .await
     }
 
     pub async fn alter_index_name(

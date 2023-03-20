@@ -16,6 +16,16 @@ CREATE SINK sink AS SELECT mv3.v1 AS v1, mv3.v21 AS v2 FROM mv AS mv3 WITH (
 );
 
 statement ok
+CREATE SOURCE src (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end  = '10',
+    datagen.rows.per.second='15',
+    datagen.split.num = '1'
+) ROW FORMAT JSON;
+
+statement ok
 CREATE VIEW v1 AS ( SELECT * FROM t_as WHERE id = 1);
 
 statement ok
@@ -122,6 +132,17 @@ SELECT * from v4
 ----
 1 (1,(1,2)) 1 (1,(1,2))
 2 (2,(2,4)) 2 (2,(2,4))
+
+statement ok
+CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src;
+
+statement ok
+ALTER SOURCE src RENAME TO src1;
+
+query TT
+SHOW CREATE MATERIALIZED VIEW mv4;
+----
+public.mv4 CREATE MATERIALIZED VIEW mv4 AS SELECT * FROM src1 AS src
 
 statement ok
 DROP SINK sink1;

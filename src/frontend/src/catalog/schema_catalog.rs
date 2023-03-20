@@ -183,6 +183,22 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
+    pub fn update_source(&mut self, prost: &PbSource) {
+        let name = prost.name.clone();
+        let id = prost.id;
+        let source = SourceCatalog::from(prost);
+        let source_ref = Arc::new(source);
+
+        let old_source = self.source_by_id.get(&id).unwrap();
+        // check if source name get updated.
+        if old_source.name != name {
+            self.source_by_name.remove(&old_source.name);
+        }
+
+        self.source_by_name.insert(name, source_ref.clone());
+        self.source_by_id.insert(id, source_ref);
+    }
+
     pub fn create_sink(&mut self, prost: &PbSink) {
         let name = prost.name.clone();
         let id = prost.id;
