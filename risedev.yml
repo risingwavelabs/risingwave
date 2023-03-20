@@ -502,8 +502,8 @@ profile:
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
-      # - use: etcd
-      #   unsafe-no-fsync: true
+      - use: etcd
+        unsafe-no-fsync: true
       - use: meta-node
       - use: opendal
         engine: fs
