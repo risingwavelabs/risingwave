@@ -57,6 +57,8 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
+    is_high_cache_dirty: bool,
+
     /// Data types for the full row.
     ///
     /// For debug formatting only.
@@ -116,13 +118,16 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    fn insert(
+    #[allow(clippy::too_many_arguments)]
+    async fn insert<S: StateStore>(
         &mut self,
+        group_key: Option<impl GroupKey>,
+        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    );
+    ) -> StreamExecutorResult<()>;
 
     /// Delete input row from the cache.
     ///
@@ -163,6 +168,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
+            is_high_cache_dirty: false,
             data_types,
         }
     }
@@ -217,16 +223,18 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 
 #[async_trait]
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(
+    async fn insert<S: StateStore>(
         &mut self,
+        group_key: Option<impl GroupKey>,
+        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) {
+    ) -> StreamExecutorResult<()> {
         if !self.is_low_cache_full() {
             self.low.insert(cache_key, (&row).into());
-            return;
+            return Ok(());
         }
         let elem_to_compare_with_middle =
             if let Some(low_last) = self.low.last_entry()
@@ -246,7 +254,7 @@ impl TopNCacheTrait for TopNCache<false> {
             );
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_compare_with_middle.1);
-            return;
+            return Ok(());
         }
 
         let elem_to_compare_with_high = {
@@ -268,6 +276,20 @@ impl TopNCacheTrait for TopNCache<false> {
         };
 
         if !self.is_high_cache_full() {
+            let need_refill = match self.high.last_key_value() {
+                Some(high_last) => elem_to_compare_with_high.0 > *high_last.0,
+                None => true,
+            };
+            if need_refill {
+                managed_state
+                    .fill_high_cache(
+                        group_key,
+                        self,
+                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.high_capacity,
+                    )
+                    .await?;
+            }
             self.high
                 .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
         } else {
@@ -278,6 +300,8 @@ impl TopNCacheTrait for TopNCache<false> {
                     .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
             }
         }
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -293,15 +317,30 @@ impl TopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
             // The row is in high
             self.high.remove(&cache_key);
+            self.is_high_cache_dirty = true;
         } else if self.is_low_cache_full()
             && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
+            // The row is in mid
+            // Try to fill the high cache if it is empty
+            if self.high.is_empty() {
+                managed_state
+                    .fill_high_cache(
+                        group_key,
+                        self,
+                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.high_capacity,
+                    )
+                    .await?;
+            }
+
             self.middle.remove(&cache_key);
             res_ops.push(Op::Delete);
             res_rows.push((&row).into());
 
             // Bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
+                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 res_ops.push(Op::Insert);
                 res_rows.push(high_first.1.clone());
@@ -318,8 +357,21 @@ impl TopNCacheTrait for TopNCache<false> {
                 res_rows.push(middle_first.1.clone());
                 self.low.insert(middle_first.0, middle_first.1);
 
+                // Try to fill the high cache if it is empty
+                if self.high.is_empty() {
+                    managed_state
+                        .fill_high_cache(
+                            group_key,
+                            self,
+                            self.middle.last_key_value().unwrap().0.clone(),
+                            self.high_capacity,
+                        )
+                        .await?;
+                }
+
                 // Bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
+                    self.is_high_cache_dirty = true;
                     let high_first = self.high.pop_first().unwrap();
                     res_ops.push(Op::Insert);
                     res_rows.push(high_first.1.clone());
@@ -328,34 +380,21 @@ impl TopNCacheTrait for TopNCache<false> {
             }
         }
 
-        // We should always refill the high cache after a delete. If high cache is not full before
-        // the delete, there should be no new rows in the state table.
-        //
-        // TODO: can we optimize fill_high_cache because we only need to fill one element?
-        if self.high.len() == self.high_capacity - 1 {
-            managed_state
-                .fill_high_cache(
-                    group_key,
-                    self,
-                    self.high.last_key_value().unwrap().0.clone(),
-                    self.high_capacity,
-                )
-                .await?;
-        }
-
         Ok(())
     }
 }
 
 #[async_trait]
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(
+    async fn insert<S: StateStore>(
         &mut self,
+        group_key: Option<impl GroupKey>,
+        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) {
+    ) -> StreamExecutorResult<()> {
         assert!(
             self.low.is_empty(),
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
@@ -370,7 +409,7 @@ impl TopNCacheTrait for TopNCache<true> {
             );
             res_ops.push(Op::Insert);
             res_rows.push((&elem_to_compare_with_middle.1).into());
-            return;
+            return Ok(());
         }
 
         let sort_key = &elem_to_compare_with_middle.0 .0;
@@ -426,6 +465,20 @@ impl TopNCacheTrait for TopNCache<true> {
                 // The row is in high.
                 let elem_to_compare_with_high = elem_to_compare_with_middle;
                 if !self.is_high_cache_full() {
+                    let need_refill = match self.high.last_key_value() {
+                        Some(high_last) => elem_to_compare_with_high.0 > *high_last.0,
+                        None => true,
+                    };
+                    if need_refill {
+                        managed_state
+                            .fill_high_cache(
+                                group_key,
+                                self,
+                                self.middle.last_key_value().unwrap().0.clone(),
+                                self.high_capacity,
+                            )
+                            .await?;
+                    }
                     self.high.insert(
                         elem_to_compare_with_high.0,
                         (&elem_to_compare_with_high.1).into(),
@@ -442,6 +495,8 @@ impl TopNCacheTrait for TopNCache<true> {
                 }
             }
         }
+
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -463,6 +518,7 @@ impl TopNCacheTrait for TopNCache<true> {
         if sort_key > middle_last_order_by {
             // The row is in high.
             self.high.remove(&cache_key);
+            self.is_high_cache_dirty = true;
         } else {
             // The row is in middle
             self.middle.remove(&cache_key);
@@ -473,8 +529,21 @@ impl TopNCacheTrait for TopNCache<true> {
                 return Ok(());
             }
 
+            // Try to fill the high cache if it is empty
+            if self.high.is_empty() {
+                managed_state
+                    .fill_high_cache(
+                        group_key,
+                        self,
+                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.high_capacity,
+                    )
+                    .await?;
+            }
+
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
+                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 let high_first_order_by = high_first.0 .0.clone();
                 assert!(high_first_order_by > middle_last_order_by);
@@ -496,22 +565,6 @@ impl TopNCacheTrait for TopNCache<true> {
                     self.middle.insert(ordered_pk_row, row);
                 }
             }
-        }
-
-        // We should always refill the high cache after a delete. If high cache is not full before
-        // the delete, there should be no new rows in the state table.
-        //
-        // TODO: can we optimize fill_high_cache because we only need to fill one element?
-        if self.high.len() == self.high_capacity - 1 {
-            assert!(!self.high.is_empty(), "high_capacity should >= 2");
-            managed_state
-                .fill_high_cache(
-                    group_key,
-                    self,
-                    self.high.last_key_value().unwrap().0.clone(),
-                    self.high_capacity,
-                )
-                .await?;
         }
 
         Ok(())

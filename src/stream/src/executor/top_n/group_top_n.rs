@@ -191,7 +191,16 @@ where
             match op {
                 Op::Insert | Op::UpdateInsert => {
                     self.managed_state.insert(row_ref);
-                    cache.insert(cache_key, row_ref, &mut res_ops, &mut res_rows);
+                    cache
+                        .insert(
+                            Some(group_key),
+                            &mut self.managed_state,
+                            cache_key,
+                            row_ref,
+                            &mut res_ops,
+                            &mut res_rows,
+                        )
+                        .await?;
                 }
 
                 Op::Delete | Op::UpdateDelete => {

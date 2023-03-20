@@ -192,7 +192,15 @@ where
                     // First insert input row to state store
                     self.managed_state.insert(row_ref);
                     self.cache
-                        .insert(cache_key, row_ref, &mut res_ops, &mut res_rows)
+                        .insert(
+                            NO_GROUP_KEY,
+                            &mut self.managed_state,
+                            cache_key,
+                            row_ref,
+                            &mut res_ops,
+                            &mut res_rows,
+                        )
+                        .await?
                 }
 
                 Op::Delete | Op::UpdateDelete => {
