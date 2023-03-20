@@ -435,7 +435,7 @@ impl Binder {
                         &self.auth_context.user_name,
                     )?
                     .get_function_by_name_args(
-                        &func_name,
+                        func_name,
                         &args.iter().map(|arg| arg.return_type()).collect_vec(),
                     ) && matches!(func.kind, FunctionKind::Table { .. })
                 {
@@ -458,7 +458,7 @@ impl Binder {
 
                 self.bind_table_to_context(columns, tf.name().to_string(), alias)?;
 
-                return Ok(Relation::TableFunction(Box::new(tf)));
+                Ok(Relation::TableFunction(Box::new(tf)))
             }
             TableFactor::Derived {
                 lateral,
