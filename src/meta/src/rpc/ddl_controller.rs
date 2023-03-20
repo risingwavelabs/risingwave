@@ -146,7 +146,7 @@ where
                         .await
                 }
                 DdlCommand::AlterRelationName(relation, name) => {
-                    ctrl.alter_relation_table(relation, &name).await
+                    ctrl.alter_relation_name(relation, &name).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -712,7 +712,7 @@ where
             .await
     }
 
-    async fn alter_relation_table(
+    async fn alter_relation_name(
         &self,
         relation: Relation,
         new_name: &str,
