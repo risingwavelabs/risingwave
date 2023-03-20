@@ -70,6 +70,10 @@ select * from extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d
 ----
 192.168.0.14 192.168.0.1 861 8374
 
+query TTII
+select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d971b900000000080020200493310000020405b4' :: BYTEA)).*;
+----
+192.168.0.14 192.168.0.1 861 8374
 
 # TODO: drop function without arguments
 
