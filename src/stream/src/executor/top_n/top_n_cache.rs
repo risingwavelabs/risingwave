@@ -14,10 +14,13 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -53,6 +56,52 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
+
+    /// Data types for the full row.
+    ///
+    /// For debug formatting only.
+    data_types: Vec<DataType>,
+}
+
+impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TopNCache {{\n  offset: {}, limit: {}, high_capacity: {},\n",
+            self.offset, self.limit, self.high_capacity
+        )?;
+
+        fn format_cache(
+            f: &mut std::fmt::Formatter<'_>,
+            cache: &BTreeMap<CacheKey, CompactedRow>,
+            data_types: &[DataType],
+        ) -> std::fmt::Result {
+            if cache.is_empty() {
+                return write!(f, "    <empty>");
+            }
+            write!(
+                f,
+                "    {}",
+                cache
+                    .iter()
+                    .format_with("\n    ", |item, f| f(&format_args!(
+                        "{:?}, {:?}",
+                        item.0,
+                        item.1.deserialize(data_types).unwrap().to_pretty_string(),
+                    )))
+            )
+        }
+
+        write!(f, "  low:\n")?;
+        format_cache(f, &self.low, &self.data_types)?;
+        write!(f, "\n  middle:\n")?;
+        format_cache(f, &self.middle, &self.data_types)?;
+        write!(f, "\n  high:\n")?;
+        format_cache(f, &self.high, &self.data_types)?;
+
+        write!(f, "\n}}")?;
+        Ok(())
+    }
 }
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
@@ -96,7 +145,8 @@ pub trait TopNCacheTrait {
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn new(offset: usize, limit: usize) -> Self {
+    /// `data_types` -- Data types for the full row.
+    pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
         assert!(limit != 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -113,6 +163,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
+            data_types,
         }
     }
 
@@ -137,7 +188,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     pub fn is_middle_cache_full(&self) -> bool {
         // For WITH_TIES, the middle cache can exceed the capacity.
         if !WITH_TIES {
-            assert!(self.middle.len() <= self.limit);
+            assert!(
+                self.middle.len() <= self.limit,
+                "the middle cache exceeds the capacity\n{self:?}"
+            );
         }
         let full = self.middle.len() >= self.limit;
         if full {

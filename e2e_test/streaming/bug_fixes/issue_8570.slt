@@ -1,0 +1,45 @@
+# https://github.com/risingwavelabs/risingwave/issues/8570
+# TopN cache invalidation issue
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(x int);
+
+statement ok
+create materialized view t_singleton as select * from t order by x limit 100;
+
+statement ok
+create materialized view mv as select * from t_singleton order by x limit 1;
+
+statement ok
+insert into t values (1), (2), (3), (4);
+
+statement ok
+delete from t where x = 2;
+
+statement ok
+insert into t values (5);
+
+statement ok
+delete from t where x = 1;
+
+statement ok
+insert into t values (6);
+
+statement ok
+delete from t where x = 3;
+
+statement ok
+delete from t where x = 4;
+
+# Shouldn't panic here
+statement ok
+insert into t values (1);
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop table t;

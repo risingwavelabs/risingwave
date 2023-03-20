@@ -19,6 +19,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
+use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum};
 use crate::util::ordered::OrderedRowSerde;
 use crate::util::value_encoding;
@@ -144,6 +145,18 @@ pub trait RowExt: Row {
         Self: Sized,
     {
         assert_row(Project::new(self, indices))
+    }
+
+    fn to_pretty_string(&self) -> String {
+        let mut s = Vec::with_capacity(self.len());
+        for datum in self.iter() {
+            let str = match datum {
+                None => "NULL".to_owned(),
+                Some(scalar) => scalar.to_text(),
+            };
+            s.push(str);
+        }
+        s.join(" | ")
     }
 }
 

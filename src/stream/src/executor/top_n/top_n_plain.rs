@@ -30,7 +30,7 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 /// `TopNExecutor` works with input with modification, it keeps all the data
 /// records/rows that have been seen, and returns topN records overall.
 pub type TopNExecutor<S, const WITH_TIES: bool> =
-    TopNExecutorWrapper<InnerTopNExecutorNew<S, WITH_TIES>>;
+    TopNExecutorWrapper<InnerTopNExecutor<S, WITH_TIES>>;
 
 impl<S: StateStore> TopNExecutor<S, false> {
     #[allow(clippy::too_many_arguments)]
@@ -48,7 +48,7 @@ impl<S: StateStore> TopNExecutor<S, false> {
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerTopNExecutorNew::new(
+            inner: InnerTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -76,7 +76,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerTopNExecutorNew::new(
+            inner: InnerTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -102,7 +102,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
     ) -> StreamResult<Self> {
         let info = input.info();
 
-        let mut inner = InnerTopNExecutorNew::new(
+        let mut inner = InnerTopNExecutor::new(
             info,
             storage_key,
             offset_and_limit,
@@ -117,7 +117,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
     }
 }
 
-pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
+pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// The storage key indices of the `TopNExecutor`
@@ -132,7 +132,7 @@ pub struct InnerTopNExecutorNew<S: StateStore, const WITH_TIES: bool> {
     cache_key_serde: CacheKeySerde,
 }
 
-impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
+impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
     /// # Arguments
     ///
     /// `storage_key` -- the storage pk. It's composed of the ORDER BY columns and the missing
@@ -158,6 +158,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
         let cache_key_serde =
             create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+        let data_types = schema.data_types();
 
         Ok(Self {
             info: ExecutorInfo {
@@ -167,14 +168,14 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutorNew<S, WITH_TIES> {
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
         })
     }
 }
 
 #[async_trait]
-impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutorNew<S, WITH_TIES>
+impl<S: StateStore, const WITH_TIES: bool> TopNExecutorBase for InnerTopNExecutor<S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
