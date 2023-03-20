@@ -2372,14 +2372,17 @@ impl Parser {
             self.parse_alter_view(true)
         } else if self.parse_keyword(Keyword::SINK) {
             self.parse_alter_sink()
+        } else if self.parse_keyword(Keyword::SOURCE) {
+            self.parse_alter_source()
         } else if self.parse_keyword(Keyword::USER) {
             self.parse_alter_user()
         } else if self.parse_keyword(Keyword::SYSTEM) {
             self.parse_alter_system()
-        } else if self.parse_keyword(Keyword::SOURCE) {
-            self.parse_alter_source()
         } else {
-            self.expected("TABLE or USER after ALTER", self.peek_token())
+            self.expected(
+                "TABLE, INDEX, MATERIALIZED, VIEW, SINK, SOURCE, USER or SYSTEM after ALTER",
+                self.peek_token(),
+            )
         }
     }
 
