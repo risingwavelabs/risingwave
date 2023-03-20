@@ -337,7 +337,16 @@ impl<S: MetaStore> BackupWorker<S> {
             let mut snapshot_builder =
                 MetaSnapshotBuilder::new(backup_manager_clone.env.meta_store_ref());
             // Reuse job id as snapshot id.
-            snapshot_builder.build(job_id).await?;
+            let hummock_manager = backup_manager_clone.hummock_manager.clone();
+            snapshot_builder
+                .build(job_id, async move {
+                    hummock_manager
+                        .read_checkpoint()
+                        .await
+                        .map(|c| c.unwrap().checkpoint.unwrap())
+                        .map_err(|e| BackupError::StateStorage(e.into()))
+                })
+                .await?;
             let snapshot = snapshot_builder.finish()?;
             backup_manager_clone
                 .backup_store

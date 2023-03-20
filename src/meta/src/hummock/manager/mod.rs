@@ -162,6 +162,7 @@ macro_rules! read_lock {
     };
 }
 pub(crate) use read_lock;
+use risingwave_backup::{checkpoint_path, object_store_client};
 use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGroupId};
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
@@ -201,7 +202,6 @@ pub(crate) use start_measure_real_process_timer;
 use super::compaction::ManualCompactionSelector;
 use super::Compactor;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
-use crate::hummock::manager::checkpoint::{checkpoint_path, object_store_client};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -282,9 +282,11 @@ where
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
         catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
-        let object_store =
-            Arc::new(object_store_client(env.system_params_manager().get_params().await).await);
-        let checkpoint_path = checkpoint_path(&env.system_params_manager().get_params().await);
+        let sys_params = env.system_params_manager().get_params().await;
+        let state_store_url = sys_params.state_store("".to_string());
+        let state_store_dir = sys_params.data_directory();
+        let object_store = Arc::new(object_store_client(&state_store_url).await);
+        let checkpoint_path = checkpoint_path(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
             env,

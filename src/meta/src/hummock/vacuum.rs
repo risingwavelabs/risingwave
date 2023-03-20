@@ -75,7 +75,7 @@ where
                 .delete_version_deltas(batch_size)
                 .await?;
             total_deleted += deleted;
-            if remain < batch_size {
+            if total_deleted == 0 || remain < batch_size {
                 break;
             }
         }

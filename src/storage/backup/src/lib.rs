@@ -37,10 +37,13 @@ pub mod storage;
 
 use std::collections::HashSet;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionExt;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
+use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
+use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
 use risingwave_pb::backup_service::{PbMetaSnapshotManifest, PbMetaSnapshotMetadata};
 use risingwave_pb::hummock::HummockVersion;
 use serde::{Deserialize, Serialize};
@@ -117,4 +120,27 @@ impl From<&MetaSnapshotManifest> for PbMetaSnapshotManifest {
             snapshot_metadata: m.snapshot_metadata.iter().map_into().collect_vec(),
         }
     }
+}
+
+const CHECKPOINT_FILE_NAME: &str = "checkpoint";
+
+/// Creates the object store to persist checkpoint, using the same object store url with
+/// `state_store`.
+pub async fn object_store_client(state_store_url: &str) -> ObjectStoreImpl {
+    let url = match state_store_url {
+        hummock if hummock.starts_with("hummock+") => {
+            hummock.strip_prefix("hummock+").unwrap().to_string()
+        }
+        _ => "memory".to_string(),
+    };
+    parse_remote_object_store(
+        &url,
+        Arc::new(ObjectStoreMetrics::unused()),
+        "Version Checkpoint",
+    )
+    .await
+}
+
+pub fn checkpoint_path(dir: &str) -> String {
+    format!("{}/{}", dir, CHECKPOINT_FILE_NAME)
 }

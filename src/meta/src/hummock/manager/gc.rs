@@ -74,6 +74,11 @@ where
             .range(..=versioning.checkpoint.checkpoint.as_ref().unwrap().id)
             .map(|(k, _)| *k)
             .collect_vec();
+        // If there is any safe point, skip this to ensure meta backup has required delta logs to
+        // replay version.
+        if !versioning.version_safe_points.is_empty() {
+            return Ok((0, deltas_to_delete.len()));
+        }
         let mut hummock_version_deltas =
             BTreeMapTransaction::new(&mut versioning.hummock_version_deltas);
         let batch = deltas_to_delete

@@ -14,14 +14,10 @@
 
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
 
 use function_name::named;
 use itertools::Itertools;
-use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockVersionUpdateExt;
-use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use risingwave_object_store::object::{parse_remote_object_store, ObjectStoreImpl};
 use risingwave_pb::hummock::hummock_version_checkpoint::StaleObjects;
 use risingwave_pb::hummock::HummockVersionCheckpoint;
 
@@ -31,15 +27,13 @@ use crate::hummock::metrics_utils::trigger_stale_ssts_stat;
 use crate::hummock::HummockManager;
 use crate::storage::MetaStore;
 
-const CHECKPOINT_FILE_NAME: &str = "checkpoint";
-
 /// A hummock version checkpoint compacts previous hummock version delta logs, and stores stale
 /// objects from those delta logs.
 impl<S> HummockManager<S>
 where
     S: MetaStore,
 {
-    pub(super) async fn read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
+    pub(crate) async fn read_checkpoint(&self) -> Result<Option<HummockVersionCheckpoint>> {
         // We `list` then `read`. Because from `read`'s error, we cannot tell whether it's "object
         // not found" or other kind of error.
         use prost::Message;
@@ -73,7 +67,7 @@ where
 
     /// Creates a hummock version checkpoint.
     /// Returns the diff between new and old checkpoint id.
-    /// Note that this method doesn't allow no concurrent caller, because internally it doesn't hold
+    /// Note that this method must not be called concurrently, because internally it doesn't hold
     /// lock throughout the method.
     #[named]
     pub async fn create_version_checkpoint(&self, min_delta_log_num: u64) -> Result<u64> {
@@ -128,28 +122,4 @@ where
 
         Ok(new_checkpoint_id - old_checkpoint_id)
     }
-}
-
-/// Creates the object store to persist checkpoint, using the same object store url with
-/// `state_store`.
-pub(super) async fn object_store_client(
-    system_params_reader: SystemParamsReader,
-) -> ObjectStoreImpl {
-    let url = match system_params_reader.state_store("".to_string()) {
-        hummock if hummock.starts_with("hummock+") => {
-            hummock.strip_prefix("hummock+").unwrap().to_string()
-        }
-        _ => "memory".to_string(),
-    };
-    parse_remote_object_store(
-        &url,
-        Arc::new(ObjectStoreMetrics::unused()),
-        "Version Checkpoint",
-    )
-    .await
-}
-
-pub(super) fn checkpoint_path(system_params_reader: &SystemParamsReader) -> String {
-    let dir = system_params_reader.data_directory().to_string();
-    format!("{}/{}", dir, CHECKPOINT_FILE_NAME)
 }

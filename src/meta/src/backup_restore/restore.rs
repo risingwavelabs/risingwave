@@ -17,7 +17,9 @@ use itertools::Itertools;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::storage::MetaSnapshotStorageRef;
+use risingwave_backup::{checkpoint_path, object_store_client};
 use risingwave_common::config::MetaBackend;
+use risingwave_pb::hummock::{HummockVersion, HummockVersionCheckpoint};
 
 use crate::backup_restore::utils::{get_backup_store, get_meta_store, MetaStoreBackendImpl};
 use crate::dispatch_meta_store;
@@ -54,9 +56,36 @@ pub struct RestoreOpts {
     /// Directory of storage to fetch meta snapshot from.
     #[clap(long, default_value_t = String::from("backup"))]
     pub storage_directory: String,
+    /// Url of storage to restore hummock version to.
+    #[clap(long, default_value_t = String::from("hummock+memory"))]
+    pub state_store_url: String,
+    /// Directory of storage to restore hummock version to.
+    #[clap(long, default_value_t = String::from("data"))]
+    pub state_store_dir: String,
     /// Print the target snapshot, but won't restore to meta store.
     #[clap(long)]
     pub dry_run: bool,
+}
+
+async fn restore_hummock_version(
+    state_store_url: &str,
+    state_store_dir: &str,
+    hummock_version: &HummockVersion,
+) -> BackupResult<()> {
+    let object_store = object_store_client(state_store_url).await;
+    let checkpoint_path = checkpoint_path(state_store_dir);
+    let checkpoint = HummockVersionCheckpoint {
+        checkpoint: Some(hummock_version.clone()),
+        // Ignore stale objects. Full GC will clear them.
+        stale_objects: Default::default(),
+    };
+    use prost::Message;
+    let buf = checkpoint.encode_to_vec();
+    object_store
+        .upload(&checkpoint_path, buf.into())
+        .await
+        .map_err(|e| BackupError::StateStorage(e.into()))?;
+    Ok(())
 }
 
 async fn restore_metadata_model<S: MetaStore, T: MetadataModel + Send + Sync>(
@@ -205,6 +234,12 @@ async fn restore_impl(
     if opts.dry_run {
         return Ok(());
     }
+    restore_hummock_version(
+        &opts.state_store_url,
+        &opts.state_store_dir,
+        &target_snapshot.metadata.hummock_version,
+    )
+    .await?;
     dispatch_meta_store!(meta_store.clone(), store, {
         restore_metadata(store.clone(), target_snapshot.clone()).await?;
     });

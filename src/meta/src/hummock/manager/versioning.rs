@@ -83,14 +83,11 @@ pub struct Versioning {
         BTreeMap<CompactionGroupId, /* SST ids */ Vec<HummockSstableId>>,
     >,
     /// `version_safe_points` is similar to `pinned_versions` expect for being a transient state.
-    /// Hummock versions GE than min(safe_point) should not be GCed.
     pub version_safe_points: Vec<HummockVersionId>,
     /// Tables that write limit is trigger for.
     pub write_limit: HashMap<CompactionGroupId, WriteLimit>,
 
     // Persistent states below
-    /// Mapping from id of each hummock version which succeeds checkpoint to its
-    /// `HummockVersionDelta`
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     pub pinned_versions: BTreeMap<HummockContextId, HummockPinnedVersion>,
     pub pinned_snapshots: BTreeMap<HummockContextId, HummockPinnedSnapshot>,
