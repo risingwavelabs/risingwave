@@ -173,6 +173,20 @@ export interface HummockVersionDeltas {
   versionDeltas: HummockVersionDelta[];
 }
 
+export interface HummockVersionCheckpoint {
+  checkpoint: HummockVersion | undefined;
+  staleObjects: { [key: number]: HummockVersionCheckpoint_StaleObjects };
+}
+
+export interface HummockVersionCheckpoint_StaleObjects {
+  id: number[];
+}
+
+export interface HummockVersionCheckpoint_StaleObjectsEntry {
+  key: number;
+  value: HummockVersionCheckpoint_StaleObjects | undefined;
+}
+
 /** We will have two epoch after decouple */
 export interface HummockSnapshot {
   /** Epoch with checkpoint, we will read durable data with it. */
@@ -1587,6 +1601,116 @@ export const HummockVersionDeltas = {
   fromPartial<I extends Exact<DeepPartial<HummockVersionDeltas>, I>>(object: I): HummockVersionDeltas {
     const message = createBaseHummockVersionDeltas();
     message.versionDeltas = object.versionDeltas?.map((e) => HummockVersionDelta.fromPartial(e)) || [];
+    return message;
+  },
+};
+
+function createBaseHummockVersionCheckpoint(): HummockVersionCheckpoint {
+  return { checkpoint: undefined, staleObjects: {} };
+}
+
+export const HummockVersionCheckpoint = {
+  fromJSON(object: any): HummockVersionCheckpoint {
+    return {
+      checkpoint: isSet(object.checkpoint) ? HummockVersion.fromJSON(object.checkpoint) : undefined,
+      staleObjects: isObject(object.staleObjects)
+        ? Object.entries(object.staleObjects).reduce<{ [key: number]: HummockVersionCheckpoint_StaleObjects }>(
+          (acc, [key, value]) => {
+            acc[Number(key)] = HummockVersionCheckpoint_StaleObjects.fromJSON(value);
+            return acc;
+          },
+          {},
+        )
+        : {},
+    };
+  },
+
+  toJSON(message: HummockVersionCheckpoint): unknown {
+    const obj: any = {};
+    message.checkpoint !== undefined &&
+      (obj.checkpoint = message.checkpoint ? HummockVersion.toJSON(message.checkpoint) : undefined);
+    obj.staleObjects = {};
+    if (message.staleObjects) {
+      Object.entries(message.staleObjects).forEach(([k, v]) => {
+        obj.staleObjects[k] = HummockVersionCheckpoint_StaleObjects.toJSON(v);
+      });
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionCheckpoint>, I>>(object: I): HummockVersionCheckpoint {
+    const message = createBaseHummockVersionCheckpoint();
+    message.checkpoint = (object.checkpoint !== undefined && object.checkpoint !== null)
+      ? HummockVersion.fromPartial(object.checkpoint)
+      : undefined;
+    message.staleObjects = Object.entries(object.staleObjects ?? {}).reduce<
+      { [key: number]: HummockVersionCheckpoint_StaleObjects }
+    >((acc, [key, value]) => {
+      if (value !== undefined) {
+        acc[Number(key)] = HummockVersionCheckpoint_StaleObjects.fromPartial(value);
+      }
+      return acc;
+    }, {});
+    return message;
+  },
+};
+
+function createBaseHummockVersionCheckpoint_StaleObjects(): HummockVersionCheckpoint_StaleObjects {
+  return { id: [] };
+}
+
+export const HummockVersionCheckpoint_StaleObjects = {
+  fromJSON(object: any): HummockVersionCheckpoint_StaleObjects {
+    return { id: Array.isArray(object?.id) ? object.id.map((e: any) => Number(e)) : [] };
+  },
+
+  toJSON(message: HummockVersionCheckpoint_StaleObjects): unknown {
+    const obj: any = {};
+    if (message.id) {
+      obj.id = message.id.map((e) => Math.round(e));
+    } else {
+      obj.id = [];
+    }
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionCheckpoint_StaleObjects>, I>>(
+    object: I,
+  ): HummockVersionCheckpoint_StaleObjects {
+    const message = createBaseHummockVersionCheckpoint_StaleObjects();
+    message.id = object.id?.map((e) => e) || [];
+    return message;
+  },
+};
+
+function createBaseHummockVersionCheckpoint_StaleObjectsEntry(): HummockVersionCheckpoint_StaleObjectsEntry {
+  return { key: 0, value: undefined };
+}
+
+export const HummockVersionCheckpoint_StaleObjectsEntry = {
+  fromJSON(object: any): HummockVersionCheckpoint_StaleObjectsEntry {
+    return {
+      key: isSet(object.key) ? Number(object.key) : 0,
+      value: isSet(object.value) ? HummockVersionCheckpoint_StaleObjects.fromJSON(object.value) : undefined,
+    };
+  },
+
+  toJSON(message: HummockVersionCheckpoint_StaleObjectsEntry): unknown {
+    const obj: any = {};
+    message.key !== undefined && (obj.key = Math.round(message.key));
+    message.value !== undefined &&
+      (obj.value = message.value ? HummockVersionCheckpoint_StaleObjects.toJSON(message.value) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<HummockVersionCheckpoint_StaleObjectsEntry>, I>>(
+    object: I,
+  ): HummockVersionCheckpoint_StaleObjectsEntry {
+    const message = createBaseHummockVersionCheckpoint_StaleObjectsEntry();
+    message.key = object.key ?? 0;
+    message.value = (object.value !== undefined && object.value !== null)
+      ? HummockVersionCheckpoint_StaleObjects.fromPartial(object.value)
+      : undefined;
     return message;
   },
 };

@@ -510,8 +510,12 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     ));
 
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
-    let mut sub_tasks =
-        hummock::start_hummock_workers(vacuum_manager, compaction_scheduler, &env.opts);
+    let mut sub_tasks = hummock::start_hummock_workers(
+        hummock_manager.clone(),
+        vacuum_manager,
+        compaction_scheduler,
+        &env.opts,
+    );
     sub_tasks.push(
         start_worker_info_monitor(
             cluster_manager.clone(),

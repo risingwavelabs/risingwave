@@ -15,8 +15,7 @@
 use core::panic;
 use std::borrow::{Borrow, BorrowMut};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ops::Bound::{Excluded, Included};
-use std::ops::DerefMut;
+use std::ops::{Bound, DerefMut};
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -28,14 +27,14 @@ use risingwave_common::monitor::rwlock::MonitoredRwLock;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
-    HummockVersionExt, HummockVersionUpdateExt,
+    add_new_sub_level, build_version_delta_after_version, get_compaction_group_ids,
+    get_member_table_ids, try_get_compaction_group_id_by_table_id, HummockVersionExt,
+    HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
     HummockEpoch, HummockSstableId, HummockSstableObjectId, HummockVersionId, SstObjectIdRange,
-    FIRST_VERSION_ID, INVALID_VERSION_ID,
+    INVALID_VERSION_ID,
 };
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::group_delta::DeltaType;
@@ -43,8 +42,8 @@ use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
     version_update_payload, CompactTask, CompactTaskAssignment, CompactionConfig, GroupDelta,
     HummockPinnedSnapshot, HummockPinnedVersion, HummockSnapshot, HummockVersion,
-    HummockVersionDelta, HummockVersionDeltas, HummockVersionStats, IntraLevelDelta, LevelType,
-    TableOption,
+    HummockVersionCheckpoint, HummockVersionDelta, HummockVersionDeltas, HummockVersionStats,
+    IntraLevelDelta, LevelType, TableOption,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use tokio::sync::oneshot::Sender;
@@ -78,6 +77,7 @@ mod tests;
 mod versioning;
 pub use versioning::HummockVersionSafePoint;
 use versioning::*;
+mod checkpoint;
 mod compaction;
 mod worker;
 
@@ -114,6 +114,9 @@ pub struct HummockManager<S: MetaStore> {
 
     compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
+
+    object_store: ObjectStoreRef,
+    checkpoint_path: String,
 }
 
 pub type HummockManagerRef<S> = Arc<HummockManager<S>>;
@@ -163,6 +166,7 @@ use risingwave_hummock_sdk::compaction_group::{StateTableId, StaticCompactionGro
 use risingwave_hummock_sdk::table_stats::{
     add_prost_table_stats_map, purge_prost_table_stats, PbTableStatsMap,
 };
+use risingwave_object_store::object::ObjectStoreRef;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
@@ -197,6 +201,7 @@ pub(crate) use start_measure_real_process_timer;
 use super::compaction::ManualCompactionSelector;
 use super::Compactor;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+use crate::hummock::manager::checkpoint::{checkpoint_path, object_store_client};
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
@@ -277,6 +282,9 @@ where
         compaction_group_manager: tokio::sync::RwLock<CompactionGroupManager>,
         catalog_manager: CatalogManagerRef<S>,
     ) -> Result<HummockManagerRef<S>> {
+        let object_store =
+            Arc::new(object_store_client(env.system_params_manager().get_params().await).await);
+        let checkpoint_path = checkpoint_path(&env.system_params_manager().get_params().await);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let instance = HummockManager {
             env,
@@ -301,6 +309,8 @@ where
                 current_epoch: INVALID_EPOCH,
             }),
             event_sender: tx,
+            object_store,
+            checkpoint_path,
         };
         let instance = Arc::new(instance);
         instance.start_worker(rx).await;
@@ -392,8 +402,6 @@ where
                 .map(|assigned| (assigned.key().unwrap(), assigned))
                 .collect();
 
-        let versions = HummockVersion::list(self.env.meta_store()).await?;
-
         let hummock_version_deltas: BTreeMap<_, _> =
             HummockVersionDelta::list(self.env.meta_store())
                 .await?
@@ -401,44 +409,50 @@ where
                 .map(|version_delta| (version_delta.id, version_delta))
                 .collect();
 
-        // Insert the initial version.
-        let mut redo_state = if versions.is_empty() {
-            let mut init_version = HummockVersion {
-                id: FIRST_VERSION_ID,
-                levels: Default::default(),
-                max_committed_epoch: INVALID_EPOCH,
-                safe_epoch: INVALID_EPOCH,
-            };
-            // Initialize independent levels via corresponding compaction groups' config.
-            let default_compaction_config = CompactionConfigBuilder::new().build();
-            for group_id in [
-                StaticCompactionGroupId::StateDefault as CompactionGroupId,
-                StaticCompactionGroupId::MaterializedView as CompactionGroupId,
-            ] {
-                init_version.levels.insert(
-                    group_id,
-                    build_initial_compaction_group_levels(group_id, &default_compaction_config),
-                );
+        let mut is_init = false;
+        // 1. Try to read checkpoint from object store first.
+        let checkpoint_from_object_store = self.read_checkpoint().await?;
+        let mut redo_state = match checkpoint_from_object_store {
+            Some(checkpoint) => {
+                versioning_guard.checkpoint = checkpoint;
+                versioning_guard
+                    .checkpoint
+                    .checkpoint
+                    .as_ref()
+                    .cloned()
+                    .unwrap()
             }
+            None => {
+                // 2. Then, for backward compatibility, try to read checkpoint from meta store.
+                let versions = HummockVersion::list(self.env.meta_store()).await?;
+                let checkpoint_version = if !versions.is_empty() {
+                    versions.into_iter().next().unwrap()
+                } else {
+                    // 3. Lastly, as no record found in stores, create a initial version.
+                    is_init = true;
+                    create_init_version()
+                };
+                versioning_guard.checkpoint = HummockVersionCheckpoint {
+                    checkpoint: Some(checkpoint_version.clone()),
+                    stale_objects: Default::default(),
+                };
+                self.write_checkpoint(&versioning_guard.checkpoint).await?;
+                checkpoint_version
+            }
+        };
+        if is_init {
             versioning_guard.version_stats = HummockVersionStats::default();
-            init_version.insert(self.env.meta_store()).await?;
             versioning_guard
                 .version_stats
                 .insert(self.env.meta_store())
                 .await?;
-            init_version
         } else {
             versioning_guard.version_stats = HummockVersionStats::list(self.env.meta_store())
                 .await?
                 .into_iter()
                 .next()
                 .expect("should contain exact one item");
-            versions
-                .into_iter()
-                .next()
-                .expect("should contain exact one item")
-        };
-        versioning_guard.checkpoint_version = redo_state.clone();
+        }
 
         for version_delta in hummock_version_deltas.values() {
             if version_delta.prev_id == redo_state.id {
@@ -452,7 +466,6 @@ where
             }
             .into(),
         );
-
         versioning_guard.current_version = redo_state;
         versioning_guard.branched_ssts = versioning_guard.current_version.build_branched_sst_info();
         versioning_guard.hummock_version_deltas = hummock_version_deltas;
@@ -468,19 +481,8 @@ where
             .map(|p| (p.context_id, p))
             .collect();
 
-        let checkpoint_id = versioning_guard.checkpoint_version.id;
         versioning_guard.objects_to_delete.clear();
-        versioning_guard.extend_objects_to_delete_from_deltas(..=checkpoint_id, &self.metrics);
-        let preserved_deltas: HashSet<HummockVersionId> =
-            HashSet::from_iter(versioning_guard.objects_to_delete.values().cloned());
-        versioning_guard.deltas_to_delete = versioning_guard
-            .hummock_version_deltas
-            .keys()
-            .cloned()
-            .filter(|id| {
-                *id <= versioning_guard.checkpoint_version.id && !preserved_deltas.contains(id)
-            })
-            .collect_vec();
+        versioning_guard.mark_objects_for_deletion((Bound::Unbounded, Bound::Unbounded));
 
         let all_group_ids = get_compaction_group_ids(&versioning_guard.current_version);
         let configs = self
@@ -1577,47 +1579,6 @@ where
         Ok(SstObjectIdRange::new(start_id, start_id + number as u64))
     }
 
-    /// Tries to checkpoint at min_pinned_version_id
-    ///
-    /// Returns the diff between new and old checkpoint id.
-    #[named]
-    pub async fn proceed_version_checkpoint(&self) -> Result<u64> {
-        let mut versioning_guard = write_lock!(self, versioning).await;
-        let min_pinned_version_id = versioning_guard.min_pinned_version_id();
-        if min_pinned_version_id <= versioning_guard.checkpoint_version.id {
-            return Ok(0);
-        }
-        let versioning = versioning_guard.deref_mut();
-        let mut checkpoint = VarTransaction::new(&mut versioning.checkpoint_version);
-        let old_checkpoint_id = checkpoint.id;
-        let mut new_checkpoint_id = min_pinned_version_id;
-        for (_, version_delta) in versioning
-            .hummock_version_deltas
-            .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
-        {
-            assert_eq!(version_delta.prev_id, checkpoint.id);
-            checkpoint.apply_version_delta(version_delta);
-        }
-        new_checkpoint_id = checkpoint.id;
-        if new_checkpoint_id == old_checkpoint_id {
-            return Ok(0);
-        }
-        commit_multi_var!(self, None, Transaction::default(), checkpoint)?;
-        versioning.extend_objects_to_delete_from_deltas(
-            (Excluded(old_checkpoint_id), Included(new_checkpoint_id)),
-            &self.metrics,
-        );
-        #[cfg(test)]
-        {
-            drop(versioning_guard);
-            self.check_state_consistency().await;
-        }
-        self.metrics
-            .checkpoint_version_id
-            .set(new_checkpoint_id as i64);
-        Ok(new_checkpoint_id - old_checkpoint_id)
-    }
-
     #[named]
     pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
         read_lock!(self, versioning).await.min_pinned_version_id()
@@ -1630,6 +1591,8 @@ where
         use std::borrow::Borrow;
         let mut compaction_guard = write_lock!(self, compaction).await;
         let mut versioning_guard = write_lock!(self, versioning).await;
+        // We don't check `checkpoint` because it's allowed to update its in memory state without
+        // persisting to object store.
         let get_state =
             |compaction_guard: &RwLockWriteGuard<'_, Compaction>,
              versioning_guard: &RwLockWriteGuard<'_, Versioning>| {
@@ -1637,7 +1600,6 @@ where
                 let compact_task_assignment_copy = compaction_guard.compact_task_assignment.clone();
                 let pinned_versions_copy = versioning_guard.pinned_versions.clone();
                 let pinned_snapshots_copy = versioning_guard.pinned_snapshots.clone();
-                let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 let version_stats_copy = versioning_guard.version_stats.clone();
                 (
@@ -1645,7 +1607,6 @@ where
                     compact_task_assignment_copy,
                     pinned_versions_copy,
                     pinned_snapshots_copy,
-                    checkpoint_version_copy,
                     hummock_version_deltas_copy,
                     version_stats_copy,
                 )

@@ -67,7 +67,6 @@ where
     ///
     /// Returns number of deleted deltas
     pub async fn vacuum_metadata(&self) -> MetaResult<usize> {
-        self.hummock_manager.proceed_version_checkpoint().await?;
         let batch_size = 64usize;
         let mut total_deleted = 0;
         loop {
@@ -348,7 +347,7 @@ mod tests {
     use std::time::Duration;
 
     use itertools::Itertools;
-    use risingwave_hummock_sdk::HummockSstableObjectId;
+    use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
     use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
     use risingwave_pb::hummock::VacuumTask;
 
@@ -377,13 +376,19 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             0
         );
+        hummock_manager.pin_version(context_id).await.unwrap();
         let sst_infos = add_test_tables(hummock_manager.as_ref(), context_id).await;
-        // Current state: {v0: [], v1: [test_tables], v2: [test_tables_2, to_delete:test_tables],
-        // v3: [test_tables_2, test_tables_3]}
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
+        hummock_manager.create_version_checkpoint(1).await.unwrap();
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 6);
+        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
 
-        // Makes checkpoint and extends deltas_to_delete. Deletes deltas of v0->v1 and v2->v3.
-        // Delta of v1->v2 cannot be deleted yet because it's used by objects_to_delete.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 5);
+        assert!(hummock_manager.get_objects_to_delete().await.is_empty());
+        hummock_manager
+            .unpin_version_before(context_id, HummockVersionId::MAX)
+            .await
+            .unwrap();
+        assert!(!hummock_manager.get_objects_to_delete().await.is_empty());
         // No SST deletion is scheduled because no available worker.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
@@ -400,9 +405,6 @@ mod tests {
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),
             3
         );
-        // The delta cannot be deleted yet.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 0);
-
         // The vacuum task is reported.
         vacuum
             .report_vacuum_task(VacuumTask {
@@ -415,8 +417,6 @@ mod tests {
             })
             .await
             .unwrap();
-        // The delta can be deleted now.
-        assert_eq!(VacuumManager::vacuum_metadata(&vacuum).await.unwrap(), 1);
         // No objects_to_delete.
         assert_eq!(
             VacuumManager::vacuum_sst_data(&vacuum).await.unwrap().len(),

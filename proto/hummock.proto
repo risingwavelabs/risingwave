@@ -124,6 +124,14 @@ message HummockVersionDeltas {
   repeated HummockVersionDelta version_deltas = 1;
 }
 
+message HummockVersionCheckpoint {
+  message StaleObjects {
+    repeated uint64 id = 1;
+  }
+  HummockVersion checkpoint = 1;
+  map<uint64, StaleObjects> stale_objects = 2;
+}
+
 // We will have two epoch after decouple
 message HummockSnapshot {
   // Epoch with checkpoint, we will read durable data with it.
