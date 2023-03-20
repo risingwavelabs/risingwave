@@ -120,43 +120,48 @@ select '1 mons 1 days 00:00:00.0000001'::INTERVAL;
 ----
 1 mon 1 day
 
-# Tests moved from regress tests due to not matching exactly.
+# parsing large values
 
-# In mixed sign intervals, PostgreSQL displays positive sign after negative
-# (e.g. `-1 mons +1 day`) while we display it without sign
-# (e.g. `-1 mons 1 day`).
-# But the main purpose of this test case is ordering of large values.
-
-statement ok
-CREATE TABLE INTERVAL_TBL_OF (f1 interval);
-
-statement ok
-INSERT INTO INTERVAL_TBL_OF (f1) VALUES
-  ('2147483647 days 2147483647 months'),
-  ('2147483647 days -2147483648 months'),
-  ('1 year'),
-  ('-2147483648 days 2147483647 months'),
-  ('-2147483648 days -2147483648 months');
-
-statement ok
-FLUSH;
-
-query TT
-SELECT r1.*, r2.*
-   FROM INTERVAL_TBL_OF r1, INTERVAL_TBL_OF r2
-   WHERE r1.f1 > r2.f1
-   ORDER BY r1.f1, r2.f1;
+query T
+select '2562047788:00:54.775807'::interval;
 ----
--178956970 years -8 mons 2147483647 days -178956970 years -8 mons -2147483648 days
-1 year                                   -178956970 years -8 mons -2147483648 days
-1 year                                   -178956970 years -8 mons 2147483647 days
-178956970 years 7 mons -2147483648 days  -178956970 years -8 mons -2147483648 days
-178956970 years 7 mons -2147483648 days  -178956970 years -8 mons 2147483647 days
-178956970 years 7 mons -2147483648 days  1 year
-178956970 years 7 mons 2147483647 days   -178956970 years -8 mons -2147483648 days
-178956970 years 7 mons 2147483647 days   -178956970 years -8 mons 2147483647 days
-178956970 years 7 mons 2147483647 days   1 year
-178956970 years 7 mons 2147483647 days   178956970 years 7 mons -2147483648 days
+2562047788:00:54.775807
+
+statement error
+select '2562047788:00:54.775808'::interval;
+
+query T
+select '4 years 2147483599 mon'::interval;
+----
+178956970 years 7 mons
+
+statement error
+select '4 years 2147483600 mon'::interval;
+
+query T
+select '-2562047788:00:54.775807'::interval;
+----
+-2562047788:00:54.775807
+
+query T
+select '-2562047788:00:54.775808'::interval;
+----
+-2562047788:00:54.775808
+
+statement error
+select '-2562047788:00:54.775809'::interval;
+
+query T
+select interval '3 mons -3 days' / 2;
+----
+1 mon 14 days -12:00:00
+
+# The following is an overflow bug present in PostgreSQL 15.2
+# Their `days` overflows to a negative value, leading to the latter smaller
+# than the former. We report an error in this case.
 
 statement ok
-DROP TABLE INTERVAL_TBL_OF;
+select interval '2147483647 mons 2147483647 days' * 0.999999991;
+
+statement error out of range
+select interval '2147483647 mons 2147483647 days' * 0.999999992;

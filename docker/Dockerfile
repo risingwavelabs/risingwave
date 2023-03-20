@@ -34,8 +34,9 @@ RUN rustup self update \
 
 RUN cargo fetch
 
-RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
+RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "static-link static-log-level" && \
   mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
   cargo clean
 
 RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
@@ -47,10 +48,13 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certi
 
 FROM image-base as risingwave
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin/connector-node
+RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=builder /risingwave/lib/librisingwave_java_binding.so /risingwave/lib/librisingwave_java_binding.so
+# Set java.library.path env to /risingwave/lib
+ENV RW_JAVA_BINDING_LIB_PATH /risingwave/lib
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy

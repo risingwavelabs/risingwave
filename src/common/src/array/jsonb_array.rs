@@ -164,6 +164,16 @@ impl JsonbVal {
         let v = Value::from_sql(&Type::JSONB, buf).ok()?;
         Some(Self(v.into()))
     }
+
+    pub fn take(mut self) -> Value {
+        self.0.take()
+    }
+}
+
+impl From<Value> for JsonbVal {
+    fn from(v: Value) -> Self {
+        Self(v.into())
+    }
 }
 
 impl JsonbRef<'_> {
@@ -343,7 +353,7 @@ impl Array for JsonbArray {
         self.data.len()
     }
 
-    fn to_protobuf(&self) -> super::ProstArray {
+    fn to_protobuf(&self) -> super::PbArray {
         // The memory layout contains `serde_json::Value` trees, but in protobuf we transmit this as
         // variable length bytes in value encoding. That is, one buffer of length n+1 containing
         // start and end offsets into the 2nd buffer containing all value bytes concatenated.
@@ -379,10 +389,10 @@ impl Array for JsonbArray {
         ];
 
         let null_bitmap = self.null_bitmap().to_protobuf();
-        super::ProstArray {
+        super::PbArray {
             null_bitmap: Some(null_bitmap),
             values,
-            array_type: super::ProstArrayType::Jsonb as i32,
+            array_type: super::PbArrayType::Jsonb as i32,
             struct_array_data: None,
             list_array_data: None,
         }

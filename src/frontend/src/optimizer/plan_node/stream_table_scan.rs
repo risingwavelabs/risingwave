@@ -18,12 +18,10 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::{
-    ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamIndexScan, StreamNode,
-};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -98,12 +96,14 @@ impl StreamTableScan {
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         chain_type: ChainType,
-    ) -> StreamIndexScan {
-        StreamIndexScan::new(
+    ) -> StreamTableScan {
+        let logical_index_scan =
             self.logical
-                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
-            chain_type,
-        )
+                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping);
+        logical_index_scan
+            .distribution_key()
+            .expect("distribution key of stream chain must exist in output columns");
+        StreamTableScan::new_with_chain_type(logical_index_scan, chain_type)
     }
 
     pub fn chain_type(&self) -> ChainType {
@@ -149,13 +149,13 @@ impl fmt::Display for StreamTableScan {
 }
 
 impl StreamNode for StreamTableScan {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
         let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
@@ -205,19 +205,19 @@ impl StreamTableScan {
             column_ids: upstream_column_ids.clone(),
         };
 
-        ProstStreamPlan {
+        PbStreamNode {
             fields: self.schema().to_prost(),
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
-                ProstStreamPlan {
-                    node_body: Some(ProstStreamNode::Merge(Default::default())),
+                PbStreamNode {
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
                     fields: upstream_schema.clone(),
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
-                ProstStreamPlan {
-                    node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
+                PbStreamNode {
+                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
                     operator_id: self.batch_plan_id.0 as u64,
                     identity: "BatchPlanNode".into(),
                     fields: upstream_schema,
@@ -226,7 +226,7 @@ impl StreamTableScan {
                     append_only: true,
                 },
             ],
-            node_body: Some(ProstStreamNode::Chain(ChainNode {
+            node_body: Some(PbNodeBody::Chain(ChainNode {
                 table_id: self.logical.table_desc().table_id.table_id,
                 chain_type: self.chain_type as i32,
                 // The column indices need to be forwarded to the downstream

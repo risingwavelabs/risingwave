@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::ProjectNode;
 use risingwave_pb::expr::ExprNode;
 
 use super::{
-    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -83,7 +83,7 @@ impl ToDistributedBatch for BatchProject {
     }
 }
 
-impl ToBatchProst for BatchProject {
+impl ToBatchPb for BatchProject {
     fn to_batch_prost_body(&self) -> NodeBody {
         let select_list = self
             .logical

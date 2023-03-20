@@ -84,7 +84,7 @@ pub struct StateTableInner<
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    // dist_key_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
@@ -198,15 +198,10 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let Distribution {
-            dist_key_indices,
-            vnodes,
-        } = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
+        let vnodes = match vnodes {
+            Some(vnodes) => vnodes,
+
+            None => Distribution::fallback_vnodes(),
         };
         let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
             let vnode_col_idx = *idx as usize;
@@ -251,7 +246,6 @@ where
             pk_serde,
             row_serde,
             pk_indices: pk_indices.to_vec(),
-            dist_key_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -406,7 +400,7 @@ where
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes,
         }: Distribution,
         value_indices: Option<Vec<usize>>,
@@ -445,14 +439,12 @@ where
                 .collect_vec(),
             None => table_columns.iter().map(|c| c.column_id).collect_vec(),
         };
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
             row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -475,7 +467,7 @@ where
         if self.vnode_col_idx_in_pk.is_some() {
             false
         } else {
-            self.dist_key_indices.is_empty()
+            self.dist_key_in_pk_indices.is_empty()
         }
     }
 
@@ -503,8 +495,13 @@ where
     }
 
     /// Get the vnode value of the given row
-    pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
-        compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+    //     compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // }
+
+    /// Get the vnode value of the given row
+    pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -516,9 +513,9 @@ where
         &self.pk_serde
     }
 
-    pub fn dist_key_indices(&self) -> &[usize] {
-        &self.dist_key_indices
-    }
+    // pub fn dist_key_indices(&self) -> &[usize] {
+    //     &self.dist_key_indices
+    // }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
@@ -724,7 +721,12 @@ where
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes);
+        let vnodes = compute_chunk_vnode(
+            &chunk,
+            &self.dist_key_in_pk_indices,
+            &self.pk_indices,
+            &self.vnodes,
+        );
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
             chunk.clone().reorder_columns(value_indices)
@@ -984,7 +986,7 @@ where
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
-            dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
+             ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 

@@ -81,20 +81,6 @@ impl IntervalUnit {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    #[deprecated]
-    fn from_total_usecs(usecs: i64) -> Self {
-        let mut remaining_usecs = usecs;
-        let months = remaining_usecs / USECS_PER_MONTH;
-        remaining_usecs -= months * USECS_PER_MONTH;
-        let days = remaining_usecs / USECS_PER_DAY;
-        remaining_usecs -= days * USECS_PER_DAY;
-        IntervalUnit {
-            months: (months as i32),
-            days: (days as i32),
-            usecs: remaining_usecs,
-        }
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -119,6 +105,63 @@ impl IntervalUnit {
         })
     }
 
+    /// Internal utility used by [`Self::mul_float`] and [`Self::div_float`] to adjust fractional
+    /// units. Not intended as general constructor.
+    fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
+        // TSROUND in include/datatype/timestamp.h
+        // round eagerly at usecs precision because floats are imprecise
+        // should round to even #5576
+        let months_round_usecs =
+            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+
+        let days_round_usecs =
+            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+
+        let trunc_fract = |num: f64| (num.trunc(), num.fract());
+
+        // Handle months
+        let (months, months_fract) = trunc_fract(months_round_usecs(months));
+        if months.is_nan() || months < i32::MIN.into() || months > i32::MAX.into() {
+            return None;
+        }
+        let months = months as i32;
+        let (leftover_days, leftover_days_fract) =
+            trunc_fract(days_round_usecs(months_fract * 30.));
+
+        // Handle days
+        let (days, days_fract) = trunc_fract(days_round_usecs(days));
+        if days.is_nan() || days < i32::MIN.into() || days > i32::MAX.into() {
+            return None;
+        }
+        // Note that PostgreSQL split the integer part and fractional part individually before
+        // adding `leftover_days`. This makes a difference for mixed sign interval.
+        // For example in `interval '3 mons -3 days' / 2`
+        // * `leftover_days` is `15`
+        // * `days` from input is `-1.5`
+        // If we add first, we get `13.5` which is `13 days 12:00:00`;
+        // If we split first, we get `14` and `-0.5`, which ends up as `14 days -12:00:00`.
+        let (days_fract_whole, days_fract) =
+            trunc_fract(days_round_usecs(days_fract + leftover_days_fract));
+        let days = (days as i32)
+            .checked_add(leftover_days as i32)?
+            .checked_add(days_fract_whole as i32)?;
+        let leftover_usecs = days_fract * (USECS_PER_DAY as f64);
+
+        // Handle usecs
+        let result_usecs = usecs + leftover_usecs;
+        let usecs = result_usecs.round();
+        if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
+            return None;
+        }
+        let usecs = usecs as i64;
+
+        Some(Self {
+            months,
+            days,
+            usecs,
+        })
+    }
+
     /// Divides [`IntervalUnit`] by an integer/float with zero check.
     pub fn div_float<I>(&self, rhs: I) -> Option<Self>
     where
@@ -131,17 +174,11 @@ impl IntervalUnit {
             return None;
         }
 
-        #[expect(deprecated)]
-        let usecs = self.as_usecs_i64();
-        #[expect(deprecated)]
-        Some(IntervalUnit::from_total_usecs(
-            (usecs as f64 / rhs).round() as i64
-        ))
-    }
-
-    #[deprecated]
-    fn as_usecs_i64(&self) -> i64 {
-        self.months as i64 * USECS_PER_MONTH + self.days as i64 * USECS_PER_DAY + self.usecs
+        Self::from_floats(
+            self.months as f64 / rhs,
+            self.days as f64 / rhs,
+            self.usecs as f64 / rhs,
+        )
     }
 
     /// times [`IntervalUnit`] with an integer/float.
@@ -152,12 +189,11 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
 
-        #[expect(deprecated)]
-        let usecs = self.as_usecs_i64();
-        #[expect(deprecated)]
-        Some(IntervalUnit::from_total_usecs(
-            (usecs as f64 * rhs).round() as i64
-        ))
+        Self::from_floats(
+            self.months as f64 * rhs,
+            self.days as f64 * rhs,
+            self.usecs as f64 * rhs,
+        )
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.
@@ -813,42 +849,45 @@ impl Display for IntervalUnit {
         let months = self.months % 12;
         let days = self.days;
         let mut space = false;
-        let mut write = |arg: std::fmt::Arguments<'_>| {
+        let mut following_neg = false;
+        let mut write_i32 = |arg: i32, unit: &str| -> std::fmt::Result {
+            if arg == 0 {
+                return Ok(());
+            }
             if space {
                 write!(f, " ")?;
             }
-            write!(f, "{arg}")?;
+            if following_neg && arg > 0 {
+                write!(f, "+")?;
+            }
+            write!(f, "{arg} {unit}")?;
+            if arg != 1 {
+                write!(f, "s")?;
+            }
             space = true;
+            following_neg = arg < 0;
             Ok(())
         };
-        if years == 1 {
-            write(format_args!("{years} year"))?;
-        } else if years != 0 {
-            write(format_args!("{years} years"))?;
-        }
-        if months == 1 {
-            write(format_args!("{months} mon"))?;
-        } else if months != 0 {
-            write(format_args!("{months} mons"))?;
-        }
-        if days == 1 {
-            write(format_args!("{days} day"))?;
-        } else if days != 0 {
-            write(format_args!("{days} days"))?;
-        }
+        write_i32(years, "year")?;
+        write_i32(months, "mon")?;
+        write_i32(days, "day")?;
         if self.usecs != 0 || self.months == 0 && self.days == 0 {
-            let usecs = self.usecs.abs();
-            let ms = usecs / 1000;
-            let hours = ms / 1000 / 3600;
-            let minutes = (ms / 1000 / 60) % 60;
-            let seconds = ms % 60000 / 1000;
-            let secs_fract = usecs % USECS_PER_SEC;
+            // `abs` on `self.usecs == i64::MIN` would overflow, so we divide first then abs
+            let secs_fract = (self.usecs % USECS_PER_SEC).abs();
+            let total_secs = (self.usecs / USECS_PER_SEC).abs();
+            let hours = total_secs / 3600;
+            let minutes = (total_secs / 60) % 60;
+            let seconds = total_secs % 60;
 
-            if self.usecs < 0 {
-                write(format_args!("-{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
-            } else {
-                write(format_args!("{hours:0>2}:{minutes:0>2}:{seconds:0>2}"))?;
+            if space {
+                write!(f, " ")?;
             }
+            if following_neg && self.usecs > 0 {
+                write!(f, "+")?;
+            } else if self.usecs < 0 {
+                write!(f, "-")?;
+            }
+            write!(f, "{hours:0>2}:{minutes:0>2}:{seconds:0>2}")?;
             if secs_fract != 0 {
                 let mut buf = [0u8; 7];
                 write!(buf.as_mut_slice(), ".{:06}", secs_fract).unwrap();
@@ -953,7 +992,7 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
     let mut hour_min_sec = Vec::new();
     for (i, c) in s.chars().enumerate() {
         match c {
-            '-' => {
+            '-' | '+' => {
                 num_buf.push(c);
             }
             '.' => {
@@ -1001,7 +1040,9 @@ fn parse_interval(s: &str) -> Result<Vec<TimeStrToken>> {
         convert_digit(&mut num_buf, &mut tokens)?;
     }
     convert_unit(&mut char_buf, &mut tokens)?;
-    convert_hms(&mut hour_min_sec, &mut tokens)?;
+    convert_hms(&mut hour_min_sec, &mut tokens).ok_or_else(|| {
+        ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", hour_min_sec))
+    })?;
 
     Ok(tokens)
 }
@@ -1037,34 +1078,49 @@ fn convert_unit(c: &mut String, t: &mut Vec<TimeStrToken>) -> Result<()> {
 /// [`TimeStrToken::Num(1)`, `TimeStrToken::TimeUnit(DateTimeField::Hour)`,
 ///  `TimeStrToken::Num(2)`, `TimeStrToken::TimeUnit(DateTimeField::Minute)`,
 ///  `TimeStrToken::Second("3")`, `TimeStrToken::TimeUnit(DateTimeField::Second)`]
-fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Result<()> {
+fn convert_hms(c: &mut Vec<String>, t: &mut Vec<TimeStrToken>) -> Option<()> {
     if c.len() > 3 {
-        return Err(ErrorCode::InvalidInputSyntax(format!("Invalid interval: {:?}", c)).into());
+        return None;
     }
+    const HOUR: usize = 0;
+    const MINUTE: usize = 1;
+    const SECOND: usize = 2;
+    let mut is_neg = false;
     for (i, s) in c.iter().enumerate() {
         match i {
-            0 => {
-                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+            HOUR => {
+                let v = s.parse().ok()?;
+                is_neg = v < 0;
+                t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Hour))
             }
-            1 => {
-                t.push(TimeStrToken::Num(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+            MINUTE => {
+                let mut v: i64 = s.parse().ok()?;
+                if !(0..60).contains(&v) {
+                    return None;
+                }
+                if is_neg {
+                    v = v.checked_neg()?;
+                }
+                t.push(TimeStrToken::Num(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Minute))
             }
-            2 => {
-                t.push(TimeStrToken::Second(s.parse().map_err(|_| {
-                    ErrorCode::InternalError(format!("Invalid interval: {}", c[0]))
-                })?));
+            SECOND => {
+                let mut v: OrderedF64 = s.parse().ok()?;
+                // PostgreSQL allows '60.x' for seconds.
+                if !(0f64 <= *v && *v < 61f64) {
+                    return None;
+                }
+                if is_neg {
+                    v = v.checked_neg()?;
+                }
+                t.push(TimeStrToken::Second(v));
                 t.push(TimeStrToken::TimeUnit(DateTimeField::Second))
             }
             _ => unreachable!(),
         }
     }
-    Ok(())
+    Some(())
 }
 
 impl IntervalUnit {
@@ -1092,11 +1148,19 @@ impl IntervalUnit {
 
         (|| match leading_field {
             Year => {
-                let months = num.checked_mul(12)?;
-                Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
+                let months = num.checked_mul(12)?.try_into().ok()?;
+                Some(IntervalUnit::from_month_day_usec(months, 0, 0))
             }
-            Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
-            Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
+            Month => Some(IntervalUnit::from_month_day_usec(
+                num.try_into().ok()?,
+                0,
+                0,
+            )),
+            Day => Some(IntervalUnit::from_month_day_usec(
+                0,
+                num.try_into().ok()?,
+                0,
+            )),
             Hour => {
                 let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
                 Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
@@ -1127,13 +1191,13 @@ impl IntervalUnit {
         while let Some(num) = token_iter.next() && let Some(interval_unit) = token_iter.next() {
             match (num, interval_unit) {
                 (TimeStrToken::Num(num), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + (|| match interval_unit {
+                    result = (|| match interval_unit {
                         Year => {
-                            let months = num.checked_mul(12)?;
-                            Some(IntervalUnit::from_month_day_usec(months as i32, 0, 0))
+                            let months = num.checked_mul(12)?.try_into().ok()?;
+                            Some(IntervalUnit::from_month_day_usec(months, 0, 0))
                         }
-                        Month => Some(IntervalUnit::from_month_day_usec(num as i32, 0, 0)),
-                        Day => Some(IntervalUnit::from_month_day_usec(0, num as i32, 0)),
+                        Month => Some(IntervalUnit::from_month_day_usec(num.try_into().ok()?, 0, 0)),
+                        Day => Some(IntervalUnit::from_month_day_usec(0, num.try_into().ok()?, 0)),
                         Hour => {
                             let usecs = num.checked_mul(3600 * USECS_PER_SEC)?;
                             Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
@@ -1147,10 +1211,11 @@ impl IntervalUnit {
                             Some(IntervalUnit::from_month_day_usec(0, 0, usecs))
                         }
                     })()
+                    .and_then(|rhs| result.checked_add(&rhs))
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 (TimeStrToken::Second(second), TimeStrToken::TimeUnit(interval_unit)) => {
-                    result = result + match interval_unit {
+                    result = match interval_unit {
                         Second => {
                             // If unsatisfied precision is passed as input, we should not return None (Error).
                             let usecs = (second.into_inner() * (USECS_PER_SEC as f64)).round() as i64;
@@ -1158,6 +1223,7 @@ impl IntervalUnit {
                         }
                         _ => None,
                     }
+                    .and_then(|rhs| result.checked_add(&rhs))
                     .ok_or_else(|| ErrorCode::InvalidInputSyntax(format!("Invalid interval {}.", s)))?;
                 }
                 _ => {
@@ -1275,11 +1341,11 @@ mod tests {
                 (11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233
             )
             .to_string(),
-            "-1 years -2 mons 3 days 11:45:14.000233"
+            "-1 years -2 mons +3 days 11:45:14.000233"
         );
         assert_eq!(
             IntervalUnit::from_month_day_usec(-14, 3, 0).to_string(),
-            "-1 years -2 mons 3 days"
+            "-1 years -2 mons +3 days"
         );
         assert_eq!(IntervalUnit::default().to_string(), "00:00:00");
         assert_eq!(
@@ -1289,7 +1355,7 @@ mod tests {
                 -((11 * 3600 + 45 * 60 + 14) * USECS_PER_SEC + 233)
             )
             .to_string(),
-            "-1 years -2 mons 3 days -11:45:14.000233"
+            "-1 years -2 mons +3 days -11:45:14.000233"
         );
     }
 

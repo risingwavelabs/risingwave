@@ -20,7 +20,7 @@ use risingwave_pb::batch_plan::values_node::ExprTuple;
 use risingwave_pb::batch_plan::ValuesNode;
 
 use super::{
-    ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchProst,
+    ExprRewritable, LogicalValues, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -73,7 +73,7 @@ impl ToDistributedBatch for BatchValues {
     }
 }
 
-impl ToBatchProst for BatchValues {
+impl ToBatchPb for BatchValues {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Values(ValuesNode {
             tuples: self

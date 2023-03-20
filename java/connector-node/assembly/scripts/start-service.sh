@@ -15,7 +15,8 @@ while getopts ":h:p:" o; do
 done
 shift $((OPTIND-1))
 
-DIR="$( cd "$( dirname $0 )" && pwd )"
+
+DIR="$( cd "$( dirname "$0" )" && pwd )"
 MAIN='com.risingwave.connector.ConnectorService'
 PORT=50051
 
@@ -24,4 +25,4 @@ if [ -z "${port}" ]; then
     port=$PORT
 fi
 
-java -classpath "${DIR}/libs/*" $MAIN --port ${port}
+java -classpath "${DIR}/libs/*" -Djava.library.path="${RW_JAVA_BINDING_LIB_PATH}" $MAIN --port ${port}

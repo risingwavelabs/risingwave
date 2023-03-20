@@ -16,6 +16,7 @@ use std::cmp::Ordering;
 use std::ops::Range;
 
 use bytes::BytesMut;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::{KeyPrefix, LenType, RestartPoint};
@@ -74,10 +75,14 @@ impl BlockIterator {
         self.try_prev_inner()
     }
 
+    pub fn table_id(&self) -> TableId {
+        self.block.table_id()
+    }
+
     pub fn key(&self) -> FullKey<&[u8]> {
         assert!(self.is_valid());
 
-        FullKey::from_slice_without_table_id(self.block.table_id(), &self.key[..])
+        FullKey::from_slice_without_table_id(self.table_id(), &self.key[..])
     }
 
     pub fn value(&self) -> &[u8] {

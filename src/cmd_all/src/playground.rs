@@ -162,7 +162,7 @@ fn osstrs<const N: usize>(s: [&str; N]) -> Vec<OsString> {
 }
 
 pub async fn playground() -> Result<()> {
-    eprintln!("launching playground");
+    tracing::info!("launching playground");
 
     let profile = if let Ok(profile) = std::env::var("PLAYGROUND_PROFILE") {
         profile.to_string()
@@ -228,22 +228,28 @@ pub async fn playground() -> Result<()> {
                     .join("start-service.sh");
                 if cmd_path.exists() {
                     tracing::info!("start connector-node with prefix_bin {}", prefix_bin);
-                    let mut cmd = Command::new(cmd_path);
-                    cmd.arg("-p").arg("50051");
-                    cmd.stdout(std::process::Stdio::piped());
-                    let mut child = cmd.spawn().expect("failed to start connector node");
-                    let stdout = child.stdout.take().expect("failed to open stdout");
-                    let _child_handle = tokio::spawn(async move { child.wait().await });
-                    let _stdout_handle = tokio::spawn(async move {
-                        let mut reader = BufReader::new(stdout).lines();
-                        while let Some(line) =
-                            reader.next_line().await.expect("failed to read line")
-                        {
-                            eprintln!("{}", line);
+                    let mut child = Command::new(cmd_path)
+                        .arg("-p")
+                        .arg("50051")
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()?;
+                    let stderr = child.stderr.take().unwrap();
+
+                    let _child_handle = tokio::spawn(async move {
+                        signal::ctrl_c().await.unwrap();
+                        let _ = child.start_kill();
+                    });
+                    let _stderr_handle = tokio::spawn(async move {
+                        let mut reader = BufReader::new(stderr).lines();
+                        while let Ok(Some(line)) = reader.next_line().await {
+                            tracing::error!(target: "risingwave_connector_node", "{}", line);
                         }
                     });
                 } else {
-                    eprintln!("connector node path not exist!");
+                    tracing::warn!(
+                        "Will not start connector node since `{}` does not exist.",
+                        cmd_path.display()
+                    );
                 }
             }
         }

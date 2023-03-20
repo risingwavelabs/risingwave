@@ -33,7 +33,7 @@ def series2(n: int) -> Iterator[tuple[int, str]]:
 
 
 if __name__ == '__main__':
-    server = UdfServer()
+    server = UdfServer(location="0.0.0.0:8815")
     server.add_function(random_int)
     server.add_function(gcd)
     server.add_function(gcd3)
