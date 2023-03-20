@@ -31,10 +31,16 @@ insert into t values (6);
 statement ok
 delete from t where x = 3;
 
+# Shouldn't be 5
+query I
+select * from mv;
+----
+4
+
 statement ok
 delete from t where x = 4;
 
-# Shouldn't panic here
+# Shouldn't panic
 statement ok
 insert into t values (1);
 

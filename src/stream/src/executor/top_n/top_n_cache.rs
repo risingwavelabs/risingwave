@@ -503,6 +503,7 @@ impl TopNCacheTrait for TopNCache<true> {
         //
         // TODO: can we optimize fill_high_cache because we only need to fill one element?
         if self.high.len() == self.high_capacity - 1 {
+            assert!(!self.high.is_empty(), "high_capacity should >= 2");
             managed_state
                 .fill_high_cache(
                     group_key,

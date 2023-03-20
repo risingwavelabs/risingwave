@@ -111,7 +111,7 @@ impl<S: StateStore> TopNExecutor<S, true> {
             state_table,
         )?;
 
-        inner.cache.high_capacity = 1;
+        inner.cache.high_capacity = 2;
 
         Ok(TopNExecutorWrapper { input, ctx, inner })
     }
@@ -1080,10 +1080,11 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  3 8
-                    +  1 6
-                    +  2 7
-                    + 10 9",
+                    +  3 6
+                    +  3 7
+                    +  1 8
+                    +  2 9
+                    + 10 10",
                 ),
                 StreamChunk::from_pretty(
                     " I I
@@ -1091,7 +1092,7 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6",
+                    - 1 8",
                 ),
             ];
             let schema = Schema {
@@ -1169,11 +1170,13 @@ mod tests {
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 8
-                    - 3 8
+                    + 3 6
+                    + 3 7
+                    - 3 7
+                    - 3 6
                     - 3 2
-                    + 1 6
-                    + 2 7"
+                    + 1 8
+                    + 2 9"
                 )
             );
 
@@ -1186,15 +1189,16 @@ mod tests {
                 )
             );
 
-            // High cache has only one capacity, but we need to trigger 2 inserts here!
+            // High cache has only 2 capacity, but we need to trigger 3 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6
+                    - 1 8
                     + 3 2
-                    + 3 8
+                    + 3 6
+                    + 3 7
                     "
                 )
             );
@@ -1220,10 +1224,11 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     "  I I
-                    +  3 8
-                    +  1 6
-                    +  2 7
-                    + 10 9",
+                    +  3 6
+                    +  3 7
+                    +  1 8
+                    +  2 9
+                    + 10 10",
                 ),
             ];
             let schema = Schema {
@@ -1252,7 +1257,7 @@ mod tests {
                 ),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6",
+                    - 1 8",
                 ),
             ];
             let schema = Schema {
@@ -1311,15 +1316,18 @@ mod tests {
             );
 
             let res = top_n_executor.next().await.unwrap().unwrap();
+            println!("{}", res.as_chunk().unwrap().to_pretty_string());
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    + 3 8
-                    - 3 8
+                    + 3 6
+                    + 3 7
+                    - 3 7
+                    - 3 6
                     - 3 2
-                    + 1 6
-                    + 2 7"
+                    + 1 8
+                    + 2 9"
                 )
             );
 
@@ -1367,15 +1375,16 @@ mod tests {
                 )
             );
 
-            // High cache has only one capacity, but we need to trigger 2 inserts here!
+            // High cache has only 2 capacity, but we need to trigger 3 inserts here!
             let res = top_n_executor.next().await.unwrap().unwrap();
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(
                     " I I
-                    - 1 6
+                    - 1 8
                     + 3 2
-                    + 3 8
+                    + 3 6
+                    + 3 7
                     "
                 )
             );
