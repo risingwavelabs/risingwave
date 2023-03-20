@@ -295,22 +295,18 @@ public class SourceRequestHandler {
                     }
                     // check whether publication exists
                     boolean publicationExists = false;
-                    float version = 0;
+                    boolean partialPublication = false;
                     try (var stmt = conn.createStatement()) {
-                        var res = stmt.executeQuery(sqlStmts.getProperty("postgres.version"));
+                        var res =
+                                stmt.executeQuery(
+                                        sqlStmts.getProperty("postgres.publication_att_exists"));
                         while (res.next()) {
-                            version = res.getFloat("setting");
+                            partialPublication = res.getBoolean(1);
                         }
-                    }
-                    if (version == 0) {
-                        throw new StatusException(
-                                Status.INTERNAL.withDescription(
-                                        "Failed to get postgres version"
-                                                + props.get(DbzConnectorConfig.TABLE_NAME)));
                     }
                     // pg 15 and up supports partial publication of table
                     // check whether publication covers all columns
-                    if (version >= 15) {
+                    if (partialPublication) {
                         try (var stmt =
                                 conn.prepareStatement(
                                         sqlStmts.getProperty("postgres.publication_att"))) {
