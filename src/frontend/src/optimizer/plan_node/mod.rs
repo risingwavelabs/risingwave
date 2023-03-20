@@ -41,8 +41,8 @@ pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
-use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
+use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
@@ -73,7 +73,7 @@ pub trait PlanNode:
     + ToBatch
     + ToStream
     + ToDistributedBatch
-    + ToProst
+    + ToPb
     + ToLocalBatch
     + PredicatePushdown
     + PlanNodeMeta
@@ -520,7 +520,7 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
         }
@@ -535,7 +535,7 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost(state))
             .collect();
         // TODO: support pk_indices and operator_id
-        StreamPlanProst {
+        StreamPlanPb {
             input,
             identity: format!("{}", self),
             node_body: node,
@@ -547,20 +547,20 @@ impl dyn PlanNode {
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanProst {
+    pub fn to_batch_prost(&self) -> BatchPlanPb {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanPb {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        BatchPlanProst {
+        BatchPlanPb {
             children,
             identity: if identity {
                 format!("{:?}", self)

@@ -32,8 +32,8 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeNode, LocalExecutePlan, PbExchangeSource, PbTaskId, PlanFragment,
+    PlanNode, RowSeqScanNode, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -113,8 +113,8 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
         Ok(row_seq_scan_node)
     }
 
-    /// Creates the `ProstExchangeSource` using the given `id`.
-    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
+    /// Creates the `PbExchangeSource` using the given `id`.
+    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<PbExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
             internal_error("No worker node found for the given parallel unit id.")
         })?;
@@ -134,9 +134,9 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             epoch: Some(self.epoch.clone()),
         };
 
-        let prost_exchange_source = ProstExchangeSource {
+        let prost_exchange_source = PbExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId {
+                task_id: Some(PbTaskId {
                     // FIXME: We should replace this random generated uuid to current query_id for
                     // better dashboard. However, due to the lack of info of
                     // stage_id and task_id, we can not do it now. Now just make sure it will not

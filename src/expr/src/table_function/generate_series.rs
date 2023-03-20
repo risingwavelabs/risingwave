@@ -154,7 +154,7 @@ where
 }
 
 pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
-    prost: &TableFunctionProst,
+    prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());

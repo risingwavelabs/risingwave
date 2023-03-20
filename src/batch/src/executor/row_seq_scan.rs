@@ -26,10 +26,10 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::select_all;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::{scan_range, ScanRange as ProstScanRange};
+use risingwave_pb::batch_plan::{scan_range, PbScanRange};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::store::PrefetchOptions;
@@ -75,7 +75,7 @@ impl ScanRange {
 
     /// Create a scan range from the prost representation.
     pub fn new(
-        scan_range: ProstScanRange,
+        scan_range: PbScanRange,
         mut pk_types: impl Iterator<Item = DataType>,
     ) -> Result<Self> {
         let pk_prefix = OwnedRow::new(
@@ -406,9 +406,10 @@ impl<S: StateStore> RowSeqScanExecutor<S> {
         } = scan_range;
 
         let (start_bound, end_bound) =
-            match table.pk_serializer().get_order_types()[pk_prefix.len()].direction() {
-                Direction::Ascending => (next_col_bounds.0, next_col_bounds.1),
-                Direction::Descending => (next_col_bounds.1, next_col_bounds.0),
+            if table.pk_serializer().get_order_types()[pk_prefix.len()].is_ascending() {
+                (next_col_bounds.0, next_col_bounds.1)
+            } else {
+                (next_col_bounds.1, next_col_bounds.0)
             };
 
         // Range Scan.

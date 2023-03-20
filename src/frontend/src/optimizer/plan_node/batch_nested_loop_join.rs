@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::NestedLoopJoinNode;
 
 use super::generic::GenericPlanRef;
 use super::{
-    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchProst,
+    ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -127,7 +127,7 @@ impl ToDistributedBatch for BatchNestedLoopJoin {
     }
 }
 
-impl ToBatchProst for BatchNestedLoopJoin {
+impl ToBatchPb for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.logical.join_type() as i32,

@@ -24,7 +24,7 @@ use risingwave_hummock_sdk::key::key_with_epoch;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockEpoch, HummockSstableObjectId, LocalSstableInfo,
 };
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::{
@@ -239,7 +239,7 @@ pub fn update_filter_key_extractor_for_table_ids(
 
 pub fn update_filter_key_extractor_for_tables(
     filter_key_extractor_manager_ref: &FilterKeyExtractorManagerRef,
-    tables: &[ProstTable],
+    tables: &[PbTable],
 ) {
     for table in tables {
         filter_key_extractor_manager_ref.update(

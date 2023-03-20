@@ -19,9 +19,6 @@ function clean_etcd_data() {
 
 function start_cluster() {
   cargo make d ci-meta-backup-test 1>/dev/null 2>&1
-  execute_sql_and_expect \
-  "alter system set  backup_storage_url to \"minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001\";" \
-  "ALTER_SYSTEM"
   sleep 5
 }
 

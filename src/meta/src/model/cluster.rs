@@ -46,17 +46,17 @@ pub struct Worker {
 
 impl MetadataModel for Worker {
     type KeyType = HostAddress;
-    type ProstType = WorkerNode;
+    type PbType = WorkerNode;
 
     fn cf_name() -> String {
         WORKER_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.worker_node.clone()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         Self {
             worker_node: prost,
             expire_at: INVALID_EXPIRE_AT,

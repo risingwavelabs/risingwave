@@ -17,8 +17,8 @@ use std::collections::BTreeMap;
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, DatabaseId, SchemaId, TableId, UserId};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
-use risingwave_pb::stream_plan::SinkDesc as ProstSinkDesc;
+use risingwave_pb::plan_common::PbColumnDesc;
+use risingwave_pb::stream_plan::PbSinkDesc;
 
 use super::{SinkCatalog, SinkId, SinkType};
 
@@ -80,15 +80,15 @@ impl SinkDesc {
         }
     }
 
-    pub fn to_proto(&self) -> ProstSinkDesc {
-        ProstSinkDesc {
+    pub fn to_proto(&self) -> PbSinkDesc {
+        PbSinkDesc {
             id: self.id.sink_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self
                 .columns
                 .iter()
-                .map(|column| Into::<ProstColumnDesc>::into(&column.column_desc))
+                .map(|column| Into::<PbColumnDesc>::into(&column.column_desc))
                 .collect_vec(),
             plan_pk: self.plan_pk.iter().map(|k| k.to_protobuf()).collect_vec(),
             downstream_pk: self.downstream_pk.iter().map(|idx| *idx as _).collect_vec(),

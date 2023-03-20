@@ -15,11 +15,11 @@
 use itertools::{Either, Itertools};
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
-use crate::expr::{CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, InputRef};
+use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, PlanTreeNodeUnary};
 use crate::optimizer::PlanRef;
-use crate::utils::{ColIndexMapping, Condition};
+use crate::utils::Condition;
 
 /// Transpose `LogicalApply` and `LogicalFilter`.
 ///
@@ -57,19 +57,8 @@ impl Rule for ApplyFilterTransposeRule {
         let filter = right.as_logical_filter()?;
         let input = filter.input();
 
-        let mut rewriter = Rewriter {
-            offset: left.schema().len(),
-            index_mapping: ColIndexMapping::new(
-                correlated_indices
-                    .clone()
-                    .into_iter()
-                    .map(Some)
-                    .collect_vec(),
-            )
-            .inverse(),
-            has_correlated_input_ref: false,
-            correlated_id,
-        };
+        let mut rewriter =
+            ApplyOffsetRewriter::new(left.schema().len(), &correlated_indices, correlated_id);
         // Split predicates in LogicalFilter into correlated expressions and uncorrelated
         // expressions.
         let (cor_exprs, uncor_exprs) =
@@ -79,8 +68,8 @@ impl Rule for ApplyFilterTransposeRule {
                 .into_iter()
                 .partition_map(|expr| {
                     let expr = rewriter.rewrite_expr(expr);
-                    if rewriter.has_correlated_input_ref {
-                        rewriter.has_correlated_input_ref = false;
+                    if rewriter.has_correlated_input_ref() {
+                        rewriter.reset_state();
                         Either::Left(expr)
                     } else {
                         Either::Right(expr)
@@ -113,35 +102,5 @@ impl Rule for ApplyFilterTransposeRule {
 impl ApplyFilterTransposeRule {
     pub fn create() -> BoxedRule {
         Box::new(ApplyFilterTransposeRule {})
-    }
-}
-
-/// Convert `CorrelatedInputRef` to `InputRef` and shift `InputRef` with offset.
-struct Rewriter {
-    offset: usize,
-    index_mapping: ColIndexMapping,
-    has_correlated_input_ref: bool,
-    correlated_id: CorrelatedId,
-}
-impl ExprRewriter for Rewriter {
-    fn rewrite_correlated_input_ref(
-        &mut self,
-        correlated_input_ref: CorrelatedInputRef,
-    ) -> ExprImpl {
-        let found = correlated_input_ref.correlated_id() == self.correlated_id;
-        self.has_correlated_input_ref |= found;
-        if found {
-            InputRef::new(
-                self.index_mapping.map(correlated_input_ref.index()),
-                correlated_input_ref.return_type(),
-            )
-            .into()
-        } else {
-            correlated_input_ref.into()
-        }
-    }
-
-    fn rewrite_input_ref(&mut self, input_ref: InputRef) -> ExprImpl {
-        InputRef::new(input_ref.index() + self.offset, input_ref.return_type()).into()
     }
 }

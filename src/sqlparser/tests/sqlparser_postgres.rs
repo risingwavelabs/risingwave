@@ -1021,7 +1021,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:28'".to_string()
         ))
     );
 
@@ -1029,7 +1029,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:24'".to_string()
         ))
     );
 
@@ -1037,7 +1037,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:27'".to_string()
         ))
     );
 
@@ -1045,7 +1045,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:23'".to_string()
         ))
     );
 
