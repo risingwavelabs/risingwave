@@ -52,4 +52,5 @@ python3 -m pip install minio psycopg2-binary
 python3 e2e_test/s3/$script.py
 
 echo "--- Kill cluster"
+rm -rf /tmp/rw_ci
 cargo make ci-kill
