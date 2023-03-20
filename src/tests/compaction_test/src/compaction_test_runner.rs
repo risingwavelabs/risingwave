@@ -129,6 +129,8 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "meta-node",
         "--listen-addr",
         &listen_addr,
+        "--advertise-addr",
+        &listen_addr,
         "--backend",
         "mem",
         "--checkpoint-frequency",
@@ -159,7 +161,7 @@ async fn start_compactor_node(
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
-        "--host",
+        "--listen-addr",
         "127.0.0.1:5550",
         "--advertise-addr",
         &advertise_addr,

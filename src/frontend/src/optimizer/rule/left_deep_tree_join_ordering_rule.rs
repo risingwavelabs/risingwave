@@ -17,9 +17,9 @@ use super::Rule;
 use crate::optimizer::rule::BoxedRule;
 
 /// Reorders a multi join into a left deep join via the heuristic ordering
-pub struct ReorderMultiJoinRule {}
+pub struct LeftDeepTreeJoinOrderingRule {}
 
-impl Rule for ReorderMultiJoinRule {
+impl Rule for LeftDeepTreeJoinOrderingRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_multi_join()?;
         // check if join is inner and can be merged into multijoin
@@ -29,9 +29,9 @@ impl Rule for ReorderMultiJoinRule {
     }
 }
 
-impl ReorderMultiJoinRule {
+impl LeftDeepTreeJoinOrderingRule {
     pub fn create() -> BoxedRule {
-        Box::new(ReorderMultiJoinRule {})
+        Box::new(LeftDeepTreeJoinOrderingRule {})
     }
 }
 

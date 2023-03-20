@@ -14,7 +14,7 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::Action;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
@@ -77,7 +77,7 @@ pub fn gen_create_mv_plan(
     query: Query,
     name: ObjectName,
     columns: Vec<Ident>,
-) -> Result<(PlanRef, ProstTable)> {
+) -> Result<(PlanRef, PbTable)> {
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
 

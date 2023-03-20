@@ -34,7 +34,7 @@ use crate::util::epoch::Epoch;
 
 // This is a hack, &'static str is not allowed as a const generics argument.
 // TODO: refine this using the adt_const_params feature.
-const CONFIG_KEYS: [&str; 21] = [
+const CONFIG_KEYS: [&str; 22] = [
     "RW_IMPLICIT_FLUSH",
     "CREATE_COMPACTION_GROUP_FOR_MV",
     "QUERY_MODE",
@@ -56,6 +56,7 @@ const CONFIG_KEYS: [&str; 21] = [
     "RW_ENABLE_SHARE_PLAN",
     "INTERVALSTYLE",
     "BATCH_PARALLELISM",
+    "RW_STREAMING_ENABLE_BUSHY_JOIN",
 ];
 
 // MUST HAVE 1v1 relationship to CONFIG_KEYS. e.g. CONFIG_KEYS[IMPLICIT_FLUSH] =
@@ -81,6 +82,7 @@ const FORCE_TWO_PHASE_AGG: usize = 17;
 const RW_ENABLE_SHARE_PLAN: usize = 18;
 const INTERVAL_STYLE: usize = 19;
 const BATCH_PARALLELISM: usize = 20;
+const STREAMING_ENABLE_BUSHY_JOIN: usize = 21;
 
 trait ConfigEntry: Default + for<'a> TryFrom<&'a [&'a str], Error = RwError> {
     fn entry_name() -> &'static str;
@@ -277,6 +279,7 @@ type QueryEpoch = ConfigU64<QUERY_EPOCH, 0>;
 type Timezone = ConfigString<TIMEZONE>;
 type StreamingParallelism = ConfigU64<STREAMING_PARALLELISM, 0>;
 type StreamingEnableDeltaJoin = ConfigBool<STREAMING_ENABLE_DELTA_JOIN, false>;
+type StreamingEnableBushyJoin = ConfigBool<STREAMING_ENABLE_BUSHY_JOIN, false>;
 type EnableTwoPhaseAgg = ConfigBool<ENABLE_TWO_PHASE_AGG, true>;
 type ForceTwoPhaseAgg = ConfigBool<FORCE_TWO_PHASE_AGG, false>;
 type EnableSharePlan = ConfigBool<RW_ENABLE_SHARE_PLAN, true>;
@@ -342,6 +345,9 @@ pub struct ConfigMap {
     /// Enable delta join in streaming query. Defaults to false.
     streaming_enable_delta_join: StreamingEnableDeltaJoin,
 
+    /// Enable bushy join in the streaming query. Defaults to false.
+    streaming_enable_bushy_join: StreamingEnableBushyJoin,
+
     /// Enable two phase agg optimization. Defaults to true.
     /// Setting this to true will always set `FORCE_TWO_PHASE_AGG` to false.
     enable_two_phase_agg: EnableTwoPhaseAgg,
@@ -402,6 +408,8 @@ impl ConfigMap {
             self.streaming_parallelism = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             self.streaming_enable_delta_join = val.as_slice().try_into()?;
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            self.streaming_enable_bushy_join = val.as_slice().try_into()?;
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             self.enable_two_phase_agg = val.as_slice().try_into()?;
             if !*self.enable_two_phase_agg {
@@ -458,6 +466,8 @@ impl ConfigMap {
             Ok(self.streaming_parallelism.to_string())
         } else if key.eq_ignore_ascii_case(StreamingEnableDeltaJoin::entry_name()) {
             Ok(self.streaming_enable_delta_join.to_string())
+        } else if key.eq_ignore_ascii_case(StreamingEnableBushyJoin::entry_name()) {
+            Ok(self.streaming_enable_bushy_join.to_string())
         } else if key.eq_ignore_ascii_case(EnableTwoPhaseAgg::entry_name()) {
             Ok(self.enable_two_phase_agg.to_string())
         } else if key.eq_ignore_ascii_case(ForceTwoPhaseAgg::entry_name()) {
@@ -549,6 +559,11 @@ impl ConfigMap {
                 name : StreamingEnableDeltaJoin::entry_name().to_lowercase(),
                 setting : self.streaming_enable_delta_join.to_string(),
                 description: String::from("Enable delta join in streaming query.")
+            },
+            VariableInfo{
+                name : StreamingEnableBushyJoin::entry_name().to_lowercase(),
+                setting : self.streaming_enable_bushy_join.to_string(),
+                description: String::from("Enable bushy join in streaming query.")
             },
             VariableInfo{
                 name : EnableTwoPhaseAgg::entry_name().to_lowercase(),
@@ -646,6 +661,10 @@ impl ConfigMap {
 
     pub fn get_streaming_enable_delta_join(&self) -> bool {
         *self.streaming_enable_delta_join
+    }
+
+    pub fn get_streaming_enable_bushy_join(&self) -> bool {
+        *self.streaming_enable_bushy_join
     }
 
     pub fn get_enable_two_phase_agg(&self) -> bool {

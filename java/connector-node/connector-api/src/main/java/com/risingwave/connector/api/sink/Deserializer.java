@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package com.risingwave.connector;
+package com.risingwave.connector.api.sink;
 
-import com.risingwave.connector.api.sink.SinkRow;
-import java.util.Iterator;
+import com.risingwave.proto.ConnectorServiceProto;
 
 public interface Deserializer {
-    Iterator<SinkRow> deserialize(Object payload);
+    CloseableIterator<SinkRow> deserialize(
+            ConnectorServiceProto.SinkStreamRequest.WriteBatch writeBatch);
 }

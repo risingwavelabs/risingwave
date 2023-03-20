@@ -15,12 +15,12 @@
 use anyhow::anyhow;
 use risingwave_connector::sink::catalog::SinkCatalog;
 use risingwave_connector::sink::{SinkConfig, SinkImpl};
-use risingwave_pb::catalog::Sink as ProstSinkCatalog;
+use risingwave_pb::catalog::PbSink;
 
 use crate::{MetaError, MetaResult};
 
 pub async fn validate_sink(
-    prost_sink_catalog: &ProstSinkCatalog,
+    prost_sink_catalog: &PbSink,
     connector_rpc_endpoint: Option<String>,
 ) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);

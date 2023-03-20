@@ -221,19 +221,7 @@ impl Binder {
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<ColumnOrder> {
-        // TODO(rc): support `NULLS FIRST | LAST`
-        if nulls_first.is_some() {
-            return Err(ErrorCode::NotImplemented(
-                "NULLS FIRST or NULLS LAST".to_string(),
-                4743.into(),
-            )
-            .into());
-        }
-        let order_type = match asc {
-            None => OrderType::default(),
-            Some(true) => OrderType::ascending(),
-            Some(false) => OrderType::descending(),
-        };
+        let order_type = OrderType::from_bools(asc, nulls_first);
         let column_index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => match *index != usize::MAX {
                 true => *index,

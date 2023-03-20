@@ -22,13 +22,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `HummockVersionDelta` tracks delta of `Sstables` in given version based on previous version.
 impl MetadataModel for HummockVersionDelta {
     type KeyType = HummockVersionId;
-    type ProstType = HummockVersionDelta;
+    type PbType = HummockVersionDelta;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_VERSION_DELTA_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -36,7 +36,7 @@ impl MetadataModel for HummockVersionDelta {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 
