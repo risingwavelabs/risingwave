@@ -78,8 +78,9 @@ public class JDBCSinkTest {
     @Test
     public void testJDBCWrite() throws SQLException {
         Connection conn = DriverManager.getConnection(connectionURL);
-        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
-        createMockTable(conn, sink.getTableName());
+        String tableName = "test";
+        createMockTable(conn, tableName);
+        JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), tableName);
 
         sink.write(
                 Iterators.forArray(
