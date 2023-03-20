@@ -296,19 +296,6 @@ impl TopNCacheTrait for TopNCache<false> {
         } else if self.is_low_cache_full()
             && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
-            // The row is in mid
-            // Try to fill the high cache if it is empty
-            if self.high.is_empty() {
-                managed_state
-                    .fill_high_cache(
-                        group_key,
-                        self,
-                        self.middle.last_key_value().unwrap().0.clone(),
-                        self.high_capacity,
-                    )
-                    .await?;
-            }
-
             self.middle.remove(&cache_key);
             res_ops.push(Op::Delete);
             res_rows.push((&row).into());
@@ -331,18 +318,6 @@ impl TopNCacheTrait for TopNCache<false> {
                 res_rows.push(middle_first.1.clone());
                 self.low.insert(middle_first.0, middle_first.1);
 
-                // Try to fill the high cache if it is empty
-                if self.high.is_empty() {
-                    managed_state
-                        .fill_high_cache(
-                            group_key,
-                            self,
-                            self.middle.last_key_value().unwrap().0.clone(),
-                            self.high_capacity,
-                        )
-                        .await?;
-                }
-
                 // Bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
                     let high_first = self.high.pop_first().unwrap();
@@ -351,6 +326,21 @@ impl TopNCacheTrait for TopNCache<false> {
                     self.middle.insert(high_first.0, high_first.1);
                 }
             }
+        }
+
+        // We should always refill the high cache after a delete. If high cache is not full before
+        // the delete, there should be no new rows in the state table.
+        //
+        // TODO: can we optimize fill_high_cache because we only need to fill one element?
+        if self.high.len() == self.high_capacity - 1 {
+            managed_state
+                .fill_high_cache(
+                    group_key,
+                    self,
+                    self.high.last_key_value().unwrap().0.clone(),
+                    self.high_capacity,
+                )
+                .await?;
         }
 
         Ok(())
@@ -483,18 +473,6 @@ impl TopNCacheTrait for TopNCache<true> {
                 return Ok(());
             }
 
-            // Try to fill the high cache if it is empty
-            if self.high.is_empty() {
-                managed_state
-                    .fill_high_cache(
-                        group_key,
-                        self,
-                        self.middle.last_key_value().unwrap().0.clone(),
-                        self.high_capacity,
-                    )
-                    .await?;
-            }
-
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
@@ -518,6 +496,21 @@ impl TopNCacheTrait for TopNCache<true> {
                     self.middle.insert(ordered_pk_row, row);
                 }
             }
+        }
+
+        // We should always refill the high cache after a delete. If high cache is not full before
+        // the delete, there should be no new rows in the state table.
+        //
+        // TODO: can we optimize fill_high_cache because we only need to fill one element?
+        if self.high.len() == self.high_capacity - 1 {
+            managed_state
+                .fill_high_cache(
+                    group_key,
+                    self,
+                    self.high.last_key_value().unwrap().0.clone(),
+                    self.high_capacity,
+                )
+                .await?;
         }
 
         Ok(())

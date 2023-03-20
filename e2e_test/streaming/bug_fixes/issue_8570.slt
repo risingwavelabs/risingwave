@@ -42,4 +42,7 @@ statement ok
 drop materialized view mv;
 
 statement ok
+drop materialized view t_singleton;
+
+statement ok
 drop table t;
