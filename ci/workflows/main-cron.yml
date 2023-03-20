@@ -232,7 +232,7 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry  
 
-  - label: "S3 source check on OpenDAL fs engine"
+  - label: "S3 source on OpenDAL fs engine"
     command: "ci/scripts/s3-source-test-for-opendal-fs-engine.sh -p ci-release -s run"
     depends_on: build
     plugins:
