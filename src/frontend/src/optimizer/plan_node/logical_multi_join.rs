@@ -509,6 +509,8 @@ impl LogicalMultiJoin {
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
 
+        nodes = graph_augmentation(nodes);
+
         // isolated nodes can be joined at any where.
         let iso_nodes = nodes
             .iter()
@@ -646,6 +648,7 @@ impl LogicalMultiJoin {
                 "no plan remain".into(),
             )));
         };
+
         let total_col_num = self.inner2output.source_size();
         let reorder_mapping = {
             let mut reorder_mapping = vec![None; total_col_num];
@@ -694,6 +697,28 @@ struct GraphNode {
     join_tree: JoinTreeNode,
     // use BTreeSet for deterministic
     relations: BTreeSet<usize>,
+}
+
+fn graph_augmentation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<usize, GraphNode> {
+    let keys = nodes.keys().cloned().collect_vec();
+    for node in keys {
+        let rel = nodes
+            .get(&node)
+            .unwrap()
+            .relations
+            .iter()
+            .cloned()
+            .collect_vec();
+
+        let n_rel = rel.len();
+        for i in 0..n_rel {
+            for j in i + 1..n_rel {
+                nodes.get_mut(&i).unwrap().relations.insert(j);
+                nodes.get_mut(&j).unwrap().relations.insert(i);
+            }
+        }
+    }
+    nodes
 }
 
 /// create logical plan by recursively travase `JoinTreeNode`
