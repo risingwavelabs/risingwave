@@ -43,7 +43,7 @@ pub struct RowIdGenExecutor {
 
     row_id_index: usize,
 
-    row_id_generator: RowIdGenerator,
+    row_id_generator: Vec<RowIdGenerator>,
 }
 
 impl RowIdGenExecutor {
@@ -68,22 +68,26 @@ impl RowIdGenExecutor {
     }
 
     /// Create a new row id generator based on the assigned vnodes.
-    fn new_generator(vnodes: &Bitmap) -> RowIdGenerator {
-        // TODO: We may generate row id for each vnode in the future instead of using the first
-        // vnode.
-        let vnode_id = vnodes.next_set_bit(0).unwrap() as u32;
-        RowIdGenerator::with_epoch(vnode_id, *UNIX_RISINGWAVE_DATE_EPOCH)
+    fn new_generator(vnodes: &Bitmap) -> Vec<RowIdGenerator> {
+        vnodes
+            .iter_ones()
+            .map(|idx| RowIdGenerator::with_epoch(idx as u32, *UNIX_RISINGWAVE_DATE_EPOCH))
+            .collect()
     }
 
     /// Generate a row ID column according to ops.
-    async fn gen_row_id_column_by_op(&mut self, column: &Column, ops: Ops<'_>) -> Column {
+    async fn gen_row_id_column_by_op(
+        column: &Column,
+        ops: Ops<'_>,
+        row_id_generator: &mut RowIdGenerator,
+    ) -> Column {
         let len = column.array_ref().len();
         let mut builder = SerialArrayBuilder::new(len);
 
         for (datum, op) in column.array_ref().iter().zip_eq_fast(ops) {
             // Only refill row_id for insert operation.
             match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().await.into())),
+                Op::Insert => builder.append(Some(row_id_generator.next().await.into())),
                 _ => builder.append(Some(Serial::try_from(datum.unwrap()).unwrap())),
             }
         }
@@ -99,6 +103,8 @@ impl RowIdGenExecutor {
         let barrier = expect_first_barrier(&mut upstream).await?;
         yield Message::Barrier(barrier);
 
+        let mut generator_idx_cycle = (0..self.row_id_generator.len()).cycle();
+
         #[for_await]
         for msg in upstream {
             let msg = msg?;
@@ -107,9 +113,12 @@ impl RowIdGenExecutor {
                 Message::Chunk(chunk) => {
                     // For chunk message, we fill the row id column and then yield it.
                     let (ops, mut columns, bitmap) = chunk.into_inner();
-                    columns[self.row_id_index] = self
-                        .gen_row_id_column_by_op(&columns[self.row_id_index], &ops)
-                        .await;
+                    columns[self.row_id_index] = Self::gen_row_id_column_by_op(
+                        &columns[self.row_id_index],
+                        &ops,
+                        &mut self.row_id_generator[generator_idx_cycle.next().unwrap()],
+                    )
+                    .await;
                     yield Message::Chunk(StreamChunk::new(ops, columns, bitmap));
                 }
                 Message::Barrier(barrier) => {
