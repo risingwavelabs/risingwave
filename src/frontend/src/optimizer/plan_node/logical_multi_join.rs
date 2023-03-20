@@ -486,24 +486,6 @@ impl LogicalMultiJoin {
     }
 
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
-        // Join tree internal representation
-        #[derive(Clone, Default, Debug)]
-        struct JoinTreeNode {
-            idx: Option<usize>,
-            left: Option<Box<JoinTreeNode>>,
-            right: Option<Box<JoinTreeNode>>,
-            height: usize,
-        }
-
-        // join graph internal representation
-        #[derive(Clone, Debug)]
-        struct GraphNode {
-            id: usize,
-            join_tree: JoinTreeNode,
-            // use BTreeSet for deterministic
-            relations: BTreeSet<usize>,
-        }
-
         let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
             .map(|idx| GraphNode {
                 id: idx,
@@ -627,37 +609,6 @@ impl LogicalMultiJoin {
             }
         }
 
-        fn create_logical_join(
-            s: &LogicalMultiJoin,
-            mut join_tree: JoinTreeNode,
-            join_ordering: &mut Vec<usize>,
-        ) -> Result<PlanRef> {
-            Ok(match (join_tree.left.take(), join_tree.right.take()) {
-                (Some(l), Some(r)) => LogicalJoin::new(
-                    create_logical_join(s, *l, join_ordering)?,
-                    create_logical_join(s, *r, join_ordering)?,
-                    JoinType::Inner,
-                    Condition::true_cond(),
-                )
-                .into(),
-                (None, None) => {
-                    if let Some(idx) = join_tree.idx {
-                        join_ordering.push(idx);
-                        s.inputs[idx].clone()
-                    } else {
-                        return Err(RwError::from(ErrorCode::InternalError(
-                            "id of the leaf node not found in the join tree".into(),
-                        )));
-                    }
-                }
-                (_, _) => {
-                    return Err(RwError::from(ErrorCode::InternalError(
-                        "only leaf node can have None subtree".into(),
-                    )))
-                }
-            })
-        }
-
         let isolated = isolated.into_iter().collect_vec();
         let mut join_ordering = vec![];
         let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
@@ -725,6 +676,56 @@ impl LogicalMultiJoin {
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
     }
+}
+
+// Join tree internal representation
+#[derive(Clone, Default, Debug)]
+struct JoinTreeNode {
+    idx: Option<usize>,
+    left: Option<Box<JoinTreeNode>>,
+    right: Option<Box<JoinTreeNode>>,
+    height: usize,
+}
+
+// join graph internal representation
+#[derive(Clone, Debug)]
+struct GraphNode {
+    id: usize,
+    join_tree: JoinTreeNode,
+    // use BTreeSet for deterministic
+    relations: BTreeSet<usize>,
+}
+
+/// create logical plan by recursively travase `JoinTreeNode`
+fn create_logical_join(
+    s: &LogicalMultiJoin,
+    mut join_tree: JoinTreeNode,
+    join_ordering: &mut Vec<usize>,
+) -> Result<PlanRef> {
+    Ok(match (join_tree.left.take(), join_tree.right.take()) {
+        (Some(l), Some(r)) => LogicalJoin::new(
+            create_logical_join(s, *l, join_ordering)?,
+            create_logical_join(s, *r, join_ordering)?,
+            JoinType::Inner,
+            Condition::true_cond(),
+        )
+        .into(),
+        (None, None) => {
+            if let Some(idx) = join_tree.idx {
+                join_ordering.push(idx);
+                s.inputs[idx].clone()
+            } else {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "id of the leaf node not found in the join tree".into(),
+                )));
+            }
+        }
+        (_, _) => {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "only leaf node can have None subtree".into(),
+            )))
+        }
+    })
 }
 
 impl ToStream for LogicalMultiJoin {
