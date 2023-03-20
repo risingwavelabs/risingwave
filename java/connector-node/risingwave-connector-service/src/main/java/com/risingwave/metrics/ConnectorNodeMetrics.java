@@ -26,16 +26,23 @@ import java.lang.management.OperatingSystemMXBean;
 import java.net.InetSocketAddress;
 
 public class ConnectorNodeMetrics {
-    private static final Counter activeConnections =
+    private static final Counter activeSourceConnections =
             Counter.build()
-                    .name("active_connections")
-                    .labelNames("sink_type", "ip")
-                    .help("Number of active connections")
+                    .name("active_source_connections")
+                    .labelNames("source_type", "ip")
+                    .help("Number of active source connections")
                     .register();
 
-    private static final Counter totalConnections =
+    private static final Counter activeSinkConnections =
             Counter.build()
-                    .name("total_connections")
+                    .name("active_sink_connections")
+                    .labelNames("sink_type", "ip")
+                    .help("Number of active sink connections")
+                    .register();
+
+    private static final Counter totalSinkConnections =
+            Counter.build()
+                    .name("total_sink_connections")
                     .labelNames("sink_type", "ip")
                     .help("Number of total connections")
                     .register();
@@ -52,6 +59,11 @@ public class ConnectorNodeMetrics {
                     .help("RAM usage in bytes")
                     .register();
 
+    private static final Counter sourceRowsReceived =
+            Counter.build()
+                    .name("source_rows_received")
+                    .help("Number of rows received by source")
+                    .register();
     private static final Counter sinkRowsReceived =
             Counter.build()
                     .name("sink_rows_received")
@@ -99,7 +111,9 @@ public class ConnectorNodeMetrics {
 
     public static void startHTTPServer(int port) {
         CollectorRegistry registry = new CollectorRegistry();
-        registry.register(activeConnections);
+        registry.register(activeSourceConnections);
+        registry.register(activeSinkConnections);
+        registry.register(sourceRowsReceived);
         registry.register(cpuUsage);
         registry.register(ramUsage);
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "node1");
@@ -114,12 +128,24 @@ public class ConnectorNodeMetrics {
         }
     }
 
-    public static void incActiveConnections(String sinkType, String ip) {
-        activeConnections.labels(sinkType, ip).inc();
+    public static void incActiveSourceConnections(String sourceType, String ip) {
+        activeSourceConnections.labels(sourceType, ip).inc();
+    }
+
+    public static void decActiveSourceConnections(String sourceType, String ip) {
+        activeSourceConnections.remove(sourceType, ip);
+    }
+
+    public static void incActiveSinkConnections(String sinkType, String ip) {
+        activeSinkConnections.labels(sinkType, ip).inc();
     }
 
     public static void decActiveConnections(String sinkType, String ip) {
-        activeConnections.remove(sinkType, ip);
+        activeSinkConnections.remove(sinkType, ip);
+    }
+
+    public static void incSourceRowsReceived(double amt) {
+        sourceRowsReceived.inc(amt);
     }
 
     public static void incSinkRowsReceived() {
@@ -127,7 +153,7 @@ public class ConnectorNodeMetrics {
     }
 
     public static void incTotalConnections(String sinkType, String ip) {
-        totalConnections.labels(sinkType, ip).inc();
+        totalSinkConnections.labels(sinkType, ip).inc();
     }
 
     public static void incErrorCount(String sinkType, String ip) {
