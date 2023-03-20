@@ -69,6 +69,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
+#[derive(Debug)]
 pub enum WildcardOrExpr {
     Expr(Expr),
     /// Expr is an arbitrary expression, returning either a table or a column.
@@ -362,6 +363,8 @@ impl Parser {
             Expr::CompoundIdentifier(_) => expr,
             // expr is `((1,2,3)::foo)`
             Expr::Cast { .. } => expr,
+            // expr is `(func())`
+            Expr::Function(_) => expr,
             // expr is `((foo.v1).v2)`
             Expr::FieldIdentifier(expr, ids) => {
                 // Put `ids` to the latter part!
