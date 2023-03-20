@@ -267,7 +267,7 @@ impl ElectionClient for EtcdElectionClient {
             }
         }
 
-        tracing::warn!("client {} lost leadership", self.id);
+        tracing::error!("client {} lost leadership", self.id);
 
         self.is_leader_sender.send_replace(false);
 

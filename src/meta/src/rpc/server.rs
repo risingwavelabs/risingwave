@@ -243,17 +243,37 @@ pub async fn rpc_serve_with_store<S: MetaStore>(
             }
         };
 
-        start_service_as_election_leader(
-            meta_store,
-            address_info,
-            max_heartbeat_interval,
-            opts,
-            init_system_params,
-            election_client,
-            svc_shutdown_rx,
-        )
-        .await
-        .expect("Unable to start leader services");
+        let mut svc_shutdown_rx_clone = svc_shutdown_rx.clone();
+        let election_client_clone = election_client.clone();
+
+        tokio::spawn(async move {
+            start_service_as_election_leader(
+                meta_store,
+                address_info,
+                max_heartbeat_interval,
+                opts,
+                init_system_params,
+                election_client_clone,
+                svc_shutdown_rx,
+            )
+            .await
+            .expect("Unable to start leader services");
+        });
+
+        if let Some(ec) = election_client {
+            let mut is_leader_watcher = ec.subscribe();
+            tokio::select! {
+                _ = svc_shutdown_rx_clone.changed() => {
+                    return;
+                }
+                res = is_leader_watcher.changed() => {
+                    match res {
+                        Ok(_) => panic!("Leader lost leadership. Fencing leader by panicking"),
+                        Err(err) => tracing::error!("leader watcher recv failed {}", err.to_string()),
+                    }
+                }
+            }
+        }
     });
 
     Ok((join_handle, leader_lost_handle, svc_shutdown_tx))
