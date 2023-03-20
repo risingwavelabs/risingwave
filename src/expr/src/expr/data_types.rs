@@ -132,6 +132,18 @@ macro_rules! float32 {
 pub(crate) use float32;
 
 #[macro_export]
+macro_rules! serial {
+    ($macro:ident) => {
+        $macro! {
+            risingwave_common::types::DataType::Serial,
+            risingwave_common::array::serial_array::SerialArray
+        }
+    };
+}
+
+pub(crate) use serial;
+
+#[macro_export]
 macro_rules! float64 {
     ($macro:ident) => {
         $macro! {

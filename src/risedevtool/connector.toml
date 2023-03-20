@@ -54,7 +54,7 @@ if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2
   exit 1
 fi
 
-if command -v mvn &> /dev/null; then
+if (command -v mvn &> /dev/null) || [ -d "${PREFIX_BIN}/maven" ]; then
     exit 0
 else
     echo "Maven is not installed. Downloading now..."

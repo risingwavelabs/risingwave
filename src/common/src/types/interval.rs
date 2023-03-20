@@ -81,20 +81,6 @@ impl IntervalUnit {
         self.usecs.rem_euclid(USECS_PER_DAY) as u64
     }
 
-    #[deprecated]
-    fn from_total_usecs(usecs: i64) -> Self {
-        let mut remaining_usecs = usecs;
-        let months = remaining_usecs / USECS_PER_MONTH;
-        remaining_usecs -= months * USECS_PER_MONTH;
-        let days = remaining_usecs / USECS_PER_DAY;
-        remaining_usecs -= days * USECS_PER_DAY;
-        IntervalUnit {
-            months: (months as i32),
-            days: (days as i32),
-            usecs: remaining_usecs,
-        }
-    }
-
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output.write_i32::<BigEndian>(self.months)?;
         output.write_i32::<BigEndian>(self.days)?;
@@ -119,6 +105,63 @@ impl IntervalUnit {
         })
     }
 
+    /// Internal utility used by [`Self::mul_float`] and [`Self::div_float`] to adjust fractional
+    /// units. Not intended as general constructor.
+    fn from_floats(months: f64, days: f64, usecs: f64) -> Option<Self> {
+        // TSROUND in include/datatype/timestamp.h
+        // round eagerly at usecs precision because floats are imprecise
+        // should round to even #5576
+        let months_round_usecs =
+            |months: f64| (months * (USECS_PER_MONTH as f64)).round() / (USECS_PER_MONTH as f64);
+
+        let days_round_usecs =
+            |days: f64| (days * (USECS_PER_DAY as f64)).round() / (USECS_PER_DAY as f64);
+
+        let trunc_fract = |num: f64| (num.trunc(), num.fract());
+
+        // Handle months
+        let (months, months_fract) = trunc_fract(months_round_usecs(months));
+        if months.is_nan() || months < i32::MIN.into() || months > i32::MAX.into() {
+            return None;
+        }
+        let months = months as i32;
+        let (leftover_days, leftover_days_fract) =
+            trunc_fract(days_round_usecs(months_fract * 30.));
+
+        // Handle days
+        let (days, days_fract) = trunc_fract(days_round_usecs(days));
+        if days.is_nan() || days < i32::MIN.into() || days > i32::MAX.into() {
+            return None;
+        }
+        // Note that PostgreSQL split the integer part and fractional part individually before
+        // adding `leftover_days`. This makes a difference for mixed sign interval.
+        // For example in `interval '3 mons -3 days' / 2`
+        // * `leftover_days` is `15`
+        // * `days` from input is `-1.5`
+        // If we add first, we get `13.5` which is `13 days 12:00:00`;
+        // If we split first, we get `14` and `-0.5`, which ends up as `14 days -12:00:00`.
+        let (days_fract_whole, days_fract) =
+            trunc_fract(days_round_usecs(days_fract + leftover_days_fract));
+        let days = (days as i32)
+            .checked_add(leftover_days as i32)?
+            .checked_add(days_fract_whole as i32)?;
+        let leftover_usecs = days_fract * (USECS_PER_DAY as f64);
+
+        // Handle usecs
+        let result_usecs = usecs + leftover_usecs;
+        let usecs = result_usecs.round();
+        if usecs.is_nan() || usecs < (i64::MIN as f64) || usecs > (i64::MAX as f64) {
+            return None;
+        }
+        let usecs = usecs as i64;
+
+        Some(Self {
+            months,
+            days,
+            usecs,
+        })
+    }
+
     /// Divides [`IntervalUnit`] by an integer/float with zero check.
     pub fn div_float<I>(&self, rhs: I) -> Option<Self>
     where
@@ -131,17 +174,11 @@ impl IntervalUnit {
             return None;
         }
 
-        #[expect(deprecated)]
-        let usecs = self.as_usecs_i64();
-        #[expect(deprecated)]
-        Some(IntervalUnit::from_total_usecs(
-            (usecs as f64 / rhs).round() as i64
-        ))
-    }
-
-    #[deprecated]
-    fn as_usecs_i64(&self) -> i64 {
-        self.months as i64 * USECS_PER_MONTH + self.days as i64 * USECS_PER_DAY + self.usecs
+        Self::from_floats(
+            self.months as f64 / rhs,
+            self.days as f64 / rhs,
+            self.usecs as f64 / rhs,
+        )
     }
 
     /// times [`IntervalUnit`] with an integer/float.
@@ -152,12 +189,11 @@ impl IntervalUnit {
         let rhs = rhs.try_into().ok()?;
         let rhs = rhs.0;
 
-        #[expect(deprecated)]
-        let usecs = self.as_usecs_i64();
-        #[expect(deprecated)]
-        Some(IntervalUnit::from_total_usecs(
-            (usecs as f64 * rhs).round() as i64
-        ))
+        Self::from_floats(
+            self.months as f64 * rhs,
+            self.days as f64 * rhs,
+            self.usecs as f64 * rhs,
+        )
     }
 
     /// Performs an exact division, returns [`None`] if for any unit, lhs % rhs != 0.

@@ -109,7 +109,7 @@ pub struct Binder {
 /// 4. After bind finished:
 ///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
 /// occur in the query. `export` will return error if there is a kind of
-/// parameter. This rule is compatible with PostgreSQL    
+/// parameter. This rule is compatible with PostgreSQL
 ///     (b) parameter is None means that it's a unknown type. The user didn't specify it
 /// and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
 /// compatible with PostgreSQL.

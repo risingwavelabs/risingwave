@@ -16,11 +16,10 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, DataChunk, RowRef,
 };
 use risingwave_common::bail;
-use risingwave_common::row::{Row, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::ordered::OrderedRow;
-use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common::util::memcmp_encoding;
+use risingwave_common::util::sort_util::ColumnOrder;
 
 use crate::vector_op::agg::aggregator::Aggregator;
 use crate::Result;
@@ -113,6 +112,8 @@ impl Aggregator for StringAggUnordered {
     }
 }
 
+type OrderKey = Vec<u8>;
+
 #[derive(Clone)]
 struct StringAggData {
     value: String,
@@ -123,31 +124,22 @@ struct StringAggData {
 struct StringAggOrdered {
     agg_col_idx: usize,
     delim_col_idx: usize,
-    order_col_indices: Vec<usize>,
-    order_types: Vec<OrderType>,
-    unordered_values: Vec<(OrderedRow, StringAggData)>,
+    column_orders: Vec<ColumnOrder>,
+    unordered_values: Vec<(OrderKey, StringAggData)>,
 }
 
 impl StringAggOrdered {
     fn new(agg_col_idx: usize, delim_col_idx: usize, column_orders: Vec<ColumnOrder>) -> Self {
-        let (order_col_indices, order_types) = column_orders
-            .into_iter()
-            .map(|p| (p.column_index, p.order_type))
-            .unzip();
         Self {
             agg_col_idx,
             delim_col_idx,
-            order_col_indices,
-            order_types,
+            column_orders,
             unordered_values: vec![],
         }
     }
 
     fn push_row(&mut self, value: &str, delim: &str, row: RowRef<'_>) {
-        let key = OrderedRow::new(
-            row.project(&self.order_col_indices).into_owned_row(),
-            &self.order_types,
-        );
+        let key = memcmp_encoding::encode_row(row, &self.column_orders);
         self.unordered_values.push((
             key,
             StringAggData {
@@ -162,7 +154,7 @@ impl StringAggOrdered {
         if rows.is_empty() {
             return None;
         }
-        rows.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        rows.sort_unstable_by(|(key_a, _), (key_b, _)| key_a.cmp(key_b));
         let mut rows_iter = rows.into_iter();
         let mut result = rows_iter.next().unwrap().1.value;
         for (_, data) in rows_iter {
