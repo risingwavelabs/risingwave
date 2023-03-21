@@ -493,12 +493,11 @@ impl HummockEventHandler {
                         } => {
                             self.uploader.seal_epoch(epoch);
 
-                            // start merging task if necessary
-                            self.uploader.start_merge_imms(epoch);
-
                             if is_checkpoint {
                                 self.uploader.start_sync_epoch(epoch);
                             } else {
+                                // start merging task on non-checkpoint epochs sealed
+                                self.uploader.start_merge_imms(epoch);
                                 // merging task memory consumption may exceed the flush threshold
                                 self.uploader.may_flush();
                             }

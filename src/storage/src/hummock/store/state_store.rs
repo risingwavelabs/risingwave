@@ -34,7 +34,7 @@ use crate::hummock::iterator::{
     UnorderedMergeIteratorInner, UserIterator,
 };
 use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatch, SharedBufferBatchSnapshotIterator,
+    SharedBufferBatch, SharedBufferBatchIterator,
 };
 use crate::hummock::store::version::{read_filter_for_local, HummockVersionReader};
 use crate::hummock::utils::{
@@ -454,7 +454,7 @@ impl LocalHummockStorage {
 }
 
 pub type StagingDataIterator = OrderedMergeIteratorInner<
-    HummockIteratorUnion<Forward, SharedBufferBatchSnapshotIterator<Forward>, SstableIterator>,
+    HummockIteratorUnion<Forward, SharedBufferBatchIterator<Forward>, SstableIterator>,
 >;
 type HummockStorageIteratorPayload = UnorderedMergeIteratorInner<
     HummockIteratorUnion<

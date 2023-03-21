@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::binary_heap::{BinaryHeap, PeekMut};
 use std::fmt::Debug;
 use std::future::Future;
 use std::marker::PhantomData;
@@ -30,7 +29,7 @@ use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::iterator::{
     Backward, DeleteRangeIterator, DirectionEnum, Forward, HummockIterator,
-    HummockIteratorDirection,
+    HummockIteratorDirection, UnorderedMergeIteratorInner,
 };
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
 use crate::hummock::utils::{range_overlap, MemoryTracker};
@@ -139,7 +138,7 @@ impl SharedBufferBatchInner {
             }
         }
 
-        let max_imm_id = *imm_ids.iter().max().unwrap_or(imm_ids.first().unwrap());
+        let max_imm_id = *imm_ids.iter().max().unwrap();
         Self {
             payload,
             epoch: min_epoch,
@@ -431,20 +430,6 @@ impl SharedBufferBatch {
         self.into_directed_iter()
     }
 
-    fn into_directed_snapshot_iter<D: HummockIteratorDirection>(
-        self,
-        read_epoch: HummockEpoch,
-    ) -> SharedBufferBatchSnapshotIterator<D> {
-        SharedBufferBatchSnapshotIterator::<D>::new(self.inner, self.table_id, read_epoch)
-    }
-
-    pub fn into_forward_snapshot_iter(
-        self,
-        read_epoch: HummockEpoch,
-    ) -> SharedBufferBatchSnapshotIterator<Forward> {
-        self.into_directed_snapshot_iter(read_epoch)
-    }
-
     pub fn delete_range_iter(&self) -> SharedBufferDeleteRangeIterator {
         SharedBufferDeleteRangeIterator::new(self.inner.clone())
     }
@@ -540,14 +525,12 @@ impl SharedBufferBatch {
     }
 
     /// Merge multiple batch to one batch.
-    pub fn build_merged_imm(
+    pub async fn build_merged_imm(
         table_id: TableId,
         shard_id: ImmId,
         imms: Vec<ImmutableMemtable>,
         memory_limiter: Option<Arc<MemoryLimiter>>,
-    ) -> Self {
-        // use a binary heap to merge imms
-        let mut heap = BinaryHeap::new();
+    ) -> HummockResult<Self> {
         let mut range_tombstone_list = Vec::new();
         let mut num_keys = 0;
         let mut min_epoch = HummockEpoch::MAX;
@@ -555,6 +538,7 @@ impl SharedBufferBatch {
         let mut merged_size = 0;
         let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
+        let mut imm_iters = Vec::with_capacity(imms.len());
         for imm in imms {
             assert!(imm.key_count() > 0, "imm should not be empty");
             assert_eq!(
@@ -569,33 +553,27 @@ impl SharedBufferBatch {
             merged_size += imm.size();
             min_epoch = std::cmp::min(min_epoch, imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
-            heap.push(Node {
-                iter: imm.into_forward_iter(),
-            });
+            imm_iters.push(imm.into_forward_iter());
         }
-
         range_tombstone_list.sort();
 
+        // use merge iterator to merge input imms
+        let mut mi = UnorderedMergeIteratorInner::new(imm_iters);
+        mi.rewind().await?;
         let mut items = Vec::with_capacity(num_keys);
-        while !heap.is_empty() {
-            let mut node = heap.peek_mut().expect("heap is not empty");
-            // (key, value)
-            let (key, (_, value)) = node.iter.current_item();
-            let item = (key.clone(), value.clone());
-            items.push((item, node.iter.epoch()));
-            node.iter.blocking_next();
-            if !node.iter.is_valid() {
-                // remove the invalid iter from heap
-                PeekMut::pop(node);
-            } else {
-                // This will update the heap
-                drop(node);
-            }
+        while mi.is_valid() {
+            let full_key = mi.key();
+            let epoch = full_key.epoch;
+            // copy key and value to avoid lifetime issue
+            // because the merge iterator will be dropped after the function returns
+            let item = (
+                Bytes::copy_from_slice(full_key.user_key.table_key.as_ref()),
+                mi.value().to_bytes(),
+            );
+            items.push((item, epoch));
+            mi.next().await?;
         }
 
-        // Do we need to add the size of EPOCH?
-        // merged_size += items.len() * EPOCH_LEN;
-        // different versions of a key will be put to a vector
         let mut merged_payload: Vec<SharedBufferVersionedEntry> = Vec::new();
         let mut pivot = items.first().map(|((k, _), _)| k.clone()).unwrap();
         let mut versions: Vec<(HummockEpoch, HummockValue<Bytes>)> = Vec::new();
@@ -616,7 +594,7 @@ impl SharedBufferBatch {
 
         let tracker =
             memory_limiter.and_then(|limiter| limiter.try_require_memory(merged_size as u64));
-        SharedBufferBatch {
+        Ok(SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
                 min_epoch,
                 epochs,
@@ -628,7 +606,7 @@ impl SharedBufferBatch {
             )),
             table_id,
             shard_id,
-        }
+        })
     }
 
     pub fn get_delete_range_tombstones(&self) -> Vec<DeleteRangeTombstone> {
@@ -649,35 +627,6 @@ impl SharedBufferBatch {
         }
     }
 }
-
-struct Node {
-    iter: SharedBufferBatchIterator<Forward>,
-}
-
-impl Ord for Node
-where
-    Self: PartialOrd,
-{
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // compares the full key
-        self.iter.key().cmp(&other.iter.key())
-    }
-}
-
-impl PartialOrd<Node> for Node {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        // Note: to implement min-heap by using max-heap internally, the comparing
-        Some(other.cmp(self))
-    }
-}
-
-impl PartialEq for Node {
-    fn eq(&self, other: &Self) -> bool {
-        self.iter.key() == other.iter.key()
-    }
-}
-
-impl Eq for Node where Self: PartialEq {}
 
 /// Iterate all the items in the shared buffer batch
 /// If there are multiple versions of a key, the iterator will return all versions
@@ -773,7 +722,7 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
             assert!(self.is_valid());
             match D::direction() {
                 DirectionEnum::Forward => {
-                    // If the current key has more versions, we need to advance the version index
+                    // If the current key has more versions, we need to advance the value index
                     if self.current_value_idx + 1 < self.current_values_len() {
                         self.current_value_idx += 1;
                     } else {
@@ -894,153 +843,6 @@ impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchIterator<
                     }
                 }
             }
-            Ok(())
-        }
-    }
-
-    fn collect_local_statistic(&self, _stats: &mut crate::monitor::StoreLocalStatistic) {}
-}
-
-/// A snapshot iterator for a given batch(Imm)
-/// Only scan value with epoch <= `read_epoch`
-pub struct SharedBufferBatchSnapshotIterator<D: HummockIteratorDirection> {
-    inner: Arc<SharedBufferBatchInner>,
-    current_key_idx: usize,
-    table_id: TableId,
-    read_epoch: HummockEpoch,
-    _phantom: PhantomData<D>,
-}
-
-impl<D: HummockIteratorDirection> SharedBufferBatchSnapshotIterator<D> {
-    pub(crate) fn new(
-        inner: Arc<SharedBufferBatchInner>,
-        table_id: TableId,
-        read_epoch: HummockEpoch,
-    ) -> Self {
-        Self {
-            inner,
-            current_key_idx: 0,
-            table_id,
-            read_epoch,
-            _phantom: Default::default(),
-        }
-    }
-
-    pub(crate) fn current_entry(&self) -> &SharedBufferVersionedEntry {
-        assert!(self.is_valid());
-        let idx = match D::direction() {
-            DirectionEnum::Forward => self.current_key_idx,
-            DirectionEnum::Backward => self.inner.len() - self.current_key_idx - 1,
-        };
-        self.inner.get(idx).unwrap()
-    }
-
-    pub fn epoch(&self) -> HummockEpoch {
-        self.read_epoch
-    }
-
-    fn check_visibility_and_seek(&mut self) {
-        // move to a key that has visible versions
-        loop {
-            if !self.is_valid() {
-                break;
-            }
-            let values = &self.current_entry().1;
-            debug_assert!(!values.is_empty());
-            let min_epoch = values.last().unwrap().0;
-            // read_epoch >= min_epoch there exists a visible version
-            if min_epoch <= self.read_epoch {
-                break;
-            }
-            self.current_key_idx += 1;
-        }
-    }
-}
-
-impl<D: HummockIteratorDirection> HummockIterator for SharedBufferBatchSnapshotIterator<D> {
-    type Direction = D;
-
-    type NextFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type RewindFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-    type SeekFuture<'a> = impl Future<Output = HummockResult<()>> + 'a;
-
-    fn next(&mut self) -> Self::NextFuture<'_> {
-        async move {
-            // move to a key that has visible versions in the snapshot
-            self.current_key_idx += 1;
-            self.check_visibility_and_seek();
-            Ok(())
-        }
-    }
-
-    fn key(&self) -> FullKey<&[u8]> {
-        let entry = self.current_entry();
-        // assume the read_epoch wouldn't be too old, so just use linear scan here and hope to
-        // exploit cpu cache prefetch
-        for (e, _) in &entry.1 {
-            if *e <= self.read_epoch {
-                return FullKey::new(self.table_id, TableKey(&entry.0), *e);
-            }
-        }
-        unreachable!("should have found a key for read epoch {}", self.read_epoch)
-    }
-
-    fn value(&self) -> HummockValue<&[u8]> {
-        let entry = self.current_entry();
-
-        // assume the read_epoch wouldn't be too old, so just use linear scan here and hope to
-        // exploit cpu cache prefetch
-        for (e, v) in &entry.1 {
-            if *e <= self.read_epoch {
-                return v.as_slice();
-            }
-        }
-        unreachable!(
-            "should have found a value for read epoch {}",
-            self.read_epoch
-        )
-    }
-
-    fn is_valid(&self) -> bool {
-        self.current_key_idx < self.inner.len()
-    }
-
-    fn rewind(&mut self) -> Self::RewindFuture<'_> {
-        async move {
-            self.current_key_idx = 0;
-            Ok(())
-        }
-    }
-
-    fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
-        async move {
-            debug_assert_eq!(key.user_key.table_id, self.table_id);
-            // Perform binary search on table key because the items in SharedBufferBatch is ordered
-            // by table key.
-            let partition_point = self
-                .inner
-                .binary_search_by(|probe| probe.0[..].cmp(*key.user_key.table_key));
-            // let _seek_key_epoch = key.epoch;
-            match D::direction() {
-                DirectionEnum::Forward => match partition_point {
-                    Ok(i) => {
-                        self.current_key_idx = i;
-                    }
-                    Err(i) => self.current_key_idx = i,
-                },
-                DirectionEnum::Backward => {
-                    match partition_point {
-                        Ok(i) => {
-                            self.current_key_idx = self.inner.len() - i - 1;
-                        }
-                        // Seek to one item before the seek partition_point:
-                        // If i == 0, the iterator will be invalidated with self.current_idx ==
-                        // self.inner.len().
-                        Err(i) => self.current_key_idx = self.inner.len() - i,
-                    }
-                }
-            }
-            self.check_visibility_and_seek();
             Ok(())
         }
     }
@@ -1521,7 +1323,9 @@ mod tests {
         ];
         // newer data comes first
         let imms = vec![imm3, imm2, imm1];
-        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms.clone(), None);
+        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms.clone(), None)
+            .await
+            .unwrap();
 
         // Point lookup
         for (i, items) in batch_items.iter().enumerate() {
@@ -1544,19 +1348,22 @@ mod tests {
             None
         );
 
-        // Forward (snapshot) iterator
-        for epoch in 1..=3 {
-            let mut iter = merged_imm.clone().into_forward_snapshot_iter(epoch);
+        // Forward iterator
+        for snapshot_epoch in 1..=3 {
+            let mut iter = merged_imm.clone().into_forward_iter();
             iter.rewind().await.unwrap();
             let mut output = vec![];
             while iter.is_valid() {
-                output.push((
-                    iter.key().user_key.table_key.to_vec(),
-                    iter.value().to_bytes(),
-                ));
+                let epoch = iter.key().epoch;
+                if snapshot_epoch == epoch {
+                    output.push((
+                        iter.key().user_key.table_key.to_vec(),
+                        iter.value().to_bytes(),
+                    ));
+                }
                 iter.next().await.unwrap();
             }
-            assert_eq!(output, batch_items[epoch as usize - 1]);
+            assert_eq!(output, batch_items[snapshot_epoch as usize - 1]);
         }
 
         // Forward and Backward iterator
@@ -1686,7 +1493,9 @@ mod tests {
         );
 
         let imms = vec![imm2, imm1];
-        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms, None);
+        let merged_imm = ImmutableMemtable::build_merged_imm(table_id, 0, imms, None)
+            .await
+            .unwrap();
 
         assert_eq!(
             Some(1),
