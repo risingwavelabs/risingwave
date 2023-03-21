@@ -353,7 +353,7 @@ pub(crate) async fn do_insert_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
-        cache_policy: CachePolicy::NotFill,
+        cache_policy: CachePolicy::Fill,
     };
     let stored_value = inner.get(key.clone(), epoch, read_options).await?;
 
@@ -384,7 +384,7 @@ pub(crate) async fn do_delete_sanity_check(
         ignore_range_tombstone: false,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
-        cache_policy: CachePolicy::NotFill,
+        cache_policy: CachePolicy::Fill,
     };
     match inner.get(key.clone(), epoch, read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
@@ -425,7 +425,7 @@ pub(crate) async fn do_update_sanity_check(
         table_id,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
-        cache_policy: CachePolicy::NotFill,
+        cache_policy: CachePolicy::Fill,
     };
 
     match inner.get(key.clone(), epoch, read_options).await? {
