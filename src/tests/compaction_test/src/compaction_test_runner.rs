@@ -33,7 +33,7 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::hummock::{HummockVersion, HummockVersionDelta};
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
-use risingwave_storage::hummock::{HummockStorage, TieredCacheMetricsBuilder};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage, TieredCacheMetricsBuilder};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics,
@@ -628,6 +628,7 @@ async fn open_hummock_iters(
                     ignore_range_tombstone: false,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await?;

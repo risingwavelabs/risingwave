@@ -26,6 +26,7 @@ use risingwave_storage::store::{
 };
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
+use risingwave_storage::hummock::CachePolicy;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
@@ -46,6 +47,7 @@ macro_rules! assert_count_range_scan {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await

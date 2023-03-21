@@ -21,6 +21,7 @@ use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::{map_table_key_range, FullKey, UserKey, TABLE_PREFIX_LEN};
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::hummock::store::version::{read_filter_for_batch, read_filter_for_local};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
@@ -97,6 +98,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -116,6 +118,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -137,6 +140,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -171,6 +175,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -207,6 +212,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -227,6 +233,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -247,6 +254,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -282,6 +290,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -303,6 +312,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -323,6 +333,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -365,6 +376,7 @@ async fn test_storage_basic() {
                 prefix_hint: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             },
         )
         .await
@@ -511,6 +523,7 @@ async fn test_state_store_sync() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -557,6 +570,7 @@ async fn test_state_store_sync() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -581,6 +595,7 @@ async fn test_state_store_sync() {
                     prefix_hint: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -623,6 +638,7 @@ async fn test_state_store_sync() {
                     prefix_hint: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -726,6 +742,7 @@ async fn test_delete_get() {
                 retention_seconds: None,
                 read_version_from_backup: false,
                 prefetch_options: Default::default(),
+                cache_policy: CachePolicy::Fill,
             }
         )
         .await
@@ -815,6 +832,7 @@ async fn test_multiple_epoch_sync() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill,
                         },
                     )
                     .await
@@ -834,6 +852,7 @@ async fn test_multiple_epoch_sync() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -852,6 +871,7 @@ async fn test_multiple_epoch_sync() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: Default::default(),
+                            cache_policy: CachePolicy::Fill,
                         },
                     )
                     .await
@@ -960,6 +980,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -984,6 +1005,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1006,6 +1028,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1048,6 +1071,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1072,6 +1096,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1096,6 +1121,7 @@ async fn test_iter_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1206,7 +1232,7 @@ async fn test_hummock_version_reader() {
                     &(Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
-                .unwrap();
+                    .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1219,6 +1245,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1236,7 +1263,7 @@ async fn test_hummock_version_reader() {
                     &(Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
-                .unwrap();
+                    .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1249,6 +1276,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1266,7 +1294,7 @@ async fn test_hummock_version_reader() {
                     &(Unbounded, Unbounded),
                     hummock_storage.read_version(),
                 )
-                .unwrap();
+                    .unwrap();
 
                 let iter = hummock_version_reader
                     .iter(
@@ -1279,6 +1307,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1333,7 +1362,7 @@ async fn test_hummock_version_reader() {
                         read_version_3.clone(),
                     ],
                 )
-                .unwrap();
+                    .unwrap();
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1351,6 +1380,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1372,7 +1402,7 @@ async fn test_hummock_version_reader() {
                         read_version_3.clone(),
                     ],
                 )
-                .unwrap();
+                    .unwrap();
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1390,6 +1420,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1411,7 +1442,7 @@ async fn test_hummock_version_reader() {
                         read_version_3.clone(),
                     ],
                 )
-                .unwrap();
+                    .unwrap();
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1429,6 +1460,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1450,7 +1482,7 @@ async fn test_hummock_version_reader() {
                         read_version_3.clone(),
                     ],
                 )
-                .unwrap();
+                    .unwrap();
 
                 assert_eq!(
                     read_version_3.read().committed().max_committed_epoch(),
@@ -1468,6 +1500,7 @@ async fn test_hummock_version_reader() {
                             prefix_hint: None,
                             read_version_from_backup: false,
                             prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                            cache_policy: CachePolicy::Fill,
                         },
                         read_snapshot,
                     )
@@ -1495,7 +1528,7 @@ async fn test_hummock_version_reader() {
                             read_version_3.clone(),
                         ],
                     )
-                    .unwrap();
+                        .unwrap();
 
                     assert_eq!(
                         read_version_3.read().committed().max_committed_epoch(),
@@ -1513,6 +1546,7 @@ async fn test_hummock_version_reader() {
                                 prefix_hint: None,
                                 read_version_from_backup: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                                cache_policy: CachePolicy::Fill,
                             },
                             read_snapshot,
                         )
@@ -1534,7 +1568,7 @@ async fn test_hummock_version_reader() {
                             read_version_3.clone(),
                         ],
                     )
-                    .unwrap();
+                        .unwrap();
 
                     assert_eq!(
                         read_version_3.read().committed().max_committed_epoch(),
@@ -1552,6 +1586,7 @@ async fn test_hummock_version_reader() {
                                 prefix_hint: None,
                                 read_version_from_backup: false,
                                 prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                                cache_policy: CachePolicy::Fill,
                             },
                             read_snapshot,
                         )
@@ -1653,6 +1688,7 @@ async fn test_get_with_min_epoch() {
                         prefix_hint: None,
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1673,6 +1709,7 @@ async fn test_get_with_min_epoch() {
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1693,6 +1730,7 @@ async fn test_get_with_min_epoch() {
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1713,6 +1751,7 @@ async fn test_get_with_min_epoch() {
                         prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                         read_version_from_backup: false,
                         prefetch_options: Default::default(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -1759,6 +1798,7 @@ async fn test_get_with_min_epoch() {
                     prefix_hint: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -1780,6 +1820,7 @@ async fn test_get_with_min_epoch() {
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -1803,6 +1844,7 @@ async fn test_get_with_min_epoch() {
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -1825,6 +1867,7 @@ async fn test_get_with_min_epoch() {
                     prefix_hint: Some(Bytes::from(prefix_hint.clone())),
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await

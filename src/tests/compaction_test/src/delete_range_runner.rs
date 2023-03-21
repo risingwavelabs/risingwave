@@ -43,9 +43,7 @@ use risingwave_pb::meta::SystemParams;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-use risingwave_storage::hummock::{
-    HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache,
-};
+use risingwave_storage::hummock::{CachePolicy, HummockStorage, MemoryLimiter, SstableObjectIdManager, SstableStore, TieredCache};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions};
@@ -392,6 +390,7 @@ impl NormalState {
                     table_id: self.table_id,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -418,6 +417,7 @@ impl NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await
@@ -450,6 +450,7 @@ impl CheckState for NormalState {
                         table_id: self.table_id,
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 )
                 .await

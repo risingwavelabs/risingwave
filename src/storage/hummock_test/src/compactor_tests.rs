@@ -46,10 +46,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::compactor::{CompactionExecutor, Compactor, CompactorContext};
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
-    use risingwave_storage::hummock::{
-        HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter,
-        SstableObjectIdManager,
-    };
+    use risingwave_storage::hummock::{CachePolicy, HummockStorage as GlobalHummockStorage, HummockStorage, MemoryLimiter, SstableObjectIdManager};
     use risingwave_storage::monitor::{CompactorMetrics, StoreLocalStatistic};
     use risingwave_storage::opts::StorageOpts;
     use risingwave_storage::storage_value::StorageValue;
@@ -81,15 +78,15 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             notification_client,
         )
-        .await
-        .unwrap();
+            .await
+            .unwrap();
 
         register_tables_with_id_for_test(
             hummock.filter_key_extractor_manager(),
             hummock_manager_ref,
             &[table_id.table_id()],
         )
-        .await;
+            .await;
 
         hummock
     }
@@ -115,8 +112,8 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             notification_client,
         )
-        .await
-        .unwrap()
+            .await
+            .unwrap()
     }
 
     async fn prepare_test_put_data(
@@ -215,7 +212,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             Default::default(),
         )
-        .await;
+            .await;
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -229,7 +226,7 @@ pub(crate) mod tests {
             1 << 10,
             (1..129).map(|v| (v * 1000) << 16).collect_vec(),
         )
-        .await;
+            .await;
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
@@ -305,6 +302,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -324,6 +322,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await;
@@ -345,7 +344,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             Default::default(),
         )
-        .await;
+            .await;
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
             &hummock_meta_client,
@@ -363,7 +362,7 @@ pub(crate) mod tests {
             1 << 20,
             (1..129).collect_vec(),
         )
-        .await;
+            .await;
 
         // 2. get compact task
         let mut compact_task = hummock_manager_ref
@@ -440,6 +439,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: Default::default(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -544,7 +544,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
-        .await;
+            .await;
 
         let compact_ctx_existing_table_id = prepare_compactor_and_filter(
             &storage_existing_table_id,
@@ -558,7 +558,7 @@ pub(crate) mod tests {
             existing_table_id,
             1,
         )
-        .await;
+            .await;
 
         // Mimic dropping table
         unregister_table_ids_from_compaction_group(&hummock_manager_ref, &[existing_table_id])
@@ -598,7 +598,7 @@ pub(crate) mod tests {
             compact_task.clone(),
             rx,
         )
-        .await;
+            .await;
 
         // 4. get the latest version and check
         let version = hummock_manager_ref.get_current_version().await;
@@ -634,7 +634,7 @@ pub(crate) mod tests {
             hummock_meta_client.clone(),
             get_notification_client_for_test(env, hummock_manager_ref.clone(), worker_node.clone()),
         )
-        .await;
+            .await;
 
         // register the local_storage to global_storage
         let mut storage_1 = global_storage
@@ -678,7 +678,7 @@ pub(crate) mod tests {
             &[drop_table_id, existing_table_ids],
             StaticCompactionGroupId::StateDefault.into(),
         )
-        .await;
+            .await;
         for index in 0..kv_count {
             epoch += 1;
             let next_epoch = epoch + 1;
@@ -806,6 +806,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -835,7 +836,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
-        .await;
+            .await;
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         let compact_ctx = get_compactor_context_with_filter_key_extractor_manager(
             &storage,
@@ -988,6 +989,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -1019,7 +1021,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
-        .await;
+            .await;
 
         let filter_key_extractor_manager = storage.filter_key_extractor_manager().clone();
         filter_key_extractor_manager.update(
@@ -1154,7 +1156,7 @@ pub(crate) mod tests {
             existing_table_id.to_be_bytes().to_vec(),
             key_prefix.to_vec(),
         ]
-        .concat();
+            .concat();
         let start_bound_key = Bytes::from(key_prefix.to_vec());
         let end_bound_key = Bytes::from(next_key(start_bound_key.as_ref()));
         let scan_result = storage
@@ -1172,6 +1174,7 @@ pub(crate) mod tests {
                     retention_seconds: None,
                     read_version_from_backup: false,
                     prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                    cache_policy: CachePolicy::Fill,
                 },
             )
             .await
@@ -1201,7 +1204,7 @@ pub(crate) mod tests {
             &hummock_manager_ref,
             TableId::from(existing_table_id),
         )
-        .await;
+            .await;
         let compact_ctx =
             prepare_compactor_and_filter(&storage, &hummock_meta_client, existing_table_id);
 
