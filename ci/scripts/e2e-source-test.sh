@@ -106,7 +106,8 @@ pkill -f connector-node
 
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 cargo make ci-start ci-1cn-1fe
-sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_mvs/*.slt'
+sqllogictest -p 4566 -d dev './e2e_test/source/nexmark_endless_sinks/*.slt'
 
 echo "--- Kill cluster"
 cargo make ci-kill
