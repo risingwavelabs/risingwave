@@ -490,6 +490,7 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
+    use tracing_test::traced_test;
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
@@ -600,6 +601,7 @@ mod tests {
         );
     }
 
+    #[traced_test]
     #[tokio::test]
     async fn test_split_change_mutation() {
         let table_id = TableId::default();
