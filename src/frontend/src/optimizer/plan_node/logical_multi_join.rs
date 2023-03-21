@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
@@ -26,7 +26,7 @@ use super::{
     PlanNodeType, PlanRef, PlanTreeNodeBinary, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
     ToStream,
 };
-use crate::expr::{ExprImpl, ExprRewriter};
+use crate::expr::{ExprImpl, ExprRewriter, ExprType, FunctionCall};
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
     ToStreamContext,
@@ -508,8 +508,10 @@ impl LogicalMultiJoin {
             })
             .enumerate()
             .collect();
-        let (eq_join_conditions, _) = self
-            .on
+
+        let condition = self.on.clone();
+        let condition = self.eq_condition_derivation(condition)?;
+        let (eq_join_conditions, _) = condition
             .clone()
             .split_by_input_col_nums(&self.input_col_nums(), true);
 
@@ -517,8 +519,6 @@ impl LogicalMultiJoin {
             nodes.get_mut(&src).unwrap().relations.insert(dst);
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
-
-        nodes = eq_condition_derivation(nodes);
 
         // isolated nodes can be joined at any where.
         let iso_nodes = nodes
@@ -626,7 +626,7 @@ impl LogicalMultiJoin {
         let mut join_ordering = vec![];
         let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
             let mut output =
-                create_logical_join(self, optimized_bushy_tree.join_tree, &mut join_ordering)?;
+                self.create_logical_join(optimized_bushy_tree.join_tree, &mut join_ordering)?;
 
             output = isolated.into_iter().fold(output, |chain, n| {
                 join_ordering.push(n);
@@ -679,7 +679,7 @@ impl LogicalMultiJoin {
             LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
                 .into();
 
-        output = LogicalFilter::create(output, self.on.clone());
+        output = LogicalFilter::create(output, condition);
         output =
             LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
         Ok(output)
@@ -687,6 +687,95 @@ impl LogicalMultiJoin {
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {
         self.inputs.iter().map(|i| i.schema().len()).collect()
+    }
+
+    ///  equivalent condition derivation by `a = b && a = c` ==> `b = c`
+    fn eq_condition_derivation(&self, mut condition: Condition) -> Result<Condition> {
+        let (eq_join_conditions, _) = condition
+            .clone()
+            .split_by_input_col_nums(&self.input_col_nums(), true);
+
+        let mut new_conj: BTreeMap<usize, BTreeSet<usize>> = BTreeMap::new();
+        let mut input_ref_map = HashMap::new();
+
+        for con in eq_join_conditions.values() {
+            for conj in con.conjunctions.iter() {
+                let (l, r) = conj.as_eq_cond().unwrap();
+                new_conj.entry(l.index).or_default().insert(r.index);
+                new_conj.entry(r.index).or_default().insert(l.index);
+                input_ref_map.insert(l.index, Some(l));
+                input_ref_map.insert(r.index, Some(r));
+            }
+        }
+
+        let mut new_pairs = BTreeSet::new();
+
+        for (_, conjs) in new_conj.iter() {
+            if conjs.len() < 2 {
+                continue;
+            }
+
+            let conjs = conjs.iter().map(|i| *i).collect_vec();
+            for i in 0..conjs.len() {
+                for j in i + 1..conjs.len() {
+                    if !new_conj.get(&conjs[i]).unwrap().contains(&conjs[j]) {
+                        if conjs[i] < conjs[j] {
+                            new_pairs.insert((conjs[i], conjs[j]));
+                        } else {
+                            new_pairs.insert((conjs[j], conjs[i]));
+                        }
+                    }
+                }
+            }
+        }
+        for (i, j) in new_pairs {
+            condition
+                .conjunctions
+                .push(ExprImpl::FunctionCall(Box::new(FunctionCall::new(
+                    ExprType::Equal,
+                    vec![
+                        ExprImpl::InputRef(Box::new(
+                            input_ref_map.get(&i).unwrap().as_ref().unwrap().clone(),
+                        )),
+                        ExprImpl::InputRef(Box::new(
+                            input_ref_map.get(&j).unwrap().as_ref().unwrap().clone(),
+                        )),
+                    ],
+                )?)));
+        }
+        Ok(condition)
+    }
+
+    /// create logical plan by recursively travase `JoinTreeNode`
+    fn create_logical_join(
+        &self,
+        mut join_tree: JoinTreeNode,
+        join_ordering: &mut Vec<usize>,
+    ) -> Result<PlanRef> {
+        Ok(match (join_tree.left.take(), join_tree.right.take()) {
+            (Some(l), Some(r)) => LogicalJoin::new(
+                self.create_logical_join(*l, join_ordering)?,
+                self.create_logical_join(*r, join_ordering)?,
+                JoinType::Inner,
+                Condition::true_cond(),
+            )
+            .into(),
+            (None, None) => {
+                if let Some(idx) = join_tree.idx {
+                    join_ordering.push(idx);
+                    self.inputs[idx].clone()
+                } else {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "id of the leaf node not found in the join tree".into(),
+                    )));
+                }
+            }
+            (_, _) => {
+                return Err(RwError::from(ErrorCode::InternalError(
+                    "only leaf node can have None subtree".into(),
+                )))
+            }
+        })
     }
 }
 
@@ -706,61 +795,6 @@ struct GraphNode {
     join_tree: JoinTreeNode,
     // use BTreeSet for deterministic
     relations: BTreeSet<usize>,
-}
-
-///  equivalent condition derivation by `a = b && a = c` ==> `b = c`
-fn eq_condition_derivation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<usize, GraphNode> {
-    let keys = nodes.keys().cloned().collect_vec();
-    for node in keys {
-        let rel = nodes
-            .get(&node)
-            .unwrap()
-            .relations
-            .iter()
-            .cloned()
-            .collect_vec();
-
-        let n_rel = rel.len();
-        for i in 0..n_rel {
-            for j in i + 1..n_rel {
-                nodes.get_mut(&rel[i]).unwrap().relations.insert(rel[j]);
-                nodes.get_mut(&rel[j]).unwrap().relations.insert(rel[i]);
-            }
-        }
-    }
-    nodes
-}
-
-/// create logical plan by recursively travase `JoinTreeNode`
-fn create_logical_join(
-    s: &LogicalMultiJoin,
-    mut join_tree: JoinTreeNode,
-    join_ordering: &mut Vec<usize>,
-) -> Result<PlanRef> {
-    Ok(match (join_tree.left.take(), join_tree.right.take()) {
-        (Some(l), Some(r)) => LogicalJoin::new(
-            create_logical_join(s, *l, join_ordering)?,
-            create_logical_join(s, *r, join_ordering)?,
-            JoinType::Inner,
-            Condition::true_cond(),
-        )
-        .into(),
-        (None, None) => {
-            if let Some(idx) = join_tree.idx {
-                join_ordering.push(idx);
-                s.inputs[idx].clone()
-            } else {
-                return Err(RwError::from(ErrorCode::InternalError(
-                    "id of the leaf node not found in the join tree".into(),
-                )));
-            }
-        }
-        (_, _) => {
-            return Err(RwError::from(ErrorCode::InternalError(
-                "only leaf node can have None subtree".into(),
-            )))
-        }
-    })
 }
 
 impl ToStream for LogicalMultiJoin {
