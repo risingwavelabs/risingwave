@@ -181,6 +181,7 @@ impl CompactorRunner {
                     .cloned()
                     .collect_vec();
                 table_iters.push(ConcatSstableIterator::new(
+                    self.compact_task.existing_table_ids.clone(),
                     tables,
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
@@ -192,6 +193,7 @@ impl CompactorRunner {
                         continue;
                     }
                     table_iters.push(ConcatSstableIterator::new(
+                        self.compact_task.existing_table_ids.clone(),
                         vec![table_info.clone()],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),
