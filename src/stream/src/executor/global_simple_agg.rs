@@ -16,7 +16,6 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
@@ -231,7 +230,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
-                .flush_state_if_needed(&mut this.storages)
+                .flush_state_if_needed(None, &mut this.storages)
                 .await?;
 
             // Flush distinct dedup state.
@@ -250,14 +249,14 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut builders = this.info.schema.create_array_builders(2);
             let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
-            let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
+            let curr_outputs = vars.agg_group.get_outputs(None, &this.storages).await?;
             let AggChangesInfo {
                 result_row,
                 prev_outputs,
                 n_appended_ops,
             } = vars
                 .agg_group
-                .build_changes(curr_outputs, &mut builders, &mut new_ops);
+                .build_changes(None, curr_outputs, &mut builders, &mut new_ops);
 
             if n_appended_ops == 0 {
                 // Agg result is not changed.
@@ -267,7 +266,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
 
             // Update the result table with latest agg outputs.
             if let Some(prev_outputs) = prev_outputs {
-                let old_row = vars.agg_group.group_key().chain(prev_outputs);
+                let old_row = prev_outputs; // keep this line to align with `HashAggExecutor`
                 this.result_table.update(old_row, result_row);
             } else {
                 this.result_table.insert(result_row);

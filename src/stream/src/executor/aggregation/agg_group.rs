@@ -177,9 +177,6 @@ impl Strategy for OnlyOutputIfHasInput {
 
 /// [`AggGroup`] manages agg states of all agg calls for one `group_key`.
 pub struct AggGroup<S: StateStore, Strtg: Strategy> {
-    /// Group key.
-    group_key: Option<OwnedRow>, // TODO(rc): we can remove this
-
     /// Current managed states for all [`AggCall`]s.
     states: Vec<AggState<S>>,
 
@@ -195,7 +192,6 @@ pub struct AggGroup<S: StateStore, Strtg: Strategy> {
 impl<S: StateStore, Strtg: Strategy> Debug for AggGroup<S, Strtg> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AggGroup")
-            .field("group_key", &self.group_key)
             .field("prev_outputs", &self.prev_outputs)
             .finish()
     }
@@ -216,7 +212,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// For [`crate::executor::GlobalSimpleAggExecutor`], the `group_key` should be `None`.
     #[allow(clippy::too_many_arguments)]
     pub async fn create(
-        group_key: Option<OwnedRow>,
+        group_key: Option<&OwnedRow>,
         agg_calls: &[AggCall],
         storages: &[AggStateStorage<S>],
         result_table: &StateTable<S>,
@@ -237,7 +233,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                     &storages[idx],
                     prev_outputs.as_ref().map(|outputs| &outputs[idx]),
                     pk_indices,
-                    group_key.as_ref(),
+                    group_key,
                     extreme_cache_size,
                     input_schema,
                 )
@@ -245,16 +241,11 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             .await?;
 
         Ok(Self {
-            group_key,
             states,
             prev_outputs,
             row_count_index,
             _phantom: PhantomData,
         })
-    }
-
-    pub fn group_key(&self) -> Option<&OwnedRow> {
-        self.group_key.as_ref()
     }
 
     fn prev_row_count(&self) -> usize {
@@ -297,13 +288,14 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// must be called before committing state tables.
     pub async fn flush_state_if_needed(
         &self,
+        group_key: Option<&OwnedRow>,
         storages: &mut [AggStateStorage<S>],
     ) -> StreamExecutorResult<()> {
         futures::future::try_join_all(self.states.iter().zip_eq_fast(storages).filter_map(
             |(state, storage)| match state {
                 AggState::Table(state) => Some(state.flush_state_if_needed(
                     must_match!(storage, AggStateStorage::Table { table } => table),
-                    self.group_key(),
+                    group_key,
                 )),
                 _ => None,
             },
@@ -322,11 +314,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// Possibly need to read/sync from state table if the state not cached in memory.
     pub async fn get_outputs(
         &mut self,
+        group_key: Option<&OwnedRow>,
         storages: &[AggStateStorage<S>],
     ) -> StreamExecutorResult<OwnedRow> {
         // Row count doesn't need I/O, so the following statement is supposed to be fast.
         let row_count = self.states[self.row_count_index]
-            .get_output(&storages[self.row_count_index], self.group_key.as_ref())
+            .get_output(&storages[self.row_count_index], group_key)
             .await?
             .as_ref()
             .map(|x| *x.as_int64() as usize)
@@ -343,7 +336,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             self.states
                 .iter_mut()
                 .zip_eq_fast(storages)
-                .map(|(state, storage)| state.get_output(storage, self.group_key.as_ref())),
+                .map(|(state, storage)| state.get_output(storage, group_key)),
         )
         .await
         .map(OwnedRow::new)
@@ -354,6 +347,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// The saved previous outputs will be updated to the latest outputs after building changes.
     pub fn build_changes(
         &mut self,
+        group_key: Option<&OwnedRow>,
         curr_outputs: OwnedRow,
         builders: &mut [ArrayBuilderImpl],
         new_ops: &mut Vec<Op>,
@@ -379,7 +373,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             new_ops,
         );
 
-        let result_row = self.group_key().chain(&curr_outputs).into_owned_row();
+        let result_row = group_key.chain(&curr_outputs).into_owned_row();
 
         let prev_outputs = if n_appended_ops == 0 {
             self.prev_outputs.clone()
