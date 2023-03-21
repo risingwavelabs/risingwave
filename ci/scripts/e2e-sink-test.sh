@@ -108,7 +108,7 @@ sleep 1
 
 # check sink destination mysql using shell
 diff -u ./e2e_test/sink/remote/mysql_expected_result.tsv \
-< (mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote ORDER BY id")
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote ORDER BY id")
 if [ $? -eq 0 ]; then
   echo "mysql sink check passed"
 else
