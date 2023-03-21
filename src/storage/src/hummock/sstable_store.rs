@@ -107,7 +107,7 @@ pub enum CachePolicy {
     /// Try reading the cache and fill the cache afterwards.
     #[default]
     Fill,
-    /// Read the cache but not fill the cache afterwards.
+    /// Read the cache but not fill the block cache afterwards. Fill tiered cache instead.
     NotFill,
 }
 
@@ -247,10 +247,16 @@ impl SstableStore {
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Block::decode(block_data, uncompressed_capacity)?;
 
-                // FIXME: Handle error? Should we insert into tiered cache?
-                tiered_cache
-                    .insert((object_id, block_index as u64), Box::new(block.clone()))
-                    .unwrap();
+                match policy {
+                    CachePolicy::NotFill => {
+                        // CachePolicy::NotFill means it doesn't fill block cache, but it is still
+                        // worthwhile to fill the tiered cache.
+                        tiered_cache
+                            .insert((object_id, block_index as u64), Box::new(block.clone()))
+                            .unwrap();
+                    }
+                    CachePolicy::Fill | CachePolicy::Disable => {}
+                };
 
                 Ok(Box::new(block))
             }
