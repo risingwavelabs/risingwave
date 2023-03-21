@@ -48,14 +48,14 @@ public class ConnectorNodeMetrics {
                     .register();
     private static final Gauge cpuUsage =
             Gauge.build()
-                    .name("cpu_usage")
-                    .labelNames("node_id")
+                    .name("process_cpu_seconds_total")
+                    .labelNames("job")
                     .help("CPU usage in percentage")
                     .register();
     private static final Gauge ramUsage =
             Gauge.build()
-                    .name("ram_usage")
-                    .labelNames("node_id")
+                    .name("process_resident_memory_bytes")
+                    .labelNames("job")
                     .help("RAM usage in bytes")
                     .register();
 
@@ -80,11 +80,11 @@ public class ConnectorNodeMetrics {
     static class PeriodicMetricsCollector extends Thread {
         private final int interval;
         private final OperatingSystemMXBean osBean;
-        private final String nodeId;
+        private final String job;
 
-        public PeriodicMetricsCollector(int intervalMillis, String nodeId) {
+        public PeriodicMetricsCollector(int intervalMillis, String job) {
             this.interval = intervalMillis;
-            this.nodeId = nodeId;
+            this.job = job;
             this.osBean = ManagementFactory.getOperatingSystemMXBean();
         }
 
@@ -102,10 +102,10 @@ public class ConnectorNodeMetrics {
 
         private void collect() {
             double cpuUsage = osBean.getSystemLoadAverage();
-            ConnectorNodeMetrics.cpuUsage.labels(nodeId).set(cpuUsage);
+            ConnectorNodeMetrics.cpuUsage.labels(job).set(cpuUsage);
             long ramUsageBytes =
                     Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-            ConnectorNodeMetrics.ramUsage.labels(nodeId).set(ramUsageBytes);
+            ConnectorNodeMetrics.ramUsage.labels(job).set(ramUsageBytes);
         }
     }
 
@@ -116,7 +116,7 @@ public class ConnectorNodeMetrics {
         registry.register(sourceRowsReceived);
         registry.register(cpuUsage);
         registry.register(ramUsage);
-        PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "node1");
+        PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
 
         try {
