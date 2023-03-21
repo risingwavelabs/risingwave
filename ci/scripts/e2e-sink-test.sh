@@ -55,7 +55,7 @@ mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXIST
 # grant access to `test` for ci test user
 mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
 # create a table named t_remote
-mysql --host=mysql --port=3306 -u root -p123456 < ./e2e_test/sink/remote/mysql_create_table.sql
+mysql --host=mysql --port=3306 -u root -p123456 test < ./e2e_test/sink/remote/mysql_create_table.sql
 
 echo "--- preparing postgresql"
 
@@ -107,7 +107,7 @@ sleep 1
 
 # check sink destination mysql using shell
 diff -u ./e2e_test/sink/remote/mysql_expected_result.tsv \
-< (mysql --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id")
+< (mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote ORDER BY id")
 if [ $? -eq 0 ]; then
   echo "mysql sink check passed"
 else
