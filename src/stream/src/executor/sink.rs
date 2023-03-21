@@ -34,7 +34,7 @@ use crate::common::log_store::{
     BoundedInMemLogStoreFactory, LogReader, LogStoreFactory, LogStoreReadItem, LogWriter,
 };
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{expect_first_barrier, Barrier, PkIndices};
+use crate::executor::{expect_first_barrier, PkIndices};
 
 pub struct SinkExecutor {
     input: BoxedExecutor,
@@ -135,11 +135,14 @@ impl SinkExecutor {
         let data_types = schema.data_types();
         let mut input = input.execute();
 
-        let Barrier {
-            epoch: epoch_pair, ..
-        } = expect_first_barrier(&mut input).await?;
+        let barrier = expect_first_barrier(&mut input).await?;
+
+        let epoch_pair = barrier.epoch;
 
         log_writer.init(epoch_pair.curr).await?;
+
+        // Propagate the first barrier
+        yield Message::Barrier(barrier);
 
         #[for_await]
         for msg in input {
@@ -355,11 +358,12 @@ mod test {
             schema.clone(),
             pk.clone(),
             vec![
+                Message::Barrier(Barrier::new_test_barrier(1)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     " I I
                     + 3 2",
                 ))),
-                Message::Barrier(Barrier::new_test_barrier(1)),
+                Message::Barrier(Barrier::new_test_barrier(2)),
                 Message::Chunk(std::mem::take(&mut StreamChunk::from_pretty(
                     "  I I
                     U- 3 2
@@ -386,6 +390,9 @@ mod test {
         );
 
         let mut executor = SinkExecutor::execute(Box::new(sink_executor));
+
+        // Barrier message.
+        executor.next().await.unwrap().unwrap();
 
         let chunk_msg = executor.next().await.unwrap().unwrap();
         assert_eq!(
