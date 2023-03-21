@@ -85,9 +85,9 @@ impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
                 cache
                     .iter()
                     .format_with("\n    ", |item, f| f(&format_args!(
-                        "{:?}, {:?}",
+                        "{:?}, {}",
                         item.0,
-                        item.1.deserialize(data_types).unwrap().to_pretty_string(),
+                        item.1.deserialize(data_types).unwrap().display(),
                     )))
             )
         }

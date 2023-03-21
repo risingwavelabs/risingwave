@@ -1316,7 +1316,6 @@ mod tests {
             );
 
             let res = top_n_executor.next().await.unwrap().unwrap();
-            println!("{}", res.as_chunk().unwrap().to_pretty_string());
             assert_eq!(
                 *res.as_chunk().unwrap(),
                 StreamChunk::from_pretty(

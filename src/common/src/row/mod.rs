@@ -13,9 +13,11 @@
 // limitations under the License.
 
 use std::borrow::Cow;
+use std::fmt::Display;
 use std::hash::{BuildHasher, Hasher};
 
 use bytes::{BufMut, Bytes, BytesMut};
+use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
@@ -147,16 +149,23 @@ pub trait RowExt: Row {
         assert_row(Project::new(self, indices))
     }
 
-    fn to_pretty_string(&self) -> String {
-        let mut s = Vec::with_capacity(self.len());
-        for datum in self.iter() {
-            let str = match datum {
-                None => "NULL".to_owned(),
-                Some(scalar) => scalar.to_text(),
-            };
-            s.push(str);
+    fn display(&self) -> impl Display + '_ {
+        struct D<'a, T: Row>(&'a T);
+        impl<'a, T: Row> Display for D<'a, T> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(
+                    f,
+                    "{}",
+                    self.0.iter().format_with(" | ", |datum, f| {
+                        match datum {
+                            None => f(&"NULL"),
+                            Some(scalar) => f(&format_args!("{}", scalar.to_text())),
+                        }
+                    })
+                )
+            }
         }
-        s.join(" | ")
+        D(self)
     }
 }
 
