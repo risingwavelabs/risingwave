@@ -16,7 +16,7 @@ normal = ["workspace-hack"]
 [dependencies]
 arc-swap = "1"
 async-trait = "0.1"
-auto_enums = { version = "0.7", features = ["futures"] }
+auto_enums = { version = "0.8", features = ["futures03"] }
 await-tree = "0.1.1"
 bytes = { version = "1", features = ["serde"] }
 crossbeam = "0.8.1"
