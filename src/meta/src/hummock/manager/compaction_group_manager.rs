@@ -468,9 +468,11 @@ impl<S: MetaStore> HummockManager<S> {
             )));
         }
         if let Some(compaction_group_id) = target_group_id {
-            if !versioning
-                .check_branched_sst_in_target_group(&parent_group_id, &compaction_group_id)
-            {
+            if !versioning.check_branched_sst_in_target_group(
+                &table_ids,
+                &parent_group_id,
+                &compaction_group_id,
+            ) {
                 return Err(Error::CompactionGroup(format!(
                     "invalid split attempt for group {}: we shall wait some time for parent group and target group could compact stale sst files",
                     parent_group_id
@@ -560,7 +562,7 @@ impl<S: MetaStore> HummockManager<S> {
 
                 new_group = Some(CompactionGroup {
                     group_id: new_compaction_group_id,
-                    compaction_config: Arc::new(config.clone()),
+                    compaction_config: Arc::new(config),
                 });
                 new_version_delta.group_deltas.insert(
                     parent_group_id,
@@ -595,25 +597,18 @@ impl<S: MetaStore> HummockManager<S> {
             match branched_ssts.get_mut(object_id) {
                 Some(mut entry) => {
                     if let Some(parent_new_sst_id) = parent_new_sst_id {
-                        entry.entry(target_compaction_group_id).or_insert(sst_id);
                         entry.insert(parent_group_id, parent_new_sst_id);
                     } else {
                         entry.remove(&parent_group_id);
-                        entry.insert(target_compaction_group_id, sst_id);
                     }
+                    entry.insert(target_compaction_group_id, sst_id);
                 }
                 None => {
-                    branched_ssts.insert(
-                        object_id,
-                        if let Some(parent_new_sst_id) = parent_new_sst_id {
-                            HashMap::from_iter([
-                                (parent_group_id, parent_new_sst_id),
-                                (target_compaction_group_id, sst_id),
-                            ])
-                        } else {
-                            HashMap::from_iter([(target_compaction_group_id, sst_id)])
-                        },
-                    );
+                    let mut groups = HashMap::from_iter([(target_compaction_group_id, sst_id)]);
+                    if let Some(parent_new_sst_id) = parent_new_sst_id {
+                        groups.insert(parent_group_id, parent_new_sst_id);
+                    }
+                    branched_ssts.insert(object_id, groups);
                 }
             }
         }

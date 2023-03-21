@@ -29,8 +29,8 @@ use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     add_new_sub_level, build_initial_compaction_group_levels, build_version_delta_after_version,
-    get_compaction_group_ids, get_member_table_ids, try_get_compaction_group_id_by_table_id,
-    BranchedSstInfo, HummockVersionExt, HummockVersionUpdateExt,
+    get_compaction_group_ids, try_get_compaction_group_id_by_table_id, BranchedSstInfo,
+    HummockVersionExt, HummockVersionUpdateExt,
 };
 use risingwave_hummock_sdk::{
     CompactionGroupId, ExtendedSstableInfo, HummockCompactionTaskId, HummockContextId,
@@ -787,6 +787,7 @@ where
                 .values()
                 .map(|v| v.minimal_pinned_snapshot)
                 .fold(max_committed_epoch, std::cmp::min);
+
             (versioning_guard.current_version.clone(), watermark)
         };
         if current_version.levels.get(&compaction_group_id).is_none() {
@@ -837,26 +838,13 @@ where
                 start_time.elapsed()
             );
         } else {
-            let all_table_ids = get_member_table_ids(&current_version);
             // to get all relational table_id from sst_info
-            let table_ids = compact_task
-                .input_ssts
-                .iter()
-                .flat_map(|level| {
-                    level
-                        .table_infos
-                        .iter()
-                        .flat_map(|sst_info| sst_info.table_ids.iter().cloned())
-                        .collect_vec()
-                })
-                .collect::<HashSet<u32>>();
-            for table_id in table_ids {
-                // to found exist table_id from
-                if all_table_ids.contains(&table_id) {
-                    compact_task.existing_table_ids.push(table_id);
-                }
-            }
-
+            compact_task.existing_table_ids = current_version
+                .levels
+                .get(&compaction_group_id)
+                .unwrap()
+                .member_table_ids
+                .clone();
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -1416,10 +1404,9 @@ where
         let mut branch_sstables = Vec::with_capacity(new_sst_id_number);
         for (sst, group_table_ids) in incorrect_ssts {
             let mut branch_groups = HashMap::new();
-            for (group_id, match_ids) in group_table_ids {
+            for (group_id, _match_ids) in group_table_ids {
                 let mut branch_sst = sst.clone();
                 branch_sst.sst_id = new_sst_id;
-                branch_sst.table_ids = match_ids;
                 branch_sstables.push(ExtendedSstableInfo::with_compaction_group(
                     group_id, branch_sst,
                 ));
@@ -1637,24 +1624,31 @@ where
                 let checkpoint_version_copy = versioning_guard.checkpoint_version.clone();
                 let hummock_version_deltas_copy = versioning_guard.hummock_version_deltas.clone();
                 let version_stats_copy = versioning_guard.version_stats.clone();
+                let branched_ssts = versioning_guard.branched_ssts.clone();
                 (
-                    compact_statuses_copy,
-                    compact_task_assignment_copy,
-                    pinned_versions_copy,
-                    pinned_snapshots_copy,
-                    checkpoint_version_copy,
-                    hummock_version_deltas_copy,
-                    version_stats_copy,
+                    (
+                        compact_statuses_copy,
+                        compact_task_assignment_copy,
+                        pinned_versions_copy,
+                        pinned_snapshots_copy,
+                        checkpoint_version_copy,
+                        hummock_version_deltas_copy,
+                        version_stats_copy,
+                    ),
+                    branched_ssts,
                 )
             };
-        let mem_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (mem_state, branched_ssts) =
+            get_state(compaction_guard.borrow(), versioning_guard.borrow());
         self.load_meta_store_state_impl(
             compaction_guard.borrow_mut(),
             versioning_guard.borrow_mut(),
         )
         .await
         .expect("Failed to load state from meta store");
-        let loaded_state = get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        let (loaded_state, load_branched_ssts) =
+            get_state(compaction_guard.borrow(), versioning_guard.borrow());
+        assert_eq!(branched_ssts, load_branched_ssts);
         assert_eq!(
             mem_state, loaded_state,
             "hummock in-mem state is inconsistent with meta store state",

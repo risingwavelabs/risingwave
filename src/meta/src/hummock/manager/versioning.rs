@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use std::cmp;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::RangeBounds;
 
 use function_name::named;
 use itertools::Itertools;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, BranchedSstInfo,
+    get_compaction_group_ids, BranchedSstInfo, HummockVersionExt,
 };
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockContextId, HummockSstableObjectId, HummockVersionId,
 };
@@ -156,6 +157,7 @@ impl Versioning {
     ///  can not split or move state-table to those group, because it may cause data overlap.
     pub fn check_branched_sst_in_target_group(
         &self,
+        table_ids: &[StateTableId],
         source_group_id: &CompactionGroupId,
         target_group_id: &CompactionGroupId,
     ) -> bool {
@@ -164,7 +166,31 @@ impl Versioning {
                 return false;
             }
         }
-        true
+        let mut found_sstable_repeated = false;
+        let moving_table_ids: HashSet<&u32> = HashSet::from_iter(table_ids);
+        if let Some(group) = self.current_version.levels.get(target_group_id) {
+            let target_member_table_ids: HashSet<u32> =
+                HashSet::from_iter(group.member_table_ids.clone());
+            self.current_version.level_iter(*source_group_id, |level| {
+                for sst in &level.table_infos {
+                    if sst
+                        .table_ids
+                        .iter()
+                        .all(|table_id| !moving_table_ids.contains(table_id))
+                    {
+                        continue;
+                    }
+                    for table_id in &sst.table_ids {
+                        if target_member_table_ids.contains(table_id) {
+                            found_sstable_repeated = true;
+                            return false;
+                        }
+                    }
+                }
+                true
+            });
+        }
+        !found_sstable_repeated
     }
 }
 

@@ -267,13 +267,8 @@ impl HummockVersionUpdateExt for HummockVersion {
             .levels
             .get_many_mut([&parent_group_id, &group_id])
             .unwrap();
-        let remove_sst_stat_from_level = |level: &mut Level, sst: &SstableInfo| {
-            level.total_file_size -= sst.file_size;
-            level.uncompressed_file_size -= sst.uncompressed_file_size;
-        };
         if let Some(ref mut l0) = parent_levels.l0 {
             for sub_level in &mut l0.sub_levels {
-                let mut insert_table_infos = vec![];
                 let target_l0 = cur_levels.l0.as_mut().unwrap();
                 let mut target_level_idx = target_l0.sub_levels.len();
                 for (idx, other) in target_l0.sub_levels.iter_mut().enumerate() {
@@ -281,44 +276,14 @@ impl HummockVersionUpdateExt for HummockVersion {
                         target_level_idx = idx;
                     }
                 }
-                for sst_info in &mut sub_level.table_infos {
-                    let removed_table_ids = sst_info
-                        .table_ids
-                        .iter()
-                        .filter(|table_id| member_table_ids.contains(table_id))
-                        .cloned()
-                        .collect_vec();
-                    if !removed_table_ids.is_empty() {
-                        let is_trivial = removed_table_ids.len() == sst_info.table_ids.len();
-                        let mut branch_table_info = sst_info.clone();
-                        branch_table_info.sst_id = new_sst_id;
-                        new_sst_id += 1;
-                        let parent_old_sst_id = sst_info.get_sst_id();
-                        split_id_vers.push((
-                            branch_table_info.get_object_id(),
-                            branch_table_info.get_sst_id(),
-                            parent_old_sst_id,
-                            if is_trivial {
-                                None
-                            } else {
-                                sst_info.sst_id = new_sst_id;
-                                new_sst_id += 1;
-                                Some(sst_info.get_sst_id())
-                            },
-                        ));
-                        branch_table_info.table_ids = removed_table_ids;
-                        insert_table_infos.push(branch_table_info);
-                    }
-                }
                 // Remove SST from sub level may result in empty sub level. It will be purged
                 // whenever another compaction task is finished.
-                let removed = sub_level
-                    .table_infos
-                    .drain_filter(|sst_info| sst_info.table_ids.is_empty())
-                    .collect_vec();
-                for removed_sst in removed {
-                    remove_sst_stat_from_level(sub_level, &removed_sst);
-                }
+                let insert_table_infos = split_sst_info_for_level(
+                    sub_level,
+                    &mut split_id_vers,
+                    &member_table_ids,
+                    &mut new_sst_id,
+                );
                 add_ssts_to_sub_level(
                     target_l0,
                     target_level_idx,
@@ -329,48 +294,26 @@ impl HummockVersionUpdateExt for HummockVersion {
             }
         }
         for (z, level) in parent_levels.levels.iter_mut().enumerate() {
-            for sst_info in &mut level.table_infos {
-                let removed_table_ids = sst_info
-                    .table_ids
-                    .drain_filter(|table_id| member_table_ids.contains(table_id))
-                    .collect_vec();
-                if !removed_table_ids.is_empty() {
-                    let is_trivial = removed_table_ids.len() == sst_info.table_ids.len();
-                    let mut branch_table_info = sst_info.clone();
-                    branch_table_info.sst_id = new_sst_id;
-                    new_sst_id += 1;
-                    let parent_old_sst_id = sst_info.get_sst_id();
-                    split_id_vers.push((
-                        branch_table_info.get_object_id(),
-                        branch_table_info.get_sst_id(),
-                        parent_old_sst_id,
-                        if is_trivial {
-                            None
-                        } else {
-                            sst_info.sst_id = new_sst_id;
-                            new_sst_id += 1;
-                            Some(sst_info.get_sst_id())
-                        },
-                    ));
-                    branch_table_info.table_ids = removed_table_ids;
-                    cur_levels.levels[z].total_file_size += branch_table_info.file_size;
-                    cur_levels.levels[z].uncompressed_file_size +=
-                        branch_table_info.uncompressed_file_size;
-                    cur_levels.levels[z].table_infos.push(branch_table_info);
-                    cur_levels.levels[z].table_infos.sort_by(|sst1, sst2| {
-                        let a = sst1.key_range.as_ref().unwrap();
-                        let b = sst2.key_range.as_ref().unwrap();
-                        a.compare(b)
-                    });
-                }
-            }
-            let removed = level
-                .table_infos
-                .drain_filter(|sst_info| sst_info.table_ids.is_empty())
-                .collect_vec();
-            for removed_sst in removed {
-                remove_sst_stat_from_level(level, &removed_sst);
-            }
+            let insert_table_infos = split_sst_info_for_level(
+                level,
+                &mut split_id_vers,
+                &member_table_ids,
+                &mut new_sst_id,
+            );
+            cur_levels.levels[z].total_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.file_size)
+                .sum::<u64>();
+            cur_levels.levels[z].uncompressed_file_size += insert_table_infos
+                .iter()
+                .map(|sst| sst.uncompressed_file_size)
+                .sum::<u64>();
+            cur_levels.levels[z].table_infos.extend(insert_table_infos);
+            cur_levels.levels[z].table_infos.sort_by(|sst1, sst2| {
+                let a = sst1.key_range.as_ref().unwrap();
+                let b = sst2.key_range.as_ref().unwrap();
+                a.compare(b)
+            });
         }
         split_id_vers
     }
@@ -423,6 +366,7 @@ impl HummockVersionUpdateExt for HummockVersion {
                 levels
                     .member_table_ids
                     .drain_filter(|t| group_meta_delta.table_ids_remove.contains(t));
+                levels.member_table_ids.sort();
             }
 
             assert!(
@@ -489,24 +433,18 @@ impl HummockVersionUpdateExt for HummockVersion {
             levels.extend(group.levels.iter());
             for level in levels {
                 for table_info in &level.table_infos {
-                    if table_info.table_ids == group.member_table_ids {
+                    if table_info.sst_id == table_info.object_id {
                         continue;
                     }
                     let object_id = table_info.get_object_id();
                     let entry: &mut BranchedSstInfo = ret.entry(object_id).or_default();
                     if let Some(exist_sst_id) = entry.get(compaction_group_id) {
-                        panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {} and {}", object_id, exist_sst_id, table_info.sst_id);
+                        panic!("we do not allow more than one sst with the same object id in one grou. object-id: {}, duplicated sst id: {:?} and {}", object_id, exist_sst_id, table_info.sst_id);
                     }
                     entry.insert(*compaction_group_id, table_info.sst_id);
                 }
             }
         }
-        ret.retain(|object_id, v| {
-            v.len() != 1 || {
-                let sst_id = v.values().next().unwrap();
-                *sst_id != *object_id
-            }
-        });
         ret
     }
 }
@@ -654,6 +592,58 @@ pub fn check_sst_id_exist(
         return true;
     }
     false
+}
+
+fn split_sst_info_for_level(
+    level: &mut Level,
+    split_id_vers: &mut Vec<SstSplitInfo>,
+    member_table_ids: &HashSet<u32>,
+    new_sst_id: &mut u64,
+) -> Vec<SstableInfo> {
+    // Remove SST from sub level may result in empty sub level. It will be purged
+    // whenever another compaction task is finished.
+    let mut removed = vec![];
+    let mut insert_table_infos = vec![];
+    for sst_info in &mut level.table_infos {
+        let removed_table_ids = sst_info
+            .table_ids
+            .iter()
+            .filter(|table_id| member_table_ids.contains(table_id))
+            .cloned()
+            .collect_vec();
+        if !removed_table_ids.is_empty() {
+            let is_trivial = removed_table_ids.len() == sst_info.table_ids.len();
+            let mut branch_table_info = sst_info.clone();
+            branch_table_info.sst_id = *new_sst_id;
+            *new_sst_id += 1;
+            let parent_old_sst_id = sst_info.get_sst_id();
+            split_id_vers.push((
+                branch_table_info.get_object_id(),
+                branch_table_info.get_sst_id(),
+                parent_old_sst_id,
+                if is_trivial {
+                    None
+                } else {
+                    sst_info.sst_id = *new_sst_id;
+                    *new_sst_id += 1;
+                    Some(sst_info.get_sst_id())
+                },
+            ));
+            branch_table_info.table_ids = removed_table_ids;
+            if is_trivial {
+                level.total_file_size -= sst_info.file_size;
+                level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                sst_info.table_ids.clear();
+                removed.push(sst_info.clone());
+            }
+            insert_table_infos.push(branch_table_info);
+        }
+    }
+    level
+        .table_infos
+        .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+        .collect_vec();
+    insert_table_infos
 }
 
 pub fn check_sst_id_exist_in_l0(
