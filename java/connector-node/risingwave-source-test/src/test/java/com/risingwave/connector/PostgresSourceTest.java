@@ -17,12 +17,11 @@ package com.risingwave.connector;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 
 import com.risingwave.proto.ConnectorServiceProto;
-import io.grpc.Grpc;
-import io.grpc.InsecureChannelCredentials;
-import io.grpc.Server;
-import io.grpc.ServerBuilder;
+import com.risingwave.proto.Data;
+import io.grpc.*;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.ResultSet;
@@ -41,7 +40,7 @@ public class PostgresSourceTest {
     private static final Logger LOG = LoggerFactory.getLogger(PostgresSourceTest.class.getName());
 
     private static final PostgreSQLContainer<?> pg =
-            new PostgreSQLContainer<>("postgres:12.3-alpine")
+            new PostgreSQLContainer<>("postgres:15-alpine")
                     .withDatabaseName("test")
                     .withUsername("postgres")
                     .withCommand("postgres -c wal_level=logical -c max_wal_senders=10");
@@ -143,6 +142,66 @@ public class PostgresSourceTest {
             fail("Execution exception: ", e);
         }
         connection.close();
+    }
+
+    @Test
+    public void testPermissionCheck() {
+        Connection connection = SourceTestClient.connect(pgDataSource);
+        String query =
+                "CREATE TABLE IF NOT EXISTS orders (o_key BIGINT NOT NULL, o_val INT, PRIMARY KEY (o_key))";
+        SourceTestClient.performQuery(connection, query);
+        // create a partial publication, check whether error is reported
+        query = "CREATE PUBLICATION dbz_publication FOR TABLE orders (o_key)";
+        SourceTestClient.performQuery(connection, query);
+        ConnectorServiceProto.TableSchema tableSchema =
+                ConnectorServiceProto.TableSchema.newBuilder()
+                        .addColumns(
+                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                        .setName("o_key")
+                                        .setDataType(Data.DataType.TypeName.INT64)
+                                        .build())
+                        .addColumns(
+                                ConnectorServiceProto.TableSchema.Column.newBuilder()
+                                        .setName("o_val")
+                                        .setDataType(Data.DataType.TypeName.INT32)
+                                        .build())
+                        .addPkIndices(0)
+                        .build();
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream1 =
+                testClient.getEventStreamValidate(
+                        pg,
+                        ConnectorServiceProto.SourceType.POSTGRES,
+                        tableSchema,
+                        "test",
+                        "orders");
+        StatusRuntimeException exception1 =
+                assertThrows(
+                        StatusRuntimeException.class,
+                        () -> {
+                            eventStream1.hasNext();
+                        });
+        assertEquals(
+                exception1.getMessage(),
+                "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders");
+        // revoke superuser and replication, check if reports error
+        query = "ALTER USER " + pg.getUsername() + " nosuperuser noreplication";
+        SourceTestClient.performQuery(connection, query);
+        Iterator<ConnectorServiceProto.GetEventStreamResponse> eventStream2 =
+                testClient.getEventStreamValidate(
+                        pg,
+                        ConnectorServiceProto.SourceType.POSTGRES,
+                        tableSchema,
+                        "test",
+                        "orders");
+        StatusRuntimeException exception2 =
+                assertThrows(
+                        StatusRuntimeException.class,
+                        () -> {
+                            eventStream2.hasNext();
+                        });
+        assertEquals(
+                exception2.getMessage(),
+                "INVALID_ARGUMENT: INTERNAL: Postgres user must be superuser or replication role to start walsender.");
     }
 
     // generates test cases for the risingwave debezium parser
