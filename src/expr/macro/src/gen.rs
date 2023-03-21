@@ -69,7 +69,7 @@ impl FunctionAttr {
 
         let pb_type = format_ident!("{}", utils::to_camel_case(&name));
         let ctor_name = format_ident!("{}_{}_{}", self.name, self.args.join("_"), self.ret);
-        let descriptor_type = quote! { crate::sig::func::FunctionDescriptor };
+        let descriptor_type = quote! { crate::sig::func::FuncSign };
         let build_fn = if build_fn {
             let name = format_ident!("{}", self.user_fn.name);
             quote! { #name }
@@ -81,9 +81,9 @@ impl FunctionAttr {
             fn #ctor_name() {
                 crate::sig::func::register(#descriptor_type {
                     name: #name,
-                    ty: risingwave_pb::expr::expr_node::Type::#pb_type,
-                    args: &[#(#args),*],
-                    ret: #ret,
+                    func: risingwave_pb::expr::expr_node::Type::#pb_type,
+                    inputs_type: &[#(#args),*],
+                    ret_type: #ret,
                     build_from_prost: #build_fn,
                 });
             }

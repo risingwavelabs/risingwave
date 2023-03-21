@@ -44,7 +44,7 @@ pub fn infer_type(func_type: ExprType, inputs: &mut Vec<ExprImpl>) -> Result<Dat
     let inputs_owned = std::mem::take(inputs);
     *inputs = inputs_owned
         .into_iter()
-        .zip_eq_fast(&sig.inputs_type)
+        .zip_eq_fast(sig.inputs_type)
         .map(|(expr, t)| {
             if DataTypeName::from(expr.return_type()) != *t {
                 if t.is_scalar() {
@@ -578,10 +578,7 @@ fn infer_type_name<'a>(
     func_type: ExprType,
     inputs: &[Option<DataTypeName>],
 ) -> Result<&'a FuncSign> {
-    let candidates = sig_map
-        .get(&(func_type, inputs.len()))
-        .map(std::ops::Deref::deref)
-        .unwrap_or_default();
+    let candidates = sig_map.get_with_arg_nums(func_type, inputs.len());
 
     // Binary operators have a special `unknown` handling rule for exact match. We do not
     // distinguish operators from functions as of now.
@@ -1027,111 +1024,122 @@ mod tests {
         // func_name and ret_type does not affect the overload resolution logic
         const DUMMY_FUNC: ExprType = ExprType::Add;
         const DUMMY_RET: T = T::Int32;
-        let testcases = [
+        let testcases: [(
+            &'static str,
+            &'static [&'static [T]],
+            &'static [Option<T>],
+            std::result::Result<&'static [T], &'static str>,
+        ); 10] = [
             (
                 "Binary special rule prefers arguments of same type.",
-                vec![
-                    vec![T::Int32, T::Int32],
-                    vec![T::Int32, T::Varchar],
-                    vec![T::Int32, T::Float64],
+                &[
+                    &[T::Int32, T::Int32],
+                    &[T::Int32, T::Varchar],
+                    &[T::Int32, T::Float64],
                 ],
-                &[Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Int32] as &[_]),
+                &[Some(T::Int32), None],
+                Ok(&[T::Int32, T::Int32]),
             ),
             (
                 "Without binary special rule, Rule 4e selects varchar.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Int32],
-                    vec![T::Int32, T::Int32, T::Varchar],
-                    vec![T::Int32, T::Int32, T::Float64],
+                &[
+                    &[T::Int32, T::Int32, T::Int32],
+                    &[T::Int32, T::Int32, T::Varchar],
+                    &[T::Int32, T::Int32, T::Float64],
                 ],
-                &[Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Int32, T::Varchar] as &[_]),
+                &[Some(T::Int32), Some(T::Int32), None],
+                Ok(&[T::Int32, T::Int32, T::Varchar]),
             ),
             (
                 "Without binary special rule, Rule 4e selects preferred type.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Int32],
-                    vec![T::Int32, T::Int32, T::Float64],
+                &[
+                    &[T::Int32, T::Int32, T::Int32],
+                    &[T::Int32, T::Int32, T::Float64],
                 ],
-                &[Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Int32, T::Float64] as &[_]),
+                &[Some(T::Int32), Some(T::Int32), None],
+                Ok(&[T::Int32, T::Int32, T::Float64]),
             ),
             (
                 "Without binary special rule, Rule 4f treats exact-match and cast-match equally.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Int32],
-                    vec![T::Int32, T::Int32, T::Float32],
+                &[
+                    &[T::Int32, T::Int32, T::Int32],
+                    &[T::Int32, T::Int32, T::Float32],
                 ],
-                &[Some(T::Int32), Some(T::Int32), None] as &[_],
+                &[Some(T::Int32), Some(T::Int32), None],
                 Err("not unique"),
             ),
             (
                 "`top_matches` ranks by exact count then preferred count",
-                vec![
-                    vec![T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
-                    vec![T::Float64, T::Int32, T::Float32, T::Timestamp], // 1 exact 1 preferred
-                    vec![T::Float32, T::Float32, T::Int32, T::Timestamptz], // 1 exact 0 preferred
-                    vec![T::Int32, T::Float64, T::Float32, T::Timestamptz], // 1 exact 1 preferred
-                    vec![T::Int32, T::Int16, T::Int32, T::Timestamptz],   // 2 exact 1 non-castable
-                    vec![T::Int32, T::Float64, T::Float32, T::Date],      // 1 exact 1 preferred
+                &[
+                    &[T::Float64, T::Float64, T::Float64, T::Timestamptz], /* 0 exact 3 preferred */
+                    &[T::Float64, T::Int32, T::Float32, T::Timestamp],     // 1 exact 1 preferred
+                    &[T::Float32, T::Float32, T::Int32, T::Timestamptz],   // 1 exact 0 preferred
+                    &[T::Int32, T::Float64, T::Float32, T::Timestamptz],   // 1 exact 1 preferred
+                    &[T::Int32, T::Int16, T::Int32, T::Timestamptz], // 2 exact 1 non-castable
+                    &[T::Int32, T::Float64, T::Float32, T::Date],    // 1 exact 1 preferred
                 ],
-                &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz] as &[_]),
+                &[Some(T::Int32), Some(T::Int32), Some(T::Int32), None],
+                Ok(&[T::Int32, T::Float64, T::Float32, T::Timestamptz]),
             ),
             (
                 "Rule 4e fails and Rule 4f unique.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Time],
-                    vec![T::Int32, T::Int32, T::Int32],
+                &[
+                    &[T::Int32, T::Int32, T::Time],
+                    &[T::Int32, T::Int32, T::Int32],
                 ],
-                &[None, Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Int32, T::Int32] as &[_]),
+                &[None, Some(T::Int32), None],
+                Ok(&[T::Int32, T::Int32, T::Int32]),
             ),
             (
                 "Rule 4e empty and Rule 4f unique.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Varchar],
-                    vec![T::Int32, T::Int32, T::Int32],
-                    vec![T::Varchar, T::Int32, T::Int32],
+                &[
+                    &[T::Int32, T::Int32, T::Varchar],
+                    &[T::Int32, T::Int32, T::Int32],
+                    &[T::Varchar, T::Int32, T::Int32],
                 ],
-                &[None, Some(T::Int32), None] as &[_],
-                Ok(&[T::Int32, T::Int32, T::Int32] as &[_]),
+                &[None, Some(T::Int32), None],
+                Ok(&[T::Int32, T::Int32, T::Int32]),
             ),
             (
                 "Rule 4e varchar resolves prior category conflict.",
-                vec![
-                    vec![T::Int32, T::Int32, T::Float32],
-                    vec![T::Time, T::Int32, T::Int32],
-                    vec![T::Varchar, T::Int32, T::Int32],
+                &[
+                    &[T::Int32, T::Int32, T::Float32],
+                    &[T::Time, T::Int32, T::Int32],
+                    &[T::Varchar, T::Int32, T::Int32],
                 ],
-                &[None, Some(T::Int32), None] as &[_],
-                Ok(&[T::Varchar, T::Int32, T::Int32] as &[_]),
+                &[None, Some(T::Int32), None],
+                Ok(&[T::Varchar, T::Int32, T::Int32]),
             ),
             (
                 "Rule 4f fails.",
-                vec![
-                    vec![T::Float32, T::Float32, T::Float32, T::Float32],
-                    vec![T::Decimal, T::Decimal, T::Int64, T::Decimal],
+                &[
+                    &[T::Float32, T::Float32, T::Float32, T::Float32],
+                    &[T::Decimal, T::Decimal, T::Int64, T::Decimal],
                 ],
-                &[Some(T::Int16), Some(T::Int32), None, Some(T::Int64)] as &[_],
+                &[Some(T::Int16), Some(T::Int32), None, Some(T::Int64)],
                 Err("not unique"),
             ),
             (
                 "Rule 4f all unknown.",
-                vec![
-                    vec![T::Float32, T::Float32, T::Float32, T::Float32],
-                    vec![T::Decimal, T::Decimal, T::Int64, T::Decimal],
+                &[
+                    &[T::Float32, T::Float32, T::Float32, T::Float32],
+                    &[T::Decimal, T::Decimal, T::Int64, T::Decimal],
                 ],
-                &[None, None, None, None] as &[_],
+                &[None, None, None, None],
                 Err("not unique"),
             ),
         ];
         for (desc, candidates, inputs, expected) in testcases {
             let mut sig_map = FuncSigMap::default();
-            candidates
-                .into_iter()
-                .for_each(|formals| sig_map.insert(DUMMY_FUNC, formals, DUMMY_RET));
+            candidates.into_iter().for_each(|formals| {
+                sig_map.insert(FuncSign {
+                    name: "add",
+                    func: DUMMY_FUNC,
+                    inputs_type: formals,
+                    ret_type: DUMMY_RET,
+                    build_from_prost: |_| unreachable!(),
+                })
+            });
             let result = infer_type_name(&sig_map, DUMMY_FUNC, inputs);
             match (expected, result) {
                 (Ok(expected), Ok(found)) => {

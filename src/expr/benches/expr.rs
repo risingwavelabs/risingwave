@@ -214,7 +214,7 @@ fn bench_expr(c: &mut Criterion) {
     let sigs = sigs.sorted_by_cached_key(|sig| sig.to_string_no_return());
     for sig in sigs {
         if sig
-            .args
+            .inputs_type
             .iter()
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
@@ -224,17 +224,17 @@ fn bench_expr(c: &mut Criterion) {
         }
 
         let mut prost = make_expression(
-            sig.ty,
-            sig.ret.into(),
-            sig.args
+            sig.func,
+            sig.ret_type.into(),
+            sig.inputs_type
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
-                    let idx = match (sig.ty, i) {
+                    let idx = match (sig.func, i) {
                         (ExprType::AtTimeZone, 1) => TIMEZONE,
                         (ExprType::DateTrunc, 0) => TIME_FIELD,
                         (ExprType::DateTrunc, 2) => TIMEZONE,
-                        (ExprType::Extract, 0) => match sig.args[1] {
+                        (ExprType::Extract, 0) => match sig.inputs_type[1] {
                             DataTypeName::Date => EXTRACT_FIELD_DATE,
                             DataTypeName::Time => EXTRACT_FIELD_TIME,
                             DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
@@ -247,7 +247,7 @@ fn bench_expr(c: &mut Criterion) {
                 })
                 .collect_vec(),
         );
-        if sig.ty == ExprType::ToChar {
+        if sig.func == ExprType::ToChar {
             let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
             f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
         }

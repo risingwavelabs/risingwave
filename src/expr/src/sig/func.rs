@@ -36,69 +36,64 @@ pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
 });
 
 /// The table of function signatures.
-pub fn func_sigs() -> impl Iterator<Item = &'static FunctionDescriptor> {
+pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
     FUNC_SIG_MAP.0.values().flatten()
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FunctionDescriptor>>);
-
-impl Deref for FuncSigMap {
-    type Target = HashMap<(ExprType, usize), Vec<FunctionDescriptor>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
 
 impl FuncSigMap {
-    pub fn insert(&mut self, desc: FunctionDescriptor) {
+    /// Inserts a function signature.
+    pub fn insert(&mut self, desc: FuncSign) {
         self.0
-            .entry((desc.ty, desc.args.len()))
+            .entry((desc.func, desc.inputs_type.len()))
             .or_default()
             .push(desc)
     }
 
-    pub fn get(
-        &self,
-        ty: ExprType,
-        args: &[DataTypeName],
-        ret: DataTypeName,
-    ) -> Option<&FunctionDescriptor> {
+    /// Returns a function signature with the same type, argument types and return type.
+    pub fn get(&self, ty: ExprType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
         let v = self.0.get(&(ty, args.len()))?;
-        v.iter().find(|d| d.args == args && d.ret == ret)
+        v.iter()
+            .find(|d| d.inputs_type == args && d.ret_type == ret)
+    }
+
+    /// Returns all function signatures with the same type and number of arguments.
+    pub fn get_with_arg_nums(&self, ty: ExprType, nargs: usize) -> &[FuncSign] {
+        self.0.get(&(ty, nargs)).map_or(&[], Deref::deref)
     }
 }
 
 /// A function signature.
 #[derive(Clone)]
-pub struct FunctionDescriptor {
+pub struct FuncSign {
     pub name: &'static str,
-    pub ty: ExprType,
-    pub args: &'static [DataTypeName],
-    pub ret: DataTypeName,
+    pub func: ExprType,
+    pub inputs_type: &'static [DataTypeName],
+    pub ret_type: DataTypeName,
     pub build_from_prost: fn(prost: &ExprNode) -> Result<BoxedExpression>,
 }
 
-impl fmt::Debug for FunctionDescriptor {
+impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "{:?}({}) -> {:?}",
-            self.ty,
-            self.args.iter().map(|t| format!("{t:?}")).join(", "),
-            self.ret
+            self.func,
+            self.inputs_type.iter().map(|t| format!("{t:?}")).join(", "),
+            self.ret_type
         )
     }
 }
 
-impl FunctionDescriptor {
+impl FuncSign {
     /// Returns a string describing the function without return type.
     pub fn to_string_no_return(&self) -> String {
         format!(
             "{}({})",
-            self.ty.as_str_name(),
-            self.args
+            self.func.as_str_name(),
+            self.inputs_type
                 .iter()
                 .map(|t| format!("{t:?}"))
                 .collect::<Vec<_>>()
@@ -109,8 +104,8 @@ impl FunctionDescriptor {
 }
 
 /// Register a function into global registry.
-pub fn register(desc: FunctionDescriptor) {
+pub fn register(desc: FuncSign) {
     unsafe { FUNC_SIG_MAP_INIT.push(desc) }
 }
 
-static mut FUNC_SIG_MAP_INIT: Vec<FunctionDescriptor> = Vec::new();
+static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();
