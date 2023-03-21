@@ -440,8 +440,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     // Get agg group of the key.
                     let agg_group = {
                         let mut cache_ptr: NonNull<_> = (&mut vars.agg_group_cache).into();
-                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because it's from
-                        // `group_change_set` which is a set.
+                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
+                        // from `group_change_set` which is a set.
                         let cache = unsafe { cache_ptr.as_mut() };
                         cache
                             .get_mut(&key)
