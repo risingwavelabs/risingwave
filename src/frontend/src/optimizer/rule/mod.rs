@@ -96,6 +96,11 @@ mod avoid_exchange_share_rule;
 pub use avoid_exchange_share_rule::*;
 mod min_max_on_index_rule;
 pub use min_max_on_index_rule::*;
+mod always_false_filter_rule;
+pub use always_false_filter_rule::*;
+
+mod apply_offset_rewriter;
+use apply_offset_rewriter::ApplyOffsetRewriter;
 
 #[macro_export]
 macro_rules! for_all_rules {
@@ -134,6 +139,7 @@ macro_rules! for_all_rules {
             , { RewriteLikeExprRule }
             , { AvoidExchangeShareRule }
             , { MinMaxOnIndexRule }
+            , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
         }
     };

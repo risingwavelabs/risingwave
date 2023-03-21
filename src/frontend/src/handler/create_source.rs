@@ -700,7 +700,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

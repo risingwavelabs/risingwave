@@ -104,7 +104,7 @@ steps:
           files: "*-junit.xml"
           format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 10
     retry: *auto-retry
 
   - label: "end-to-end test (release mode)"

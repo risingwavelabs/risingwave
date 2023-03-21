@@ -159,7 +159,6 @@ async fn main() {
         compactor_nodes: args.compactor_nodes,
         compute_node_cores: args.compute_node_cores,
         meta_nodes: args.meta_nodes,
-        meta_node_extra_args: vec![],
         etcd_timeout_rate: args.etcd_timeout_rate,
         etcd_data_path: args.etcd_data,
     };
