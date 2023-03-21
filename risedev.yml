@@ -181,7 +181,7 @@ profile:
       # If you want to use azblob as storage backend, configure bucket(container) name and root path:
       - use: opendal
         engine: azblob
-        bucket: "wccc"
+        bucket: test-bucket
         root: risingwave
       - use: compactor
       # - use: prometheus
@@ -972,7 +972,7 @@ template:
 
     engine: hdfs
 
-    namenode: 127.0.0.1:9000"
+    namenode: 127.0.0.1:9000
 
     bucket: risingwave-test
 
