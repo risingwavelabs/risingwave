@@ -62,10 +62,6 @@ use crate::store::{gen_min_epoch, ReadOptions, StateStoreIterExt, StreamTypeOfIt
 
 pub type CommittedVersion = PinnedVersion;
 
-/// The value of threshold should be related to the number of in-flight barriers
-/// and the frequency of checkpoint. We may tune this value later.
-pub const IMM_MERGE_THRESHOLD: usize = 8;
-
 /// Data not committed to Hummock. There are two types of staging data:
 /// - Immutable memtable: data that has been written into local state store but not persisted.
 /// - Uncommitted SST: data that has been uploaded to persistent storage but not committed to
@@ -306,13 +302,7 @@ impl HummockReadVersion {
 
                         // Check 3) and replace imms with a staging sst
                         for imm_id in &intersect_imm_ids {
-                            // TODO(siyuan): confirm the correctness of this logic
                             if let Some(merged_imm) = self.staging.merged_imm.back() {
-                                // The reversed imm_ids (old to new) should be a prefix of
-                                // intersect_imm_ids. Here we compare the oldest and newest to check
-                                // whether the merged imm should be removed.
-                                // let imm_ids = merged_imm.get_imm_ids();
-
                                 if *imm_id == merged_imm.batch_id() {
                                     self.staging.merged_imm.pop_back();
                                 }

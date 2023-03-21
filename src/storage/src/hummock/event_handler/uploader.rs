@@ -35,8 +35,9 @@ use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
 use crate::hummock::event_handler::LocalInstanceId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-use crate::hummock::store::version::{StagingSstableInfo, IMM_MERGE_THRESHOLD};
+use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::{HummockError, HummockResult};
+use crate::opts::StorageOpts;
 
 pub type UploadTaskPayload = Vec<ImmutableMemtable>;
 
@@ -381,7 +382,7 @@ impl SealedData {
     fn gen_merging_tasks(&mut self, sealed_epoch: HummockEpoch, context: &UploaderContext) {
         self.imms_by_table_shard
             .iter_mut()
-            .filter(|(_, imms)| imms.len() >= IMM_MERGE_THRESHOLD)
+            .filter(|(_, imms)| imms.len() >= context.imm_merge_threshold)
             .map(|((table_id, shard_id), imms)| {
                 let imms = imms.drain(..).collect_vec();
                 // ensure imms are sealed
@@ -491,6 +492,10 @@ struct UploaderContext {
     /// When called, it will spawn a task to flush the imm into sst and return the join handle.
     spawn_upload_task: SpawnUploadTask,
     buffer_tracker: BufferTracker,
+    /// The number of immutable memtables that will be merged into a new imm.
+    /// When the number of imms of a table shard exceeds this threshold, uploader will generate
+    /// merging tasks to merge them.
+    imm_merge_threshold: usize,
 }
 
 impl UploaderContext {
@@ -498,11 +503,13 @@ impl UploaderContext {
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
+        config: &StorageOpts,
     ) -> Self {
         UploaderContext {
             pinned_version,
             spawn_upload_task,
             buffer_tracker,
+            imm_merge_threshold: config.imm_merge_threshold,
         }
     }
 }
@@ -552,6 +559,7 @@ impl HummockUploader {
         pinned_version: PinnedVersion,
         spawn_upload_task: SpawnUploadTask,
         buffer_tracker: BufferTracker,
+        config: &StorageOpts,
     ) -> Self {
         let initial_epoch = pinned_version.version().max_committed_epoch;
         Self {
@@ -562,8 +570,18 @@ impl HummockUploader {
             sealed_data: Default::default(),
             syncing_data: Default::default(),
             synced_data: Default::default(),
-            context: UploaderContext::new(pinned_version, spawn_upload_task, buffer_tracker),
+            context: UploaderContext::new(
+                pinned_version,
+                spawn_upload_task,
+                buffer_tracker,
+                config,
+            ),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn imm_merge_threshold(&self) -> usize {
+        self.context.imm_merge_threshold
     }
 
     pub(crate) fn buffer_tracker(&self) -> &BufferTracker {
@@ -916,8 +934,8 @@ mod tests {
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::shared_buffer::shared_buffer_batch::SharedBufferBatch;
     use crate::hummock::store::memtable::{ImmId, ImmutableMemtable};
-    use crate::hummock::store::version::IMM_MERGE_THRESHOLD;
     use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
+    use crate::opts::StorageOpts;
     use crate::storage_value::StorageValue;
 
     const INITIAL_EPOCH: HummockEpoch = 5;
@@ -1004,10 +1022,12 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
+        let config = StorageOpts::default();
         UploaderContext::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
+            &config,
         )
     }
 
@@ -1016,10 +1036,12 @@ mod tests {
         Fut: UploadOutputFuture,
         F: UploadFn<Fut>,
     {
+        let config = StorageOpts::default();
         HummockUploader::new(
             initial_pinned_version(),
             Arc::new(move |payload, task_info| spawn(upload_fn(payload, task_info))),
             BufferTracker::for_test(),
+            &config,
         )
     }
 
@@ -1171,6 +1193,7 @@ mod tests {
         let mut all_imms = VecDeque::new();
         // assume a chckpoint consists of 11 epochs
         let ckpt_intervals = 11;
+        let imm_merge_threshold: usize = uploader.imm_merge_threshold();
 
         // For each epoch, we gen imm for 2 shards and add them to uploader and seal the epoch
         // afterward. check uploader's state after each epoch has been sealed
@@ -1202,16 +1225,16 @@ mod tests {
             });
 
             let epoch_cnt = (epoch - INITIAL_EPOCH) as usize;
-            if epoch_cnt < IMM_MERGE_THRESHOLD {
+            if epoch_cnt < imm_merge_threshold {
                 assert!(uploader.sealed_data.merging_tasks.is_empty());
                 assert!(uploader.sealed_data.spilled_data.is_empty());
                 assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
             } else {
                 assert_eq!(epoch_cnt, uploader.sealed_data.epochs.len());
 
-                let unmerged_imm_cnt: usize = epoch_cnt - IMM_MERGE_THRESHOLD * merged_imms.len();
+                let unmerged_imm_cnt: usize = epoch_cnt - imm_merge_threshold * merged_imms.len();
 
-                if unmerged_imm_cnt < IMM_MERGE_THRESHOLD {
+                if unmerged_imm_cnt < imm_merge_threshold {
                     continue;
                 }
 
@@ -1220,14 +1243,14 @@ mod tests {
                 imms_by_shard
                     .get(&(TEST_TABLE_ID, 1 as LocalInstanceId))
                     .map_or((), |imms| {
-                        assert_eq!(IMM_MERGE_THRESHOLD, imms.len());
+                        assert_eq!(imm_merge_threshold, imms.len());
                     });
 
                 // check shard 2
                 imms_by_shard
                     .get(&(TEST_TABLE_ID, 2 as LocalInstanceId))
                     .map_or((), |imms| {
-                        assert_eq!(IMM_MERGE_THRESHOLD, imms.len());
+                        assert_eq!(imm_merge_threshold, imms.len());
                     });
 
                 // we have enough sealed imms, start merging task
@@ -1400,6 +1423,8 @@ mod tests {
                 (await_start_future, finish_tx)
             }
         };
+
+        let config = StorageOpts::default();
         let uploader = HummockUploader::new(
             initial_pinned_version(),
             Arc::new({
@@ -1418,6 +1443,7 @@ mod tests {
                 }
             }),
             buffer_tracker.clone(),
+            &config,
         );
         (buffer_tracker, uploader, new_task_notifier)
     }

@@ -145,12 +145,14 @@ impl HummockEventHandler {
         let write_conflict_detector =
             ConflictDetector::new_from_config(&compactor_context.storage_opts);
         let sstable_object_id_manager = compactor_context.sstable_object_id_manager.clone();
+        let storage_opts = compactor_context.storage_opts.clone();
         let uploader = HummockUploader::new(
             pinned_version.clone(),
             Arc::new(move |payload, task_info| {
                 spawn(flush_imms(payload, task_info, compactor_context.clone()))
             }),
             buffer_tracker,
+            &storage_opts,
         );
 
         Self {
@@ -444,7 +446,6 @@ impl HummockEventHandler {
                     }
 
                     UploaderEvent::ImmMerged(merge_output) => {
-                        // FIXME: After we finish feed merged_imm into `flush`, then uncomment this.
                         // clear the imms have been merged in the sealed data
                         self.uploader.update_sealed_data(&merge_output.merged_imm);
 
