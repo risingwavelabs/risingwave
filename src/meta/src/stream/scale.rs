@@ -1006,20 +1006,19 @@ where
                 }
             }
 
-            let downstream_fragment_ids =
-                if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(&fragment_id) {
-                    // Skip NoShuffle fragments' downstream
-                    if ctx
-                        .no_shuffle_source_fragment_ids
-                        .contains(&fragment.fragment_id)
-                    {
-                        vec![]
-                    } else {
-                        downstream_fragments.keys().copied().collect_vec()
-                    }
-                } else {
-                    vec![]
-                };
+            let downstream_fragment_ids = if let Some(downstream_fragments) =
+                ctx.fragment_dispatcher_map.get(&fragment_id)
+            {
+                // Skip fragments' no-shuffle downstream, as there's no need to update the merger
+                // (receiver) of a no-shuffle downstream
+                downstream_fragments
+                    .iter()
+                    .filter(|(_, dispatcher_type)| *dispatcher_type != &DispatcherType::NoShuffle)
+                    .map(|(fragment_id, _)| *fragment_id)
+                    .collect_vec()
+            } else {
+                vec![]
+            };
 
             let vnode_bitmap_updates = match fragment.distribution_type() {
                 FragmentDistributionType::Hash => {
