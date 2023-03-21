@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::FilterNode;
 
 use super::{
-    ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
+    ExprRewritable, LogicalFilter, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::plan_node::{PlanBase, ToLocalBatch};
@@ -75,7 +75,7 @@ impl ToDistributedBatch for BatchFilter {
     }
 }
 
-impl ToBatchProst for BatchFilter {
+impl ToBatchPb for BatchFilter {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Filter(FilterNode {
             search_condition: Some(

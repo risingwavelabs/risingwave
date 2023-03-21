@@ -35,6 +35,8 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::session_config::ConfigMap;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::types::DataType;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::stream_cancel::{stream_tripwire, Trigger, Tripwire};
@@ -73,6 +75,7 @@ use crate::scheduler::SchedulerError::QueryCancelError;
 use crate::scheduler::{
     DistributedQueryMetrics, HummockSnapshotManager, HummockSnapshotManagerRef, QueryManager,
 };
+use crate::telemetry::FrontendTelemetryCreator;
 use crate::user::user_authentication::md5_hash_with_salt;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::{UserInfoReader, UserInfoWriter, UserInfoWriterImpl};
@@ -157,9 +160,7 @@ impl FrontendEnv {
         }
     }
 
-    pub async fn init(
-        opts: FrontendOpts,
-    ) -> Result<(Self, JoinHandle<()>, JoinHandle<()>, Sender<()>)> {
+    pub async fn init(opts: FrontendOpts) -> Result<(Self, Vec<JoinHandle<()>>, Vec<Sender<()>>)> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         info!("Starting frontend node");
         info!("> config: {:?}", config);
@@ -197,6 +198,8 @@ impl FrontendEnv {
             Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
             vec![],
         );
+        let mut join_handles = vec![heartbeat_join_handle];
+        let mut shutdown_senders = vec![heartbeat_shutdown_sender];
 
         let (catalog_updated_tx, catalog_updated_rx) = watch::channel(0);
         let catalog = Arc::new(RwLock::new(Catalog::default()));
@@ -233,7 +236,10 @@ impl FrontendEnv {
             user_info_updated_rx,
         ));
 
-        let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
+        let telemetry_enabled = system_params_reader.telemetry_enabled();
+
+        let system_params_manager =
+            Arc::new(LocalSystemParamsManager::new(system_params_reader.clone()));
         let frontend_observer_node = FrontendObserverNode::new(
             worker_node_manager.clone(),
             catalog,
@@ -241,12 +247,13 @@ impl FrontendEnv {
             user_info_manager,
             user_info_updated_tx,
             hummock_snapshot_manager.clone(),
-            system_params_manager,
+            system_params_manager.clone(),
         );
         let observer_manager =
             ObserverManager::new_with_meta_client(meta_client.clone(), frontend_observer_node)
                 .await;
         let observer_join_handle = observer_manager.start().await;
+        join_handles.push(observer_join_handle);
 
         meta_client.activate(&frontend_address).await?;
 
@@ -261,6 +268,28 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let host = opts.health_check_listener_addr.clone();
+
+        let telemetry_manager = TelemetryManager::new(
+            system_params_manager.watch_params(),
+            Arc::new(meta_client.clone()),
+            Arc::new(FrontendTelemetryCreator::new()),
+        );
+
+        // if the toml config file or env variable disables telemetry, do not watch system params
+        // change because if any of configs disable telemetry, we should never start it
+        if config.server.telemetry_enabled && telemetry_env_enabled() {
+            if telemetry_enabled {
+                telemetry_manager.start_telemetry_reporting();
+            }
+            let (telemetry_join_handle, telemetry_shutdown_sender) =
+                telemetry_manager.watch_params_change();
+
+            join_handles.push(telemetry_join_handle);
+            shutdown_senders.push(telemetry_shutdown_sender);
+        } else {
+            tracing::info!("Telemetry didn't start due to config");
+        }
+
         tokio::spawn(async move {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
@@ -294,9 +323,8 @@ impl FrontendEnv {
                 source_metrics,
                 creating_streaming_job_tracker,
             },
-            observer_join_handle,
-            heartbeat_join_handle,
-            heartbeat_shutdown_sender,
+            join_handles,
+            shutdown_senders,
         ))
     }
 
@@ -545,9 +573,8 @@ impl SessionImpl {
 
 pub struct SessionManagerImpl {
     env: FrontendEnv,
-    _observer_join_handle: JoinHandle<()>,
-    _heartbeat_join_handle: JoinHandle<()>,
-    _heartbeat_shutdown_sender: Sender<()>,
+    _join_handles: Vec<JoinHandle<()>>,
+    _shutdown_senders: Vec<Sender<()>>,
     number: AtomicI32,
 }
 
@@ -669,13 +696,11 @@ impl SessionManager<PgResponseStream> for SessionManagerImpl {
 
 impl SessionManagerImpl {
     pub async fn new(opts: FrontendOpts) -> Result<Self> {
-        let (env, join_handle, heartbeat_join_handle, heartbeat_shutdown_sender) =
-            FrontendEnv::init(opts).await?;
+        let (env, join_handles, shutdown_senders) = FrontendEnv::init(opts).await?;
         Ok(Self {
             env,
-            _observer_join_handle: join_handle,
-            _heartbeat_join_handle: heartbeat_join_handle,
-            _heartbeat_shutdown_sender: heartbeat_shutdown_sender,
+            _join_handles: join_handles,
+            _shutdown_senders: shutdown_senders,
             number: AtomicI32::new(0),
         })
     }

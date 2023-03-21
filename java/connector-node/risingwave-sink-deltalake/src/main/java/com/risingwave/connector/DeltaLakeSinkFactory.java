@@ -20,8 +20,10 @@ import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
 import com.risingwave.java.utils.MinioUrlParser;
+import com.risingwave.proto.Catalog.SinkType;
 import io.delta.standalone.DeltaLog;
 import io.delta.standalone.types.StructType;
+import io.grpc.Status;
 import java.nio.file.Paths;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
@@ -36,9 +38,6 @@ public class DeltaLakeSinkFactory implements SinkFactory {
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        // TODO: Remove this call to `validate` after supporting sink validation in risingwave.
-        validate(tableSchema, tableProperties);
-
         String location = tableProperties.get(LOCATION_PROP);
         String locationType = tableProperties.get(LOCATION_TYPE_PROP);
 
@@ -52,7 +51,14 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     }
 
     @Override
-    public void validate(TableSchema tableSchema, Map<String, String> tableProperties) {
+    public void validate(
+            TableSchema tableSchema, Map<String, String> tableProperties, SinkType sinkType) {
+        if (sinkType != SinkType.APPEND_ONLY && sinkType != SinkType.FORCE_APPEND_ONLY) {
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("only append-only delta lake sink is supported")
+                    .asRuntimeException();
+        }
+
         if (!tableProperties.containsKey(LOCATION_PROP)
                 || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
             throw INVALID_ARGUMENT

@@ -22,13 +22,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// `AssignedCompactTasks` tracks compact tasks assigned to context id.
 impl MetadataModel for CompactTaskAssignment {
     type KeyType = HummockCompactionTaskId;
-    type ProstType = CompactTaskAssignment;
+    type PbType = CompactTaskAssignment;
 
     fn cf_name() -> String {
         HUMMOCK_COMPACT_TASK_ASSIGNMENT.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -36,7 +36,7 @@ impl MetadataModel for CompactTaskAssignment {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

@@ -86,6 +86,8 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1", features = ["alloc"] }
+serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 strum = { version = "0.24", features = ["derive"] }
@@ -96,7 +98,6 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710"
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
@@ -179,6 +180,8 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1", features = ["alloc"] }
+serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 strum = { version = "0.24", features = ["derive"] }
@@ -191,7 +194,6 @@ tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tonic-build = { version = "0.8" }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }

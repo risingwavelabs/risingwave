@@ -268,10 +268,10 @@ pub type ExpandedParallelUnitMapping = ExpandedMapping<marker::ParallelUnit>;
 
 impl ActorMapping {
     /// Transform this actor mapping to a parallel unit mapping, essentially `transform`.
-    pub fn to_parallel_unit(
-        &self,
-        to_map: &HashMap<ActorId, ParallelUnitId>,
-    ) -> ParallelUnitMapping {
+    pub fn to_parallel_unit<M>(&self, to_map: &M) -> ParallelUnitMapping
+    where
+        M: for<'a> Index<&'a ActorId, Output = ParallelUnitId>,
+    {
         self.transform(to_map)
     }
 

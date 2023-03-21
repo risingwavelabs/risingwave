@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::SendError;
 use tokio_stream::wrappers::ReceiverStream;
 
+use super::actor::spawn_blocking_drop_stream;
 use super::{BoxedExecutor, Executor, ExecutorInfo, MessageStreamItem};
 
 /// Handle used to drive the subtask.
@@ -85,6 +86,7 @@ pub fn wrap(input: BoxedExecutor) -> (SubtaskHandle, SubtaskRxExecutor) {
                 break;
             }
         }
+        spawn_blocking_drop_stream(input).await;
     }
     .instrument_await("Subtask");
 

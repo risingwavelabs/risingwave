@@ -562,18 +562,25 @@ export interface CompactTaskProgress {
   numSstsUploaded: number;
 }
 
-export interface ReportCompactionTaskProgressRequest {
-  contextId: number;
-  progress: CompactTaskProgress[];
+/** The measurement of the workload on a compactor to determine whether it is idle. */
+export interface CompactorWorkload {
+  cpu: number;
 }
 
-export interface ReportCompactionTaskProgressResponse {
+export interface CompactorHeartbeatRequest {
+  contextId: number;
+  progress: CompactTaskProgress[];
+  workload: CompactorWorkload | undefined;
+}
+
+export interface CompactorHeartbeatResponse {
   status: Status | undefined;
 }
 
 export interface SubscribeCompactTasksRequest {
   contextId: number;
   maxConcurrentTaskNumber: number;
+  cpuCoreNum: number;
 }
 
 export interface ValidationTask {
@@ -795,6 +802,7 @@ export interface CompactionConfig {
   splitByStateTable: boolean;
   /** soft limit for max number of sub level number */
   level0StopWriteThresholdSubLevelNumber: number;
+  level0MaxCompactFileNumber: number;
 }
 
 export const CompactionConfig_CompactionMode = {
@@ -847,6 +855,16 @@ export interface HummockVersionStats {
 export interface HummockVersionStats_TableStatsEntry {
   key: number;
   value: TableStats | undefined;
+}
+
+export interface GetScaleCompactorRequest {
+}
+
+export interface GetScaleCompactorResponse {
+  suggestCores: number;
+  runningCores: number;
+  totalCores: number;
+  waitingCompactionBytes: number;
 }
 
 export interface WriteLimits {
@@ -2822,19 +2840,42 @@ export const CompactTaskProgress = {
   },
 };
 
-function createBaseReportCompactionTaskProgressRequest(): ReportCompactionTaskProgressRequest {
-  return { contextId: 0, progress: [] };
+function createBaseCompactorWorkload(): CompactorWorkload {
+  return { cpu: 0 };
 }
 
-export const ReportCompactionTaskProgressRequest = {
-  fromJSON(object: any): ReportCompactionTaskProgressRequest {
+export const CompactorWorkload = {
+  fromJSON(object: any): CompactorWorkload {
+    return { cpu: isSet(object.cpu) ? Number(object.cpu) : 0 };
+  },
+
+  toJSON(message: CompactorWorkload): unknown {
+    const obj: any = {};
+    message.cpu !== undefined && (obj.cpu = Math.round(message.cpu));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<CompactorWorkload>, I>>(object: I): CompactorWorkload {
+    const message = createBaseCompactorWorkload();
+    message.cpu = object.cpu ?? 0;
+    return message;
+  },
+};
+
+function createBaseCompactorHeartbeatRequest(): CompactorHeartbeatRequest {
+  return { contextId: 0, progress: [], workload: undefined };
+}
+
+export const CompactorHeartbeatRequest = {
+  fromJSON(object: any): CompactorHeartbeatRequest {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       progress: Array.isArray(object?.progress) ? object.progress.map((e: any) => CompactTaskProgress.fromJSON(e)) : [],
+      workload: isSet(object.workload) ? CompactorWorkload.fromJSON(object.workload) : undefined,
     };
   },
 
-  toJSON(message: ReportCompactionTaskProgressRequest): unknown {
+  toJSON(message: CompactorHeartbeatRequest): unknown {
     const obj: any = {};
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     if (message.progress) {
@@ -2842,38 +2883,39 @@ export const ReportCompactionTaskProgressRequest = {
     } else {
       obj.progress = [];
     }
+    message.workload !== undefined &&
+      (obj.workload = message.workload ? CompactorWorkload.toJSON(message.workload) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressRequest>, I>>(
-    object: I,
-  ): ReportCompactionTaskProgressRequest {
-    const message = createBaseReportCompactionTaskProgressRequest();
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatRequest>, I>>(object: I): CompactorHeartbeatRequest {
+    const message = createBaseCompactorHeartbeatRequest();
     message.contextId = object.contextId ?? 0;
     message.progress = object.progress?.map((e) => CompactTaskProgress.fromPartial(e)) || [];
+    message.workload = (object.workload !== undefined && object.workload !== null)
+      ? CompactorWorkload.fromPartial(object.workload)
+      : undefined;
     return message;
   },
 };
 
-function createBaseReportCompactionTaskProgressResponse(): ReportCompactionTaskProgressResponse {
+function createBaseCompactorHeartbeatResponse(): CompactorHeartbeatResponse {
   return { status: undefined };
 }
 
-export const ReportCompactionTaskProgressResponse = {
-  fromJSON(object: any): ReportCompactionTaskProgressResponse {
+export const CompactorHeartbeatResponse = {
+  fromJSON(object: any): CompactorHeartbeatResponse {
     return { status: isSet(object.status) ? Status.fromJSON(object.status) : undefined };
   },
 
-  toJSON(message: ReportCompactionTaskProgressResponse): unknown {
+  toJSON(message: CompactorHeartbeatResponse): unknown {
     const obj: any = {};
     message.status !== undefined && (obj.status = message.status ? Status.toJSON(message.status) : undefined);
     return obj;
   },
 
-  fromPartial<I extends Exact<DeepPartial<ReportCompactionTaskProgressResponse>, I>>(
-    object: I,
-  ): ReportCompactionTaskProgressResponse {
-    const message = createBaseReportCompactionTaskProgressResponse();
+  fromPartial<I extends Exact<DeepPartial<CompactorHeartbeatResponse>, I>>(object: I): CompactorHeartbeatResponse {
+    const message = createBaseCompactorHeartbeatResponse();
     message.status = (object.status !== undefined && object.status !== null)
       ? Status.fromPartial(object.status)
       : undefined;
@@ -2882,7 +2924,7 @@ export const ReportCompactionTaskProgressResponse = {
 };
 
 function createBaseSubscribeCompactTasksRequest(): SubscribeCompactTasksRequest {
-  return { contextId: 0, maxConcurrentTaskNumber: 0 };
+  return { contextId: 0, maxConcurrentTaskNumber: 0, cpuCoreNum: 0 };
 }
 
 export const SubscribeCompactTasksRequest = {
@@ -2890,6 +2932,7 @@ export const SubscribeCompactTasksRequest = {
     return {
       contextId: isSet(object.contextId) ? Number(object.contextId) : 0,
       maxConcurrentTaskNumber: isSet(object.maxConcurrentTaskNumber) ? Number(object.maxConcurrentTaskNumber) : 0,
+      cpuCoreNum: isSet(object.cpuCoreNum) ? Number(object.cpuCoreNum) : 0,
     };
   },
 
@@ -2898,6 +2941,7 @@ export const SubscribeCompactTasksRequest = {
     message.contextId !== undefined && (obj.contextId = Math.round(message.contextId));
     message.maxConcurrentTaskNumber !== undefined &&
       (obj.maxConcurrentTaskNumber = Math.round(message.maxConcurrentTaskNumber));
+    message.cpuCoreNum !== undefined && (obj.cpuCoreNum = Math.round(message.cpuCoreNum));
     return obj;
   },
 
@@ -2905,6 +2949,7 @@ export const SubscribeCompactTasksRequest = {
     const message = createBaseSubscribeCompactTasksRequest();
     message.contextId = object.contextId ?? 0;
     message.maxConcurrentTaskNumber = object.maxConcurrentTaskNumber ?? 0;
+    message.cpuCoreNum = object.cpuCoreNum ?? 0;
     return message;
   },
 };
@@ -4361,6 +4406,7 @@ function createBaseCompactionConfig(): CompactionConfig {
     maxSpaceReclaimBytes: 0,
     splitByStateTable: false,
     level0StopWriteThresholdSubLevelNumber: 0,
+    level0MaxCompactFileNumber: 0,
   };
 }
 
@@ -4393,6 +4439,9 @@ export const CompactionConfig = {
       level0StopWriteThresholdSubLevelNumber: isSet(object.level0StopWriteThresholdSubLevelNumber)
         ? Number(object.level0StopWriteThresholdSubLevelNumber)
         : 0,
+      level0MaxCompactFileNumber: isSet(object.level0MaxCompactFileNumber)
+        ? Number(object.level0MaxCompactFileNumber)
+        : 0,
     };
   },
 
@@ -4421,6 +4470,8 @@ export const CompactionConfig = {
     message.splitByStateTable !== undefined && (obj.splitByStateTable = message.splitByStateTable);
     message.level0StopWriteThresholdSubLevelNumber !== undefined &&
       (obj.level0StopWriteThresholdSubLevelNumber = Math.round(message.level0StopWriteThresholdSubLevelNumber));
+    message.level0MaxCompactFileNumber !== undefined &&
+      (obj.level0MaxCompactFileNumber = Math.round(message.level0MaxCompactFileNumber));
     return obj;
   },
 
@@ -4440,6 +4491,7 @@ export const CompactionConfig = {
     message.maxSpaceReclaimBytes = object.maxSpaceReclaimBytes ?? 0;
     message.splitByStateTable = object.splitByStateTable ?? false;
     message.level0StopWriteThresholdSubLevelNumber = object.level0StopWriteThresholdSubLevelNumber ?? 0;
+    message.level0MaxCompactFileNumber = object.level0MaxCompactFileNumber ?? 0;
     return message;
   },
 };
@@ -4546,6 +4598,60 @@ export const HummockVersionStats_TableStatsEntry = {
     message.value = (object.value !== undefined && object.value !== null)
       ? TableStats.fromPartial(object.value)
       : undefined;
+    return message;
+  },
+};
+
+function createBaseGetScaleCompactorRequest(): GetScaleCompactorRequest {
+  return {};
+}
+
+export const GetScaleCompactorRequest = {
+  fromJSON(_: any): GetScaleCompactorRequest {
+    return {};
+  },
+
+  toJSON(_: GetScaleCompactorRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetScaleCompactorRequest>, I>>(_: I): GetScaleCompactorRequest {
+    const message = createBaseGetScaleCompactorRequest();
+    return message;
+  },
+};
+
+function createBaseGetScaleCompactorResponse(): GetScaleCompactorResponse {
+  return { suggestCores: 0, runningCores: 0, totalCores: 0, waitingCompactionBytes: 0 };
+}
+
+export const GetScaleCompactorResponse = {
+  fromJSON(object: any): GetScaleCompactorResponse {
+    return {
+      suggestCores: isSet(object.suggestCores) ? Number(object.suggestCores) : 0,
+      runningCores: isSet(object.runningCores) ? Number(object.runningCores) : 0,
+      totalCores: isSet(object.totalCores) ? Number(object.totalCores) : 0,
+      waitingCompactionBytes: isSet(object.waitingCompactionBytes) ? Number(object.waitingCompactionBytes) : 0,
+    };
+  },
+
+  toJSON(message: GetScaleCompactorResponse): unknown {
+    const obj: any = {};
+    message.suggestCores !== undefined && (obj.suggestCores = Math.round(message.suggestCores));
+    message.runningCores !== undefined && (obj.runningCores = Math.round(message.runningCores));
+    message.totalCores !== undefined && (obj.totalCores = Math.round(message.totalCores));
+    message.waitingCompactionBytes !== undefined &&
+      (obj.waitingCompactionBytes = Math.round(message.waitingCompactionBytes));
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetScaleCompactorResponse>, I>>(object: I): GetScaleCompactorResponse {
+    const message = createBaseGetScaleCompactorResponse();
+    message.suggestCores = object.suggestCores ?? 0;
+    message.runningCores = object.runningCores ?? 0;
+    message.totalCores = object.totalCores ?? 0;
+    message.waitingCompactionBytes = object.waitingCompactionBytes ?? 0;
     return message;
   },
 };

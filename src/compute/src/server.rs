@@ -26,6 +26,8 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -34,6 +36,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -70,6 +73,7 @@ use crate::rpc::service::monitor_service::{
     AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
@@ -214,10 +218,10 @@ pub async fn compute_node_serve(
         ));
         monitor_cache(memory_collector, &registry).unwrap();
         let backup_reader = storage.backup_reader();
-        let system_params_manager = system_params_manager.clone();
+        let system_params_mgr = system_params_manager.clone();
         tokio::spawn(async move {
             backup_reader
-                .watch_config_change(system_params_manager.watch_params())
+                .watch_config_change(system_params_mgr.watch_params())
                 .await;
         });
     }
@@ -267,6 +271,8 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
+    let telemetry_enabled = system_params.telemetry_enabled();
+
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
     let dml_mgr = Arc::new(DmlManager::default());
@@ -287,7 +293,20 @@ pub async fn compute_node_serve(
 
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
+            None | Some("json") => SinkPayloadFormat::Json,
+            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            _ => {
+                unreachable!(
+                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
+                    opts.connector_rpc_sink_payload_format
+                )
+            }
+        },
     };
+
+    info!("connector param: {:?}", connector_params);
+
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
@@ -296,7 +315,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store,
         dml_mgr,
-        system_params_manager,
+        system_params_manager.clone(),
         source_metrics,
     );
 
@@ -317,6 +336,25 @@ pub async fn compute_node_serve(
     let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
+
+    let telemetry_manager = TelemetryManager::new(
+        system_params_manager.watch_params(),
+        Arc::new(meta_client.clone()),
+        Arc::new(ComputeTelemetryCreator::new()),
+    );
+
+    // if the toml config file or env variable disables telemetry, do not watch system params change
+    // because if any of configs disable telemetry, we should never start it
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
+        // if all configs are true, start reporting
+        if telemetry_enabled {
+            telemetry_manager.start_telemetry_reporting();
+        }
+        // if config and env are true, starting watching
+        sub_tasks.push(telemetry_manager.watch_params_change());
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

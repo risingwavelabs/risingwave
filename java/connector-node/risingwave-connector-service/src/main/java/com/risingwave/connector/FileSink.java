@@ -57,25 +57,28 @@ public class FileSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            switch (row.getOp()) {
-                case INSERT:
-                    String buf =
-                            new Gson()
-                                    .toJson(
-                                            IntStream.range(0, row.size())
-                                                    .mapToObj(row::get)
-                                                    .toArray());
-                    try {
-                        sinkWriter.write(buf + System.lineSeparator());
-                    } catch (IOException e) {
-                        throw INTERNAL.withCause(e).asRuntimeException();
-                    }
-                    break;
-                default:
-                    throw UNIMPLEMENTED
-                            .withDescription("unsupported operation: " + row.getOp())
-                            .asRuntimeException();
+            try (SinkRow row = rows.next()) {
+                switch (row.getOp()) {
+                    case INSERT:
+                        String buf =
+                                new Gson()
+                                        .toJson(
+                                                IntStream.range(0, row.size())
+                                                        .mapToObj(row::get)
+                                                        .toArray());
+                        try {
+                            sinkWriter.write(buf + System.lineSeparator());
+                        } catch (IOException e) {
+                            throw INTERNAL.withCause(e).asRuntimeException();
+                        }
+                        break;
+                    default:
+                        throw UNIMPLEMENTED
+                                .withDescription("unsupported operation: " + row.getOp())
+                                .asRuntimeException();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }

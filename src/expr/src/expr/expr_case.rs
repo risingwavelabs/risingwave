@@ -164,7 +164,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::Type;
     use risingwave_pb::expr::FunctionCall;
 
@@ -178,7 +178,7 @@ mod tests {
             children: vec![
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Boolean as i32,
                         ..Default::default()
                     }),
@@ -186,7 +186,7 @@ mod tests {
                 },
                 ExprNode {
                     expr_type: Type::ConstantValue as i32,
-                    return_type: Some(ProstDataType {
+                    return_type: Some(PbDataType {
                         type_name: TypeName::Int32 as i32,
                         ..Default::default()
                     }),
@@ -196,7 +196,7 @@ mod tests {
         };
         let p = ExprNode {
             expr_type: Type::Case as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int32 as i32,
                 ..Default::default()
             }),

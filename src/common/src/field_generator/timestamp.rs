@@ -31,6 +31,7 @@ enum LocalNow {
 }
 
 pub struct TimestampField {
+    base: Option<DateTime<FixedOffset>>,
     max_past: Duration,
     local_now: LocalNow,
     seed: u64,
@@ -38,6 +39,7 @@ pub struct TimestampField {
 
 impl TimestampField {
     pub fn new(
+        base: Option<DateTime<FixedOffset>>,
         max_past_option: Option<String>,
         max_past_mode: Option<String>,
         seed: u64,
@@ -61,6 +63,7 @@ impl TimestampField {
         };
         debug!(?local_now, ?max_past, "parse timestamp field option");
         Ok(Self {
+            base,
             // convert to chrono::Duration
             max_past: chrono::Duration::from_std(max_past)?,
             local_now,
@@ -72,12 +75,15 @@ impl TimestampField {
         let milliseconds = self.max_past.num_milliseconds();
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
         let max_milliseconds = rng.gen_range(0..=milliseconds);
-        let now = match self.local_now {
-            LocalNow::Relative => Local::now()
-                .naive_local()
-                .duration_round(Duration::microseconds(1))
-                .unwrap(),
-            LocalNow::Absolute(now) => now,
+        let now = match self.base {
+            Some(base) => base.naive_local(),
+            None => match self.local_now {
+                LocalNow::Relative => Local::now()
+                    .naive_local()
+                    .duration_round(Duration::microseconds(1))
+                    .unwrap(),
+                LocalNow::Absolute(now) => now,
+            },
         };
         now - Duration::milliseconds(max_milliseconds)
     }
