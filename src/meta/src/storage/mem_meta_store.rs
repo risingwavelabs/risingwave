@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use risingwave_common::config::MetaBackend;
 use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 
 use super::{
@@ -77,6 +78,10 @@ impl MemStore {
 #[async_trait]
 impl MetaStore for MemStore {
     type Snapshot = MemSnapshot;
+
+    fn meta_store_type(&self) -> MetaBackend {
+        MetaBackend::Mem
+    }
 
     async fn snapshot(&self) -> Self::Snapshot {
         let guard = self.inner.clone().read_owned().await;

@@ -71,6 +71,13 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
   }
 }
 
+export interface GetTelemetryInfoRequest {
+}
+
+export interface TelemetryInfoResponse {
+  trackingId?: string | undefined;
+}
+
 export interface HeartbeatRequest {
   nodeId: number;
   /** Lightweight info piggybacked by heartbeat request. */
@@ -576,6 +583,7 @@ export interface SystemParams {
   dataDirectory?: string | undefined;
   backupStorageUrl?: string | undefined;
   backupStorageDirectory?: string | undefined;
+  telemetryEnabled?: boolean | undefined;
 }
 
 export interface GetSystemParamsRequest {
@@ -593,6 +601,48 @@ export interface SetSystemParamRequest {
 
 export interface SetSystemParamResponse {
 }
+
+function createBaseGetTelemetryInfoRequest(): GetTelemetryInfoRequest {
+  return {};
+}
+
+export const GetTelemetryInfoRequest = {
+  fromJSON(_: any): GetTelemetryInfoRequest {
+    return {};
+  },
+
+  toJSON(_: GetTelemetryInfoRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTelemetryInfoRequest>, I>>(_: I): GetTelemetryInfoRequest {
+    const message = createBaseGetTelemetryInfoRequest();
+    return message;
+  },
+};
+
+function createBaseTelemetryInfoResponse(): TelemetryInfoResponse {
+  return { trackingId: undefined };
+}
+
+export const TelemetryInfoResponse = {
+  fromJSON(object: any): TelemetryInfoResponse {
+    return { trackingId: isSet(object.trackingId) ? String(object.trackingId) : undefined };
+  },
+
+  toJSON(message: TelemetryInfoResponse): unknown {
+    const obj: any = {};
+    message.trackingId !== undefined && (obj.trackingId = message.trackingId);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TelemetryInfoResponse>, I>>(object: I): TelemetryInfoResponse {
+    const message = createBaseTelemetryInfoResponse();
+    message.trackingId = object.trackingId ?? undefined;
+    return message;
+  },
+};
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
@@ -2506,6 +2556,7 @@ function createBaseSystemParams(): SystemParams {
     dataDirectory: undefined,
     backupStorageUrl: undefined,
     backupStorageDirectory: undefined,
+    telemetryEnabled: undefined,
   };
 }
 
@@ -2521,6 +2572,7 @@ export const SystemParams = {
       dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
       backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
       backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+      telemetryEnabled: isSet(object.telemetryEnabled) ? Boolean(object.telemetryEnabled) : undefined,
     };
   },
 
@@ -2535,6 +2587,7 @@ export const SystemParams = {
     message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
     message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
     message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    message.telemetryEnabled !== undefined && (obj.telemetryEnabled = message.telemetryEnabled);
     return obj;
   },
 
@@ -2549,6 +2602,7 @@ export const SystemParams = {
     message.dataDirectory = object.dataDirectory ?? undefined;
     message.backupStorageUrl = object.backupStorageUrl ?? undefined;
     message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    message.telemetryEnabled = object.telemetryEnabled ?? undefined;
     return message;
   },
 };

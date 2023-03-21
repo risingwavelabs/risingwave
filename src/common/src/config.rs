@@ -222,6 +222,9 @@ pub struct ServerConfig {
     /// >0 = open metrics
     pub metrics_level: u32,
 
+    #[serde(default = "default::server::telemetry_enabled")]
+    pub telemetry_enabled: bool,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -498,6 +501,9 @@ pub struct SystemConfig {
     /// Remote directory for storing snapshots.
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: String,
+
+    #[serde(default = "default::system::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 }
 
 impl Default for SystemConfig {
@@ -518,6 +524,7 @@ impl SystemConfig {
             data_directory: Some(self.data_directory),
             backup_storage_url: Some(self.backup_storage_url),
             backup_storage_directory: Some(self.backup_storage_directory),
+            telemetry_enabled: Some(self.telemetry_enabled),
         }
     }
 }
@@ -587,6 +594,10 @@ mod default {
 
         pub fn metrics_level() -> u32 {
             0
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            true
         }
     }
 
@@ -775,6 +786,10 @@ mod default {
 
         pub fn backup_storage_directory() -> String {
             system_param::default::backup_storage_directory()
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            system_param::default::telemetry_enabled()
         }
     }
 }
