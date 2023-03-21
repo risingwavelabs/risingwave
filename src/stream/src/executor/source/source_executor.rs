@@ -719,6 +719,11 @@ mod tests {
                 split_num: 3,
                 start_offset: None,
             }),
+            SplitImpl::Datagen(DatagenSplit {
+                split_index: 2,
+                split_num: 3,
+                start_offset: None,
+            }),
         ];
 
         let change_split_mutation =
@@ -756,10 +761,13 @@ mod tests {
                 " i
                 + 11
                 + 12
+                + 13
                 + 14
                 + 15
+                + 16
                 + 17
                 + 18
+                + 19
                 + 20",
             )
         );
