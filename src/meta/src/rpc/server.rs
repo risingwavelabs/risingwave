@@ -22,6 +22,7 @@ use risingwave_common::config::MetaBackend;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common_service::metrics_manager::MetricsManager;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
@@ -561,7 +562,7 @@ pub async fn start_service_as_election_leader<S: MetaStore>(
     );
 
     // May start telemetry reporting
-    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled{
+    if let MetaBackend::Etcd = meta_store.meta_store_type() && env.opts.telemetry_enabled && telemetry_env_enabled(){
         if system_params_reader.telemetry_enabled(){
             mgr.start_telemetry_reporting();
         }
