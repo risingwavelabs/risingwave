@@ -86,7 +86,7 @@ pub(crate) fn get_event_data_types(
 
     if let Some(row_id_index) = row_id_index {
         // _row_id
-        fields.insert(row_id_index, DataType::Int64);
+        fields.insert(row_id_index, DataType::Serial);
     }
 
     fields

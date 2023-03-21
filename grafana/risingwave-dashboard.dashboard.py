@@ -520,10 +520,16 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "{{job}} @ {{instance}}",
-                )
+                    "cpu - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
+                    "cpu usage -{{job}} @ {{instance}}",
+                ),
             ],
         ),
+
         panels.timeseries_count(
             "Meta Cluster",
             "",
@@ -559,6 +565,16 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance, level_index)",
                             "L{{level_index}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "scale compactor core count",
+                    "compactor core resource need to scale out",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compactor_suggest_core_count')})",
+                            "suggest-core-count"
                         ),
                     ],
                 ),
@@ -1563,7 +1579,6 @@ def section_batch_exchange(outer_panels):
             ],
         ),
     ]
-
 
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()

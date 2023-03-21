@@ -32,7 +32,7 @@ v1 Int32
 v2 Int32
 v3 Int32
 primary key _row_id
-idx1 index(v1, v2) include(v3) distributed by(v1, v2)
+idx1 index(v1 ASC, v2 ASC) include(v3) distributed by(v1, v2)
 
 statement ok
 drop index idx1;

@@ -19,10 +19,11 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{
-    memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum, IntervalUnit,
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
+    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    ScalarImpl,
 };
-use risingwave_common::util::value_encoding;
+use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::{memcmp_encoding, value_encoding};
 
 const ENV_BENCH_SER: &str = "BENCH_SER";
 const ENV_BENCH_DE: &str = "BENCH_DE";
@@ -45,9 +46,12 @@ impl Case {
 }
 
 fn key_serialization(datum: &Datum) -> Vec<u8> {
-    let mut serializer = memcomparable::Serializer::new(vec![]);
-    memcmp_serialize_datum_into(datum, &mut serializer).unwrap();
-    black_box(serializer.into_inner())
+    let result = memcmp_encoding::encode_value(
+        datum.as_ref().map(ScalarImpl::as_scalar_ref_impl),
+        OrderType::default(),
+    )
+    .unwrap();
+    black_box(result)
 }
 
 fn value_serialization(datum: &Datum) -> Vec<u8> {
@@ -55,8 +59,7 @@ fn value_serialization(datum: &Datum) -> Vec<u8> {
 }
 
 fn key_deserialization(ty: &DataType, datum: &[u8]) {
-    let mut deserializer = memcomparable::Deserializer::new(datum);
-    let result = memcmp_deserialize_datum_from(ty, &mut deserializer);
+    let result = memcmp_encoding::decode_value(ty, datum, OrderType::default()).unwrap();
     let _ = black_box(result);
 }
 

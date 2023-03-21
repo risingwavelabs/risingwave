@@ -19,7 +19,9 @@ use std::vec;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, SchemaId, TableId};
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::common::{ParallelUnit, PbColumnOrder, PbDirection, PbOrderType, WorkerNode};
+use risingwave_pb::common::{
+    ParallelUnit, PbColumnOrder, PbDirection, PbNullsAre, PbOrderType, WorkerNode,
+};
 use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::data::DataType;
 use risingwave_pb::expr::agg_call::Type;
@@ -96,6 +98,7 @@ fn make_column_order(column_index: u32) -> PbColumnOrder {
         column_index,
         order_type: Some(PbOrderType {
             direction: PbDirection::Ascending as _,
+            nulls_are: PbNullsAre::Largest as _,
         }),
     }
 }
@@ -129,6 +132,7 @@ fn make_source_internal_table(id: u32) -> PbTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Descending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         ..Default::default()
@@ -150,6 +154,7 @@ fn make_internal_table(id: u32, is_agg_value: bool) -> PbTable {
             column_index: 0,
             order_type: Some(PbOrderType {
                 direction: PbDirection::Descending as _,
+                nulls_are: PbNullsAre::Largest as _,
             }),
         }],
         stream_key: vec![2],

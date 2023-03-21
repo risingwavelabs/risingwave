@@ -34,7 +34,7 @@ where
     F: Fn(&mut Parser) -> T,
 {
     let mut tokenizer = Tokenizer::new(sql);
-    let tokens = tokenizer.tokenize().unwrap();
+    let tokens = tokenizer.tokenize_with_location().unwrap();
     f(&mut Parser::new(tokens))
 }
 

@@ -36,7 +36,6 @@ use crate::array::{
     ListRef, StructRef,
 };
 use crate::collection::estimate_size::EstimateSize;
-use crate::hash::VirtualNode;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
     DataType, Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, OrderedF32,
@@ -59,10 +58,6 @@ impl From<u64> for HashCode {
 impl HashCode {
     pub fn hash_code(self) -> u64 {
         self.0
-    }
-
-    pub fn to_vnode(self) -> VirtualNode {
-        VirtualNode::from(self)
     }
 }
 

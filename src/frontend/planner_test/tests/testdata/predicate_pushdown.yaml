@@ -10,9 +10,7 @@
         └─LogicalProject { exprs: [t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalFilter { predicate: false:Boolean }
-    └─LogicalAgg { aggs: [min(t.v1)] }
-      └─LogicalScan { table: t, columns: [t.v1] }
+    LogicalValues { rows: [], schema: Schema { fields: [min(t.v1):Int32] } }
 - name: filter should not transpose limit
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
