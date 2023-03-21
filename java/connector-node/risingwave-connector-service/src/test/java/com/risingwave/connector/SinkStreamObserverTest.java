@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import com.risingwave.connector.api.TableSchema;
@@ -14,7 +28,7 @@ public class SinkStreamObserverTest {
     public SinkConfig fileSinkConfig =
             SinkConfig.newBuilder()
                     .setTableSchema(TableSchema.getMockTableProto())
-                    .setSinkType("file")
+                    .setConnectorType("file")
                     .putAllProperties(Map.of("output.path", "/tmp/rw-connector"))
                     .build();
 
@@ -78,6 +92,7 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
                                         .setSinkConfig(fileSinkConfig)
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstSync =
@@ -119,6 +134,7 @@ public class SinkStreamObserverTest {
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
                                         .setSinkConfig(fileSinkConfig)
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .build())
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstSync =
@@ -183,6 +199,7 @@ public class SinkStreamObserverTest {
                 ConnectorServiceProto.SinkStreamRequest.newBuilder()
                         .setStart(
                                 ConnectorServiceProto.SinkStreamRequest.StartSink.newBuilder()
+                                        .setFormat(ConnectorServiceProto.SinkPayloadFormat.JSON)
                                         .setSinkConfig(fileSinkConfig))
                         .build();
         ConnectorServiceProto.SinkStreamRequest firstStartEpoch =

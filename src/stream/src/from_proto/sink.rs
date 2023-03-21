@@ -37,10 +37,10 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
         let mut properties = sink_desc.get_properties().clone();
         let pk_indices = sink_desc
-            .pk
+            .downstream_pk
             .iter()
-            .map(|pk| pk.index as usize)
-            .collect::<Vec<_>>();
+            .map(|i| *i as usize)
+            .collect_vec();
         let schema = sink_desc.columns.iter().map(Into::into).collect();
         // This field can be used to distinguish a specific actor in parallelism to prevent
         // transaction execution errors

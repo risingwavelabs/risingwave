@@ -1,5 +1,5 @@
 # macOS
-.DS_Store
+**/*.DS_Store
 
 # Visual Studio Code
 .vscode/*
@@ -48,6 +48,8 @@ src/log/
 **/tags
 
 log/
+
+*.log
 
 .risingwave/
 .bin/

@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use risingwave_pb::data::Column as ProstColumn;
+use risingwave_pb::data::PbColumn;
 
 use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
@@ -32,12 +32,12 @@ impl Column {
         Column { array }
     }
 
-    pub fn to_protobuf(&self) -> ProstColumn {
+    pub fn to_protobuf(&self) -> PbColumn {
         let array = self.array.to_protobuf();
-        ProstColumn { array: Some(array) }
+        PbColumn { array: Some(array) }
     }
 
-    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> ArrayResult<Self> {
+    pub fn from_protobuf(col: &PbColumn, cardinality: usize) -> ArrayResult<Self> {
         Ok(Column {
             array: Arc::new(ArrayImpl::from_protobuf(col.get_array()?, cardinality)?),
         })

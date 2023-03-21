@@ -58,6 +58,7 @@ impl RegexpMatches {
     }
 }
 
+#[async_trait::async_trait]
 impl TableFunction for RegexpMatches {
     fn return_type(&self) -> DataType {
         DataType::List {
@@ -65,8 +66,8 @@ impl TableFunction for RegexpMatches {
         }
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let text_arr = self.text.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        let text_arr = self.text.eval_checked(input).await?;
         let text_arr: &Utf8Array = text_arr.as_ref().into();
 
         let bitmap = input.visibility();
@@ -102,7 +103,7 @@ impl TableFunction for RegexpMatches {
 }
 
 pub fn new_regexp_matches(
-    prost: &TableFunctionProst,
+    prost: &TableFunctionPb,
     chunk_size: usize,
 ) -> Result<BoxedTableFunction> {
     ensure!(

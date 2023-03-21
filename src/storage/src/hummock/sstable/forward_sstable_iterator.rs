@@ -19,7 +19,6 @@ use std::ops::Bound::*;
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::key::FullKey;
-use risingwave_hummock_sdk::KeyComparator;
 
 use super::super::{HummockResult, HummockValue};
 use super::Sstable;
@@ -96,7 +95,7 @@ impl PrefetchContext {
             if *prefetched_idx == idx {
                 false
             } else {
-                tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
+                tracing::warn!(target: "events::storage::sstable::block_seek", "prefetch mismatch: sstable_object_id = {}, block_id = {}, prefetched_block_id = {}", sst.id, idx, *prefetched_idx);
                 self.prefetched_blocks.clear();
                 true
             }
@@ -219,10 +218,14 @@ impl SstableIterator {
     }
 
     /// Seeks to a block, and then seeks to the key if `seek_key` is given.
-    async fn seek_idx(&mut self, idx: usize, seek_key: Option<&[u8]>) -> HummockResult<()> {
+    async fn seek_idx(
+        &mut self,
+        idx: usize,
+        seek_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
         tracing::trace!(
             target: "events::storage::sstable::block_seek",
-            "table iterator seek: sstable_id = {}, block_id = {}",
+            "table iterator seek: sstable_object_id = {}, block_id = {}",
             self.sst.value().id,
             idx,
         );
@@ -275,7 +278,7 @@ impl HummockIterator for SstableIterator {
     }
 
     fn key(&self) -> FullKey<&[u8]> {
-        FullKey::decode(self.block_iter.as_ref().expect("no block iter").key())
+        self.block_iter.as_ref().expect("no block iter").key()
     }
 
     fn value(&self) -> HummockValue<&[u8]> {
@@ -297,7 +300,6 @@ impl HummockIterator for SstableIterator {
 
     fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> Self::SeekFuture<'a> {
         async move {
-            let encoded_key = key.encode();
             let block_idx = self
                 .sst
                 .value()
@@ -307,17 +309,13 @@ impl HummockIterator for SstableIterator {
                     // compare by version comparator
                     // Note: we are comparing against the `smallest_key` of the `block`, thus the
                     // partition point should be `prev(<=)` instead of `<`.
-                    let ord = KeyComparator::compare_encoded_full_key(
-                        block_meta.smallest_key.as_slice(),
-                        encoded_key.as_slice(),
-                    );
+                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
                     ord == Less || ord == Equal
                 })
                 .saturating_sub(1); // considering the boundary of 0
             self.init_block_fetcher(block_idx);
 
-            self.seek_idx(block_idx, Some(encoded_key.as_slice()))
-                .await?;
+            self.seek_idx(block_idx, Some(key)).await?;
             if !self.is_valid() {
                 // seek to next block
                 self.seek_idx(block_idx + 1, None).await?;

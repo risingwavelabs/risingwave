@@ -15,43 +15,36 @@
 use itertools::Itertools;
 
 use crate::array::column::Column;
+use crate::array::ArrayImpl;
+use crate::for_all_type_pairs;
 use crate::types::DataType;
 
 /// Check if the schema of `columns` matches the expected `data_types`. Used for debugging.
 pub fn schema_check<'a, T, C>(data_types: T, columns: C) -> Result<(), String>
 where
-    T: IntoIterator<Item = &'a DataType> + Clone,
-    C: IntoIterator<Item = &'a Column> + Clone,
+    T: IntoIterator<Item = &'a DataType>,
+    C: IntoIterator<Item = &'a Column>,
 {
-    tracing::event!(
-        tracing::Level::TRACE,
-        "input schema = \n{:#?}\nexpected schema = \n{:#?}",
-        columns
-            .clone()
-            .into_iter()
-            .map(|col| col.array_ref().get_ident())
-            .collect_vec(),
-        data_types.clone().into_iter().collect_vec(),
-    );
-
-    for (i, pair) in columns.into_iter().zip_longest(data_types).enumerate() {
-        let array = pair.as_ref().left().map(|c| c.array_ref());
-        let builder = pair.as_ref().right().map(|d| d.create_array_builder(0)); // TODO: check `data_type` directly
-
-        macro_rules! check_schema {
-            ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
-                use crate::array::ArrayBuilderImpl;
-                use crate::array::ArrayImpl;
-
-                match (array, &builder) {
-                    $( (Some(ArrayImpl::$variant_name(_)), Some(ArrayBuilderImpl::$variant_name(_))) => {} ),*
-                    _ => return Err(format!("column {} should be {:?}, while stream chunk gives {:?}",
-                                            i, builder.map(|b| b.get_ident()), array.map(|a| a.get_ident()))),
+    for (i, pair) in data_types
+        .into_iter()
+        .zip_longest(columns.into_iter().map(|c| c.array_ref()))
+        .enumerate()
+    {
+        macro_rules! matches {
+            ($( { $DataType:ident, $PhysicalType:ident }),*) => {
+                match (pair.as_ref().left(), pair.as_ref().right()) {
+                    $( (Some(DataType::$DataType { .. }), Some(ArrayImpl::$PhysicalType(_))) => continue, )*
+                    (data_type, array) => {
+                        let array_ident = array.map(|a| a.get_ident());
+                        return Err(format!(
+                            "column type mismatched at position {i}: expected {data_type:?}, found {array_ident:?}"
+                        ));
+                    }
                 }
-            };
+            }
         }
 
-        for_all_variants! { check_schema };
+        for_all_type_pairs! { matches }
     }
 
     Ok(())

@@ -41,6 +41,7 @@ use crate::hummock::utils::{
     do_delete_sanity_check, do_insert_sanity_check, do_update_sanity_check,
     filter_with_delete_range, ENABLE_SANITY_CHECK,
 };
+use crate::hummock::write_limiter::WriteLimiterRef;
 use crate::hummock::{MemoryLimiter, SstableIterator};
 use crate::mem_table::{merge_stream, KeyOp, MemTable};
 use crate::monitor::{HummockStateStoreMetrics, IterLocalMetricsGuard, StoreLocalStatistic};
@@ -75,6 +76,8 @@ pub struct LocalHummockStorage {
     tracing: Arc<risingwave_tracing::RwTracingService>,
 
     stats: Arc<HummockStateStoreMetrics>,
+
+    write_limiter: WriteLimiterRef,
 }
 
 impl LocalHummockStorage {
@@ -359,6 +362,7 @@ impl LocalHummockStorage {
 
         let sorted_items = SharedBufferBatch::build_shared_buffer_item_batches(kv_pairs);
         let size = SharedBufferBatch::measure_batch_size(&sorted_items);
+        self.write_limiter.wait_permission(self.table_id).await;
         let limiter = self.memory_limiter.as_ref();
         let tracker = if let Some(tracker) = limiter.try_require_memory(size as u64) {
             tracker
@@ -412,6 +416,7 @@ impl LocalHummockStorage {
 }
 
 impl LocalHummockStorage {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         instance_guard: LocalInstanceGuard,
         read_version: Arc<RwLock<HummockReadVersion>>,
@@ -419,6 +424,7 @@ impl LocalHummockStorage {
         event_sender: mpsc::UnboundedSender<HummockEvent>,
         memory_limiter: Arc<MemoryLimiter>,
         tracing: Arc<risingwave_tracing::RwTracingService>,
+        write_limiter: WriteLimiterRef,
         option: NewLocalOptions,
     ) -> Self {
         let stats = hummock_version_reader.stats().clone();
@@ -435,6 +441,7 @@ impl LocalHummockStorage {
             hummock_version_reader,
             tracing,
             stats,
+            write_limiter,
         }
     }
 

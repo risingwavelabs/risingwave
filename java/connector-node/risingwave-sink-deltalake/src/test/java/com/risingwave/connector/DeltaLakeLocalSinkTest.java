@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static com.risingwave.connector.DeltaLakeSinkFactoryTest.*;
@@ -6,7 +20,7 @@ import static org.apache.spark.sql.types.DataTypes.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import io.delta.standalone.DeltaLog;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -52,8 +66,8 @@ public class DeltaLakeLocalSinkTest {
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkrow(Op.INSERT, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                        new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
 
         List<Row> rows = List.of(RowFactory.create(1, "Alice"), RowFactory.create(2, "Bob"));
@@ -79,14 +93,14 @@ public class DeltaLakeLocalSinkTest {
                             createStructField("name", StringType, false),
                         });
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         validateTableWithSpark(location, List.of(), schema);
 
         sink.sync();
         List<Row> rows = List.of(RowFactory.create(1, "Alice"));
         validateTableWithSpark(location, rows, schema);
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         rows = List.of(RowFactory.create(1, "Alice"), RowFactory.create(2, "Bob"));
         validateTableWithSpark(location, rows, schema);

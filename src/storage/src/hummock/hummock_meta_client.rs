@@ -17,9 +17,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
-use risingwave_hummock_sdk::{HummockSstableId, LocalSstableInfo, SstIdRange};
+use risingwave_hummock_sdk::{HummockSstableObjectId, LocalSstableInfo, SstObjectIdRange};
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
+    VacuumTask,
 };
 use risingwave_rpc_client::error::Result;
 use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient, MetaClient};
@@ -88,7 +89,7 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         unreachable!("Currently CNs should not call this function")
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();
         let res = self.meta_client.get_new_sst_ids(number).await;
@@ -122,18 +123,20 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         self.meta_client
-            .subscribe_compact_tasks(max_concurrent_task_number)
+            .subscribe_compact_tasks(max_concurrent_task_number, cpu_core_num)
             .await
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()> {
         self.meta_client
-            .report_compaction_task_progress(progress)
+            .compactor_heartbeat(progress, workload)
             .await
     }
 
@@ -152,8 +155,8 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
             .await
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        self.meta_client.report_full_scan_task(sst_ids).await
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+        self.meta_client.report_full_scan_task(object_ids).await
     }
 
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()> {

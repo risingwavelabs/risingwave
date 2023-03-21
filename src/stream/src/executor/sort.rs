@@ -247,7 +247,7 @@ impl<S: StateStore> SortExecutor<S> {
             let no_longer_owned_vnodes =
                 Bitmap::bit_saturate_subtract(prev_vnode_bitmap, curr_vnode_bitmap);
             self.buffer.retain(|(_, pk), _| {
-                let vnode = self.state_table.compute_vnode(pk);
+                let vnode = self.state_table.compute_vnode_by_pk(pk);
                 !no_longer_owned_vnodes.is_set(vnode.to_index())
             });
         }
@@ -504,7 +504,7 @@ mod tests {
             ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64),
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int64),
         ];
-        let order_types = vec![OrderType::Ascending];
+        let order_types = vec![OrderType::ascending()];
         let pk_indices = create_pk_indices();
         StateTable::new_without_distribution(
             memory_state_store,

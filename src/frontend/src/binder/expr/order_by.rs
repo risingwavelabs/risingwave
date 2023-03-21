@@ -13,10 +13,10 @@
 // limitations under the License.
 
 use risingwave_common::error::Result;
+use risingwave_common::util::sort_util::OrderType;
 use risingwave_sqlparser::ast::OrderByExpr;
 
 use crate::expr::OrderByExpr as BoundOrderByExpr;
-use crate::optimizer::property::Direction;
 use crate::Binder;
 
 impl Binder {
@@ -34,23 +34,8 @@ impl Binder {
             nulls_first,
         }: OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
-        let direction = match asc {
-            None | Some(true) => Direction::Asc,
-            Some(false) => Direction::Desc,
-        };
-
-        let nulls_first = nulls_first.unwrap_or_else(|| match direction {
-            Direction::Asc => false,
-            Direction::Desc => true,
-            Direction::Any => unreachable!(),
-        });
-
+        let order_type = OrderType::from_bools(asc, nulls_first);
         let expr = self.bind_expr(expr)?;
-
-        Ok(BoundOrderByExpr {
-            expr,
-            direction,
-            nulls_first,
-        })
+        Ok(BoundOrderByExpr { expr, order_type })
     }
 }

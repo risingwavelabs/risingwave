@@ -21,10 +21,10 @@ use risingwave_batch::executor::{BoxedExecutor, JoinType};
 use risingwave_common::catalog::schema_test_utils::field_n;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
-use risingwave_common::{enable_jemalloc_on_linux, hash};
+use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
+use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, GreaterThan, InputRef, Modulus,
@@ -32,7 +32,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 use utils::bench_join;
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_hash_join_executor(
     join_type: JoinType,
@@ -58,7 +58,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(123)).as_ref()),
             })),
         };
@@ -88,7 +88,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(456)).as_ref()),
             })),
         };
@@ -141,7 +141,7 @@ fn create_hash_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(100)).as_ref()),
             })),
         };

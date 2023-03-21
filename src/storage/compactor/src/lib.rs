@@ -15,6 +15,7 @@
 mod compactor_observer;
 mod rpc;
 mod server;
+mod telemetry;
 
 use clap::Parser;
 use risingwave_common_proc_macro::OverrideConfig;
@@ -27,19 +28,14 @@ pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:6660"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:6660")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", alias = "client-address")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.

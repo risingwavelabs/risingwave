@@ -18,15 +18,16 @@ anyhow = "1"
 apache-avro = { git = "https://github.com/risingwavelabs/avro", branch = "waruto/modify-decimal", features = ["snappy", "zstandard", "bzip", "xz"] }
 async-trait = "0.1"
 aws-config = { workspace = true }
+aws-sdk-ec2 = { workspace = true }
 aws-sdk-kinesis = { workspace = true } 
-aws-sdk-s3 = { workspace = true } 
+aws-sdk-s3 = { workspace = true }
 aws-smithy-http = { workspace = true }
 aws-types = { workspace = true }
 bincode = "1"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-csv-core = "0.1.10"
+csv = "1.2"
 duration-str = "0.5.0"
 enum-as-inner = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
@@ -58,7 +59,7 @@ rust_decimal = "1"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_derive = "1"
 serde_json = "1"
-serde_with = "2"
+serde_with = { version = "2", features = ["json"] }
 simd-json = { git = "https://github.com/tabVersion/simd-json.git", branch = "main", features = ["key-to-lowercase"] }
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal", "fs"] }

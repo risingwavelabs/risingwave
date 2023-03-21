@@ -25,14 +25,15 @@ use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use itertools::{Either, Itertools};
 use risingwave_common::buffer::Bitmap;
-use risingwave_common::catalog::{
-    get_dist_key_in_pk_indices, ColumnDesc, ColumnId, Schema, TableId, TableOption,
-};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema, TableId, TableOption};
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::ordered::*;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::util::value_encoding::{BasicSerde, ValueRowSerde};
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::{
+    BasicSerde, EitherSerde, ValueRowSerde, ValueRowSerdeNew,
+};
 use risingwave_hummock_sdk::key::{end_bound_of_prefix, next_key, prefixed_range};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use tracing::trace;
@@ -87,11 +88,6 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     pk_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
-    /// Note that the index is based on the all columns of the table, instead of the output ones.
-    // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
-
-    /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
     dist_key_in_pk_indices: Vec<usize>,
 
@@ -108,8 +104,9 @@ pub struct StorageTableInner<S: StateStore, SD: ValueRowSerde> {
     read_prefix_len_hint: usize,
 }
 
-/// `StorageTable` will use `BasicSerde` as default
-pub type StorageTable<S> = StorageTableInner<S, BasicSerde>;
+/// `StorageTable` will use [`EitherSerde`] as default so that we can support both versioned and
+/// non-versioned tables with the same type.
+pub type StorageTable<S> = StorageTableInner<S, EitherSerde>;
 
 impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, SD> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -118,7 +115,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for StorageTableInner<S, 
 }
 
 // init
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+impl<S: StateStore> StorageTableInner<S, EitherSerde> {
     /// Create a  [`StorageTableInner`] given a complete set of `columns` and a partial
     /// set of `column_ids`. The output will only contains columns with the given ids in the same
     /// order.
@@ -134,6 +131,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         table_options: TableOption,
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
+        versioned: bool,
     ) -> Self {
         Self::new_inner(
             store,
@@ -146,6 +144,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_options,
             value_indices,
             read_prefix_len_hint,
+            versioned,
         )
     }
 
@@ -169,15 +168,10 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Default::default(),
             value_indices,
             0,
+            false,
         )
     }
 
-    pub fn pk_serializer(&self) -> &OrderedRowSerde {
-        &self.pk_serializer
-    }
-}
-
-impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         store: S,
@@ -187,12 +181,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes,
         }: Distribution,
         table_option: TableOption,
         value_indices: Vec<usize>,
         read_prefix_len_hint: usize,
+        versioned: bool,
     ) -> Self {
         assert_eq!(order_types.len(), pk_indices.len());
 
@@ -237,9 +232,16 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             .map(|idx| table_columns[*idx].column_id)
             .collect_vec();
         let pk_serializer = OrderedRowSerde::new(pk_data_types, order_types);
-        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        let row_serde = {
+            let schema = Arc::from(data_types.into_boxed_slice());
+            if versioned {
+                ColumnAwareSerde::new(&column_ids, schema).into()
+            } else {
+                BasicSerde::new(&column_ids, schema).into()
+            }
+        };
+
         let key_output_indices = match key_output_indices.is_empty() {
             true => None,
             false => Some(key_output_indices),
@@ -256,12 +258,17 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             mapping: Arc::new(mapping),
             row_serde: Arc::new(row_serde),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
             vnodes,
             table_option,
             read_prefix_len_hint,
         }
+    }
+}
+
+impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
+    pub fn pk_serializer(&self) -> &OrderedRowSerde {
+        &self.pk_serializer
     }
 
     pub fn schema(&self) -> &Schema {
@@ -270,6 +277,20 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
 
     pub fn pk_indices(&self) -> &[usize] {
         &self.pk_indices
+    }
+
+    pub fn output_indices(&self) -> &[usize] {
+        &self.output_indices
+    }
+
+    /// Get the indices of the primary key columns in the output columns.
+    ///
+    /// Returns `None` if any of the primary key columns is not in the output columns.
+    pub fn pk_in_output_indices(&self) -> Option<Vec<usize>> {
+        self.pk_indices
+            .iter()
+            .map(|&i| self.output_indices.iter().position(|&j| i == j))
+            .collect()
     }
 }
 
@@ -562,23 +583,21 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Some(Bytes::from(encoded_prefix[..prefix_len].to_vec()))
         } else {
             trace!(
-                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}",
+                    "iter_with_pk_bounds dist_key_indices table_id {} not match prefix pk_prefix {:?}  pk_prefix_indices {:?}",
                     self.table_id,
                     pk_prefix,
-                    self.dist_key_indices,
                     pk_prefix_indices
                 );
             None
         };
 
         trace!(
-            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?} dist_key_indices {:?} pk_prefix_indices {:?}" ,
+            "iter_with_pk_bounds table_id {} prefix_hint {:?} start_key: {:?}, end_key: {:?} pk_prefix {:?}  pk_prefix_indices {:?}" ,
             self.table_id,
             prefix_hint,
             start_key,
             end_key,
             pk_prefix,
-            self.dist_key_indices,
             pk_prefix_indices
         );
 

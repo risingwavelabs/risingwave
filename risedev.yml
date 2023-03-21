@@ -499,6 +499,39 @@ profile:
         exporter-port: 2224
         health-check-port: 6788
 
+  ci-3cn-3fe-opendal-fs-backend:
+    config-path: src/config/ci.toml
+    steps:
+      - use: etcd
+        unsafe-no-fsync: true
+      - use: meta-node
+      - use: opendal
+        engine: fs
+        bucket: ""
+        root: /tmp/rw_ci
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+      - use: frontend
+        port: 4565
+        exporter-port: 2222
+        health-check-port: 6786
+      - use: frontend
+        port: 4566
+        exporter-port: 2223
+        health-check-port: 6787
+      - use: frontend
+        port: 4567
+        exporter-port: 2224
+        health-check-port: 6788
+      - use: compactor
+
   ci-pubsub:
     config-path: src/config/ci.toml
     steps:
@@ -736,6 +769,13 @@ template:
 
     # Total available memory for the compute node in bytes
     total-memory-bytes: 8589934592
+
+    # The policy for compute node memory control.
+    memory-control-policy: streaming-only
+
+    #  The proportion of streaming memory to all available memory for computing. Only works when
+    # `memory_control_policy` is set to "streaming-batch".
+    streaming-memory-proportion: 0.7
 
     # Parallelism of tasks per compute node
     parallelism: 4

@@ -32,8 +32,8 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeNode, ExchangeSource as ProstExchangeSource, LocalExecutePlan,
-    PlanFragment, PlanNode, RowSeqScanNode, TaskId as ProstTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeNode, LocalExecutePlan, PbExchangeSource, PbTaskId, PlanFragment,
+    PlanNode, RowSeqScanNode, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, WorkerNode};
 use risingwave_pb::plan_common::StorageTableDesc;
@@ -77,20 +77,15 @@ pub type BoxedLookupExecutorBuilder = Box<dyn LookupExecutorBuilder>;
 impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
     /// Gets the virtual node based on the given `scan_range`
     fn get_virtual_node(&self, scan_range: &ScanRange) -> Result<VirtualNode> {
-        let dist_keys = self
+        let dist_key_in_pk_indices = self
             .table_desc
-            .dist_key_indices
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
-        let pk_indices = self
-            .table_desc
-            .pk
-            .iter()
-            .map(|col| col.index as _)
-            .collect_vec();
 
-        let virtual_node = scan_range.try_compute_vnode(&dist_keys, &pk_indices);
+        let virtual_node =
+            scan_range.try_compute_vnode_with_dist_key_in_pk_indices(&dist_key_in_pk_indices);
         virtual_node.ok_or_else(|| internal_error("Could not compute vnode for lookup join"))
     }
 
@@ -118,8 +113,8 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
         Ok(row_seq_scan_node)
     }
 
-    /// Creates the `ProstExchangeSource` using the given `id`.
-    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<ProstExchangeSource> {
+    /// Creates the `PbExchangeSource` using the given `id`.
+    fn build_prost_exchange_source(&self, id: &ParallelUnitId) -> Result<PbExchangeSource> {
         let worker = self.pu_to_worker_mapping.get(id).ok_or_else(|| {
             internal_error("No worker node found for the given parallel unit id.")
         })?;
@@ -139,9 +134,9 @@ impl<C: BatchTaskContext> InnerSideExecutorBuilder<C> {
             epoch: Some(self.epoch.clone()),
         };
 
-        let prost_exchange_source = ProstExchangeSource {
+        let prost_exchange_source = PbExchangeSource {
             task_output_id: Some(TaskOutputId {
-                task_id: Some(ProstTaskId {
+                task_id: Some(PbTaskId {
                     // FIXME: We should replace this random generated uuid to current query_id for
                     // better dashboard. However, due to the lack of info of
                     // stage_id and task_id, we can not do it now. Now just make sure it will not
@@ -465,7 +460,7 @@ mod tests {
     use risingwave_common::hash::HashKeyDispatcher;
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{
         new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
     };
@@ -557,20 +552,20 @@ mod tests {
     }
 
     fn create_order_by_executor(child: BoxedExecutor) -> BoxedExecutor {
-        let order_pairs = vec![
-            OrderPair {
-                column_idx: 0,
-                order_type: OrderType::Ascending,
+        let column_orders = vec![
+            ColumnOrder {
+                column_index: 0,
+                order_type: OrderType::ascending(),
             },
-            OrderPair {
-                column_idx: 1,
-                order_type: OrderType::Ascending,
+            ColumnOrder {
+                column_index: 1,
+                order_type: OrderType::ascending(),
             },
         ];
 
         Box::new(SortExecutor::new(
             child,
-            order_pairs,
+            column_orders,
             "SortExecutor".into(),
             CHUNK_SIZE,
         ))

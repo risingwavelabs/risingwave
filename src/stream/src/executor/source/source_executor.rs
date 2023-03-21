@@ -496,10 +496,10 @@ mod tests {
     use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::plan_common::RowFormatType as ProstRowFormatType;
+    use risingwave_pb::plan_common::PbRowFormatType;
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
@@ -519,7 +519,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let pk_indices = vec![0];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Native as i32,
+            row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
         let (barrier_tx, barrier_rx) = unbounded_channel::<Barrier>();
@@ -610,7 +610,7 @@ mod tests {
         let pk_column_ids = vec![0];
         let pk_indices = vec![0_usize];
         let source_info = StreamSourceInfo {
-            row_format: ProstRowFormatType::Native as i32,
+            row_format: PbRowFormatType::Native as i32,
             ..Default::default()
         };
         let properties = convert_args!(hashmap!(
@@ -663,7 +663,7 @@ mod tests {
             Box::new(executor),
             mem_state_store.clone(),
             TableId::from(0x2333),
-            vec![OrderPair::new(0, OrderType::Ascending)],
+            vec![ColumnOrder::new(0, OrderType::ascending())],
             column_ids,
             2,
             Arc::new(AtomicU64::new(0)),

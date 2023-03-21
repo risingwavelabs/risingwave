@@ -16,13 +16,13 @@ use std::collections::HashMap;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use rdkafka::consumer::{BaseConsumer, Consumer, DefaultConsumerContext};
+use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::error::KafkaResult;
 use rdkafka::{Offset, TopicPartitionList};
 
 use crate::source::base::SplitEnumerator;
 use crate::source::kafka::split::KafkaSplit;
-use crate::source::kafka::{KafkaProperties, KAFKA_SYNC_CALL_TIMEOUT};
+use crate::source::kafka::{KafkaProperties, PrivateLinkConsumerContext, KAFKA_SYNC_CALL_TIMEOUT};
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum KafkaEnumeratorOffset {
@@ -35,7 +35,7 @@ pub enum KafkaEnumeratorOffset {
 pub struct KafkaSplitEnumerator {
     broker_address: String,
     topic: String,
-    client: BaseConsumer,
+    client: BaseConsumer<PrivateLinkConsumerContext>,
     start_offset: KafkaEnumeratorOffset,
 
     // maybe used in the future for batch processing
@@ -54,10 +54,10 @@ impl SplitEnumerator for KafkaSplitEnumerator {
         let common_props = &properties.common;
 
         let broker_address = common_props.brokers.clone();
+        let broker_rewrite_map = common_props.broker_rewrite_map.clone();
         let topic = common_props.topic.clone();
         config.set("bootstrap.servers", &broker_address);
         common_props.set_security_properties(&mut config);
-
         let mut scan_start_offset = match properties
             .scan_startup_mode
             .as_ref()
@@ -79,7 +79,9 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             scan_start_offset = KafkaEnumeratorOffset::Timestamp(time_offset)
         }
 
-        let client: BaseConsumer = config.create_with_context(DefaultConsumerContext).await?;
+        let client_ctx = PrivateLinkConsumerContext::new(broker_rewrite_map)?;
+        let client: BaseConsumer<PrivateLinkConsumerContext> =
+            config.create_with_context(client_ctx).await?;
 
         Ok(Self {
             broker_address,

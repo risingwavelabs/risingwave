@@ -14,10 +14,11 @@
 
 use derivative::Derivative;
 use generic::PlanAggCall;
+use itertools::Itertools;
 use pb::stream_node as pb_node;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_pb::stream_plan as pb;
 use smallvec::SmallVec;
@@ -28,7 +29,7 @@ use super::{generic, EqJoinPredicate, PlanNodeId};
 use crate::expr::{Expr, ExprImpl};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::plan_tree_node_v2::PlanTreeNodeV2;
-use crate::optimizer::property::{Distribution, FieldOrder};
+use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::TableCatalog;
 
@@ -98,6 +99,10 @@ impl generic::GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.0.ctx.clone()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.0.functional_dependency()
+    }
 }
 
 impl generic::GenericPlanRef for PlanBase {
@@ -111,6 +116,10 @@ impl generic::GenericPlanRef for PlanBase {
 
     fn ctx(&self) -> OptimizerContextRef {
         self.ctx.clone()
+    }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        todo!()
     }
 }
 
@@ -225,23 +234,16 @@ impl HashJoin {
     pub fn infer_internal_and_degree_table_catalog(
         input: &impl StreamPlanRef,
         join_key_indices: Vec<usize>,
+        dk_indices_in_jk: Vec<usize>,
     ) -> (TableCatalog, TableCatalog, Vec<usize>) {
         let schema = input.schema();
 
-        let internal_table_dist_keys = input.distribution().dist_column_indices().to_vec();
-
-        // Find the dist key position in join key.
-        // FIXME(yuhao): currently the dist key position is not the exact position mapped to the
-        // join key when there are duplicate value in join key indices.
-        let degree_table_dist_keys = internal_table_dist_keys
+        let internal_table_dist_keys = dk_indices_in_jk
             .iter()
-            .map(|idx| {
-                join_key_indices
-                    .iter()
-                    .position(|v| v == idx)
-                    .expect("join key should contain dist key.")
-            })
-            .collect();
+            .map(|idx| join_key_indices[*idx])
+            .collect_vec();
+
+        let degree_table_dist_keys = dk_indices_in_jk.clone();
 
         // The pk of hash join internal and degree table should be join_key + input_pk.
         let join_key_len = join_key_indices.len();
@@ -268,7 +270,7 @@ impl HashJoin {
             internal_table_catalog_builder.add_column(field);
         });
         pk_indices.iter().for_each(|idx| {
-            internal_table_catalog_builder.add_order_column(*idx, OrderType::Ascending)
+            internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
         // Build degree table.
@@ -279,17 +281,18 @@ impl HashJoin {
 
         pk_indices.iter().enumerate().for_each(|(order_idx, idx)| {
             degree_table_catalog_builder.add_column(&internal_columns_fields[*idx]);
-            degree_table_catalog_builder.add_order_column(order_idx, OrderType::Ascending);
+            degree_table_catalog_builder.add_order_column(order_idx, OrderType::ascending());
         });
         degree_table_catalog_builder.add_column(&degree_column_field);
         degree_table_catalog_builder
             .set_value_indices(vec![degree_table_catalog_builder.columns().len() - 1]);
 
-        internal_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
-        degree_table_catalog_builder.set_read_prefix_len_hint(join_key_len);
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        degree_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
+
         (
-            internal_table_catalog_builder.build(internal_table_dist_keys),
-            degree_table_catalog_builder.build(degree_table_dist_keys),
+            internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
+            degree_table_catalog_builder.build(degree_table_dist_keys, join_key_len),
             deduped_input_pk_indices,
         )
     }
@@ -298,6 +301,8 @@ impl HashJoin {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HopWindow {
     pub core: generic::HopWindow<PlanRef>,
+    window_start_exprs: Vec<ExprImpl>,
+    window_end_exprs: Vec<ExprImpl>,
 }
 impl_plan_tree_node_v2_for_stream_unary_node_with_core_delegating!(HopWindow, core, input);
 
@@ -417,18 +422,18 @@ impl_node!(
     TopN
 );
 
-use pb_node::NodeBody as ProstNode;
+use pb_node::PbNodeBody;
 #[allow(dead_code)]
 pub fn to_stream_prost_body(
     (base, core): &PlanOwned,
     state: &mut BuildFragmentGraphState,
-) -> ProstNode {
+) -> PbNodeBody {
     use pb::*;
     match core {
         Node::TableScan(_) => todo!(),
         Node::IndexScan(_) => todo!(),
         // ^ need standalone implementations
-        Node::Exchange(_) => ProstNode::Exchange(ExchangeNode {
+        Node::Exchange(_) => PbNodeBody::Exchange(ExchangeNode {
             strategy: Some(DispatchStrategy {
                 r#type: match &base.dist {
                     Distribution::HashShard(_) => DispatcherType::Hash,
@@ -454,7 +459,7 @@ pub fn to_stream_prost_body(
                 .with_id(state.gen_table_id_wrapped());
             let right_table = infer_right_internal_table_catalog(&me.right.0)
                 .with_id(state.gen_table_id_wrapped());
-            ProstNode::DynamicFilter(DynamicFilterNode {
+            PbNodeBody::DynamicFilter(DynamicFilterNode {
                 left_key: me.left_index as u32,
                 condition,
                 left_table: Some(left_table.to_internal_table_prost()),
@@ -477,7 +482,7 @@ pub fn to_stream_prost_body(
 
             // TODO: add a separate delta join node in proto, or move fragmenter to frontend so that
             // we don't need an intermediate representation.
-            ProstNode::DeltaIndexJoin(DeltaIndexJoinNode {
+            PbNodeBody::DeltaIndexJoin(DeltaIndexJoinNode {
                 join_type: me.core.join_type as i32,
                 left_key: me
                     .eq_join_predicate
@@ -499,7 +504,7 @@ pub fn to_stream_prost_body(
                 left_table_id: left_table_desc.table_id.table_id(),
                 right_table_id: right_table_desc.table_id.table_id(),
                 left_info: Some(ArrangementInfo {
-                    arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                     column_descs: left_table
                         .core
                         .column_descs()
@@ -509,7 +514,7 @@ pub fn to_stream_prost_body(
                     table_desc: Some(left_table_desc.to_protobuf()),
                 }),
                 right_info: Some(ArrangementInfo {
-                    arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                    arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                     column_descs: right_table
                         .core
                         .column_descs()
@@ -525,7 +530,7 @@ pub fn to_stream_prost_body(
             use pb::expand_node::Subset;
 
             let me = &me.core;
-            ProstNode::Expand(ExpandNode {
+            PbNodeBody::Expand(ExpandNode {
                 column_subsets: me
                     .column_subsets
                     .iter()
@@ -538,7 +543,7 @@ pub fn to_stream_prost_body(
         }
         Node::Filter(me) => {
             let me = &me.core;
-            ProstNode::Filter(FilterNode {
+            PbNodeBody::Filter(FilterNode {
                 search_condition: Some(ExprImpl::from(me.predicate.clone()).to_expr_proto()),
             })
         }
@@ -547,7 +552,7 @@ pub fn to_stream_prost_body(
             let agg_states = me.core.infer_stream_agg_state(base, None);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, None);
 
-            ProstNode::GlobalSimpleAgg(SimpleAggNode {
+            PbNodeBody::GlobalSimpleAgg(SimpleAggNode {
                 agg_calls: me
                     .core
                     .agg_calls
@@ -591,14 +596,14 @@ pub fn to_stream_prost_body(
                 order_by: me.core.order.to_protobuf(),
             };
 
-            ProstNode::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(group_topn_node)
         }
         Node::HashAgg(me) => {
             let result_table = me.core.infer_result_table(base, me.vnode_col_idx);
             let agg_states = me.core.infer_stream_agg_state(base, me.vnode_col_idx);
             let distinct_dedup_tables = me.core.infer_distinct_dedup_tables(base, me.vnode_col_idx);
 
-            ProstNode::HashAgg(HashAggNode {
+            PbNodeBody::HashAgg(HashAggNode {
                 group_key: me.core.group_key.iter().map(|&idx| idx as u32).collect(),
                 agg_calls: me
                     .core
@@ -623,76 +628,35 @@ pub fn to_stream_prost_body(
                     .collect(),
             })
         }
-        Node::HashJoin(me) => {
-            let left_key_indices = me.eq_join_predicate.left_eq_indexes();
-            let right_key_indices = me.eq_join_predicate.right_eq_indexes();
-            let left_key_indices_prost = left_key_indices.iter().map(|&idx| idx as i32).collect();
-            let right_key_indices_prost = right_key_indices.iter().map(|&idx| idx as i32).collect();
-
-            let (left_table, left_degree_table, left_deduped_input_pk_indices) =
-                HashJoin::infer_internal_and_degree_table_catalog(
-                    &me.core.left.0,
-                    left_key_indices,
-                );
-            let (right_table, right_degree_table, right_deduped_input_pk_indices) =
-                HashJoin::infer_internal_and_degree_table_catalog(
-                    &me.core.right.0,
-                    right_key_indices,
-                );
-
-            let left_deduped_input_pk_indices = left_deduped_input_pk_indices
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect();
-
-            let right_deduped_input_pk_indices = right_deduped_input_pk_indices
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect();
-
-            let (left_table, left_degree_table) = (
-                left_table.with_id(state.gen_table_id_wrapped()),
-                left_degree_table.with_id(state.gen_table_id_wrapped()),
-            );
-            let (right_table, right_degree_table) = (
-                right_table.with_id(state.gen_table_id_wrapped()),
-                right_degree_table.with_id(state.gen_table_id_wrapped()),
-            );
-
-            let null_safe_prost = me.eq_join_predicate.null_safes().into_iter().collect();
-
-            ProstNode::HashJoin(HashJoinNode {
-                join_type: me.core.join_type as i32,
-                left_key: left_key_indices_prost,
-                right_key: right_key_indices_prost,
-                null_safe: null_safe_prost,
-                condition: me
-                    .eq_join_predicate
-                    .other_cond()
-                    .as_expr_unless_true()
-                    .map(|x| x.to_expr_proto()),
-                left_table: Some(left_table.to_internal_table_prost()),
-                right_table: Some(right_table.to_internal_table_prost()),
-                left_degree_table: Some(left_degree_table.to_internal_table_prost()),
-                right_degree_table: Some(right_degree_table.to_internal_table_prost()),
-                left_deduped_input_pk_indices,
-                right_deduped_input_pk_indices,
-                output_indices: me.core.output_indices.iter().map(|&x| x as u32).collect(),
-                is_append_only: me.is_append_only,
-            })
+        Node::HashJoin(_) => {
+            unreachable!();
         }
         Node::HopWindow(me) => {
+            let window_start_exprs = me
+                .window_start_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect();
+            let window_end_exprs = me
+                .window_end_exprs
+                .clone()
+                .iter()
+                .map(|x| x.to_expr_proto())
+                .collect();
             let me = &me.core;
-            ProstNode::HopWindow(HopWindowNode {
+            PbNodeBody::HopWindow(HopWindowNode {
                 time_col: me.time_col.index() as _,
                 window_slide: Some(me.window_slide.into()),
                 window_size: Some(me.window_size.into()),
                 output_indices: me.output_indices.iter().map(|&x| x as u32).collect(),
+                window_start_exprs,
+                window_end_exprs,
             })
         }
         Node::LocalSimpleAgg(me) => {
             let me = &me.core;
-            ProstNode::LocalSimpleAgg(SimpleAggNode {
+            PbNodeBody::LocalSimpleAgg(SimpleAggNode {
                 agg_calls: me.agg_calls.iter().map(PlanAggCall::to_protobuf).collect(),
                 row_count_index: u32::MAX, // this is not used
                 distribution_key: base
@@ -708,11 +672,11 @@ pub fn to_stream_prost_body(
             })
         }
         Node::Materialize(me) => {
-            ProstNode::Materialize(MaterializeNode {
+            PbNodeBody::Materialize(MaterializeNode {
                 // We don't need table id for materialize node in frontend. The id will be generated
                 // on meta catalog service.
                 table_id: 0,
-                column_orders: me.table.pk().iter().map(FieldOrder::to_protobuf).collect(),
+                column_orders: me.table.pk().iter().map(ColumnOrder::to_protobuf).collect(),
                 table: Some(me.table.to_internal_table_prost()),
                 handle_pk_conflict_behavior: 0,
             })
@@ -724,9 +688,9 @@ pub fn to_stream_prost_body(
                 .iter()
                 .map(ExprImpl::to_project_set_select_item_proto)
                 .collect();
-            ProstNode::ProjectSet(ProjectSetNode { select_list })
+            PbNodeBody::ProjectSet(ProjectSetNode { select_list })
         }
-        Node::Project(me) => ProstNode::Project(ProjectNode {
+        Node::Project(me) => PbNodeBody::Project(ProjectNode {
             select_list: me.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
             watermark_input_key: me
                 .watermark_derivations
@@ -739,7 +703,7 @@ pub fn to_stream_prost_body(
                 .map(|(_, y)| *y as u32)
                 .collect(),
         }),
-        Node::Sink(me) => ProstNode::Sink(SinkNode {
+        Node::Sink(me) => PbNodeBody::Sink(SinkNode {
             sink_desc: Some(me.sink_desc.to_proto()),
         }),
         Node::Source(me) => {
@@ -758,7 +722,7 @@ pub fn to_stream_prost_body(
                 pk_column_ids: me.pk_col_ids.iter().map(Into::into).collect(),
                 properties: me.properties.clone().into_iter().collect(),
             });
-            ProstNode::Source(SourceNode { source_inner })
+            PbNodeBody::Source(SourceNode { source_inner })
         }
         Node::TopN(me) => {
             let me = &me.core;
@@ -776,9 +740,9 @@ pub fn to_stream_prost_body(
             // TODO: support with ties for append only TopN
             // <https://github.com/risingwavelabs/risingwave/issues/5642>
             if me.input.0.append_only && !me.with_ties {
-                ProstNode::AppendOnlyTopN(topn_node)
+                PbNodeBody::AppendOnlyTopN(topn_node)
             } else {
-                ProstNode::TopN(topn_node)
+                PbNodeBody::TopN(topn_node)
             }
         }
     }

@@ -10,9 +10,7 @@
         └─LogicalProject { exprs: [t.v1] }
           └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t._row_id] }
   optimized_logical_plan_for_batch: |
-    LogicalFilter { predicate: false:Boolean }
-    └─LogicalAgg { aggs: [min(t.v1)] }
-      └─LogicalScan { table: t, columns: [t.v1] }
+    LogicalValues { rows: [], schema: Schema { fields: [min(t.v1):Int32] } }
 - name: filter should not transpose limit
   sql: |
     create table t(v1 int, v2 int, v3 int, v4 int);
@@ -129,7 +127,7 @@
     └─LogicalAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count, count(1:Int32)] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3, 1:Int32] }
         └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3], predicate: (t.v1 = 10:Int32) AND (t.v2 = 20:Int32) AND (t.v3 = 30:Int32) AND (t.v2 > t.v3) }
-- name: filter project set transpose
+- name: filter project set transpose TODO(https://github.com/risingwavelabs/risingwave/issues/8591)
   sql: |
     create table t(v1 int, v2 int, v3 int, arr int[]);
     with cte as (select v1, v2, v3, unnest(arr) as arr_unnested from t) select * from cte where v1=10 AND v2=20 AND v3=30 AND arr_unnested=30;
@@ -266,10 +264,10 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
-      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval)] }
+      |     └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '01:00:00':Interval) as $expr1], output_watermarks: [$expr1] }
       |       └─StreamNow { output: [now] }
       └─StreamExchange { dist: HashShard(t2.v2) }
         └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
@@ -303,12 +301,12 @@
     LogicalFilter { predicate: (t1.v1 > (Now + '00:30:00':Interval)) }
     └─LogicalScan { table: t1, columns: [t1.v1, t1.v2], predicate: (t1.v2 > 5:Int32) }
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output: [t1.v1, t1.v2, t1._row_id] }
+    StreamMaterialize { columns: [v1, v2, t1._row_id(hidden)], pk_columns: [t1._row_id], pk_conflict: "no check", watermark_columns: [v1] }
+    └─StreamDynamicFilter { predicate: (t1.v1 > $expr1), output_watermarks: [t1.v1], output: [t1.v1, t1.v2, t1._row_id] }
       ├─StreamFilter { predicate: (t1.v2 > 5:Int32) }
       | └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval)] }
+        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:30:00':Interval) as $expr1], output_watermarks: [$expr1] }
           └─StreamNow { output: [now] }
 - name: eq-predicate derived condition other side pushdown in inner join
   sql: |
@@ -352,7 +350,7 @@
     StreamMaterialize { columns: [v1, v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, v1], pk_conflict: "no check" }
     └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v2, output: [t1.v1, t2.v2, t1._row_id, t2._row_id] }
       ├─StreamExchange { dist: HashShard(t1.v1) }
-      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output: [t1.v1, t1._row_id] }
+      | └─StreamDynamicFilter { predicate: (t1.v1 > now), output_watermarks: [t1.v1], output: [t1.v1, t1._row_id] }
       |   ├─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
       |   └─StreamExchange { dist: Broadcast }
       |     └─StreamNow { output: [now] }

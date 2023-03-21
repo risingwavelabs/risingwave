@@ -21,6 +21,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::hash::ActorMapping;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::source::SplitImpl;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::add_mutation::Dispatchers;
 use risingwave_pb::stream_plan::barrier::Mutation;
@@ -57,6 +58,9 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
+    ///
+    /// This field exists only when there's upstream fragment and the current fragment is
+    /// hash-sharded.
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
@@ -493,6 +497,18 @@ where
         Ok(())
     }
 
+    pub async fn wait_epoch_commit(&self, epoch: HummockEpoch) -> MetaResult<()> {
+        let futures = self.info.node_map.values().map(|worker_node| async {
+            let client = self.client_pool.get(worker_node).await?;
+            let request = WaitEpochCommitRequest { epoch };
+            client.wait_epoch_commit(request).await
+        });
+
+        try_join_all(futures).await?;
+
+        Ok(())
+    }
+
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(&self) -> MetaResult<()> {
@@ -504,15 +520,7 @@ where
                 // execution of the next command of `Update`, as some newly created operators may
                 // immediately initialize their states on that barrier.
                 Some(Mutation::Pause(..)) => {
-                    let futures = self.info.node_map.values().map(|worker_node| async {
-                        let client = self.client_pool.get(worker_node).await?;
-                        let request = WaitEpochCommitRequest {
-                            epoch: self.prev_epoch.0,
-                        };
-                        client.wait_epoch_commit(request).await
-                    });
-
-                    try_join_all(futures).await?;
+                    self.wait_epoch_commit(self.prev_epoch.0).await?;
                 }
 
                 _ => {}

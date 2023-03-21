@@ -16,10 +16,11 @@ use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::table_stats::TableStatsMap;
 use risingwave_hummock_sdk::{
-    HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo, SstIdRange,
+    HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo, SstObjectIdRange,
 };
 use risingwave_pb::hummock::{
-    CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion, VacuumTask,
+    CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot, HummockVersion,
+    VacuumTask,
 };
 
 use crate::error::Result;
@@ -35,15 +36,16 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn unpin_snapshot(&self) -> Result<()>;
     async fn unpin_snapshot_before(&self, pinned_epochs: HummockEpoch) -> Result<()>;
     async fn get_epoch(&self) -> Result<HummockSnapshot>;
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange>;
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange>;
     async fn report_compaction_task(
         &self,
         compact_task: CompactTask,
         table_stats_change: TableStatsMap,
     ) -> Result<()>;
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()>;
     // We keep `commit_epoch` only for test/benchmark.
     async fn commit_epoch(
@@ -56,6 +58,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>>;
     async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()>;
     async fn trigger_manual_compaction(
@@ -64,6 +67,6 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         table_id: u32,
         level: u32,
     ) -> Result<()>;
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()>;
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()>;
     async fn trigger_full_gc(&self, sst_retention_time_sec: u64) -> Result<()>;
 }

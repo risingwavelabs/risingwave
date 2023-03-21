@@ -40,7 +40,7 @@ use std::iter::{self, TrustedLen};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, Not, RangeInclusive};
 
 use risingwave_pb::common::buffer::CompressionType;
-use risingwave_pb::common::Buffer as ProstBuffer;
+use risingwave_pb::common::PbBuffer;
 
 #[derive(Default, Debug)]
 pub struct BitmapBuilder {
@@ -525,21 +525,21 @@ impl FromIterator<Option<bool>> for Bitmap {
 }
 
 impl Bitmap {
-    pub fn to_protobuf(&self) -> ProstBuffer {
+    pub fn to_protobuf(&self) -> PbBuffer {
         let mut body = Vec::with_capacity((self.num_bits + 7) % 8 + 1);
         body.push((self.num_bits % 8) as u8);
         body.extend_from_slice(unsafe {
             std::slice::from_raw_parts(self.bits.as_ptr() as *const u8, (self.num_bits + 7) / 8)
         });
-        ProstBuffer {
+        PbBuffer {
             body,
             compression: CompressionType::None as i32,
         }
     }
 }
 
-impl From<&ProstBuffer> for Bitmap {
-    fn from(buf: &ProstBuffer) -> Self {
+impl From<&PbBuffer> for Bitmap {
+    fn from(buf: &PbBuffer) -> Self {
         let last_byte_num_bits = buf.body[0];
         let num_bits = ((buf.body.len() - 1) * 8) - ((8 - last_byte_num_bits) % 8) as usize;
 
@@ -762,7 +762,7 @@ mod tests {
     #[test]
     fn test_bitmap_from_protobuf() {
         let bitmap_bytes = vec![3u8 /* len % BITS */, 0b0101_0010, 0b110];
-        let buf = ProstBuffer {
+        let buf = PbBuffer {
             body: bitmap_bytes,
             compression: CompressionType::None as _,
         };

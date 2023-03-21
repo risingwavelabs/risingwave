@@ -165,9 +165,7 @@
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchProject { exprs: [0:Int32] }
-    └─BatchFilter { predicate: false:Boolean }
-      └─BatchValues { rows: [[]] }
+    BatchValues { rows: [] }
 - name: case searched form with else
   sql: |
     create table t (v1 int);
@@ -406,7 +404,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List { datatype: Int32 }]] }
@@ -429,7 +427,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List { datatype: Int32 }]] }
@@ -442,8 +440,8 @@
     └─LogicalFilter { predicate: (t.v1 >= Now) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t._row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v1] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
@@ -456,20 +454,20 @@
     └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
       └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
   stream_plan: |
-    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output: [t.v1, t._row_id] }
+    StreamMaterialize { columns: [v1, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v1] }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id] }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1], watermark_columns: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval)] }
+        └─StreamProject { exprs: [(AtTimeZone((AtTimeZone(now, 'UTC':Varchar) - '00:00:00':Interval), 'UTC':Varchar) - '00:00:02':Interval) as $expr1], output_watermarks: [$expr1] }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
     create table t (v1 timestamp with time zone, v2 timestamp with time zone);
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |
-    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (t.v2 >= now), output: [t.v1, t.v2, t._row_id] }
-      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output: [t.v1, t.v2, t._row_id] }
+    StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], pk_columns: [t._row_id], pk_conflict: "no check", watermark_columns: [v2] }
+    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id] }
+      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id] }
       | ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], pk: [t._row_id], dist: UpstreamHashShard(t._row_id) }
       | └─StreamExchange { dist: Broadcast }
       |   └─StreamNow { output: [now] }
@@ -485,8 +483,8 @@
     create table t (v1 timestamp with time zone, v2 int);
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |
-    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check" }
-    └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output: [max(t.v1), t.v2] }
+    StreamMaterialize { columns: [max_time, t.v2(hidden)], pk_columns: [t.v2], pk_conflict: "no check", watermark_columns: [max_time] }
+    └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [max(t.v1), t.v2] }
       ├─StreamProject { exprs: [max(t.v1), t.v2] }
       | └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
       |   └─StreamExchange { dist: HashShard(t.v2) }

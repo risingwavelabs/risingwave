@@ -81,6 +81,9 @@ impl ObserverState for FrontendObserverNode {
             Info::MetaBackupManifestId(_) => {
                 panic!("frontend node should not receive MetaBackupManifestId");
             }
+            Info::HummockWriteLimits(_) => {
+                panic!("frontend node should not receive HummockWriteLimits");
+            }
             Info::SystemParams(p) => {
                 self.system_params_manager.try_set_params(p);
             }
@@ -217,6 +220,7 @@ impl FrontendObserverNode {
                 Operation::Delete => {
                     catalog_guard.drop_index(index.database_id, index.schema_id, index.id.into())
                 }
+                Operation::Update => catalog_guard.update_index(index),
                 _ => panic!("receive an unsupported notify {:?}", resp),
             },
             Info::View(view) => match resp.operation() {

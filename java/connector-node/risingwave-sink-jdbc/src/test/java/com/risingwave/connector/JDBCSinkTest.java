@@ -1,10 +1,24 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static org.junit.Assert.*;
 
 import com.google.common.collect.Iterators;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data.Op;
 import java.sql.*;
 import org.junit.Test;
@@ -19,7 +33,7 @@ public class JDBCSinkTest {
         JDBCSink sink = new JDBCSink(conn, TableSchema.getMockTableSchema(), "test");
         createMockTable(conn, sink.getTableName());
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice")));
         sink.sync();
 
         Statement stmt = conn.createStatement();
@@ -30,7 +44,7 @@ public class JDBCSinkTest {
         }
         assertEquals(1, count);
 
-        sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob")));
+        sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob")));
         sink.sync();
         stmt = conn.createStatement();
         rs = stmt.executeQuery("SELECT * FROM test");
@@ -69,11 +83,11 @@ public class JDBCSinkTest {
 
         sink.write(
                 Iterators.forArray(
-                        new ArraySinkrow(Op.INSERT, 1, "Alice"),
-                        new ArraySinkrow(Op.INSERT, 2, "Bob"),
-                        new ArraySinkrow(Op.UPDATE_DELETE, 1, "Alice"),
-                        new ArraySinkrow(Op.UPDATE_INSERT, 1, "Clare"),
-                        new ArraySinkrow(Op.DELETE, 2, "Bob")));
+                        new ArraySinkRow(Op.INSERT, 1, "Alice"),
+                        new ArraySinkRow(Op.INSERT, 2, "Bob"),
+                        new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice"),
+                        new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare"),
+                        new ArraySinkRow(Op.DELETE, 2, "Bob")));
         sink.sync();
 
         Statement stmt = conn.createStatement();

@@ -13,10 +13,11 @@
 // limitations under the License.
 
 use std::fmt;
-use std::ops::BitAnd;
 
+use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::HashJoinNode;
@@ -63,15 +64,20 @@ impl StreamHashJoin {
             logical.right().distribution(),
             &logical,
         );
-        let watermark_columns = {
-            let from_left = logical
-                .l2i_col_mapping()
-                .rewrite_bitset(logical.left().watermark_columns());
 
-            let from_right = logical
-                .r2i_col_mapping()
-                .rewrite_bitset(logical.right().watermark_columns());
-            let watermark_columns = from_left.bitand(&from_right);
+        let watermark_columns = {
+            let l2i = logical.l2i_col_mapping();
+            let r2i = logical.r2i_col_mapping();
+
+            let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
+            for (left_key, right_key) in eq_join_predicate.eq_indexes() {
+                if logical.left().watermark_columns().contains(left_key)
+                    && logical.right().watermark_columns().contains(right_key)
+                {
+                    watermark_columns.insert(l2i.map(left_key));
+                    watermark_columns.insert(r2i.map(right_key));
+                }
+            }
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
 
@@ -145,6 +151,29 @@ impl StreamHashJoin {
     pub fn to_delta_join(&self) -> StreamDeltaJoin {
         StreamDeltaJoin::new(self.logical.clone(), self.eq_join_predicate.clone())
     }
+
+    pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
+        let left_dk_indices = self.left().distribution().dist_column_indices().to_vec();
+        let right_dk_indices = self.right().distribution().dist_column_indices().to_vec();
+        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+
+        assert_eq!(left_jk_indices.len(), right_jk_indices.len());
+
+        let mut dk_indices_in_jk = vec![];
+
+        for (l_dk_idx, r_dk_idx) in left_dk_indices.iter().zip_eq_fast(right_dk_indices.iter()) {
+            for dk_idx_in_jk in left_jk_indices.iter().positions(|idx| idx == l_dk_idx) {
+                if right_jk_indices[dk_idx_in_jk] == *r_dk_idx {
+                    dk_indices_in_jk.push(dk_idx_in_jk);
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(dk_indices_in_jk.len(), left_dk_indices.len());
+        dk_indices_in_jk
+    }
 }
 
 impl fmt::Display for StreamHashJoin {
@@ -168,6 +197,18 @@ impl fmt::Display for StreamHashJoin {
                 input_schema: &concat_schema,
             },
         );
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
 
         if verbose {
             if self
@@ -214,24 +255,25 @@ impl_plan_tree_node_for_binary! { StreamHashJoin }
 
 impl StreamNode for StreamHashJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        let left_key_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_key_indices = self.eq_join_predicate.right_eq_indexes();
-        let left_key_indices_prost = left_key_indices.iter().map(|idx| *idx as i32).collect_vec();
-        let right_key_indices_prost = right_key_indices
-            .iter()
-            .map(|idx| *idx as i32)
-            .collect_vec();
+        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
+        let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
+
+        let dk_indices_in_jk = self.derive_dist_key_in_join_key();
 
         use super::stream::HashJoin;
         let (left_table, left_degree_table, left_deduped_input_pk_indices) =
             HashJoin::infer_internal_and_degree_table_catalog(
                 self.left().plan_base(),
-                left_key_indices,
+                left_jk_indices,
+                dk_indices_in_jk.clone(),
             );
         let (right_table, right_degree_table, right_deduped_input_pk_indices) =
             HashJoin::infer_internal_and_degree_table_catalog(
                 self.right().plan_base(),
-                right_key_indices,
+                right_jk_indices,
+                dk_indices_in_jk,
             );
 
         let left_deduped_input_pk_indices = left_deduped_input_pk_indices
@@ -257,8 +299,8 @@ impl StreamNode for StreamHashJoin {
 
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,
-            left_key: left_key_indices_prost,
-            right_key: right_key_indices_prost,
+            left_key: left_jk_indices_prost,
+            right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
             condition: self
                 .eq_join_predicate

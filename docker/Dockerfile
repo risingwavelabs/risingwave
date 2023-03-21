@@ -33,24 +33,28 @@ RUN rustup self update \
   && rustup component add rustfmt
 
 RUN cargo fetch
-RUN mkdir -p /risingwave/bin/connector-node
 
-RUN cargo build -p risingwave_cmd_all --release --features "static-link static-log-level" && \
-  mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+RUN cargo build -p risingwave_cmd_all -p risingwave_java_binding --release --features "static-link static-log-level" && \
+  mkdir -p /risingwave/bin && mv /risingwave/target/release/risingwave /risingwave/bin/ && \
+  mkdir -p /risingwave/lib && mv /risingwave/target/release/librisingwave_java_binding.so /risingwave/lib && \
   cargo clean
 
-RUN cd risingwave-connector-node && mvn -B package -Dmaven.test.skip=true
-RUN tar -zxvf /risingwave/risingwave-connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
+RUN cd /risingwave/java && mvn -B package -Dmaven.test.skip=true && \
+    mkdir -p /risingwave/bin/connector-node && \
+    tar -zxvf /risingwave/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz -C /risingwave/bin/connector-node
 
 FROM ubuntu:22.04 as image-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get -y install ca-certificates openjdk-11-jdk && rm -rf /var/lib/{apt,dpkg,cache,log}/
 
 FROM image-base as risingwave
 LABEL org.opencontainers.image.source https://github.com/risingwavelabs/risingwave
-RUN mkdir -p /risingwave/bin/connector-node
+RUN mkdir -p /risingwave/bin/connector-node && mkdir -p /risingwave/lib
 COPY --from=builder /risingwave/bin/risingwave /risingwave/bin/risingwave
 COPY --from=builder /risingwave/bin/connector-node /risingwave/bin/connector-node
 COPY --from=builder /risingwave/ui /risingwave/ui
+COPY --from=builder /risingwave/lib/librisingwave_java_binding.so /risingwave/lib/librisingwave_java_binding.so
+# Set java.library.path env to /risingwave/lib
+ENV RW_JAVA_BINDING_LIB_PATH /risingwave/lib
 # Set default playground mode to docker-playground profile
 ENV PLAYGROUND_PROFILE docker-playground
 # Set default dashboard UI to local path instead of github proxy

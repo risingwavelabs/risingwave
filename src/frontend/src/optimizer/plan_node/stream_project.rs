@@ -16,14 +16,12 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_common::catalog::FieldDisplay;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectNode;
 
-use super::generic::GenericPlanRef;
 use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::expr::{try_derive_watermark, Expr, ExprDisplay, ExprImpl, ExprRewriter};
-use crate::optimizer::plan_node::generic::AliasedExpr;
+use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -41,35 +39,14 @@ pub struct StreamProject {
 impl fmt::Display for StreamProject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("StreamProject");
-        let input = self.input();
-        let input_schema = input.schema();
-        builder.field(
-            "exprs",
-            &self
-                .exprs()
-                .iter()
-                .zip_eq_fast(self.base.schema().fields().iter())
-                .map(|(expr, field)| AliasedExpr {
-                    expr: ExprDisplay { expr, input_schema },
-                    alias: {
-                        match expr {
-                            ExprImpl::InputRef(_) | ExprImpl::Literal(_) => None,
-                            _ => Some(field.name.clone()),
-                        }
-                    },
-                })
-                .collect_vec(),
-        );
+        self.logical.fmt_fields_with_builder(&mut builder);
         if !self.watermark_derivations.is_empty() {
             builder.field(
-                "watermark_columns",
+                "output_watermarks",
                 &self
                     .watermark_derivations
                     .iter()
-                    .map(|(_, idx)| ExprDisplay {
-                        expr: &self.exprs()[*idx],
-                        input_schema,
-                    })
+                    .map(|(_, idx)| FieldDisplay(self.schema().fields.get(*idx).unwrap()))
                     .collect_vec(),
             );
         };
@@ -136,8 +113,8 @@ impl PlanTreeNodeUnary for StreamProject {
 impl_plan_tree_node_for_unary! {StreamProject}
 
 impl StreamNode for StreamProject {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Project(ProjectNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        PbNodeBody::Project(ProjectNode {
             select_list: self
                 .logical
                 .exprs()

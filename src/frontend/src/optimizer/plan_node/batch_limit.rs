@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::LimitNode;
 
 use super::{
-    ExprRewritable, LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalLimit, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -52,7 +52,7 @@ impl BatchLimit {
         let any_order = Order::any();
         let ensure_single_dist = RequiredDist::single().enforce_if_not_satisfies(
             batch_partial_limit.into(),
-            if self.order().field_order.is_empty() {
+            if self.order().column_orders.is_empty() {
                 &any_order
             } else {
                 self.order()
@@ -98,7 +98,7 @@ impl ToDistributedBatch for BatchLimit {
     }
 }
 
-impl ToBatchProst for BatchLimit {
+impl ToBatchPb for BatchLimit {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Limit(LimitNode {
             limit: self.logical.limit(),

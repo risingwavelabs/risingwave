@@ -14,8 +14,8 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object as ProstObject};
-use risingwave_pb::user::GrantPrivilege as ProstPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
+use risingwave_pb::user::PbGrantPrivilege;
 use risingwave_sqlparser::ast::{GrantObjects, Privileges, Statement};
 
 use super::RwPgResponse;
@@ -31,7 +31,7 @@ fn make_prost_privilege(
     session: &SessionImpl,
     privileges: Privileges,
     objects: GrantObjects,
-) -> Result<Vec<ProstPrivilege>> {
+) -> Result<Vec<PbGrantPrivilege>> {
     check_privilege_type(&privileges, &objects)?;
 
     let catalog_reader = session.env().catalog_reader();
@@ -46,14 +46,14 @@ fn make_prost_privilege(
             for db in databases {
                 let database_name = Binder::resolve_database_name(db)?;
                 let database = reader.get_database_by_name(&database_name)?;
-                grant_objs.push(ProstObject::DatabaseId(database.id()));
+                grant_objs.push(PbObject::DatabaseId(database.id()));
             }
         }
         GrantObjects::Schemas(schemas) => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::SchemaId(schema.id()));
+                grant_objs.push(PbObject::SchemaId(schema.id()));
             }
         }
         GrantObjects::Mviews(tables) => {
@@ -67,7 +67,7 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (table, _) = reader.get_table_by_name(db_name, schema_path, &table_name)?;
-                grant_objs.push(ProstObject::TableId(table.id().table_id));
+                grant_objs.push(PbObject::TableId(table.id().table_id));
             }
         }
         GrantObjects::Sources(sources) => {
@@ -81,21 +81,21 @@ fn make_prost_privilege(
                 let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
                 let (source, _) = reader.get_source_by_name(db_name, schema_path, &source_name)?;
-                grant_objs.push(ProstObject::SourceId(source.id));
+                grant_objs.push(PbObject::SourceId(source.id));
             }
         }
         GrantObjects::AllSourcesInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::AllSourcesSchemaId(schema.id()));
+                grant_objs.push(PbObject::AllSourcesSchemaId(schema.id()));
             }
         }
         GrantObjects::AllMviewsInSchema { schemas } => {
             for schema in schemas {
                 let schema_name = Binder::resolve_schema_name(schema)?;
                 let schema = reader.get_schema_by_name(session.database(), &schema_name)?;
-                grant_objs.push(ProstObject::AllTablesSchemaId(schema.id()));
+                grant_objs.push(PbObject::AllTablesSchemaId(schema.id()));
             }
         }
         o => {
@@ -120,7 +120,7 @@ fn make_prost_privilege(
 
     let mut prost_privileges = vec![];
     for objs in grant_objs {
-        prost_privileges.push(ProstPrivilege {
+        prost_privileges.push(PbGrantPrivilege {
             action_with_opts: action_with_opts.clone(),
             object: Some(objs),
         });
@@ -261,15 +261,15 @@ mod tests {
             assert_eq!(
                 user_info.grant_privileges,
                 vec![
-                    ProstPrivilege {
+                    PbGrantPrivilege {
                         action_with_opts: vec![ActionWithGrantOption {
                             action: Action::Connect as i32,
                             with_grant_option: true,
                             granted_by: session.user_id(),
                         }],
-                        object: Some(ProstObject::DatabaseId(session_database_id)),
+                        object: Some(PbObject::DatabaseId(session_database_id)),
                     },
-                    ProstPrivilege {
+                    PbGrantPrivilege {
                         action_with_opts: vec![
                             ActionWithGrantOption {
                                 action: Action::Connect as i32,
@@ -282,7 +282,7 @@ mod tests {
                                 granted_by: DEFAULT_SUPER_USER_ID,
                             }
                         ],
-                        object: Some(ProstObject::DatabaseId(database_id)),
+                        object: Some(PbObject::DatabaseId(database_id)),
                     }
                 ]
             );
@@ -299,7 +299,7 @@ mod tests {
             assert!(user_info
                 .grant_privileges
                 .iter()
-                .filter(|gp| gp.object == Some(ProstObject::DatabaseId(database_id)))
+                .filter(|gp| gp.object == Some(PbObject::DatabaseId(database_id)))
                 .all(|p| p.action_with_opts.iter().all(|ao| !ao.with_grant_option)));
         }
 
@@ -313,13 +313,13 @@ mod tests {
             let user_info = reader.get_user_by_name("user1").unwrap();
             assert_eq!(
                 user_info.grant_privileges,
-                vec![ProstPrivilege {
+                vec![PbGrantPrivilege {
                     action_with_opts: vec![ActionWithGrantOption {
                         action: Action::Connect as i32,
                         with_grant_option: true,
                         granted_by: session.user_id(),
                     }],
-                    object: Some(ProstObject::DatabaseId(session_database_id)),
+                    object: Some(PbObject::DatabaseId(session_database_id)),
                 }]
             );
         }

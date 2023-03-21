@@ -18,13 +18,13 @@ use std::sync::Arc;
 use itertools::Itertools;
 use risingwave_common::catalog::IndexId;
 use risingwave_common::types::DataType;
-use risingwave_pb::catalog::Index as ProstIndex;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::catalog::PbIndex;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::ColumnId;
 use crate::catalog::{DatabaseId, SchemaId, TableCatalog};
 use crate::expr::{Expr, InputRef};
-use crate::optimizer::property::FieldOrder;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IndexCatalog {
@@ -50,7 +50,7 @@ pub struct IndexCatalog {
 
 impl IndexCatalog {
     pub fn build_from(
-        index_prost: &ProstIndex,
+        index_prost: &PbIndex,
         index_table: &TableCatalog,
         primary_table: &TableCatalog,
     ) -> Self {
@@ -98,16 +98,13 @@ impl IndexCatalog {
         }
     }
 
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<FieldOrder> {
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| FieldOrder {
-                index: *mapping.get(&x.index).unwrap(),
-                direct: x.direct,
-            })
+            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
             .collect_vec()
     }
 
@@ -125,18 +122,20 @@ impl IndexCatalog {
         self.index_table.columns.len() == self.primary_table.columns.len()
     }
 
-    /// a mapping maps column index of secondary index to column index of primary table
+    /// A mapping maps the column index of the secondary index to the column index of the primary
+    /// table.
     pub fn secondary_to_primary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.secondary_to_primary_mapping
     }
 
-    /// a mapping maps column index of primary table to column index of secondary index
+    /// A mapping maps the column index of the primary table to the column index of the secondary
+    /// index.
     pub fn primary_to_secondary_mapping(&self) -> &BTreeMap<usize, usize> {
         &self.primary_to_secondary_mapping
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstIndex {
-        ProstIndex {
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbIndex {
+        PbIndex {
             id: self.id.index_id,
             schema_id,
             database_id,

@@ -19,6 +19,8 @@ use std::time::Duration;
 use risingwave_common::config::load_config;
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -32,7 +34,7 @@ use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::compactor::{CompactionExecutor, CompactorContext};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{
-    CompactorMemoryCollector, MemoryLimiter, SstableIdManager, SstableStore,
+    CompactorMemoryCollector, MemoryLimiter, SstableObjectIdManager, SstableStore,
 };
 use risingwave_storage::monitor::{
     monitor_cache, CompactorMetrics, HummockMetrics, ObjectStoreMetrics,
@@ -44,6 +46,7 @@ use tracing::info;
 
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::CompactorServiceImpl;
+use crate::telemetry::CompactorTelemetryCreator;
 use crate::CompactorOpts;
 
 /// Fetches and runs compaction tasks.
@@ -108,10 +111,14 @@ pub async fn compactor_serve(
         storage_opts.meta_cache_capacity_mb * (1 << 20),
     ));
 
+    let telemetry_enabled = system_params_reader.telemetry_enabled();
+
     let filter_key_extractor_manager = Arc::new(FilterKeyExtractorManager::default());
     let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params_reader));
-    let compactor_observer_node =
-        CompactorObserverNode::new(filter_key_extractor_manager.clone(), system_params_manager);
+    let compactor_observer_node = CompactorObserverNode::new(
+        filter_key_extractor_manager.clone(),
+        system_params_manager.clone(),
+    );
     let observer_manager =
         ObserverManager::new_with_meta_client(meta_client.clone(), compactor_observer_node).await;
 
@@ -128,7 +135,7 @@ pub async fn compactor_serve(
         Arc::new(MemoryLimiter::new(input_limit_mb << 20)),
     ));
     monitor_cache(memory_collector, &registry).unwrap();
-    let sstable_id_manager = Arc::new(SstableIdManager::new(
+    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
         hummock_meta_client.clone(),
         storage_opts.sstable_id_remote_fetch_number,
     ));
@@ -143,24 +150,40 @@ pub async fn compactor_serve(
         )),
         filter_key_extractor_manager: filter_key_extractor_manager.clone(),
         read_memory_limiter: memory_limiter,
-        sstable_id_manager: sstable_id_manager.clone(),
+        sstable_object_id_manager: sstable_object_id_manager.clone(),
         task_progress_manager: Default::default(),
         compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(CompactorRuntimeConfig {
             max_concurrent_task_number,
         })),
     });
-    let sub_tasks = vec![
+    let mut sub_tasks = vec![
         MetaClient::start_heartbeat_loop(
             meta_client.clone(),
             Duration::from_millis(config.server.heartbeat_interval_ms as u64),
             Duration::from_secs(config.server.max_heartbeat_interval_secs as u64),
-            vec![sstable_id_manager],
+            vec![sstable_object_id_manager],
         ),
         risingwave_storage::hummock::compactor::Compactor::start_compactor(
             compactor_context.clone(),
             hummock_meta_client,
         ),
     ];
+
+    let telemetry_manager = TelemetryManager::new(
+        system_params_manager.watch_params(),
+        Arc::new(meta_client.clone()),
+        Arc::new(CompactorTelemetryCreator::new()),
+    );
+    // if the toml config file or env variable disables telemetry, do not watch system params change
+    // because if any of configs disable telemetry, we should never start it
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
+        if telemetry_enabled {
+            telemetry_manager.start_telemetry_reporting();
+        }
+        sub_tasks.push(telemetry_manager.watch_params_change());
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {

@@ -95,6 +95,7 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Int16,
         T::Int32,
         T::Int64,
+        T::Serial,
         T::Decimal,
         T::Float32,
         T::Float64,
@@ -110,6 +111,7 @@ fn build_type_derive_map() -> FuncSigMap {
         T::Int16,
         T::Int32,
         T::Int64,
+        T::Serial,
         T::Decimal,
         T::Float32,
         T::Float64,
@@ -233,10 +235,20 @@ fn build_type_derive_map() -> FuncSigMap {
     }
     for t in [T::Timestamp, T::Date] {
         map.insert(E::TumbleStart, vec![t, T::Interval], T::Timestamp);
+        map.insert(
+            E::TumbleStart,
+            vec![t, T::Interval, T::Interval],
+            T::Timestamp,
+        );
     }
     map.insert(
         E::TumbleStart,
         vec![T::Timestamptz, T::Interval],
+        T::Timestamptz,
+    );
+    map.insert(
+        E::TumbleStart,
+        vec![T::Timestamptz, T::Interval, T::Interval],
         T::Timestamptz,
     );
     map.insert(E::ToTimestamp, vec![T::Float64], T::Timestamptz);

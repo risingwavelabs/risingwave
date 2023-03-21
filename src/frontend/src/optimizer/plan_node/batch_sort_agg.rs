@@ -22,8 +22,7 @@ use risingwave_pb::expr::ExprNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
-    ToDistributedBatch,
+    ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -49,21 +48,16 @@ impl BatchSortAgg {
             d => d.clone(),
         };
         let input_order = Order {
-            field_order: input
+            column_orders: input
                 .order()
-                .field_order
+                .column_orders
                 .iter()
-                .filter(|field_ord| {
-                    logical
-                        .group_key()
-                        .iter()
-                        .any(|g_k| *g_k == field_ord.index)
-                })
+                .filter(|o| logical.group_key().iter().any(|g_k| *g_k == o.column_index))
                 .cloned()
                 .collect(),
         };
 
-        assert_eq!(input_order.field_order.len(), logical.group_key().len());
+        assert_eq!(input_order.column_orders.len(), logical.group_key().len());
 
         let order = logical
             .i2o_col_mapping()
@@ -114,7 +108,7 @@ impl ToDistributedBatch for BatchSortAgg {
     }
 }
 
-impl ToBatchProst for BatchSortAgg {
+impl ToBatchPb for BatchSortAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::SortAgg(SortAggNode {
             agg_calls: self

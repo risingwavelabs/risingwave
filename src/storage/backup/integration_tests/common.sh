@@ -19,10 +19,6 @@ function clean_etcd_data() {
 
 function start_cluster() {
   cargo make d ci-meta-backup-test 1>/dev/null 2>&1
-}
-
-function wait_cluster_ready() {
-  # TODO #6482: wait cluster to finish actor migration and other recovery stuff deterministically.
   sleep 5
 }
 

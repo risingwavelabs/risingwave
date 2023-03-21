@@ -11,7 +11,7 @@ import {
   workerTypeFromJSON,
   workerTypeToJSON,
 } from "./common";
-import { HummockSnapshot, HummockVersion, HummockVersionDeltas } from "./hummock";
+import { HummockSnapshot, HummockVersion, HummockVersionDeltas, WriteLimits } from "./hummock";
 import { ConnectorSplits } from "./source";
 import { Dispatcher, StreamActor, StreamEnvironment, StreamNode } from "./stream_plan";
 import { UserInfo } from "./user";
@@ -69,6 +69,13 @@ export function subscribeTypeToJSON(object: SubscribeType): string {
     default:
       return "UNRECOGNIZED";
   }
+}
+
+export interface GetTelemetryInfoRequest {
+}
+
+export interface TelemetryInfoResponse {
+  trackingId?: string | undefined;
 }
 
 export interface HeartbeatRequest {
@@ -408,8 +415,9 @@ export interface MetaSnapshot {
   nodes: WorkerNode[];
   hummockSnapshot: HummockSnapshot | undefined;
   hummockVersion: HummockVersion | undefined;
-  version: MetaSnapshot_SnapshotVersion | undefined;
   metaBackupManifestId: MetaBackupManifestId | undefined;
+  hummockWriteLimits: WriteLimits | undefined;
+  version: MetaSnapshot_SnapshotVersion | undefined;
 }
 
 export interface MetaSnapshot_SnapshotVersion {
@@ -438,7 +446,8 @@ export interface SubscribeResponse {
     | { $case: "hummockVersionDeltas"; hummockVersionDeltas: HummockVersionDeltas }
     | { $case: "snapshot"; snapshot: MetaSnapshot }
     | { $case: "metaBackupManifestId"; metaBackupManifestId: MetaBackupManifestId }
-    | { $case: "systemParams"; systemParams: SystemParams };
+    | { $case: "systemParams"; systemParams: SystemParams }
+    | { $case: "hummockWriteLimits"; hummockWriteLimits: WriteLimits };
 }
 
 export const SubscribeResponse_Operation = {
@@ -574,6 +583,7 @@ export interface SystemParams {
   dataDirectory?: string | undefined;
   backupStorageUrl?: string | undefined;
   backupStorageDirectory?: string | undefined;
+  telemetryEnabled?: boolean | undefined;
 }
 
 export interface GetSystemParamsRequest {
@@ -591,6 +601,48 @@ export interface SetSystemParamRequest {
 
 export interface SetSystemParamResponse {
 }
+
+function createBaseGetTelemetryInfoRequest(): GetTelemetryInfoRequest {
+  return {};
+}
+
+export const GetTelemetryInfoRequest = {
+  fromJSON(_: any): GetTelemetryInfoRequest {
+    return {};
+  },
+
+  toJSON(_: GetTelemetryInfoRequest): unknown {
+    const obj: any = {};
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GetTelemetryInfoRequest>, I>>(_: I): GetTelemetryInfoRequest {
+    const message = createBaseGetTelemetryInfoRequest();
+    return message;
+  },
+};
+
+function createBaseTelemetryInfoResponse(): TelemetryInfoResponse {
+  return { trackingId: undefined };
+}
+
+export const TelemetryInfoResponse = {
+  fromJSON(object: any): TelemetryInfoResponse {
+    return { trackingId: isSet(object.trackingId) ? String(object.trackingId) : undefined };
+  },
+
+  toJSON(message: TelemetryInfoResponse): unknown {
+    const obj: any = {};
+    message.trackingId !== undefined && (obj.trackingId = message.trackingId);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<TelemetryInfoResponse>, I>>(object: I): TelemetryInfoResponse {
+    const message = createBaseTelemetryInfoResponse();
+    message.trackingId = object.trackingId ?? undefined;
+    return message;
+  },
+};
 
 function createBaseHeartbeatRequest(): HeartbeatRequest {
   return { nodeId: 0, info: [] };
@@ -1659,8 +1711,9 @@ function createBaseMetaSnapshot(): MetaSnapshot {
     nodes: [],
     hummockSnapshot: undefined,
     hummockVersion: undefined,
-    version: undefined,
     metaBackupManifestId: undefined,
+    hummockWriteLimits: undefined,
+    version: undefined,
   };
 }
 
@@ -1684,10 +1737,13 @@ export const MetaSnapshot = {
         : [],
       hummockSnapshot: isSet(object.hummockSnapshot) ? HummockSnapshot.fromJSON(object.hummockSnapshot) : undefined,
       hummockVersion: isSet(object.hummockVersion) ? HummockVersion.fromJSON(object.hummockVersion) : undefined,
-      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
       metaBackupManifestId: isSet(object.metaBackupManifestId)
         ? MetaBackupManifestId.fromJSON(object.metaBackupManifestId)
         : undefined,
+      hummockWriteLimits: isSet(object.hummockWriteLimits)
+        ? WriteLimits.fromJSON(object.hummockWriteLimits)
+        : undefined,
+      version: isSet(object.version) ? MetaSnapshot_SnapshotVersion.fromJSON(object.version) : undefined,
     };
   },
 
@@ -1754,11 +1810,15 @@ export const MetaSnapshot = {
       (obj.hummockSnapshot = message.hummockSnapshot ? HummockSnapshot.toJSON(message.hummockSnapshot) : undefined);
     message.hummockVersion !== undefined &&
       (obj.hummockVersion = message.hummockVersion ? HummockVersion.toJSON(message.hummockVersion) : undefined);
-    message.version !== undefined &&
-      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
     message.metaBackupManifestId !== undefined && (obj.metaBackupManifestId = message.metaBackupManifestId
       ? MetaBackupManifestId.toJSON(message.metaBackupManifestId)
       : undefined);
+    message.hummockWriteLimits !== undefined &&
+      (obj.hummockWriteLimits = message.hummockWriteLimits
+        ? WriteLimits.toJSON(message.hummockWriteLimits)
+        : undefined);
+    message.version !== undefined &&
+      (obj.version = message.version ? MetaSnapshot_SnapshotVersion.toJSON(message.version) : undefined);
     return obj;
   },
 
@@ -1782,11 +1842,14 @@ export const MetaSnapshot = {
     message.hummockVersion = (object.hummockVersion !== undefined && object.hummockVersion !== null)
       ? HummockVersion.fromPartial(object.hummockVersion)
       : undefined;
-    message.version = (object.version !== undefined && object.version !== null)
-      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
-      : undefined;
     message.metaBackupManifestId = (object.metaBackupManifestId !== undefined && object.metaBackupManifestId !== null)
       ? MetaBackupManifestId.fromPartial(object.metaBackupManifestId)
+      : undefined;
+    message.hummockWriteLimits = (object.hummockWriteLimits !== undefined && object.hummockWriteLimits !== null)
+      ? WriteLimits.fromPartial(object.hummockWriteLimits)
+      : undefined;
+    message.version = (object.version !== undefined && object.version !== null)
+      ? MetaSnapshot_SnapshotVersion.fromPartial(object.version)
       : undefined;
     return message;
   },
@@ -1878,6 +1941,8 @@ export const SubscribeResponse = {
         }
         : isSet(object.systemParams)
         ? { $case: "systemParams", systemParams: SystemParams.fromJSON(object.systemParams) }
+        : isSet(object.hummockWriteLimits)
+        ? { $case: "hummockWriteLimits", hummockWriteLimits: WriteLimits.fromJSON(object.hummockWriteLimits) }
         : undefined,
     };
   },
@@ -1920,6 +1985,9 @@ export const SubscribeResponse = {
       : undefined);
     message.info?.$case === "systemParams" &&
       (obj.systemParams = message.info?.systemParams ? SystemParams.toJSON(message.info?.systemParams) : undefined);
+    message.info?.$case === "hummockWriteLimits" && (obj.hummockWriteLimits = message.info?.hummockWriteLimits
+      ? WriteLimits.toJSON(message.info?.hummockWriteLimits)
+      : undefined);
     return obj;
   },
 
@@ -2009,6 +2077,16 @@ export const SubscribeResponse = {
       object.info?.systemParams !== null
     ) {
       message.info = { $case: "systemParams", systemParams: SystemParams.fromPartial(object.info.systemParams) };
+    }
+    if (
+      object.info?.$case === "hummockWriteLimits" &&
+      object.info?.hummockWriteLimits !== undefined &&
+      object.info?.hummockWriteLimits !== null
+    ) {
+      message.info = {
+        $case: "hummockWriteLimits",
+        hummockWriteLimits: WriteLimits.fromPartial(object.info.hummockWriteLimits),
+      };
     }
     return message;
   },
@@ -2478,6 +2556,7 @@ function createBaseSystemParams(): SystemParams {
     dataDirectory: undefined,
     backupStorageUrl: undefined,
     backupStorageDirectory: undefined,
+    telemetryEnabled: undefined,
   };
 }
 
@@ -2493,6 +2572,7 @@ export const SystemParams = {
       dataDirectory: isSet(object.dataDirectory) ? String(object.dataDirectory) : undefined,
       backupStorageUrl: isSet(object.backupStorageUrl) ? String(object.backupStorageUrl) : undefined,
       backupStorageDirectory: isSet(object.backupStorageDirectory) ? String(object.backupStorageDirectory) : undefined,
+      telemetryEnabled: isSet(object.telemetryEnabled) ? Boolean(object.telemetryEnabled) : undefined,
     };
   },
 
@@ -2507,6 +2587,7 @@ export const SystemParams = {
     message.dataDirectory !== undefined && (obj.dataDirectory = message.dataDirectory);
     message.backupStorageUrl !== undefined && (obj.backupStorageUrl = message.backupStorageUrl);
     message.backupStorageDirectory !== undefined && (obj.backupStorageDirectory = message.backupStorageDirectory);
+    message.telemetryEnabled !== undefined && (obj.telemetryEnabled = message.telemetryEnabled);
     return obj;
   },
 
@@ -2521,6 +2602,7 @@ export const SystemParams = {
     message.dataDirectory = object.dataDirectory ?? undefined;
     message.backupStorageUrl = object.backupStorageUrl ?? undefined;
     message.backupStorageDirectory = object.backupStorageDirectory ?? undefined;
+    message.telemetryEnabled = object.telemetryEnabled ?? undefined;
     return message;
   },
 };

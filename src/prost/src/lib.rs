@@ -142,10 +142,10 @@ pub mod backup_service_serde;
 pub mod java_binding_serde;
 
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub struct ProstFieldNotFound(pub &'static str);
+pub struct PbFieldNotFound(pub &'static str);
 
-impl From<ProstFieldNotFound> for tonic::Status {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for tonic::Status {
+    fn from(e: PbFieldNotFound) -> Self {
         tonic::Status::new(tonic::Code::Internal, e.0)
     }
 }

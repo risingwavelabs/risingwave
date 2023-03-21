@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use futures::channel::{mpsc, oneshot};
 use futures::stream::select_with_strategy;
 use futures::{stream, StreamExt};
@@ -25,7 +23,7 @@ use super::error::StreamExecutorError;
 use super::{
     expect_first_barrier, Barrier, BoxedExecutor, Executor, ExecutorInfo, Message, MessageStream,
 };
-use crate::executor::{BoxedMessageStream, PkIndices, Watermark};
+use crate::executor::PkIndices;
 use crate::task::{ActorId, CreateMviewProgress};
 
 /// `ChainExecutor` is an executor that enables synchronization between the existing stream and
@@ -40,41 +38,11 @@ pub struct RearrangedChainExecutor {
 
     upstream: BoxedExecutor,
 
-    upstream_indices: Arc<[usize]>,
-
     progress: CreateMviewProgress,
 
     actor_id: ActorId,
 
     info: ExecutorInfo,
-}
-
-fn mapping(upstream_indices: &[usize], msg: Message) -> Option<Message> {
-    match msg {
-        Message::Watermark(watermark) => {
-            mapping_watermark(watermark, upstream_indices).map(Message::Watermark)
-        }
-        Message::Chunk(chunk) => {
-            let (ops, columns, visibility) = chunk.into_inner();
-            let mapped_columns = upstream_indices
-                .iter()
-                .map(|&i| columns[i].clone())
-                .collect();
-            Some(Message::Chunk(StreamChunk::new(
-                ops,
-                mapped_columns,
-                visibility,
-            )))
-        }
-        Message::Barrier(_) => Some(msg),
-    }
-}
-
-fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {
-    upstream_indices
-        .iter()
-        .position(|&idx| idx == watermark.col_idx)
-        .map(|idx| watermark.with_idx(idx))
 }
 
 #[derive(Debug)]
@@ -118,7 +86,6 @@ impl RearrangedChainExecutor {
     pub fn new(
         snapshot: BoxedExecutor,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -131,7 +98,6 @@ impl RearrangedChainExecutor {
             },
             snapshot,
             upstream,
-            upstream_indices: upstream_indices.into(),
             actor_id: progress.actor_id(),
             progress,
         }
@@ -139,13 +105,7 @@ impl RearrangedChainExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
-        // 0. Project the upstream with `upstream_indices`.
-        let upstream_indices = self.upstream_indices.clone();
-
-        let mut upstream = Box::pin(Self::mapping_stream(
-            self.upstream.execute(),
-            &upstream_indices,
-        ));
+        let mut upstream = Box::pin(self.upstream.execute());
 
         // 1. Poll the upstream to get the first barrier.
         let first_barrier = expect_first_barrier(&mut upstream).await?;
@@ -324,17 +284,6 @@ impl RearrangedChainExecutor {
                 Either::Right((None, _)) => {
                     Err(StreamExecutorError::channel_closed("upstream"))?;
                 }
-            }
-        }
-    }
-
-    #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn mapping_stream(stream: BoxedMessageStream, upstream_indices: &[usize]) {
-        #[for_await]
-        for msg in stream {
-            match mapping(upstream_indices, msg?) {
-                Some(msg) => yield msg,
-                None => continue,
             }
         }
     }

@@ -41,8 +41,8 @@ pub use logical_source::KAFKA_TIMESTAMP_COLUMN_NAME;
 use paste::paste;
 use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::batch_plan::PlanNode as BatchPlanProst;
-use risingwave_pb::stream_plan::StreamNode as StreamPlanProst;
+use risingwave_pb::batch_plan::PlanNode as BatchPlanPb;
+use risingwave_pb::stream_plan::StreamNode as StreamPlanPb;
 use serde::Serialize;
 use smallvec::SmallVec;
 
@@ -73,7 +73,7 @@ pub trait PlanNode:
     + ToBatch
     + ToStream
     + ToDistributedBatch
-    + ToProst
+    + ToPb
     + ToLocalBatch
     + PredicatePushdown
     + PlanNodeMeta
@@ -397,6 +397,10 @@ impl GenericPlanRef for PlanRef {
     fn ctx(&self) -> OptimizerContextRef {
         self.plan_base().ctx()
     }
+
+    fn functional_dependency(&self) -> &FunctionalDependencySet {
+        self.plan_base().functional_dependency()
+    }
 }
 
 /// In order to let expression display id started from 1 for explaining, hidden column names and
@@ -516,12 +520,9 @@ impl dyn PlanNode {
     ///
     /// Note that [`StreamTableScan`] has its own implementation of `to_stream_prost`. We have a
     /// hook inside to do some ad-hoc thing for [`StreamTableScan`].
-    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanProst {
+    pub fn to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> StreamPlanPb {
         if let Some(stream_table_scan) = self.as_stream_table_scan() {
             return stream_table_scan.adhoc_to_stream_prost();
-        }
-        if let Some(stream_index_scan) = self.as_stream_index_scan() {
-            return stream_index_scan.adhoc_to_stream_prost();
         }
         if let Some(stream_share) = self.as_stream_share() {
             return stream_share.adhoc_to_stream_prost(state);
@@ -534,7 +535,7 @@ impl dyn PlanNode {
             .map(|plan| plan.to_stream_prost(state))
             .collect();
         // TODO: support pk_indices and operator_id
-        StreamPlanProst {
+        StreamPlanPb {
             input,
             identity: format!("{}", self),
             node_body: node,
@@ -546,20 +547,20 @@ impl dyn PlanNode {
     }
 
     /// Serialize the plan node and its children to a batch plan proto.
-    pub fn to_batch_prost(&self) -> BatchPlanProst {
+    pub fn to_batch_prost(&self) -> BatchPlanPb {
         self.to_batch_prost_identity(true)
     }
 
     /// Serialize the plan node and its children to a batch plan proto without the identity field
     /// (for testing).
-    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanProst {
+    pub fn to_batch_prost_identity(&self, identity: bool) -> BatchPlanPb {
         let node_body = Some(self.to_batch_prost_body());
         let children = self
             .inputs()
             .into_iter()
             .map(|plan| plan.to_batch_prost_identity(identity))
             .collect();
-        BatchPlanProst {
+        BatchPlanPb {
             children,
             identity: if identity {
                 format!("{:?}", self)
@@ -656,7 +657,6 @@ mod stream_group_topn;
 mod stream_hash_agg;
 mod stream_hash_join;
 mod stream_hop_window;
-mod stream_index_scan;
 mod stream_local_simple_agg;
 mod stream_materialize;
 mod stream_now;
@@ -671,6 +671,7 @@ mod stream_watermark_filter;
 
 mod derive;
 mod stream_share;
+mod stream_temporal_join;
 mod stream_union;
 pub mod utils;
 
@@ -731,7 +732,6 @@ pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
 pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
-pub use stream_index_scan::StreamIndexScan;
 pub use stream_local_simple_agg::StreamLocalSimpleAgg;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_now::StreamNow;
@@ -742,6 +742,7 @@ pub use stream_share::StreamShare;
 pub use stream_sink::StreamSink;
 pub use stream_source::StreamSource;
 pub use stream_table_scan::StreamTableScan;
+pub use stream_temporal_join::StreamTemporalJoin;
 pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_watermark_filter::StreamWatermarkFilter;
@@ -829,7 +830,6 @@ macro_rules! for_all_plan_nodes {
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
-            , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
@@ -840,6 +840,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }
@@ -929,7 +930,6 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, TopN }
             , { Stream, HopWindow }
             , { Stream, DeltaJoin }
-            , { Stream, IndexScan }
             , { Stream, Expand }
             , { Stream, DynamicFilter }
             , { Stream, ProjectSet }
@@ -940,6 +940,7 @@ macro_rules! for_stream_plan_nodes {
             , { Stream, Now }
             , { Stream, Share }
             , { Stream, WatermarkFilter }
+            , { Stream, TemporalJoin }
         }
     };
 }

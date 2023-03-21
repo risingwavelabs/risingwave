@@ -1,19 +1,24 @@
 /* eslint-disable */
 import { StreamSourceInfo } from "./catalog";
-import { BatchQueryEpoch, Buffer, HostAddress, WorkerNode } from "./common";
+import {
+  BatchQueryEpoch,
+  Buffer,
+  ColumnOrder,
+  Direction,
+  directionFromJSON,
+  directionToJSON,
+  HostAddress,
+  WorkerNode,
+} from "./common";
 import { IntervalUnit } from "./data";
 import { AggCall, ExprNode, ProjectSetSelectItem, TableFunction } from "./expr";
 import {
   ColumnCatalog,
   ColumnDesc,
-  ColumnOrder,
   Field,
   JoinType,
   joinTypeFromJSON,
   joinTypeToJSON,
-  OrderType,
-  orderTypeFromJSON,
-  orderTypeToJSON,
   StorageTableDesc,
 } from "./plan_common";
 
@@ -207,7 +212,7 @@ export interface SortMergeJoinNode {
   joinType: JoinType;
   leftKey: number[];
   rightKey: number[];
-  direction: OrderType;
+  direction: Direction;
   outputIndices: number[];
 }
 
@@ -216,6 +221,8 @@ export interface HopWindowNode {
   windowSlide: IntervalUnit | undefined;
   windowSize: IntervalUnit | undefined;
   outputIndices: number[];
+  windowStartExprs: ExprNode[];
+  windowEndExprs: ExprNode[];
 }
 
 export interface TableFunctionNode {
@@ -1323,7 +1330,7 @@ function createBaseSortMergeJoinNode(): SortMergeJoinNode {
     joinType: JoinType.UNSPECIFIED,
     leftKey: [],
     rightKey: [],
-    direction: OrderType.ORDER_UNSPECIFIED,
+    direction: Direction.DIRECTION_UNSPECIFIED,
     outputIndices: [],
   };
 }
@@ -1334,7 +1341,7 @@ export const SortMergeJoinNode = {
       joinType: isSet(object.joinType) ? joinTypeFromJSON(object.joinType) : JoinType.UNSPECIFIED,
       leftKey: Array.isArray(object?.leftKey) ? object.leftKey.map((e: any) => Number(e)) : [],
       rightKey: Array.isArray(object?.rightKey) ? object.rightKey.map((e: any) => Number(e)) : [],
-      direction: isSet(object.direction) ? orderTypeFromJSON(object.direction) : OrderType.ORDER_UNSPECIFIED,
+      direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
     };
   },
@@ -1352,7 +1359,7 @@ export const SortMergeJoinNode = {
     } else {
       obj.rightKey = [];
     }
-    message.direction !== undefined && (obj.direction = orderTypeToJSON(message.direction));
+    message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
     if (message.outputIndices) {
       obj.outputIndices = message.outputIndices.map((e) => Math.round(e));
     } else {
@@ -1366,14 +1373,21 @@ export const SortMergeJoinNode = {
     message.joinType = object.joinType ?? JoinType.UNSPECIFIED;
     message.leftKey = object.leftKey?.map((e) => e) || [];
     message.rightKey = object.rightKey?.map((e) => e) || [];
-    message.direction = object.direction ?? OrderType.ORDER_UNSPECIFIED;
+    message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
     return message;
   },
 };
 
 function createBaseHopWindowNode(): HopWindowNode {
-  return { timeCol: 0, windowSlide: undefined, windowSize: undefined, outputIndices: [] };
+  return {
+    timeCol: 0,
+    windowSlide: undefined,
+    windowSize: undefined,
+    outputIndices: [],
+    windowStartExprs: [],
+    windowEndExprs: [],
+  };
 }
 
 export const HopWindowNode = {
@@ -1383,6 +1397,12 @@ export const HopWindowNode = {
       windowSlide: isSet(object.windowSlide) ? IntervalUnit.fromJSON(object.windowSlide) : undefined,
       windowSize: isSet(object.windowSize) ? IntervalUnit.fromJSON(object.windowSize) : undefined,
       outputIndices: Array.isArray(object?.outputIndices) ? object.outputIndices.map((e: any) => Number(e)) : [],
+      windowStartExprs: Array.isArray(object?.windowStartExprs)
+        ? object.windowStartExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
+      windowEndExprs: Array.isArray(object?.windowEndExprs)
+        ? object.windowEndExprs.map((e: any) => ExprNode.fromJSON(e))
+        : [],
     };
   },
 
@@ -1398,6 +1418,16 @@ export const HopWindowNode = {
     } else {
       obj.outputIndices = [];
     }
+    if (message.windowStartExprs) {
+      obj.windowStartExprs = message.windowStartExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowStartExprs = [];
+    }
+    if (message.windowEndExprs) {
+      obj.windowEndExprs = message.windowEndExprs.map((e) => e ? ExprNode.toJSON(e) : undefined);
+    } else {
+      obj.windowEndExprs = [];
+    }
     return obj;
   },
 
@@ -1411,6 +1441,8 @@ export const HopWindowNode = {
       ? IntervalUnit.fromPartial(object.windowSize)
       : undefined;
     message.outputIndices = object.outputIndices?.map((e) => e) || [];
+    message.windowStartExprs = object.windowStartExprs?.map((e) => ExprNode.fromPartial(e)) || [];
+    message.windowEndExprs = object.windowEndExprs?.map((e) => ExprNode.fromPartial(e)) || [];
     return message;
   },
 };

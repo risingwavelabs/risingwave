@@ -10,7 +10,7 @@ option optimize_for = SPEED;
 message IntervalUnit {
   int32 months = 1;
   int32 days = 2;
-  int64 ms = 3;
+  int64 usecs = 3;
 }
 
 message DataType {
@@ -50,6 +50,7 @@ message DataType {
     LIST = 16;
     BYTEA = 17;
     JSONB = 18;
+    SERIAL = 19;
   }
   TypeName type_name = 1;
   // Data length for char.

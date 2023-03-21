@@ -35,7 +35,6 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -74,6 +73,7 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["dea
 petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
+postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
 prost-types = { version = "0.11" }
@@ -86,17 +86,18 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1", features = ["alloc"] }
+serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 strum = { version = "0.24", features = ["derive"] }
 subtle = { version = "2" }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["net"] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }
@@ -127,7 +128,6 @@ crossbeam-channel = { version = "0.5" }
 crossbeam-deque = { version = "0.8" }
 crossbeam-epoch = { version = "0.9" }
 crossbeam-utils = { version = "0.8" }
-digest = { version = "0.10", features = ["mac", "std"] }
 either = { version = "1" }
 fail = { version = "0.5", default-features = false, features = ["failpoints"] }
 fixedbitset = { version = "0.4" }
@@ -166,6 +166,7 @@ parking_lot_core = { version = "0.9", default-features = false, features = ["dea
 petgraph = { version = "0.6" }
 phf = { version = "0.11", features = ["uncased"] }
 phf_shared = { version = "0.11", features = ["uncased"] }
+postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc", default-features = false, features = ["derive", "with-chrono-0_4", "with-serde_json-1"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 prometheus = { version = "0.13", features = ["process"] }
 prost = { version = "0.11", features = ["no-recursion-limit"] }
@@ -179,6 +180,8 @@ reqwest = { version = "0.11", features = ["blocking", "json", "rustls-tls"] }
 ring = { version = "0.16", features = ["std"] }
 scopeguard = { version = "1" }
 serde = { version = "1", features = ["alloc", "derive", "rc"] }
+serde_json = { version = "1", features = ["alloc"] }
+serde_with = { version = "2", features = ["json"] }
 smallvec = { version = "1", default-features = false, features = ["serde"] }
 socket2 = { version = "0.4", default-features = false, features = ["all"] }
 strum = { version = "0.24", features = ["derive"] }
@@ -186,12 +189,11 @@ subtle = { version = "2" }
 syn = { version = "1", features = ["extra-traits", "full", "visit", "visit-mut"] }
 time = { version = "0.3", features = ["formatting", "local-offset", "macros", "parsing"] }
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "parking_lot", "process", "rt-multi-thread", "signal", "stats", "sync", "time", "tracing"] }
-tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["net"] }
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710", features = ["fs", "net"] }
 tokio-util = { version = "0.7", features = ["codec", "io"] }
 tonic = { version = "0.8", features = ["gzip", "tls-webpki-roots"] }
 tonic-build = { version = "0.8" }
 tower = { version = "0.4", features = ["balance", "buffer", "filter", "limit", "load-shed", "retry", "timeout", "util"] }
-tower-http = { version = "0.3", features = ["add-extension", "cors", "map-response-body", "util"] }
 tracing = { version = "0.1", features = ["log", "release_max_level_trace"] }
 tracing-core = { version = "0.1" }
 tracing-futures = { version = "0.2" }

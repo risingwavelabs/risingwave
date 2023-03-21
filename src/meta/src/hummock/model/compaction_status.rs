@@ -23,17 +23,17 @@ use crate::model::{MetadataModel, MetadataModelResult};
 
 impl MetadataModel for CompactStatus {
     type KeyType = CompactionGroupId;
-    type ProstType = risingwave_pb::hummock::CompactStatus;
+    type PbType = risingwave_pb::hummock::CompactStatus;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_COMPACTION_STATUS_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.into()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost.borrow().into()
     }
 

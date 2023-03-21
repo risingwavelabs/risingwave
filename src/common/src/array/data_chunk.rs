@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 
 use super::{ArrayResult, Vis};
 use crate::array::column::Column;
@@ -32,7 +32,7 @@ use crate::types::to_text::ToText;
 use crate::types::{DataType, Datum, NaiveDateTimeWrapper, ToOwnedDatum};
 use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
-use crate::util::value_encoding::serialize_datum_into;
+use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 
 /// `DataChunk` is a collection of arrays with visibility mask.
 #[derive(Clone, PartialEq)]
@@ -152,12 +152,12 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> ProstDataChunk {
+    pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
             "must be compacted before transfer"
         );
-        let mut proto = ProstDataChunk {
+        let mut proto = PbDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
@@ -189,7 +189,7 @@ impl DataChunk {
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
@@ -377,12 +377,14 @@ impl DataChunk {
         DataChunk::new(columns, indexes.len())
     }
 
-    /// Serialize each rows into value encoding bytes.
+    /// Serialize each row into value encoding bytes.
     ///
-    /// the returned vector's size is self.capacity() and for the invisible row will give a empty
-    /// vec<u8>
+    /// The returned vector's size is `self.capacity()` and for the invisible row will give a empty
+    /// bytes.
+    // Note(bugen): should we exclude the invisible rows in the output so that the caller won't need
+    // to handle visibility again?
     pub fn serialize(&self) -> Vec<Bytes> {
-        match &self.vis2 {
+        let buffers = match &self.vis2 {
             Vis::Bitmap(vis) => {
                 let rows_num = vis.len();
                 let mut buffers = vec![BytesMut::new(); rows_num];
@@ -398,7 +400,7 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers.into_iter().map(BytesMut::freeze).collect_vec()
+                buffers
             }
             Vis::Compact(rows_num) => {
                 let mut buffers = vec![BytesMut::new(); *rows_num];
@@ -412,9 +414,27 @@ impl DataChunk {
                         }
                     }
                 }
-                buffers.into_iter().map(BytesMut::freeze).collect_vec()
+                buffers
             }
+        };
+
+        buffers.into_iter().map(BytesMut::freeze).collect_vec()
+    }
+
+    /// Serialize each row into bytes with given serializer.
+    ///
+    /// This is similar to `serialize` but it uses a custom serializer. Prefer `serialize` if
+    /// possible since it might be more efficient due to columnar operations.
+    pub fn serialize_with(&self, serializer: &impl ValueRowSerializer) -> Vec<Bytes> {
+        let mut results = Vec::with_capacity(self.capacity());
+        for row in self.rows_with_holes() {
+            results.push(if let Some(row) = row {
+                serializer.serialize(row).into()
+            } else {
+                Bytes::new()
+            });
         }
+        results
     }
 }
 
@@ -459,6 +479,7 @@ pub trait DataChunkTestExt {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
@@ -484,6 +505,7 @@ impl DataChunkTestExt for DataChunk {
                 "TS" => DataType::Timestamp,
                 "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
+                "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
                         fields: array[1..array.len() - 1]
@@ -545,6 +567,12 @@ impl DataChunkTestExt for DataChunk {
                             ))
                         }
                         ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
+                        ArrayBuilderImpl::Serial(_) => ScalarImpl::Serial(
+                            s.parse::<i64>()
+                                .map_err(|_| panic!("invalid serial: {s:?}"))
+                                .unwrap()
+                                .into(),
+                        ),
                         ArrayBuilderImpl::Struct(builder) => {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
@@ -621,7 +649,6 @@ impl DataChunkTestExt for DataChunk {
 
 #[cfg(test)]
 mod tests {
-
     use crate::array::*;
     use crate::row::Row;
     use crate::{column, column_nonnull};

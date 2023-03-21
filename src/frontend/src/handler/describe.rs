@@ -29,12 +29,11 @@ use crate::binder::{Binder, Relation};
 use crate::catalog::{CatalogError, IndexCatalog};
 use crate::handler::util::col_descs_to_rows;
 use crate::handler::HandlerArgs;
-use crate::optimizer::property::Direction;
 
 pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new(&session);
-    let relation = binder.bind_relation_by_name(table_name.clone(), None)?;
+    let relation = binder.bind_relation_by_name(table_name.clone(), None, false)?;
     // For Source, it doesn't have table catalog so use get source to get column descs.
     let (columns, pk_columns, indices): (Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>) = {
         let (column_catalogs, pk_column_catalogs, indices) = match relation {
@@ -60,7 +59,7 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
                     .table_catalog
                     .pk()
                     .iter()
-                    .map(|idx| t.table_catalog.columns[idx.index].clone())
+                    .map(|x| t.table_catalog.columns[x.column_index].clone())
                     .collect_vec();
                 (t.table_catalog.columns, pk_column_catalogs, t.table_indexes)
             }
@@ -117,21 +116,17 @@ pub fn handle_describe(handler_args: HandlerArgs, table_name: ObjectName) -> Res
         let index_columns_with_ordering = index_table
             .pk
             .iter()
-            .filter(|x| !index_table.columns[x.index].is_hidden)
+            .filter(|x| !index_table.columns[x.column_index].is_hidden)
             .map(|x| {
-                let index_column_name = index_table.columns[x.index].name().to_string();
-                if Direction::Desc == x.direct {
-                    index_column_name + " DESC"
-                } else {
-                    index_column_name
-                }
+                let index_column_name = index_table.columns[x.column_index].name().to_string();
+                format!("{} {}", index_column_name, x.order_type)
             })
             .collect_vec();
 
         let pk_column_index_set = index_table
             .pk
             .iter()
-            .map(|x| x.index)
+            .map(|x| x.column_index)
             .collect::<HashSet<_>>();
 
         let include_columns = index_table
@@ -241,7 +236,7 @@ mod tests {
             "v3".into() => "Int32".into(),
             "v4".into() => "Int32".into(),
             "primary key".into() => "v3".into(),
-            "idx1".into() => "index(v1 DESC, v2, v3) include(v4) distributed by(v1, v2)".into(),
+            "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1, v2)".into(),
         };
 
         assert_eq!(columns, expected_columns);
