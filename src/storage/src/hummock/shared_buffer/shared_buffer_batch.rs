@@ -52,6 +52,7 @@ pub(crate) struct SharedBufferBatchInner {
     /// The list of imm ids that are merged into this batch
     /// This field is immutable
     imm_ids: Vec<ImmId>,
+    /// The epochs of the data in batch, sorted in ascending order (old to new)
     epochs: Vec<HummockEpoch>,
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
@@ -362,9 +363,12 @@ impl SharedBufferBatch {
         self.inner.epochs.len() > 1
     }
 
-    /// For a merged imm, returns the minimum epoch
-    pub fn epoch(&self) -> HummockEpoch {
+    pub fn min_epoch(&self) -> HummockEpoch {
         *self.inner.epochs.first().unwrap()
+    }
+
+    pub fn max_epoch(&self) -> HummockEpoch {
+        *self.inner.epochs.last().unwrap()
     }
 
     pub fn get_imm_ids(&self) -> &Vec<ImmId> {
@@ -546,7 +550,7 @@ impl SharedBufferBatch {
             );
 
             merged_imm_ids.push(imm.batch_id());
-            epochs.push(imm.epoch());
+            epochs.push(imm.min_epoch());
             num_items += imm.kv_count();
             merged_size += imm.size();
             range_tombstone_list.extend(imm.get_delete_range_tombstones());

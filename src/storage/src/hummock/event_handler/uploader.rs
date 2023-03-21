@@ -384,8 +384,8 @@ impl SealedData {
             .filter(|(_, imms)| imms.len() >= IMM_MERGE_THRESHOLD)
             .map(|((table_id, shard_id), imms)| {
                 let imms = imms.drain(..).collect_vec();
-                // ensure imms <= sealed_epoch
-                assert!(imms.iter().all(|imm| imm.epoch() <= sealed_epoch));
+                // ensure imms are sealed
+                assert!(imms.iter().all(|imm| imm.max_epoch() <= sealed_epoch));
                 MergingImmTask::new(*table_id, *shard_id, imms, context)
             })
             .for_each(|task| self.merging_tasks.push_front(task));
@@ -588,7 +588,7 @@ impl HummockUploader {
     }
 
     pub(crate) fn add_imm(&mut self, imm: ImmutableMemtable) {
-        let epoch = imm.epoch();
+        let epoch = imm.min_epoch();
         assert!(
             epoch > self.max_sealed_epoch,
             "imm epoch {} older than max sealed epoch {}",

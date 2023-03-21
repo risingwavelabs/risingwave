@@ -79,7 +79,7 @@ async fn test_read_version_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst_iter.count());
-        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
     }
 
     {
@@ -119,7 +119,7 @@ async fn test_read_version_basic() {
 
             assert_eq!(1, staging_imm.len() as u64);
             assert_eq!(0, staging_sst_iter.count());
-            assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+            assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
         }
     }
 
@@ -140,7 +140,7 @@ async fn test_read_version_basic() {
             .imm
             .iter()
             .rev()
-            .map(|imm| imm.epoch())
+            .map(|imm| imm.min_epoch())
             .take(3)
             .rev()
             .collect::<Vec<_>>();
@@ -226,7 +226,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].epoch());
+        assert_eq!(4, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(2, staging_ssts.len());
@@ -250,7 +250,7 @@ async fn test_read_version_basic() {
 
         let staging_imm = staging_imm_iter.cloned().collect_vec();
         assert_eq!(1, staging_imm.len());
-        assert_eq!(4, staging_imm[0].epoch());
+        assert_eq!(4, staging_imm[0].min_epoch());
 
         let staging_ssts = staging_sst_iter.cloned().collect_vec();
         assert_eq!(1, staging_ssts.len());
@@ -309,7 +309,7 @@ async fn test_read_filter_basic() {
 
         assert_eq!(1, staging_imm.len());
         assert_eq!(0, staging_sst.len());
-        assert!(staging_imm.iter().any(|imm| imm.epoch() <= epoch));
+        assert!(staging_imm.iter().any(|imm| imm.min_epoch() <= epoch));
 
         // build for local
         {

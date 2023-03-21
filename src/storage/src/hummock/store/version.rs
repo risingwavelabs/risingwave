@@ -167,9 +167,10 @@ impl StagingVersion {
             .iter()
             .chain(self.merged_imm.iter())
             .filter(move |imm| {
-                imm.epoch() <= max_epoch_inclusive
+                // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
+                imm.min_epoch() <= max_epoch_inclusive
                     && imm.table_id == table_id
-                    && imm.epoch() > min_epoch_exclusive
+                    && imm.min_epoch() > min_epoch_exclusive
                     && range_overlap(&(left, right), &imm.start_table_key(), &imm.end_table_key())
             });
 
@@ -366,22 +367,15 @@ impl HummockReadVersion {
                     // TODO: remove it when support update staging local_sst
                     self.staging
                         .imm
-                        .retain(|imm| imm.epoch() > max_committed_epoch);
+                        .retain(|imm| imm.min_epoch() > max_committed_epoch);
 
                     self.staging
                         .merged_imm
-                        .retain(|merged_imm| merged_imm.epoch() > max_committed_epoch);
+                        .retain(|merged_imm| merged_imm.min_epoch() > max_committed_epoch);
 
                     self.staging.sst.retain(|sst| {
                         sst.epochs.first().expect("epochs not empty") > &max_committed_epoch
                     });
-
-                    assert!(self
-                        .staging
-                        .imm
-                        .iter()
-                        .chain(self.staging.merged_imm.iter())
-                        .all(|imm| imm.epoch() > max_committed_epoch));
 
                     // check epochs.last() > MCE
                     assert!(self.staging.sst.iter().all(|sst| {
@@ -543,7 +537,8 @@ impl HummockVersionReader {
 
         // 1. read staging data
         for imm in &imms {
-            if imm.epoch() <= min_epoch {
+            // skip imm that only holding out-of-date data
+            if imm.max_epoch() <= min_epoch {
                 continue;
             }
 
