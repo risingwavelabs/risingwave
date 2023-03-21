@@ -44,7 +44,7 @@ statement ok
 FLUSH;
 
 statement ok
-UPDATE t_remote SET name = 'Alex' WHERE id = 1;
+UPDATE t_remote SET v_varchar = 'Alex' WHERE id = 1;
 
 statement ok
 DELETE FROM t_remote WHERE id = 2;

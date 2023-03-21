@@ -106,13 +106,9 @@ sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
 # check sink destination mysql using shell
-if mysql  --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
-if ($1 == 1 && $2 == "Alex") c1++;
- if ($1 == 3 && $2 == "Carl") c2++;
-  if ($1 == 4 && $2 == "Doris") c3++;
-   if ($1 == 5 && $2 == "Eve") c4++;
-    if ($1 == 6 && $2 == "Frank") c5++; }
-     END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1); }'; then
+diff -u ./e2e_test/sink/remote/mysql_expected_result.tsv \
+< (mysql --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id")
+if [ $? -eq 0 ]; then
   echo "mysql sink check passed"
 else
   echo "The output is not as expected."
