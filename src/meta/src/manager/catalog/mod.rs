@@ -88,6 +88,8 @@ macro_rules! commit_meta {
     };
 }
 pub(crate) use commit_meta;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::meta::CreatingJobInfo;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
@@ -1529,10 +1531,12 @@ where
     pub async fn finish_replace_table_procedure(
         &self,
         table: &Table,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             tables.contains_key(&table.id)
@@ -1540,15 +1544,53 @@ where
             "table must exist and be in altering procedure"
         );
 
+        let index_ids: Vec<_> = indexes
+            .tree_ref()
+            .iter()
+            .filter(|(_, index)| index.primary_table_id == table.id)
+            .map(|(index_id, _index)| *index_id)
+            .collect_vec();
+
+        let mut updated_indexes = vec![];
+
+        for index_id in &index_ids {
+            let mut index = indexes.get_mut(*index_id).unwrap();
+            index
+                .index_item
+                .iter_mut()
+                .for_each(|x| match x.rex_node.as_mut().unwrap() {
+                    RexNode::InputRef(input_col_idx) => {
+                        *input_col_idx =
+                            table_col_index_mapping.map(*input_col_idx as usize) as u32;
+                        x.return_type = table.columns[*input_col_idx as usize]
+                            .column_desc
+                            .clone()
+                            .unwrap()
+                            .column_type;
+                    }
+                    RexNode::FuncCall(_) => unimplemented!(),
+                    _ => unreachable!(),
+                });
+
+            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+        }
+
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         database_core.in_progress_creation_tracker.remove(&key);
 
         tables.insert(table.id, table.clone());
-        commit_meta!(self, tables)?;
+        commit_meta!(self, tables, indexes)?;
 
-        let version = self
+        // TODO: support group notification.
+        let mut version = self
             .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
             .await;
+
+        for index in updated_indexes {
+            version = self
+                .notify_frontend(Operation::Update, Info::Index(index))
+                .await;
+        }
 
         Ok(version)
     }
