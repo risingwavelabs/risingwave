@@ -184,6 +184,8 @@ public class PostgresSourceTest {
         assertEquals(
                 exception1.getMessage(),
                 "INVALID_ARGUMENT: INTERNAL: The publication 'dbz_publication' does not cover all necessary columns in table orders");
+        query = "DROP PUBLICATION dbz_publication";
+        SourceTestClient.performQuery(connection, query);
         // revoke superuser and replication, check if reports error
         query = "ALTER USER " + pg.getUsername() + " nosuperuser noreplication";
         SourceTestClient.performQuery(connection, query);
