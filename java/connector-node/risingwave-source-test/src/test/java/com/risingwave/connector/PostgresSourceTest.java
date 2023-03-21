@@ -144,6 +144,7 @@ public class PostgresSourceTest {
         connection.close();
     }
 
+    // test whether validation catches permission errors
     @Test
     public void testPermissionCheck() {
         Connection connection = SourceTestClient.connect(pgDataSource);
