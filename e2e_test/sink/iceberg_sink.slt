@@ -24,6 +24,12 @@ statement ok
 FLUSH;
 
 statement ok
+INSERT INTO t6 VALUES (1, 50, '1-50');
+
+statement ok
+FLUSH;
+
+statement ok
 DROP SINK s6;
 
 statement ok
