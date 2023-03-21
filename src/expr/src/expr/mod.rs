@@ -101,6 +101,11 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
     /// Evaluate the expression in row-based execution.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
 
+    /// Evaluate if the expression is constant.
+    fn eval_const(&self) -> Result<Datum> {
+        Err(ExprError::NotConstant)
+    }
+
     /// Wrap the expression in a Box.
     fn boxed(self) -> BoxedExpression
     where

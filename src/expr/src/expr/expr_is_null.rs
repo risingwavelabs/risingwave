@@ -16,13 +16,11 @@ use std::sync::Arc;
 
 use risingwave_common::array::{ArrayImpl, ArrayRef, BoolArray, DataChunk};
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr_macro::build_function;
-use risingwave_pb::expr::ExprNode;
 
-use super::build_expr_from_prost::get_children_and_return_type;
-use super::build_from_prost;
 use crate::expr::{BoxedExpression, Expression};
 use crate::Result;
 
@@ -93,18 +91,18 @@ impl Expression for IsNotNullExpression {
 }
 
 #[build_function("is_null(*) -> boolean")]
-fn build_is_null_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, _) = get_children_and_return_type(prost)?;
+fn build_is_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    ensure!(children.len() == 1);
     Ok(Box::new(IsNullExpression {
-        child: build_from_prost(&children[0])?,
+        child: children.into_iter().next().unwrap(),
     }))
 }
 
 #[build_function("is_not_null(*) -> boolean")]
-fn build_is_not_null_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, _) = get_children_and_return_type(prost)?;
+fn build_is_not_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    ensure!(children.len() == 1);
     Ok(Box::new(IsNotNullExpression {
-        child: build_from_prost(&children[0])?,
+        child: children.into_iter().next().unwrap(),
     }))
 }
 

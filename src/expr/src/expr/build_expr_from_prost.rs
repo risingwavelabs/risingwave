@@ -15,9 +15,8 @@
 use itertools::Itertools;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
-use risingwave_common::util::value_encoding::deserialize_datum;
 use risingwave_expr_macro::build_function;
-use risingwave_pb::expr::expr_node::RexNode;
+use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use super::expr_array_concat::ArrayConcatExpression;
@@ -41,8 +40,9 @@ use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpres
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ensure, ExprError, Result};
 
+/// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
-    use risingwave_pb::expr::expr_node::Type as E;
+    use PbType as E;
 
     if let Some(RexNode::FuncCall(call)) = &prost.rex_node {
         let args = call
@@ -50,9 +50,19 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             .iter()
             .map(|c| DataType::from(c.get_return_type().unwrap()).into())
             .collect_vec();
-        let ret = DataType::from(prost.get_return_type().unwrap()).into();
-        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args, ret) {
-            return (desc.build_from_prost)(prost);
+        let return_type = DataType::from(prost.get_return_type().unwrap());
+
+        if let Some(desc) = FUNC_SIG_MAP.get(prost.expr_type(), &args, (&return_type).into()) {
+            let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() else {
+                bail!("Expected RexNode::FuncCall");
+            };
+
+            let children = func_call
+                .get_children()
+                .iter()
+                .map(build_from_prost)
+                .try_collect()?;
+            return (desc.build)(return_type, children);
         }
     }
 
@@ -86,6 +96,29 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
     }
 }
 
+/// Build an expression.
+pub fn build(
+    func: PbType,
+    ret_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let args = children
+        .iter()
+        .map(|c| c.return_type().into())
+        .collect_vec();
+    let desc = FUNC_SIG_MAP
+        .get(func, &args, (&ret_type).into())
+        .ok_or_else(|| {
+            ExprError::UnsupportedFunction(format!(
+                "{:?}({}) -> {:?}",
+                func,
+                args.iter().map(|t| format!("{:?}", t)).join(", "),
+                ret_type
+            ))
+        })?;
+    (desc.build)(ret_type, children)
+}
+
 pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNode], DataType)> {
     let ret_type = DataType::from(prost.get_return_type().unwrap());
     if let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() {
@@ -96,37 +129,36 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
 }
 
 #[build_function("to_char(timestamp, varchar) -> varchar")]
-fn build_to_char_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+fn build_to_char_expr(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
     use risingwave_common::array::*;
 
     use crate::vector_op::to_char::{compile_pattern_to_chrono, to_char_timestamp};
 
-    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
-    let data_expr = build_from_prost(&children[0])?;
-    let tmpl_node = &children[1];
-    if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
-        && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
-    {
-        let tmpl = tmpl.as_utf8();
-        let pattern = compile_pattern_to_chrono(tmpl);
+    let mut iter = children.into_iter();
+    let data_expr = iter.next().unwrap();
+    let tmpl_expr = iter.next().unwrap();
 
-        Ok(ExprToCharConstTmpl {
+    Ok(if let Ok(Some(tmpl)) = tmpl_expr.eval_const() {
+        ExprToCharConstTmpl {
             ctx: ExprToCharConstTmplContext {
-                chrono_pattern: pattern,
+                chrono_pattern: compile_pattern_to_chrono(tmpl.as_utf8()),
             },
             child: data_expr,
-        }.boxed())
+        }
+        .boxed()
     } else {
-        let tmpl_expr = build_from_prost(&children[1])?;
-        Ok(BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
+        BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
             data_expr,
             tmpl_expr,
-            ret_type,
+            return_type,
             |a, b, w| Ok(to_char_timestamp(a, b, w)),
         )
-        .boxed())
-    }
+        .boxed()
+    })
 }
 
 pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
@@ -141,36 +173,35 @@ pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
 }
 
 #[build_function("to_timestamp(varchar, varchar) -> timestamp")]
-pub fn build_to_timestamp_expr(prost: &ExprNode) -> Result<BoxedExpression> {
+pub fn build_to_timestamp_expr(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
     use risingwave_common::array::*;
 
     use crate::vector_op::to_char::compile_pattern_to_chrono;
     use crate::vector_op::to_timestamp::to_timestamp;
 
-    let (children, ret_type) = get_children_and_return_type(prost)?;
     ensure!(children.len() == 2);
-    let data_expr = build_from_prost(&children[0])?;
-    let tmpl_node = &children[1];
-    if let RexNode::Constant(tmpl_value) = tmpl_node.get_rex_node().unwrap()
-        && let Ok(Some(tmpl)) = deserialize_datum(tmpl_value.get_body().as_slice(), &DataType::from(tmpl_node.get_return_type().unwrap()))
-    {
-        let tmpl = tmpl.as_utf8();
-        let pattern = compile_pattern_to_chrono(tmpl);
+    let mut iter = children.into_iter();
+    let data_expr = iter.next().unwrap();
+    let tmpl_expr = iter.next().unwrap();
 
-        Ok(ExprToTimestampConstTmpl {
+    Ok(if let Ok(Some(tmpl)) = tmpl_expr.eval_const() {
+        ExprToTimestampConstTmpl {
             ctx: ExprToTimestampConstTmplContext {
-                chrono_pattern: pattern,
+                chrono_pattern: compile_pattern_to_chrono(tmpl.as_utf8()),
             },
             child: data_expr,
-        }.boxed())
+        }
+        .boxed()
     } else {
-        let tmpl_expr = build_from_prost(&children[1])?;
-        Ok(BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+        BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
             data_expr,
             tmpl_expr,
-            ret_type,
+            return_type,
             to_timestamp,
         )
-        .boxed())
-    }
+        .boxed()
+    })
 }

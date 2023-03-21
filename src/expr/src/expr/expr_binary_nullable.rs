@@ -18,14 +18,13 @@ use std::sync::Arc;
 
 use risingwave_common::array::*;
 use risingwave_common::buffer::Bitmap;
+use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar};
 use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::expr::ExprNode;
 
-use super::build_expr_from_prost::get_children_and_return_type;
-use super::{build_from_prost, BoxedExpression, Expression};
+use super::{BoxedExpression, Expression};
 use crate::vector_op::conjunction::{and, or};
 use crate::Result;
 
@@ -113,21 +112,23 @@ impl Expression for BinaryShortCircuitExpression {
 }
 
 #[build_function("and(boolean, boolean) -> boolean")]
-fn build_and_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, _) = get_children_and_return_type(prost)?;
+fn build_and_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    ensure!(children.len() == 2);
+    let mut iter = children.into_iter();
     Ok(Box::new(BinaryShortCircuitExpression {
-        expr_ia1: build_from_prost(&children[0])?,
-        expr_ia2: build_from_prost(&children[1])?,
+        expr_ia1: iter.next().unwrap(),
+        expr_ia2: iter.next().unwrap(),
         expr_type: Type::And,
     }))
 }
 
 #[build_function("or(boolean, boolean) -> boolean")]
-fn build_or_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, _) = get_children_and_return_type(prost)?;
+fn build_or_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
+    ensure!(children.len() == 2);
+    let mut iter = children.into_iter();
     Ok(Box::new(BinaryShortCircuitExpression {
-        expr_ia1: build_from_prost(&children[0])?,
-        expr_ia2: build_from_prost(&children[1])?,
+        expr_ia1: iter.next().unwrap(),
+        expr_ia2: iter.next().unwrap(),
         expr_type: Type::Or,
     }))
 }

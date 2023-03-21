@@ -84,7 +84,7 @@ impl FunctionAttr {
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
-                    build_from_prost: #build_fn,
+                    build: #build_fn,
                 });
             }
         })
@@ -109,21 +109,6 @@ impl FunctionAttr {
             .map(|i| format_ident!("e{i}"))
             .collect::<Vec<_>>();
         let exprs0 = exprs.clone();
-
-        let prepare = quote! {
-            use risingwave_common::array::*;
-            use risingwave_common::types::*;
-            use risingwave_pb::expr::expr_node::RexNode;
-
-            let return_type = DataType::from(prost.get_return_type().unwrap());
-            let RexNode::FuncCall(func_call) = prost.get_rex_node().unwrap() else {
-                crate::bail!("Expected RexNode::FuncCall");
-            };
-            let children = func_call.get_children();
-            crate::ensure!(children.len() == #num_args);
-            let mut iter = children.iter();
-            #(let #exprs0 = crate::expr::build_from_prost(iter.next().unwrap())?;)*
-        };
 
         let build_expr = if self.ret == "varchar" && self.user_fn.is_writer_style() {
             let template_struct = match num_args {
@@ -265,8 +250,15 @@ impl FunctionAttr {
             }
         };
         Ok(quote! {
-            |prost| {
-                #prepare
+            |return_type, children| {
+                use risingwave_common::array::*;
+                use risingwave_common::types::*;
+                use risingwave_pb::expr::expr_node::RexNode;
+
+                crate::ensure!(children.len() == #num_args);
+                let mut iter = children.into_iter();
+                #(let #exprs0 = iter.next().unwrap();)*
+
                 #build_expr
             }
         })

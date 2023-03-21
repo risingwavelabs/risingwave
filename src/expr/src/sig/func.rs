@@ -20,9 +20,8 @@ use std::ops::Deref;
 use std::sync::LazyLock;
 
 use itertools::Itertools;
-use risingwave_common::types::DataTypeName;
-use risingwave_pb::expr::expr_node::Type as ExprType;
-use risingwave_pb::expr::ExprNode;
+use risingwave_common::types::{DataType, DataTypeName};
+use risingwave_pb::expr::expr_node::PbType;
 
 use crate::error::Result;
 use crate::expr::BoxedExpression;
@@ -41,7 +40,7 @@ pub fn func_sigs() -> impl Iterator<Item = &'static FuncSign> {
 }
 
 #[derive(Default, Clone, Debug)]
-pub struct FuncSigMap(HashMap<(ExprType, usize), Vec<FuncSign>>);
+pub struct FuncSigMap(HashMap<(PbType, usize), Vec<FuncSign>>);
 
 impl FuncSigMap {
     /// Inserts a function signature.
@@ -53,14 +52,14 @@ impl FuncSigMap {
     }
 
     /// Returns a function signature with the same type, argument types and return type.
-    pub fn get(&self, ty: ExprType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
+    pub fn get(&self, ty: PbType, args: &[DataTypeName], ret: DataTypeName) -> Option<&FuncSign> {
         let v = self.0.get(&(ty, args.len()))?;
         v.iter()
             .find(|d| d.inputs_type == args && d.ret_type == ret)
     }
 
     /// Returns all function signatures with the same type and number of arguments.
-    pub fn get_with_arg_nums(&self, ty: ExprType, nargs: usize) -> &[FuncSign] {
+    pub fn get_with_arg_nums(&self, ty: PbType, nargs: usize) -> &[FuncSign] {
         self.0.get(&(ty, nargs)).map_or(&[], Deref::deref)
     }
 }
@@ -69,10 +68,10 @@ impl FuncSigMap {
 #[derive(Clone)]
 pub struct FuncSign {
     pub name: &'static str,
-    pub func: ExprType,
+    pub func: PbType,
     pub inputs_type: &'static [DataTypeName],
     pub ret_type: DataTypeName,
-    pub build_from_prost: fn(prost: &ExprNode) -> Result<BoxedExpression>,
+    pub build: fn(return_type: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>,
 }
 
 impl fmt::Debug for FuncSign {
