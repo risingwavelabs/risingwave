@@ -439,13 +439,14 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let futs = keys_in_batch.into_iter().map(|key| {
                     // Get agg group of the key.
                     let agg_group = {
-                        let mut cache_ptr: NonNull<_> = (&mut vars.agg_group_cache).into();
-                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
-                        // from `group_change_set` which is a set.
-                        let cache = unsafe { cache_ptr.as_mut() };
-                        cache
+                        let mut ptr: NonNull<_> = vars
+                            .agg_group_cache
                             .get_mut(&key)
                             .expect("changed group must have corresponding AggGroup")
+                            .into();
+                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
+                        // from `group_change_set` which is a set.
+                        unsafe { ptr.as_mut() }
                     };
                     async {
                         let curr_outputs = agg_group.get_outputs(&this.storages).await?;
