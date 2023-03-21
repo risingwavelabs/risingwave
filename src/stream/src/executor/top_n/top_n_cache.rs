@@ -57,8 +57,6 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
-    is_high_cache_dirty: bool,
-
     /// Data types for the full row.
     ///
     /// For debug formatting only.
@@ -119,15 +117,13 @@ pub trait TopNCacheTrait {
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
     #[allow(clippy::too_many_arguments)]
-    async fn insert<S: StateStore>(
+    fn insert(
         &mut self,
-        group_key: Option<impl GroupKey>,
-        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) -> StreamExecutorResult<()>;
+    );
 
     /// Delete input row from the cache.
     ///
@@ -168,7 +164,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
-            is_high_cache_dirty: false,
             data_types,
         }
     }
@@ -203,7 +198,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         if full {
             assert!(self.is_low_cache_full());
         } else {
-            assert!(self.high.is_empty());
+            assert!(
+                self.high.is_empty(),
+                "the high cache is not empty when middle cache is not full:\n{self:?}"
+            );
         }
         full
     }
@@ -213,66 +211,48 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         if !WITH_TIES {
             assert!(self.high.len() <= self.high_capacity);
         }
-        let full = self.high.len() >= self.high_capacity;
-        if full {
-            assert!(self.is_middle_cache_full());
-        }
-        full
+        self.high.len() >= self.high_capacity
     }
 
     /// Use this method instead of `self.high.insert` directly when possible.
-    /// It checks `is_high_cache_dirty` flag and refills the high cache if needed.
-    async fn insert_high_cache<S: StateStore>(
-        &mut self,
-        group_key: Option<impl GroupKey>,
-        managed_state: &mut ManagedTopNState<S>,
-        cache_key: CacheKey,
-        row: CompactedRow,
-    ) -> StreamExecutorResult<()> {
+    ///
+    /// It only inserts into high cache if the key is smaller than the largest key in the high
+    /// cache. Otherwise, we simply ignore the row. We will wait until the high cache becomes
+    /// empty and fill it at that time.
+    fn insert_high_cache(&mut self, cache_key: CacheKey, row: CompactedRow, is_from_middle: bool) {
         if !self.is_high_cache_full() {
-            let need_refill = self.is_high_cache_dirty
-                && match self.high.last_key_value() {
-                    Some(high_last) => cache_key > *high_last.0,
-                    None => false,
-                };
-            if need_refill {
-                managed_state
-                    .fill_high_cache(
-                        group_key,
-                        self,
-                        self.middle.last_key_value().unwrap().0.clone(),
-                        self.high_capacity,
-                    )
-                    .await?;
-                self.is_high_cache_dirty = false;
+            if is_from_middle {
+                self.high.insert(cache_key, row);
+                return;
             }
-            self.high.insert(cache_key, row);
+            // For direct insert, we need to check if the key is smaller than the largest key
+            if let Some(high_last) = self.high.last_key_value() && cache_key <= *high_last.0 {
+                debug_assert!(cache_key != *high_last.0, "cache_key should be unique");
+                self.high.insert(cache_key, row);
+            }
         } else {
             let high_last = self.high.last_entry().unwrap();
             if cache_key <= *high_last.key() {
+                debug_assert!(cache_key != *high_last.key(), "cache_key should be unique");
                 high_last.remove_entry();
                 self.high.insert(cache_key, row);
             }
         }
-
-        Ok(())
     }
 }
 
 #[async_trait]
 impl TopNCacheTrait for TopNCache<false> {
-    async fn insert<S: StateStore>(
+    fn insert(
         &mut self,
-        group_key: Option<impl GroupKey>,
-        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) -> StreamExecutorResult<()> {
+    ) {
         if !self.is_low_cache_full() {
             self.low.insert(cache_key, (&row).into());
-            return Ok(());
+            return;
         }
         let elem_to_compare_with_middle =
             if let Some(low_last) = self.low.last_entry()
@@ -292,9 +272,10 @@ impl TopNCacheTrait for TopNCache<false> {
             );
             res_ops.push(Op::Insert);
             res_rows.push(elem_to_compare_with_middle.1);
-            return Ok(());
+            return;
         }
 
+        let mut is_from_middle = false;
         let elem_to_compare_with_high = {
             let middle_last = self.middle.last_entry().unwrap();
             if elem_to_compare_with_middle.0 <= *middle_last.key() {
@@ -307,6 +288,7 @@ impl TopNCacheTrait for TopNCache<false> {
                 res_rows.push(elem_to_compare_with_middle.1.clone());
                 self.middle
                     .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+                is_from_middle = true;
                 res
             } else {
                 elem_to_compare_with_middle
@@ -314,14 +296,10 @@ impl TopNCacheTrait for TopNCache<false> {
         };
 
         self.insert_high_cache(
-            group_key,
-            managed_state,
             elem_to_compare_with_high.0,
             elem_to_compare_with_high.1,
-        )
-        .await?;
-
-        Ok(())
+            is_from_middle,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -337,7 +315,6 @@ impl TopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
             // The row is in high
             self.high.remove(&cache_key);
-            self.is_high_cache_dirty = true;
         } else if self.is_low_cache_full()
             && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
@@ -360,7 +337,6 @@ impl TopNCacheTrait for TopNCache<false> {
 
             // Bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
-                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 res_ops.push(Op::Insert);
                 res_rows.push(high_first.1.clone());
@@ -391,7 +367,6 @@ impl TopNCacheTrait for TopNCache<false> {
 
                 // Bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
-                    self.is_high_cache_dirty = true;
                     let high_first = self.high.pop_first().unwrap();
                     res_ops.push(Op::Insert);
                     res_rows.push(high_first.1.clone());
@@ -406,15 +381,13 @@ impl TopNCacheTrait for TopNCache<false> {
 
 #[async_trait]
 impl TopNCacheTrait for TopNCache<true> {
-    async fn insert<S: StateStore>(
+    fn insert(
         &mut self,
-        group_key: Option<impl GroupKey>,
-        managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
-    ) -> StreamExecutorResult<()> {
+    ) {
         assert!(
             self.low.is_empty(),
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
@@ -429,7 +402,7 @@ impl TopNCacheTrait for TopNCache<true> {
             );
             res_ops.push(Op::Insert);
             res_rows.push((&elem_to_compare_with_middle.1).into());
-            return Ok(());
+            return;
         }
 
         let sort_key = &elem_to_compare_with_middle.0 .0;
@@ -485,16 +458,12 @@ impl TopNCacheTrait for TopNCache<true> {
                 // The row is in high.
                 let elem_to_compare_with_high = elem_to_compare_with_middle;
                 self.insert_high_cache(
-                    group_key,
-                    managed_state,
                     elem_to_compare_with_high.0,
                     elem_to_compare_with_high.1.into(),
-                )
-                .await?;
+                    false,
+                );
             }
         }
-
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -516,7 +485,6 @@ impl TopNCacheTrait for TopNCache<true> {
         if sort_key > middle_last_order_by {
             // The row is in high.
             self.high.remove(&cache_key);
-            self.is_high_cache_dirty = true;
         } else {
             // The row is in middle
             self.middle.remove(&cache_key);
@@ -541,7 +509,6 @@ impl TopNCacheTrait for TopNCache<true> {
 
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
-                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 let high_first_order_by = high_first.0 .0.clone();
                 assert!(high_first_order_by > middle_last_order_by);
