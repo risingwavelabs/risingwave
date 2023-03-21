@@ -576,7 +576,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         };
     }
 
-    pub async fn cancel(&self) {
+    pub fn cancel(&self) {
         if let Some(handle) = self.runtime_task_handle.lock().take() {
             // Cancel task running.
             handle.abort();
