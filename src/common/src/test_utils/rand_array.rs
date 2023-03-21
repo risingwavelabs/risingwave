@@ -143,7 +143,12 @@ impl RandValue for ListValue {
     }
 }
 
-pub fn rand_array<A, R>(rand: &mut R, size: usize) -> A
+pub fn rand_array<A, R>(
+    rand: &mut R,
+    size: usize,
+    null_ratio_numerator: u32,
+    null_ratio_denominator: u32,
+) -> A
 where
     A: Array,
     R: Rng,
@@ -151,7 +156,7 @@ where
 {
     let mut builder = A::Builder::new(size);
     for _ in 0..size {
-        let is_null = rand.gen::<bool>();
+        let is_null = rand.gen_ratio(null_ratio_numerator, null_ratio_denominator);
         if is_null {
             builder.append_null();
         } else {
@@ -163,21 +168,36 @@ where
     builder.finish()
 }
 
-pub fn seed_rand_array<A>(size: usize, seed: u64) -> A
+pub fn seed_rand_array<A>(
+    size: usize,
+    seed: u64,
+    null_ratio_numerator: u32,
+    null_ratio_denominator: u32,
+) -> A
 where
     A: Array,
     A::OwnedItem: RandValue,
 {
     let mut rand = SmallRng::seed_from_u64(seed);
-    rand_array(&mut rand, size)
+    rand_array(
+        &mut rand,
+        size,
+        null_ratio_numerator,
+        null_ratio_denominator,
+    )
 }
 
-pub fn seed_rand_array_ref<A>(size: usize, seed: u64) -> ArrayRef
+pub fn seed_rand_array_ref<A>(
+    size: usize,
+    seed: u64,
+    null_ratio_numerator: u32,
+    null_ratio_denominator: u32,
+) -> ArrayRef
 where
     A: Array,
     A::OwnedItem: RandValue,
 {
-    let array: A = seed_rand_array(size, seed);
+    let array: A = seed_rand_array(size, seed, null_ratio_numerator, null_ratio_denominator);
     Arc::new(array.into())
 }
 
@@ -195,7 +215,7 @@ mod tests {
             ($( { $variant_name:ident, $suffix_name:ident, $array:ty, $builder:ty } ),*) => {
             $(
                 {
-                    let array = seed_rand_array::<$array>(10, 1024);
+                    let array = seed_rand_array::<$array>(10, 1024, 1,2);
                     assert_eq!(10, array.len());
                 }
             )*
