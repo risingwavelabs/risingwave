@@ -25,6 +25,7 @@ pub fn expand_type_wildcard(ty: &str) -> Vec<&str> {
             "float32",
             "float64",
             "decimal",
+            "serial",
             "date",
             "time",
             "timestamp",
@@ -52,6 +53,7 @@ pub fn to_data_type_name(ty: &str) -> Option<&str> {
         "float32" => "Float32",
         "float64" => "Float64",
         "decimal" => "Decimal",
+        "serial" => "Serial",
         "date" => "Date",
         "time" => "Time",
         "timestamp" => "Timestamp",
@@ -136,6 +138,7 @@ pub fn to_array_type(ty: &str) -> &str {
         "float32" => "F32Array",
         "float64" => "F64Array",
         "decimal" => "DecimalArray",
+        "serial" => "SerialArray",
         "date" => "NaiveDateArray",
         "time" => "NaiveTimeArray",
         "timestamp" => "NaiveDateTimeArray",
@@ -160,6 +163,7 @@ pub fn to_data_type(ty: &str) -> &str {
         "float32" => "OrderedF32",
         "float64" => "OrderedF64",
         "decimal" => "Decimal",
+        "serial" => "Serial",
         "date" => "NaiveDateWrapper",
         "time" => "NaiveTimeWrapper",
         "timestamp" => "NaiveDateTimeWrapper",
@@ -178,7 +182,7 @@ pub fn to_data_type(ty: &str) -> &str {
 pub fn is_primitive(ty: &str) -> bool {
     match ty {
         "int16" | "int32" | "int64" | "float32" | "float64" | "decimal" | "date" | "time"
-        | "timestamp" | "timestamptz" | "interval" => true,
+        | "timestamp" | "timestamptz" | "interval" | "serial" => true,
         "boolean" | "varchar" | "bytea" | "jsonb" | "struct" | "list" => false,
         _ => panic!("unknown type: {ty:?}"),
     }

@@ -15,7 +15,7 @@
 use risingwave_common::types::{Decimal, OrderedF64};
 use risingwave_expr_macro::function;
 
-#[function("round(decimal, int32) -> decimal")]
+#[function("round_digit(decimal, int32) -> decimal")]
 pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     let digits = digits.into();
     if digits < 0 {
