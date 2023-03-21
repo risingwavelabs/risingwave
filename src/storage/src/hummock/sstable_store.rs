@@ -246,6 +246,12 @@ impl SstableStore {
 
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Block::decode(block_data, uncompressed_capacity)?;
+
+                // FIXME: Handle error? Should we insert into tiered cache?
+                tiered_cache
+                    .insert((object_id, block_index as u64), Box::new(block.clone()))
+                    .unwrap();
+
                 Ok(Box::new(block))
             }
         };
