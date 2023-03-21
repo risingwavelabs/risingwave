@@ -29,7 +29,6 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
-use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::{Aborted, SenderError};
@@ -294,9 +293,6 @@ pub struct BatchTaskExecution<C> {
 
     /// Runtime for the batch tasks.
     runtime: &'static Runtime,
-
-    /// Join handle of async execution task.
-    runtime_task_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -329,7 +325,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             context,
             runtime,
             sender,
-            runtime_task_handle: Mutex::new(None),
         })
     }
 
@@ -450,8 +445,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             },
             ctx2,
         );
+        self.runtime.spawn(alloc_stat_wrap_fut);
 
-        *self.runtime_task_handle.lock() = Some(self.runtime.spawn(alloc_stat_wrap_fut));
         Ok(())
     }
 
@@ -497,7 +492,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 biased;
                 err_reason = &mut shutdown_rx => {
                     state = TaskStatus::Aborted;
-                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
+                    // When aborted, there are two cases:
+                    // 1. Caused by some error(e.g. oom), in this case we should report it to user.
+                    // 2. Normal cancel(e.g. cancelled since other task failed), in this case we should not report an error.
+                    error = err_reason.map(|s| Some(Aborted(s))).unwrap_or(None);
                     break;
                 }
                 res = data_chunk_stream.next() => {
@@ -577,10 +575,10 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
     }
 
     pub fn cancel(&self) {
-        if let Some(handle) = self.runtime_task_handle.lock().take() {
-            // Cancel task running.
-            handle.abort();
-        }
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            // Drop sender directly to mark cancel without error.
+            drop(sender);
+        };
     }
 
     pub fn get_task_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
