@@ -518,7 +518,7 @@ impl LogicalMultiJoin {
             nodes.get_mut(&dst).unwrap().relations.insert(src);
         }
 
-        nodes = graph_augmentation(nodes);
+        nodes = eq_condition_derivation(nodes);
 
         // isolated nodes can be joined at any where.
         let iso_nodes = nodes
@@ -708,8 +708,8 @@ struct GraphNode {
     relations: BTreeSet<usize>,
 }
 
-///  equivalent condition derivation by `a = b && a & c` ==> `b = c`
-fn graph_augmentation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<usize, GraphNode> {
+///  equivalent condition derivation by `a = b && a = c` ==> `b = c`
+fn eq_condition_derivation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<usize, GraphNode> {
     let keys = nodes.keys().cloned().collect_vec();
     for node in keys {
         let rel = nodes
