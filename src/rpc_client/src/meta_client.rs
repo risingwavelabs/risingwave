@@ -27,6 +27,7 @@ use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
@@ -58,6 +59,7 @@ use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -799,6 +801,12 @@ impl MetaClient {
         Ok(resp.manifest.expect("should exist"))
     }
 
+    pub async fn get_telemetry_info(&self) -> Result<TelemetryInfoResponse> {
+        let req = GetTelemetryInfoRequest {};
+        let resp = self.inner.get_telemetry_info(req).await?;
+        Ok(resp)
+    }
+
     pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
@@ -993,6 +1001,17 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+#[async_trait]
+impl TelemetryInfoFetcher for MetaClient {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+        let resp = self.get_telemetry_info().await?;
+        let tracking_id = resp
+            .get_tracking_id()
+            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
+        Ok(tracking_id.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
@@ -1005,6 +1024,7 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
 }
 
@@ -1020,7 +1040,9 @@ impl GrpcMetaClientCore {
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
+        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel);
+
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -1032,6 +1054,7 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            telemetry_client,
             system_params_client,
         }
     }
@@ -1325,7 +1348,6 @@ impl GrpcMetaClient {
             )))
         })
         .await?;
-
         Ok(channel)
     }
 
@@ -1424,6 +1446,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }

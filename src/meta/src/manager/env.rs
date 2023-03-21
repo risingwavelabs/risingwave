@@ -100,6 +100,8 @@ pub struct MetaOpts {
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
+    /// telemetry enabled in config file or not
+    pub telemetry_enabled: bool,
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
@@ -126,6 +128,7 @@ impl MetaOpts {
             security_group_id: None,
             connector_rpc_endpoint: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
+            telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             max_compactor_task_multiplier: 2,
         }

@@ -56,6 +56,7 @@ prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 ryu = "1.0"
@@ -78,6 +79,7 @@ toml = "0.5"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
+uuid = "1.2.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
