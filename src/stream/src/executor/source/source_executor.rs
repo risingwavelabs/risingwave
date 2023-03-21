@@ -615,9 +615,9 @@ mod tests {
         };
         let properties = convert_args!(hashmap!(
             "connector" => "datagen",
-            "fields.v1.min" => "1",
-            "fields.v1.max" => "1000",
-            "fields.v1.seed" => "12345",
+            "fields.v1.kind" => "sequence",
+            "fields.v1.start" => "11",
+            "fields.v1.end" => "11111",
         ));
 
         let source_desc_builder = create_source_desc_builder(
@@ -701,10 +701,10 @@ mod tests {
             chunk_1,
             StreamChunk::from_pretty(
                 " i
-                + 533
-                + 833
-                + 738
-                + 344",
+                + 11
+                + 14
+                + 17
+                + 20",
             )
         );
 
@@ -754,13 +754,13 @@ mod tests {
             // mixed from datagen split 0 and 1
             StreamChunk::from_pretty(
                 " i
-                + 29
-                + 201
-                + 344
-                + 425
-                + 525
-                + 533
-                + 833",
+                + 11
+                + 12
+                + 14
+                + 15
+                + 17
+                + 18
+                + 20",
             )
         );
 
