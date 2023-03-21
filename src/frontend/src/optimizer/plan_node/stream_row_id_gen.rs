@@ -14,34 +14,31 @@
 
 use std::fmt;
 
+use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{ExprRewritable, LogicalRowIdGen, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
-    input: PlanRef,
-    row_id_index: usize,
+    logical: LogicalRowIdGen,
 }
 
 impl StreamRowIdGen {
-    pub fn new(input: PlanRef, row_id_index: usize) -> Self {
+    pub fn new(logical: LogicalRowIdGen) -> Self {
+        let watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
         let base = PlanBase::new_stream(
-            input.ctx(),
-            input.schema().clone(),
-            input.logical_pk().to_vec(),
-            input.functional_dependency().clone(),
-            input.distribution().clone(),
-            input.append_only(),
-            input.watermark_columns().clone(),
+            logical.ctx(),
+            logical.schema().clone(),
+            logical.logical_pk().to_vec(),
+            logical.functional_dependency().clone(),
+            logical.distribution().clone(),
+            logical.append_only(),
+            watermark_columns,
         );
-        Self {
-            base,
-            input,
-            row_id_index,
-        }
+        Self { base, logical }
     }
 }
 
@@ -50,18 +47,20 @@ impl fmt::Display for StreamRowIdGen {
         write!(
             f,
             "StreamRowIdGen {{ row_id_index: {} }}",
-            self.row_id_index
+            self.logical.row_id_index()
         )
     }
 }
 
 impl PlanTreeNodeUnary for StreamRowIdGen {
     fn input(&self) -> PlanRef {
-        self.input.clone()
+        self.logical.input()
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.row_id_index)
+        Self::new(
+            self.logical.clone_with_input(input),
+        )
     }
 }
 
@@ -72,7 +71,7 @@ impl StreamNode for StreamRowIdGen {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::RowIdGen(RowIdGenNode {
-            row_id_index: self.row_id_index as _,
+            row_id_index: self.logical.row_id_index() as _,
         })
     }
 }

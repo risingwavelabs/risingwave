@@ -15,12 +15,13 @@
 use std::sync::Arc;
 use std::{fmt, vec};
 
-use risingwave_common::catalog::Schema;
-use risingwave_common::error::{ErrorCode, Result, RwError};
+use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::error::Result;
+use risingwave_common::types::DataType;
 
 use super::{
     BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    ToBatch, ToStream,
+    StreamValues, ToBatch, ToStream, LogicalRowIdGen,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -132,20 +133,27 @@ impl ToBatch for LogicalValues {
 
 impl ToStream for LogicalValues {
     fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        Ok(StreamValues::new(self.clone()).into())
     }
 
     fn logical_rewrite_for_stream(
         &self,
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        Err(RwError::from(ErrorCode::NotImplemented(
-            "Stream values executor is unimplemented!".to_string(),
-            None.into(),
-        )))
+        let row_id_index = self.schema().len();
+        let col_index_mapping = ColIndexMapping::identity(row_id_index);
+        let ctx = self.ctx().clone();
+        let mut schema = self.schema().clone();
+        schema.fields.push(Field {
+            data_type: DataType::Int64,
+            name: "_row_id".to_string(),
+            sub_fields: vec![],
+            type_name: "int64".to_string(),
+        });
+        let rows = self.rows().clone().to_owned();
+        let logical_values = Self::create(rows, schema, ctx);
+        let logical_row_id_gen = LogicalRowIdGen::new(logical_values, row_id_index);
+        Ok((logical_row_id_gen.into(), col_index_mapping))
     }
 }
 

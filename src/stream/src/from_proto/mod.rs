@@ -105,7 +105,7 @@ macro_rules! build_executor {
                     <$data_type>::new_boxed_executor($source, node, $store, $stream).await
                 },
             )*
-            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
+            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) | NodeBody::Values(_) => unreachable!()
         }
     }
 }

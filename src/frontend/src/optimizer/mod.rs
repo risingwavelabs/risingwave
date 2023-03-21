@@ -41,8 +41,8 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    BatchProject, Convention, LogicalProject, LogicalRowIdGen, StreamDml, StreamMaterialize,
+    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -397,7 +397,8 @@ impl PlanRoot {
 
         // Add RowIDGen node if needed.
         if let Some(row_id_index) = row_id_index {
-            stream_plan = StreamRowIdGen::new(stream_plan, row_id_index).into();
+            let logical_row_id_gen = LogicalRowIdGen::new(stream_plan, row_id_index);
+            stream_plan = StreamRowIdGen::new(logical_row_id_gen).into();
         }
 
         let conflict_behavior = match append_only {

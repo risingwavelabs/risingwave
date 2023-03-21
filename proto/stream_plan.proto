@@ -511,6 +511,14 @@ message NowNode {
   catalog.Table state_table = 1;
 }
 
+message ValuesNode {
+  message ExprTuple {
+    repeated expr.ExprNode cells = 1;
+  }
+  repeated ExprTuple tuples = 1;
+  repeated plan_common.Field fields = 2;
+}
+
 message StreamNode {
   oneof node_body {
     SourceNode source = 100;
@@ -545,6 +553,7 @@ message StreamNode {
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
     TemporalJoinNode temporal_join = 131;
+    ValuesNode values = 132;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.

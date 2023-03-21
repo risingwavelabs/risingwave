@@ -32,7 +32,8 @@ use crate::catalog::ColumnId;
 use crate::expr::{Expr, ExprImpl, ExprType};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    ColumnPruningContext, LogicalRowIdGen, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 use crate::TableCatalog;
@@ -352,7 +353,8 @@ impl ToStream for LogicalSource {
 
         assert!(!(self.core.gen_row_id && self.core.for_table));
         if let Some(row_id_index) = self.core.row_id_index && self.core.gen_row_id {
-            plan = StreamRowIdGen::new(plan, row_id_index).into();
+            let logical_row_id_gen = LogicalRowIdGen::new(plan, row_id_index);
+            plan = StreamRowIdGen::new(logical_row_id_gen).into();
         }
         Ok(plan)
     }
