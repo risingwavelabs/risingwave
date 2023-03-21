@@ -758,36 +758,28 @@ mod tests {
         let capacity = 128;
         let seed = 10244021u64;
         let columns = vec![
-            Column::new(seed_rand_array_ref::<BoolArray>(capacity, seed, 1, 2)),
-            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed + 1, 1, 2)),
-            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed + 2, 1, 2)),
-            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed + 3, 1, 2)),
-            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed + 4, 1, 2)),
-            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5, 1, 2)),
-            Column::new(seed_rand_array_ref::<DecimalArray>(
-                capacity,
-                seed + 6,
-                1,
-                2,
-            )),
-            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 1, 2)),
+            Column::new(seed_rand_array_ref::<BoolArray>(capacity, seed, 0.5)),
+            Column::new(seed_rand_array_ref::<I16Array>(capacity, seed + 1, 0.5)),
+            Column::new(seed_rand_array_ref::<I32Array>(capacity, seed + 2, 0.5)),
+            Column::new(seed_rand_array_ref::<I64Array>(capacity, seed + 3, 0.5)),
+            Column::new(seed_rand_array_ref::<F32Array>(capacity, seed + 4, 0.5)),
+            Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5, 0.5)),
+            Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6, 0.5)),
+            Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 0.5)),
             Column::new(seed_rand_array_ref::<NaiveDateArray>(
                 capacity,
                 seed + 8,
-                1,
-                2,
+                0.5,
             )),
             Column::new(seed_rand_array_ref::<NaiveTimeArray>(
                 capacity,
                 seed + 9,
-                1,
-                2,
+                0.5,
             )),
             Column::new(seed_rand_array_ref::<NaiveDateTimeArray>(
                 capacity,
                 seed + 10,
-                1,
-                2,
+                0.5,
             )),
         ];
         let types = vec![
