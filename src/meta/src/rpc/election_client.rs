@@ -267,7 +267,11 @@ impl ElectionClient for EtcdElectionClient {
             }
         }
 
-        tracing::warn!("client {} lost leadership", self.id);
+        tracing::warn!("client {} lost leadership. Calling external panic", self.id);
+
+        // TODO: should be parameterized to get correct port
+        let client = hyper::Client::new();
+        let _ = client.get(hyper::Uri::from_static("127.0.0.1:2345")).await;
 
         self.is_leader_sender.send_replace(false);
 

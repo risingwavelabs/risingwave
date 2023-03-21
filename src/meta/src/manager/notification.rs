@@ -126,7 +126,7 @@ where
             info,
             version,
         };
-        self.task_tx.send(task).unwrap();
+        self.task_tx.send(task).unwrap(); // TODO: change this to unwrap or?
     }
 
     /// Add a notification to the waiting queue and increase notification version.

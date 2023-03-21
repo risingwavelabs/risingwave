@@ -52,6 +52,26 @@ fn main() -> Result<()> {
         );
     }
 
+    // TODO: I need to add the kill node here
+    // meta node configuration
+    for fn_name in ["kill", "fencing"] {
+        fns.insert(
+            fn_name,
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching kill container");
+
+                // TODO: change the otps here
+                let opts = risingwave_kill::KillOpts::parse_from(args);
+
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+
+                risingwave_rt::main_okk(risingwave_kill::start(opts));
+
+                Ok(())
+            }),
+        );
+    }
+
     // meta node configuration
     for fn_name in ["meta", "meta-node", "meta_node"] {
         fns.insert(
