@@ -1562,11 +1562,14 @@ where
                     RexNode::InputRef(input_col_idx) => {
                         *input_col_idx =
                             table_col_index_mapping.map(*input_col_idx as usize) as u32;
-                        x.return_type = table.columns[*input_col_idx as usize]
-                            .column_desc
-                            .clone()
-                            .unwrap()
-                            .column_type;
+                        assert_eq!(
+                            x.return_type,
+                            table.columns[*input_col_idx as usize]
+                                .column_desc
+                                .clone()
+                                .unwrap()
+                                .column_type
+                        );
                     }
                     RexNode::FuncCall(_) => unimplemented!(),
                     _ => unreachable!(),
