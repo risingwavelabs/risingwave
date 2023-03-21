@@ -17,19 +17,26 @@ use std::fmt::{Debug, Write};
 use std::str::FromStr;
 
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
+use futures_util::FutureExt;
 use itertools::Itertools;
 use num_traits::ToPrimitive;
-use risingwave_common::array::{Array, JsonbRef, ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::array::{
+    JsonbRef, ListArray, ListRef, ListValue, StructArray, StructRef, StructValue, Utf8Array,
+};
+use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
     DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, Scalar, ScalarImpl, ScalarRefImpl,
+    OrderedF32, OrderedF64, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr_macro::function;
+use risingwave_expr_macro::{build_function, function};
+use risingwave_pb::expr::expr_node::PbType;
 use speedate::{Date as SpeedDate, DateTime as SpeedDateTime, Time as SpeedTime};
 
+use crate::expr::template::UnaryExpression;
+use crate::expr::{build, BoxedExpression, Expression, InputRefExpression};
 use crate::{ExprError, Result};
 
 /// String literals for bool type.
@@ -412,6 +419,7 @@ where
 #[function("cast(float64) -> decimal")]
 #[function("cast(date) -> timestamp")]
 #[function("cast(time) -> interval")]
+#[function("cast(varchar) -> varchar")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -508,99 +516,6 @@ pub fn literal_parsing(
     Ok(scalar)
 }
 
-/// It accepts a macro whose input is `{ $input:ident, $cast:ident, $func:expr }` tuples
-///
-/// * `$input`: input type
-/// * `$cast`: The cast type in that the operation will calculate
-/// * `$func`: The scalar function for expression, it's a generic function and specialized by the
-///   type of `$input, $cast`
-/// * `$infallible`: Whether the cast is infallible
-#[macro_export]
-macro_rules! for_all_cast_variants {
-    ($macro:ident) => {
-        $macro! {
-            { varchar, date, str_to_date, false },
-            { varchar, time, str_to_time, false },
-            { varchar, interval, str_parse, false },
-            { varchar, timestamp, str_to_timestamp, false },
-            { varchar, int16, str_parse, false },
-            { varchar, int32, str_parse, false },
-            { varchar, int64, str_parse, false },
-            { varchar, float32, str_parse, false },
-            { varchar, float64, str_parse, false },
-            { varchar, decimal, str_parse, false },
-            { varchar, boolean, str_to_bool, false },
-            { varchar, bytea, str_to_bytea, false },
-            { varchar, jsonb, str_parse, false },
-            // `str_to_list` requires `target_elem_type` and is handled elsewhere
-
-            { boolean, varchar, bool_to_varchar, false },
-            { int16, varchar, general_to_text, false },
-            { int32, varchar, general_to_text, false },
-            { int64, varchar, general_to_text, false },
-            { float32, varchar, general_to_text, false },
-            { float64, varchar, general_to_text, false },
-            { decimal, varchar, general_to_text, false },
-            { time, varchar, general_to_text, false },
-            { interval, varchar, general_to_text, false },
-            { date, varchar, general_to_text, false },
-            { timestamp, varchar, general_to_text, false },
-            { jsonb, varchar, |x, w| general_to_text(x, w), false },
-            { list, varchar, |x, w| general_to_text(x, w), false },
-
-            { jsonb, boolean, jsonb_to_bool, false },
-            { jsonb, int16, jsonb_to_i16, false },
-            { jsonb, int32, jsonb_to_i32, false },
-            { jsonb, int64, jsonb_to_i64, false },
-            { jsonb, decimal, jsonb_to_dec, false },
-            { jsonb, float32, jsonb_to_f32, false },
-            { jsonb, float64, jsonb_to_f64, false },
-
-            { boolean, int32, try_cast, false },
-            { int32, boolean, int32_to_bool, false },
-
-            { int16, int32, cast::<i16, i32>, true },
-            { int16, int64, cast::<i16, i64>, true },
-            { int16, float32, cast::<i16, OrderedF32>, true },
-            { int16, float64, cast::<i16, OrderedF64>, true },
-            { int16, decimal, cast::<i16, Decimal>, true },
-            { int32, int16, try_cast, false },
-            { int32, int64, cast::<i32, i64>, true },
-            { int32, float32, to_f32, false }, // lossy
-            { int32, float64, cast::<i32, OrderedF64>, true },
-            { int32, decimal, cast::<i32, Decimal>, true },
-            { int64, int16, try_cast, false },
-            { int64, int32, try_cast, false },
-            { int64, float32, to_f32, false }, // lossy
-            { int64, float64, to_f64, false }, // lossy
-            { int64, decimal, cast::<i64, Decimal>, true },
-
-            { float32, float64, cast::<OrderedF32, OrderedF64>, true },
-            { float32, decimal, cast::<OrderedF32, Decimal>, true },
-            { float32, int16, to_i16, false },
-            { float32, int32, to_i32, false },
-            { float32, int64, to_i64, false },
-            { float64, decimal, cast::<OrderedF64, Decimal>, true },
-            { float64, int16, to_i16, false },
-            { float64, int32, to_i32, false },
-            { float64, int64, to_i64, false },
-            { float64, float32, to_f32, false }, // lossy
-
-            { decimal, int16, dec_to_i16, false },
-            { decimal, int32, dec_to_i32, false },
-            { decimal, int64, dec_to_i64, false },
-            { decimal, float32, to_f32, false },
-            { decimal, float64, to_f64, false },
-
-            { date, timestamp, cast::<NaiveDateWrapper, NaiveDateTimeWrapper>, true },
-            { time, interval, cast::<NaiveTimeWrapper, IntervalUnit>, true },
-            { timestamp, date, timestamp_to_date, true },
-            { timestamp, time, timestamp_to_time, true },
-            { interval, time, interval_to_time, true }
-        }
-    };
-}
-
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
 // function.
 /// Takes a string input in the form of a comma-separated list enclosed in braces, and returns a
@@ -641,147 +556,146 @@ fn unnest(input: &str) -> Result<Vec<&str>> {
     Ok(items)
 }
 
-// #[function("cast(varchar) -> list")]
-pub fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
-    // Return a new ListValue.
-    // For each &str in the comma separated input a ScalarRefImpl is initialized which in turn
-    // is cast into the target DataType. If the target DataType is of type Varchar, then
-    // no casting is needed.
-    Ok(ListValue::new(
-        unnest(input)?
-            .iter()
-            .map(|s| {
-                Some(ScalarRefImpl::Utf8(s.trim()))
-                    .map(|scalar_ref| match target_elem_type {
-                        DataType::Varchar => Ok(scalar_ref.into_scalar_impl()),
-                        _ => scalar_cast(scalar_ref, &DataType::Varchar, target_elem_type),
-                    })
-                    .transpose()
-            })
-            .try_collect()?,
-    ))
+#[build_function("cast(varchar) -> list")]
+fn build_cast_str_to_list(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let elem_type = match &return_type {
+        DataType::List { datatype } => (**datatype).clone(),
+        _ => panic!("expected list type"),
+    };
+    let child = children.into_iter().next().unwrap();
+    Ok(Box::new(UnaryExpression::<Utf8Array, ListArray, _>::new(
+        child,
+        return_type,
+        move |x| str_to_list(x, &elem_type),
+    )))
+}
+
+fn str_to_list(input: &str, target_elem_type: &DataType) -> Result<ListValue> {
+    let cast = build(
+        PbType::Cast,
+        target_elem_type.clone(),
+        vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
+    )
+    .unwrap();
+    let mut values = vec![];
+    for item in unnest(input)? {
+        let v = cast
+            .eval_row(&OwnedRow::new(vec![Some(item.to_string().into())])) // TODO: optimize
+            .now_or_never()
+            .unwrap()?;
+        values.push(v);
+    }
+    Ok(ListValue::new(values))
+}
+
+#[build_function("cast(list) -> list")]
+fn build_cast_list_to_list(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let child = children.into_iter().next().unwrap();
+    let source_elem_type = match child.return_type() {
+        DataType::List { datatype } => (*datatype).clone(),
+        _ => panic!("expected list type"),
+    };
+    let target_elem_type = match &return_type {
+        DataType::List { datatype } => (**datatype).clone(),
+        _ => panic!("expected list type"),
+    };
+    Ok(Box::new(UnaryExpression::<ListArray, ListArray, _>::new(
+        child,
+        return_type,
+        move |x| list_cast(x, &source_elem_type, &target_elem_type),
+    )))
 }
 
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
-///
-/// TODO: `.map(scalar_cast)` is not a preferred pattern and we should avoid it if possible.
-// #[function("cast(list) -> list")]
-pub fn list_cast(
+fn list_cast(
     input: ListRef<'_>,
     source_elem_type: &DataType,
     target_elem_type: &DataType,
 ) -> Result<ListValue> {
-    Ok(ListValue::new(
-        input
-            .values_ref()
-            .into_iter()
-            .map(|datum_ref| {
-                datum_ref
-                    .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
-                    .transpose()
-            })
-            .try_collect()?,
+    let cast = build(
+        PbType::Cast,
+        target_elem_type.clone(),
+        vec![InputRefExpression::new(source_elem_type.clone(), 0).boxed()],
+    )
+    .unwrap();
+    let elements = input.values_ref();
+    let mut values = Vec::with_capacity(elements.len());
+    for item in elements {
+        let v = cast
+            .eval_row(&OwnedRow::new(vec![item.map(|s| s.into_scalar_impl())])) // TODO: optimize
+            .now_or_never()
+            .unwrap()?;
+        values.push(v);
+    }
+    Ok(ListValue::new(values))
+}
+
+#[build_function("cast(struct) -> struct")]
+fn build_cast_struct_to_struct(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let child = children.into_iter().next().unwrap();
+    let source_elem_type = match child.return_type() {
+        DataType::Struct(s) => (*s).clone(),
+        _ => panic!("expected struct type"),
+    };
+    let target_elem_type = match &return_type {
+        DataType::Struct(s) => (**s).clone(),
+        _ => panic!("expected struct type"),
+    };
+    Ok(Box::new(
+        UnaryExpression::<StructArray, StructArray, _>::new(child, return_type, move |x| {
+            struct_cast(x, &source_elem_type, &target_elem_type)
+        }),
     ))
 }
 
 /// Cast struct of `source_elem_type` to `target_elem_type` by casting each element.
-// #[function("cast(struct) -> struct")]
-pub fn struct_cast(
+fn struct_cast(
     input: StructRef<'_>,
     source_elem_type: &StructType,
     target_elem_type: &StructType,
 ) -> Result<StructValue> {
-    Ok(StructValue::new(
-        input
-            .fields_ref()
-            .into_iter()
-            .zip_eq_fast(source_elem_type.fields.iter())
-            .zip_eq_fast(target_elem_type.fields.iter())
-            .map(|((datum_ref, source_elem_type), target_elem_type)| {
-                if source_elem_type == target_elem_type {
-                    return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
-                }
-                datum_ref
-                    .map(|scalar_ref| scalar_cast(scalar_ref, source_elem_type, target_elem_type))
-                    .transpose()
-            })
-            .try_collect()?,
-    ))
-}
-
-/// Cast scalar ref with `source_type` into owned scalar with `target_type`. This function forms a
-/// mutual recursion with `list_cast` so that we can cast nested lists (e.g., varchar[][] to
-/// int[][]).
-fn scalar_cast(
-    source: ScalarRefImpl<'_>,
-    source_type: &DataType,
-    target_type: &DataType,
-) -> Result<ScalarImpl> {
-    use crate::expr::data_types::*;
-
-    match (source_type, target_type) {
-        (DataType::Struct(source_type), DataType::Struct(target_type)) => {
-            Ok(struct_cast(source.try_into()?, source_type, target_type)?.to_scalar_value())
-        }
-        (
-            DataType::List {
-                datatype: source_elem_type,
-            },
-            DataType::List {
-                datatype: target_elem_type,
-            },
-        ) => list_cast(source.try_into()?, source_elem_type, target_elem_type)
-            .map(Scalar::to_scalar_value),
-        (
-            DataType::Varchar,
-            DataType::List {
-                datatype: target_elem_type,
-            },
-        ) => str_to_list(source.try_into()?, target_elem_type).map(Scalar::to_scalar_value),
-        (source_type, target_type) => {
-            macro_rules! gen_cast_impl {
-                ($( { $input:ident, $cast:ident, $func:expr, $infallible:ident } ),*) => {
-                    match (source_type, target_type) {
-                        $(
-                            ($input! { type_match_pattern }, $cast! { type_match_pattern }) => gen_cast_impl!(arm: $input, $cast, $func, $infallible),
-                        )*
-                        _ => {
-                            return Err(ExprError::UnsupportedCast(source_type.clone(), target_type.clone()));
-                        }
-                    }
-                };
-                (arm: $input:ident, varchar, $func:expr, false) => {
-                    {
-                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
-                        let mut writer = String::new();
-                        let target: Result<()> = $func(source, &mut writer);
-                        target.map(|_| Scalar::to_scalar_value(writer.into_boxed_str()))
-                    }
-                };
-                (arm: $input:ident, $cast:ident, $func:expr, false) => {
-                    {
-                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
-                        let target: Result<<$cast! { type_array } as Array>::OwnedItem> = $func(source);
-                        target.map(Scalar::to_scalar_value)
-                    }
-                };
-                (arm: $input:ident, $cast:ident, $func:expr, true) => {
-                    {
-                        let source: <$input! { type_array } as Array>::RefItem<'_> = source.try_into()?;
-                        let target: Result<<$cast! { type_array } as Array>::OwnedItem> = Ok($func(source));
-                        target.map(Scalar::to_scalar_value)
-                    }
-                };
+    let fields = input
+        .fields_ref()
+        .into_iter()
+        .zip_eq_fast(source_elem_type.fields.iter())
+        .zip_eq_fast(target_elem_type.fields.iter())
+        .map(|((datum_ref, source_field_type), target_field_type)| {
+            if source_field_type == target_field_type {
+                return Ok(datum_ref.map(|scalar_ref| scalar_ref.into_scalar_impl()));
             }
-            for_all_cast_variants!(gen_cast_impl)
-        }
-    }
+            let cast = build(
+                PbType::Cast,
+                target_field_type.clone(),
+                vec![InputRefExpression::new(source_field_type.clone(), 0).boxed()],
+            )
+            .unwrap();
+            let value = match datum_ref {
+                Some(scalar_ref) => cast
+                    .eval_row(&OwnedRow::new(vec![Some(scalar_ref.into_scalar_impl())]))
+                    .now_or_never()
+                    .unwrap()?,
+                None => None,
+            };
+            Ok(value) as Result<_>
+        })
+        .try_collect()?;
+    Ok(StructValue::new(fields))
 }
 
 #[cfg(test)]
 mod tests {
 
     use num_traits::FromPrimitive;
+    use risingwave_common::types::Scalar;
 
     use super::*;
 
