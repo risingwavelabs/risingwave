@@ -22,7 +22,9 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{
+    build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
@@ -233,11 +235,13 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
-        new_binary_expr(
+        build(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
-            InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
-            LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            vec![
+                InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
+                LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            ],
         )
     }
 

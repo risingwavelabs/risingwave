@@ -25,7 +25,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{once, OwnedRow as RowData, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_expr::expr::{BoxedExpression, InputRefExpression, LiteralExpression};
+use risingwave_expr::expr::{build, BoxedExpression, InputRefExpression, LiteralExpression};
 use risingwave_pb::expr::expr_node::Type as ExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
     GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual,
@@ -265,11 +265,13 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
         assert_eq!(l_data_type, r_data_type);
         let dynamic_cond = move |literal: Datum| {
             literal.map(|scalar| {
-                new_binary_expr(
+                build(
                     self.comparator,
                     DataType::Boolean,
-                    Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
-                    Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                    vec![
+                        Box::new(InputRefExpression::new(l_data_type.clone(), self.key_l)),
+                        Box::new(LiteralExpression::new(r_data_type.clone(), Some(scalar))),
+                    ],
                 )
             })
         };

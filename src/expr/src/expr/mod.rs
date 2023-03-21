@@ -70,7 +70,7 @@ use risingwave_common::types::{DataType, Datum};
 use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
-pub use self::build_expr_from_prost::build_from_prost;
+pub use self::build_expr_from_prost::{build, build_from_prost};
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
 use super::{ExprError, Result};

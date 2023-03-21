@@ -1137,7 +1137,7 @@ mod tests {
                     func: DUMMY_FUNC,
                     inputs_type: formals,
                     ret_type: DUMMY_RET,
-                    build_from_prost: |_| unreachable!(),
+                    build: |_, _| unreachable!(),
                 })
             });
             let result = infer_type_name(&sig_map, DUMMY_FUNC, inputs);
