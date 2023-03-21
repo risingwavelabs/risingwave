@@ -29,6 +29,7 @@ use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
 use task_stats_alloc::{TaskLocalBytesAllocated, BYTES_ALLOCATED};
 use tokio::runtime::Runtime;
 use tokio::sync::oneshot::{Receiver, Sender};
+use tokio::task::JoinHandle;
 use tokio_metrics::TaskMonitor;
 
 use crate::error::BatchError::{Aborted, SenderError};
@@ -293,6 +294,9 @@ pub struct BatchTaskExecution<C> {
 
     /// Runtime for the batch tasks.
     runtime: &'static Runtime,
+
+    /// Join handle of async execution task.
+    runtime_task_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
@@ -445,7 +449,8 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             },
             ctx2,
         );
-        self.runtime.spawn(alloc_stat_wrap_fut);
+
+        *self.runtime_task_handle.lock() = Some(self.runtime.spawn(alloc_stat_wrap_fut));
         Ok(())
     }
 
@@ -558,7 +563,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn abort_task(&self, err_msg: String) {
+    pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
@@ -568,6 +573,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 info!("Abort task {:?} done", self.task_id);
             }
         };
+    }
+
+    pub async fn cancel(&self) {
+        if let Some(handle) = self.runtime_task_handle.lock().take() {
+            /// Cancel task running.
+            handle.abort();
+        }
     }
 
     pub fn get_task_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {

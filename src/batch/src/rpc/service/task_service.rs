@@ -101,10 +101,8 @@ impl TaskService for BatchServiceImpl {
     ) -> Result<Response<AbortTaskResponse>, Status> {
         let req = req.into_inner();
         tracing::trace!("Aborting task: {:?}", req.get_task_id().unwrap());
-        self.mgr.abort_task(
-            req.get_task_id().expect("no task id found"),
-            "abort task request".to_string(),
-        );
+        self.mgr
+            .cancel_task(req.get_task_id().expect("no task id found"));
         Ok(Response::new(AbortTaskResponse { status: None }))
     }
 
