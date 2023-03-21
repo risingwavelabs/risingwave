@@ -103,7 +103,7 @@ async fn compact_shared_buffer(
             let tombstones = imm.get_delete_range_tombstones();
             builder.add_tombstone(tombstones);
             // calculate encoded bytes of key var length
-            (imm.get_payload().len() * 8 + imm.size()) as u64
+            (imm.kv_count() * 8 + imm.size()) as u64
         };
         compact_data_size += data_size;
         size_and_start_user_keys.push((data_size, imm.start_user_key()));

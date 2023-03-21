@@ -49,10 +49,6 @@ pub type SharedBufferVersionedEntry = (Bytes, Vec<(HummockEpoch, HummockValue<By
 #[derive(Debug)]
 pub(crate) struct SharedBufferBatchInner {
     payload: Vec<SharedBufferVersionedEntry>,
-    /// The minimum epoch of this batch if it contains many epochs
-    epoch: HummockEpoch,
-    has_multi_epochs: bool,
-
     /// The list of imm ids that are merged into this batch
     /// This field is immutable
     imm_ids: Vec<ImmId>,
@@ -60,6 +56,8 @@ pub(crate) struct SharedBufferBatchInner {
     range_tombstone_list: Vec<DeleteRangeTombstone>,
     largest_table_key: Vec<u8>,
     smallest_table_key: Vec<u8>,
+    kv_count: usize,
+    /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
     _tracker: Option<MemoryTracker>,
     /// For a batch created from multiple batches, this will be
@@ -90,6 +88,7 @@ impl SharedBufferBatchInner {
                 smallest_table_key.extend_from_slice(item.0.as_ref());
             }
         }
+        let kv_count = payload.len();
         let items = payload
             .into_iter()
             .map(|(k, v)| (k, vec![(epoch, v)]))
@@ -98,11 +97,10 @@ impl SharedBufferBatchInner {
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
         SharedBufferBatchInner {
             payload: items,
-            epoch,
-            has_multi_epochs: false,
             imm_ids: vec![batch_id],
             epochs: vec![epoch],
             range_tombstone_list: range_tombstones,
+            kv_count,
             size,
             largest_table_key,
             smallest_table_key,
@@ -112,15 +110,17 @@ impl SharedBufferBatchInner {
     }
 
     pub(crate) fn new_with_multi_epoch_batches(
-        min_epoch: HummockEpoch,
         epochs: Vec<HummockEpoch>,
         payload: Vec<SharedBufferVersionedEntry>,
+        num_items: usize,
         imm_ids: Vec<ImmId>,
         range_tombstone_list: Vec<DeleteRangeTombstone>,
         size: usize,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         debug_assert!(!imm_ids.is_empty());
+        debug_assert!(!epochs.is_empty());
+        debug_assert!(epochs.is_sorted());
 
         let (smallest_empty, mut smallest_table_key, mut largest_table_key, range_tombstones) =
             Self::get_table_key_ends(range_tombstone_list);
@@ -141,13 +141,12 @@ impl SharedBufferBatchInner {
         let max_imm_id = *imm_ids.iter().max().unwrap();
         Self {
             payload,
-            epoch: min_epoch,
-            has_multi_epochs: true,
             epochs,
             imm_ids,
             range_tombstone_list: range_tombstones,
             largest_table_key,
             smallest_table_key,
+            kv_count: num_items,
             size,
             _tracker: tracker,
             batch_id: max_imm_id,
@@ -360,12 +359,12 @@ impl SharedBufferBatch {
     }
 
     pub fn is_merged_imm(&self) -> bool {
-        self.inner.has_multi_epochs
+        self.inner.epochs.len() > 1
     }
 
     /// For a merged imm, returns the minimum epoch
     pub fn epoch(&self) -> HummockEpoch {
-        self.inner.epoch
+        *self.inner.epochs.first().unwrap()
     }
 
     pub fn get_imm_ids(&self) -> &Vec<ImmId> {
@@ -373,8 +372,8 @@ impl SharedBufferBatch {
         &self.inner.imm_ids
     }
 
-    pub fn key_count(&self) -> usize {
-        self.inner.len()
+    pub fn kv_count(&self) -> usize {
+        self.inner.kv_count
     }
 
     /// Return `None` if the key doesn't exist
@@ -532,35 +531,34 @@ impl SharedBufferBatch {
         memory_limiter: Option<Arc<MemoryLimiter>>,
     ) -> HummockResult<Self> {
         let mut range_tombstone_list = Vec::new();
-        let mut num_keys = 0;
-        let mut min_epoch = HummockEpoch::MAX;
+        let mut num_items = 0;
         let mut epochs = vec![];
         let mut merged_size = 0;
         let mut merged_imm_ids = Vec::with_capacity(imms.len());
 
         let mut imm_iters = Vec::with_capacity(imms.len());
         for imm in imms {
-            assert!(imm.key_count() > 0, "imm should not be empty");
+            assert!(imm.kv_count() > 0, "imm should not be empty");
             assert_eq!(
                 table_id,
                 imm.table_id(),
                 "should only merge data belonging to the same table"
             );
-            let epoch = imm.epoch();
+
             merged_imm_ids.push(imm.batch_id());
-            epochs.push(epoch);
-            num_keys += imm.key_count();
+            epochs.push(imm.epoch());
+            num_items += imm.kv_count();
             merged_size += imm.size();
-            min_epoch = std::cmp::min(min_epoch, imm.epoch());
             range_tombstone_list.extend(imm.get_delete_range_tombstones());
             imm_iters.push(imm.into_forward_iter());
         }
         range_tombstone_list.sort();
+        epochs.sort();
 
         // use merge iterator to merge input imms
         let mut mi = UnorderedMergeIteratorInner::new(imm_iters);
         mi.rewind().await?;
-        let mut items = Vec::with_capacity(num_keys);
+        let mut items = Vec::with_capacity(num_items);
         while mi.is_valid() {
             let full_key = mi.key();
             let epoch = full_key.epoch;
@@ -596,9 +594,9 @@ impl SharedBufferBatch {
             memory_limiter.and_then(|limiter| limiter.try_require_memory(merged_size as u64));
         Ok(SharedBufferBatch {
             inner: Arc::new(SharedBufferBatchInner::new_with_multi_epoch_batches(
-                min_epoch,
                 epochs,
                 merged_payload,
+                num_items,
                 merged_imm_ids,
                 range_tombstone_list,
                 merged_size,
@@ -703,10 +701,6 @@ impl<D: HummockIteratorDirection> SharedBufferBatchIterator<D> {
                 }
             }
         }
-    }
-
-    pub fn epoch(&self) -> HummockEpoch {
-        self.inner.epoch
     }
 }
 
