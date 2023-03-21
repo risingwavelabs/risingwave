@@ -490,7 +490,6 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 mod tests {
     use std::sync::atomic::AtomicU64;
     use std::time::Duration;
-    use tracing_test::traced_test;
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
@@ -504,6 +503,7 @@ mod tests {
     use risingwave_source::connector_test_utils::create_source_desc_builder;
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tracing_test::traced_test;
 
     use super::*;
     use crate::executor::ActorContext;

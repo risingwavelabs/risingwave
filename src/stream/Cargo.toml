@@ -76,5 +76,5 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 assert_matches = "1"
-tracing-test = "0.2"
 risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+tracing-test = "0.2"
