@@ -80,26 +80,43 @@ impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
 async fn get_or_create_tracking_id(
     meta_store: Arc<impl MetaStore>,
 ) -> Result<String, anyhow::Error> {
-    match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(bytes) => String::from_utf8(bytes).map_err(|e| anyhow!("failed to parse uuid, {}", e)),
+    match get_tracking_id(meta_store.clone()).await {
+        Ok(id) => Ok(id),
         Err(_) => {
-            let uuid = Uuid::new_v4().to_string();
-            // put new uuid in meta store
-            match meta_store
-                .put_cf(
-                    TELEMETRY_CF,
-                    TELEMETRY_KEY.to_vec(),
-                    uuid.clone().into_bytes(),
-                )
-                .await
-            {
+            let tracking_id = Uuid::new_v4().to_string();
+            match put_tracking_id(tracking_id.clone(), meta_store).await {
                 Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
-                Ok(_) => Ok(uuid),
+                Ok(_) => Ok(tracking_id),
             }
         }
     }
 }
 
+pub(crate) async fn get_tracking_id(meta_store: Arc<impl MetaStore>) -> anyhow::Result<String> {
+    match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
+        Err(e) => Err(anyhow::format_err!("tracking_id not exist, {}", e)),
+    }
+}
+
+pub(crate) async fn put_tracking_id(
+    tracking_id: String,
+    meta_store: Arc<impl MetaStore>,
+) -> anyhow::Result<()> {
+    // put new uuid in meta store
+    match meta_store
+        .put_cf(
+            TELEMETRY_CF,
+            TELEMETRY_KEY.to_vec(),
+            tracking_id.clone().into_bytes(),
+        )
+        .await
+    {
+        Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
+        Ok(_) => Ok(()),
+    }
+}
 #[derive(Copy, Clone)]
 pub(crate) struct MetaReportCreator {}
 
@@ -132,29 +149,42 @@ mod tests {
     use crate::storage::MemStore;
 
     #[tokio::test]
-    async fn test_get_or_create_tracking_id_existing_id() {
-        let meta_store = Arc::new(MemStore::new());
-        let uuid = Uuid::new_v4().to_string();
-        meta_store
-            .put_cf(
-                TELEMETRY_CF,
-                TELEMETRY_KEY.to_vec(),
-                uuid.clone().into_bytes(),
-            )
-            .await
-            .unwrap();
-        let result = get_or_create_tracking_id(Arc::clone(&meta_store))
-            .await
-            .unwrap();
-        assert_eq!(result, uuid);
+    async fn test_put_tracking_id() {
+        let meta_store = Arc::new(MemStore::default());
+        let tracking_id = Uuid::new_v4().to_string();
+
+        let result = put_tracking_id(tracking_id.clone(), meta_store.clone()).await;
+        assert!(result.is_ok());
     }
 
     #[tokio::test]
-    async fn test_get_or_create_tracking_id_new_id() {
-        let meta_store = Arc::new(MemStore::new());
-        let result = get_or_create_tracking_id(Arc::clone(&meta_store))
+    async fn test_get_tracking_id() {
+        let meta_store = Arc::new(MemStore::default());
+        let tracking_id = Uuid::new_v4().to_string();
+
+        put_tracking_id(tracking_id.clone(), meta_store.clone())
             .await
             .unwrap();
-        assert!(String::from_utf8(result.into_bytes()).is_ok());
+        let result = get_tracking_id(meta_store.clone()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), tracking_id);
+    }
+
+    #[tokio::test]
+    async fn test_get_or_create_tracking_id() {
+        let meta_store = Arc::new(MemStore::default());
+        let tracking_id = Uuid::new_v4().to_string();
+
+        // Test when there is no existing tracking ID.
+        let result = get_or_create_tracking_id(meta_store.clone()).await;
+        assert!(result.is_ok());
+
+        // Test when there is an existing tracking ID.
+        put_tracking_id(tracking_id.clone(), meta_store.clone())
+            .await
+            .unwrap();
+        let result = get_or_create_tracking_id(meta_store.clone()).await;
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), tracking_id);
     }
 }
