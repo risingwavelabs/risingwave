@@ -75,7 +75,9 @@ public class JDBCSinkFactory implements SinkFactory {
                 jdbcPk.add(pkResultSet.getString("COLUMN_NAME"));
             }
         } catch (SQLException e) {
-            throw Status.INTERNAL.withCause(e).asRuntimeException();
+            throw Status.INVALID_ARGUMENT
+                    .withDescription("failed to connect to target database: " + e.getSQLState())
+                    .asRuntimeException();
         }
 
         if (!jdbcTableNames.contains(tableName)) {

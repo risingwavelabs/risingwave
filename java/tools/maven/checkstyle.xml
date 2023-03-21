@@ -165,11 +165,6 @@ This file is based on the checkstyle file of Apache Beam.
         <!-- Enforce Java-style array declarations -->
         <module name="ArrayTypeStyle"/>
 
-        <module name="TodoComment">
-            <!-- Checks that disallowed strings are not used in comments.  -->
-            <property name="format" value="(FIXME)|(XXX)|(@author)"/>
-        </module>
-
         <!--
 
         IMPORT CHECKS

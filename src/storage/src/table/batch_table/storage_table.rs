@@ -490,7 +490,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         }))
         .await?;
 
-        #[auto_enum(futures::Stream)]
+        #[auto_enum(futures03::Stream)]
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),

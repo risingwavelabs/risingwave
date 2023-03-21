@@ -21,7 +21,6 @@ publish = false
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
-auto_enums = { version = "0.7", features = ["futures"] }
 aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
 aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
@@ -112,8 +111,7 @@ zstd-sys = { version = "2", default-features = false, features = ["legacy", "std
 ahash = { version = "0.8" }
 anyhow = { version = "1", features = ["backtrace"] }
 arrayvec = { version = "0.7", default-features = false, features = ["std"] }
-auto_enums = { version = "0.7", features = ["futures"] }
-auto_enums_derive = { version = "0.7", default-features = false, features = ["futures", "std"] }
+auto_enums = { version = "0.8", features = ["futures03"] }
 aws-sdk-s3 = { version = "0.21", features = ["native-tls"] }
 aws-smithy-client = { version = "0.51", default-features = false, features = ["native-tls", "rustls"] }
 aws-types = { version = "0.51", default-features = false, features = ["hardcoded-credentials"] }
