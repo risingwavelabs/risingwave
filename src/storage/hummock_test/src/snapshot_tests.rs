@@ -20,13 +20,13 @@ use futures::TryStreamExt;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::{
     LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, WriteOptions,
 };
 
 use crate::test_utils::{with_hummock_storage_v2, HummockStateStoreTestTrait, TestIngestBatch};
-use risingwave_storage::hummock::CachePolicy;
 
 macro_rules! assert_count_range_scan {
     ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{

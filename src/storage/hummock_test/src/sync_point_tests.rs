@@ -34,7 +34,7 @@ use risingwave_meta::storage::MemStore;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::compactor::{Compactor, CompactorContext};
-use risingwave_storage::hummock::SstableObjectIdManager;
+use risingwave_storage::hummock::{CachePolicy, SstableObjectIdManager};
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions};
 use risingwave_storage::StateStore;
 use serial_test::serial;
@@ -387,6 +387,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         retention_seconds: None,
         read_version_from_backup: false,
         prefetch_options: Default::default(),
+        cache_policy: CachePolicy::Fill,
     };
     let get_result = storage
         .get(Bytes::from("hhh"), 120, read_options.clone())

@@ -24,7 +24,7 @@ use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
 use risingwave_storage::hummock::test_utils::default_opts_for_test;
-use risingwave_storage::hummock::HummockStorage;
+use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
 use risingwave_storage::store::*;
 use risingwave_storage::StateStore;
@@ -106,6 +106,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                         table_id: Default::default(),
                         read_version_from_backup: false,
                         prefetch_options: PrefetchOptions::new_for_exhaust_iter(),
+                        cache_policy: CachePolicy::Fill,
                     },
                 ))
                 .unwrap();

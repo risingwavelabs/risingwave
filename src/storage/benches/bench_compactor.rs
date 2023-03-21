@@ -214,7 +214,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         .block_on(async { build_table(sstable_store.clone(), 4, 0..test_key_size, 2).await });
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
-        prefetch: true,
         cache_policy: CachePolicy::Fill,
         must_iterated_end_user_key: None,
     });

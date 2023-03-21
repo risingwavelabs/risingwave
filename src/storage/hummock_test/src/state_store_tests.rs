@@ -616,8 +616,8 @@ async fn test_reload_storage() {
         meta_client.clone(),
         get_notification_client_for_test(env, hummock_manager_ref, worker_node),
     )
-        .await
-        .unwrap();
+    .await
+    .unwrap();
 
     // Get the value after flushing to remote.
     let value = hummock_storage
