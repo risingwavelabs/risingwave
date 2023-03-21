@@ -148,12 +148,16 @@ pub async fn post_telemetry_report(url: &str, report_body: String) -> Result<(),
 /// check whether telemetry is enabled in environment variable
 pub fn telemetry_env_enabled() -> bool {
     // default to be true
-    std::env::var(TELEMETRY_ENV_ENABLE)
+    get_bool_env(TELEMETRY_ENV_ENABLE).unwrap_or(true)
+}
+
+pub fn get_bool_env(key: &str) -> Result<bool> {
+    let b = std::env::var(key)
         .unwrap_or("true".to_string())
         .trim()
         .to_ascii_lowercase()
-        .parse()
-        .unwrap_or(true)
+        .parse()?;
+    Ok(b)
 }
 
 pub fn current_timestamp() -> u64 {
@@ -181,14 +185,42 @@ mod tests {
     }
 
     #[test]
-    fn test_telemetry_enabled() {
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
-        assert!(telemetry_env_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "false");
-        assert!(!telemetry_env_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "wrong_str");
-        assert!(telemetry_env_enabled());
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "False");
-        assert!(!telemetry_env_enabled());
+    fn test_get_bool_env_true() {
+        let key = "MY_ENV_VARIABLE_TRUE";
+        std::env::set_var(key, "true");
+        let result = get_bool_env(key).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_get_bool_env_false() {
+        let key = "MY_ENV_VARIABLE_FALSE";
+        std::env::set_var(key, "false");
+        let result = get_bool_env(key).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn test_get_bool_env_default() {
+        let key = "MY_ENV_VARIABLE_NOT_SET";
+        std::env::remove_var(key);
+        let result = get_bool_env(key).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_get_bool_env_case_insensitive() {
+        let key = "MY_ENV_VARIABLE_MIXED_CASE";
+        std::env::set_var(key, "tRue");
+        let result = get_bool_env(key).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn test_get_bool_env_invalid() {
+        let key = "MY_ENV_VARIABLE_INVALID";
+        std::env::set_var(key, "not_a_bool");
+        let result = get_bool_env(key);
+        assert!(result.is_err());
     }
 }
