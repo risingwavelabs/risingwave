@@ -266,5 +266,15 @@ def _string_to_data_type(type_str: str):
             return pa.string()
         case 'BINARY' | 'VARBINARY':
             return pa.binary()
-        case _:
-            raise ValueError(f'Unsupported type: {type_str}')
+
+    # extract 'STRUCT<a INT, b VARCHAR, ...>'
+    if type_str.startswith('STRUCT'):
+        type_str = type_str[6:].strip('<>')
+        fields = []
+        for field in type_str.split(','):
+            field = field.strip()
+            name, type_str = field.split(' ')
+            fields.append(pa.field(name, _string_to_data_type(type_str)))
+        return pa.struct(fields)
+
+    raise ValueError(f'Unsupported type: {type_str}')
