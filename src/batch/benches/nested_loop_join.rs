@@ -15,7 +15,7 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::enable_jemalloc_on_linux;
+use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
@@ -28,7 +28,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 use utils::{bench_join, create_input};
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
