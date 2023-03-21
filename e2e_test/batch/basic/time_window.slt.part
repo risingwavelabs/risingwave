@@ -28,6 +28,21 @@ from tumble(t1, created_at, interval '30' minute) order by row_id, window_start;
 7 1 2022-01-01 10:51:00 2022-01-01 10:30:00 2022-01-01 11:00:00
 8 3 2022-01-01 11:02:00 2022-01-01 11:00:00 2022-01-01 11:30:00
 
+
+query IITTT
+select row_id, uid, created_at, window_start, window_end
+from tumble(t1, created_at, interval '30' minute, interval '13' minute) order by row_id, window_start;
+----
+1 1 2022-01-01 10:00:00 2022-01-01 09:43:00 2022-01-01 10:13:00
+2 3 2022-01-01 10:05:00 2022-01-01 09:43:00 2022-01-01 10:13:00
+3 2 2022-01-01 10:14:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+4 1 2022-01-01 10:22:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+5 3 2022-01-01 10:33:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+6 2 2022-01-01 10:42:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+7 1 2022-01-01 10:51:00 2022-01-01 10:43:00 2022-01-01 11:13:00
+8 3 2022-01-01 11:02:00 2022-01-01 10:43:00 2022-01-01 11:13:00
+
+
 query IITTT
 select row_id, uid, created_at, window_start, window_end
 from hop(t1, created_at, interval '15' minute, interval '30' minute) order by row_id, window_start;
@@ -48,6 +63,27 @@ from hop(t1, created_at, interval '15' minute, interval '30' minute) order by ro
 7 1 2022-01-01 10:51:00 2022-01-01 10:45:00 2022-01-01 11:15:00
 8 3 2022-01-01 11:02:00 2022-01-01 10:45:00 2022-01-01 11:15:00
 8 3 2022-01-01 11:02:00 2022-01-01 11:00:00 2022-01-01 11:30:00
+
+query IITTT
+select row_id, uid, created_at, window_start, window_end
+from hop(t1, created_at, interval '15' minute, interval '30' minute, interval '13' minute) order by row_id, window_start;
+----
+1 1 2022-01-01 10:00:00 2022-01-01 09:43:00 2022-01-01 10:13:00
+1 1 2022-01-01 10:00:00 2022-01-01 09:58:00 2022-01-01 10:28:00
+2 3 2022-01-01 10:05:00 2022-01-01 09:43:00 2022-01-01 10:13:00
+2 3 2022-01-01 10:05:00 2022-01-01 09:58:00 2022-01-01 10:28:00
+3 2 2022-01-01 10:14:00 2022-01-01 09:58:00 2022-01-01 10:28:00
+3 2 2022-01-01 10:14:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+4 1 2022-01-01 10:22:00 2022-01-01 09:58:00 2022-01-01 10:28:00
+4 1 2022-01-01 10:22:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+5 3 2022-01-01 10:33:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+5 3 2022-01-01 10:33:00 2022-01-01 10:28:00 2022-01-01 10:58:00
+6 2 2022-01-01 10:42:00 2022-01-01 10:13:00 2022-01-01 10:43:00
+6 2 2022-01-01 10:42:00 2022-01-01 10:28:00 2022-01-01 10:58:00
+7 1 2022-01-01 10:51:00 2022-01-01 10:28:00 2022-01-01 10:58:00
+7 1 2022-01-01 10:51:00 2022-01-01 10:43:00 2022-01-01 11:13:00
+8 3 2022-01-01 11:02:00 2022-01-01 10:43:00 2022-01-01 11:13:00
+8 3 2022-01-01 11:02:00 2022-01-01 10:58:00 2022-01-01 11:28:00
 
 query IIT rowsort
 select row_id, uid, created_at
@@ -70,6 +106,29 @@ from hop(t1, created_at, interval '15' minute, interval '30' minute);
 8 3 2022-01-01 11:02:00
 8 3 2022-01-01 11:02:00
 
+
+query IIT rowsort
+select row_id, uid, created_at
+from hop(t1, created_at, interval '15' minute, interval '30' minute, interval '13' minute);
+----
+1 1 2022-01-01 10:00:00
+1 1 2022-01-01 10:00:00
+2 3 2022-01-01 10:05:00
+2 3 2022-01-01 10:05:00
+3 2 2022-01-01 10:14:00
+3 2 2022-01-01 10:14:00
+4 1 2022-01-01 10:22:00
+4 1 2022-01-01 10:22:00
+5 3 2022-01-01 10:33:00
+5 3 2022-01-01 10:33:00
+6 2 2022-01-01 10:42:00
+6 2 2022-01-01 10:42:00
+7 1 2022-01-01 10:51:00
+7 1 2022-01-01 10:51:00
+8 3 2022-01-01 11:02:00
+8 3 2022-01-01 11:02:00
+
+
 query IT
 select sum(v), window_start
 from tumble(t1, created_at, interval '30' minute)
@@ -78,6 +137,15 @@ group by window_start order by window_start;
 10 2022-01-01 10:00:00
 18 2022-01-01 10:30:00
  8 2022-01-01 11:00:00
+
+query IT
+select sum(v), window_start
+from tumble(t1, created_at, interval '30' minute, interval '13' minute)
+group by window_start order by window_start;
+----
+7 2022-01-01 09:43:00
+15 2022-01-01 10:13:00
+14 2022-01-01 10:43:00
 
 query IIT
 select uid, sum(v), window_start
@@ -92,6 +160,20 @@ group by window_start, uid order by window_start, uid;
 3 5 2022-01-01 10:30:00
 3 8 2022-01-01 11:00:00
 
+query IIT
+select uid, sum(v), window_start
+from tumble(t1, created_at, interval '30' minute, interval '13' minute)
+group by window_start, uid order by window_start, uid;
+----
+1 4 2022-01-01 09:43:00
+3 3 2022-01-01 09:43:00
+1 1 2022-01-01 10:13:00
+2 9 2022-01-01 10:13:00
+3 5 2022-01-01 10:13:00
+1 6 2022-01-01 10:43:00
+3 8 2022-01-01 10:43:00
+
+
 query IT
 select sum(v), window_start
 from hop(t1, created_at, interval '15' minute, interval '30' minute)
@@ -103,6 +185,19 @@ group by window_start order by window_start;
 18 2022-01-01 10:30:00
 14 2022-01-01 10:45:00
  8 2022-01-01 11:00:00
+
+
+query IT
+select sum(v), window_start
+from hop(t1, created_at, interval '15' minute, interval '30' minute, interval '13' minute)
+group by window_start order by window_start;
+----
+7 2022-01-01 09:43:00
+10 2022-01-01 09:58:00
+15 2022-01-01 10:13:00
+18 2022-01-01 10:28:00
+14 2022-01-01 10:43:00
+8 2022-01-01 10:58:00
 
 query IIT
 select uid, sum(v), window_start
@@ -124,6 +219,28 @@ group by window_start, uid order by window_start, uid;
 1 6 2022-01-01 10:45:00
 3 8 2022-01-01 10:45:00
 3 8 2022-01-01 11:00:00
+
+
+
+query IIT
+select uid, sum(v), window_start
+from hop(t1, created_at, interval '15' minute, interval '30' minute, interval '13' minute)
+group by window_start, uid order by window_start, uid;
+----
+1 4 2022-01-01 09:43:00
+3 3 2022-01-01 09:43:00
+1 5 2022-01-01 09:58:00
+2 2 2022-01-01 09:58:00
+3 3 2022-01-01 09:58:00
+1 1 2022-01-01 10:13:00
+2 9 2022-01-01 10:13:00
+3 5 2022-01-01 10:13:00
+1 6 2022-01-01 10:28:00
+2 7 2022-01-01 10:28:00
+3 5 2022-01-01 10:28:00
+1 6 2022-01-01 10:43:00
+3 8 2022-01-01 10:43:00
+3 8 2022-01-01 10:58:00
 
 statement error
 select * from hop(t1, created_at, interval '0', interval '1');

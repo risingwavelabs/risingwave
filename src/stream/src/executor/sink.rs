@@ -88,7 +88,7 @@ impl SinkExecutor {
             input: materialize_executor,
             metrics,
             config,
-            identity: format!("SinkExecutor_{:?}", executor_id),
+            identity: format!("SinkExecutor {:X?}", executor_id),
             pk_indices,
             schema,
             connector_params,

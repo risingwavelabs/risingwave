@@ -14,10 +14,6 @@ checkpoint_frequency = 10
 
 [storage]
 shared_buffer_capacity_mb = 4096
-sstable_size_mb = 256
-block_size_kb = 1024
-bloom_false_positive = 0.001
-data_directory = "hummock_001"
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024
 compactor_memory_limit_mb = 5120
@@ -41,3 +37,9 @@ stream_enable_executor_row_count = false
 stream_connector_message_buffer_size = 16
 unsafe_stream_extreme_cache_size = 1024
 stream_chunk_size = 1024
+
+[system]
+sstable_size_mb = 256
+block_size_kb = 1024
+bloom_false_positive = 0.001
+data_directory = "hummock_001"

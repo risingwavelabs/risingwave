@@ -43,7 +43,7 @@ use risingwave_storage::store::{ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
-const CHECKPOINT_FREQ_FOR_REPLAY: usize = 99999999;
+const CHECKPOINT_FREQ_FOR_REPLAY: u64 = 99999999;
 
 use crate::CompactionTestOpts;
 
@@ -129,8 +129,12 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "meta-node",
         "--listen-addr",
         &listen_addr,
+        "--advertise-addr",
+        &listen_addr,
         "--backend",
         "mem",
+        "--checkpoint-frequency",
+        &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
         "--config-path",
         &config_path,
     ]);
@@ -138,17 +142,17 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         &meta_opts.config_path,
         Some(meta_opts.override_opts.clone()),
     );
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
+    assert_eq!(
+        CHECKPOINT_FREQ_FOR_REPLAY,
+        config.system.checkpoint_frequency
+    );
     assert!(
         config.meta.enable_compaction_deterministic,
         "enable_compaction_deterministic should be set"
     );
 
-    // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version during version log replay.
-    assert_eq!(
-        CHECKPOINT_FREQ_FOR_REPLAY,
-        config.streaming.checkpoint_frequency
-    );
     risingwave_meta::start(meta_opts).await
 }
 
@@ -160,7 +164,7 @@ async fn start_compactor_node(
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
-        "--host",
+        "--listen-addr",
         "127.0.0.1:5550",
         "--advertise-addr",
         &advertise_addr,

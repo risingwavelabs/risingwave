@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::GroupTopNNode;
 
 use super::{
-    ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalTopN, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::optimizer::plan_node::ToLocalBatch;
@@ -78,7 +78,7 @@ impl ToDistributedBatch for BatchGroupTopN {
     }
 }
 
-impl ToBatchProst for BatchGroupTopN {
+impl ToBatchPb for BatchGroupTopN {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_orders = self.logical.topn_order().to_protobuf();
         NodeBody::GroupTopN(GroupTopNNode {

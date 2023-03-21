@@ -39,10 +39,10 @@ statement ok
 explain select v2 from ddl_t;
 
 statement ok
-explain create sink sink_t from ddl_t with ( connector = 'kafka', format = 'append_only', force_append_only = 'true' );
+explain create sink sink_t from ddl_t with ( connector = 'kafka', type = 'append-only', force_append_only = 'true' );
 
 statement ok
-explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka', format = 'append_only', force_append_only = 'true' );
+explain create sink sink_as as select sum(v2) as sum from ddl_t with ( connector = 'kafka', type = 'append-only', force_append_only = 'true' );
 
 # Create a mview with duplicated name.
 statement error
@@ -119,6 +119,9 @@ create table "T2" ("V1" int);
 
 statement ok
 insert into "T2" ("V1") values (1);
+
+statement ok
+drop table "T2"
 
 statement error
 create table C1 (c1 varchar(5));

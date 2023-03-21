@@ -64,7 +64,7 @@ public class IcebergSinkFactoryTest {
                         sinkFactory.create(
                                 TableSchema.getMockTableSchema(),
                                 Map.of(
-                                        IcebergSinkFactory.SINK_MODE_PROP,
+                                        IcebergSinkFactory.SINK_TYPE_PROP,
                                         sinkMode,
                                         IcebergSinkFactory.WAREHOUSE_PATH_PROP,
                                         warehousePath,

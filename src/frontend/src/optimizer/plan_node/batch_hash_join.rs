@@ -22,8 +22,8 @@ use risingwave_pb::plan_common::JoinType;
 
 use super::generic::GenericPlanRef;
 use super::{
-    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary,
-    ToBatchProst, ToDistributedBatch,
+    EqJoinPredicate, ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, ToBatchPb,
+    ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -173,7 +173,9 @@ impl ToDistributedBatch for BatchHashJoin {
         let r2l = self
             .eq_join_predicate()
             .r2l_eq_columns_mapping(left.schema().len(), right.schema().len());
-        let l2r = r2l.inverse();
+        let l2r = self
+            .eq_join_predicate()
+            .l2r_eq_columns_mapping(left.schema().len());
 
         let right_dist = right.distribution();
         match right_dist {
@@ -216,7 +218,7 @@ impl ToDistributedBatch for BatchHashJoin {
     }
 }
 
-impl ToBatchProst for BatchHashJoin {
+impl ToBatchPb for BatchHashJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HashJoin(HashJoinNode {
             join_type: self.logical.join_type() as i32,

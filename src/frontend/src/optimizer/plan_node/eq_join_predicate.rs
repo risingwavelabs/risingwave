@@ -227,6 +227,15 @@ impl EqJoinPredicate {
         ColIndexMapping::new(map)
     }
 
+    /// return the eq columns index mapping from left inputs to right inputs
+    pub fn l2r_eq_columns_mapping(&self, left_cols_num: usize) -> ColIndexMapping {
+        let mut map = vec![None; left_cols_num];
+        for (left, right, _) in self.eq_keys() {
+            map[left.index] = Some(right.index - left_cols_num);
+        }
+        ColIndexMapping::new(map)
+    }
+
     /// Reorder the `eq_keys` according to the `reorder_idx`.
     pub fn reorder(self, reorder_idx: &[usize]) -> Self {
         assert!(reorder_idx.len() <= self.eq_keys.len());

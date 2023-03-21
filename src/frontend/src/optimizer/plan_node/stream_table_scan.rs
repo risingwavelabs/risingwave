@@ -18,12 +18,10 @@ use std::rc::Rc;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, TableDesc};
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::{ChainType, StreamNode as ProstStreamPlan};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{ChainType, PbStreamNode};
 
-use super::{
-    ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamIndexScan, StreamNode,
-};
+use super::{ExprRewritable, LogicalScan, PlanBase, PlanNodeId, PlanRef, StreamNode};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
@@ -98,12 +96,14 @@ impl StreamTableScan {
         index_table_desc: Rc<TableDesc>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         chain_type: ChainType,
-    ) -> StreamIndexScan {
-        StreamIndexScan::new(
+    ) -> StreamTableScan {
+        let logical_index_scan =
             self.logical
-                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping),
-            chain_type,
-        )
+                .to_index_scan(index_name, index_table_desc, primary_to_secondary_mapping);
+        logical_index_scan
+            .distribution_key()
+            .expect("distribution key of stream chain must exist in output columns");
+        StreamTableScan::new_with_chain_type(logical_index_scan, chain_type)
     }
 
     pub fn chain_type(&self) -> ChainType {
@@ -149,94 +149,89 @@ impl fmt::Display for StreamTableScan {
 }
 
 impl StreamNode for StreamTableScan {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
 impl StreamTableScan {
-    pub fn adhoc_to_stream_prost(&self) -> ProstStreamPlan {
-        use risingwave_pb::plan_common::Field as ProstField;
+    pub fn adhoc_to_stream_prost(&self) -> PbStreamNode {
         use risingwave_pb::stream_plan::*;
 
-        let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.logical.table_desc().to_protobuf()),
-            column_ids: self
-                .logical
-                .output_column_ids()
-                .iter()
-                .map(ColumnId::get_id)
-                .collect(),
-        };
-
-        let stream_key = self.logical_pk().iter().map(|x| *x as u32).collect_vec();
+        let stream_key = self.base.logical_pk.iter().map(|x| *x as u32).collect_vec();
 
         // The required columns from the table (both scan and upstream).
         let upstream_column_ids = match self.chain_type {
+            // For backfill, we additionally need the primary key columns.
+            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
             ChainType::Chain | ChainType::Rearrange | ChainType::UpstreamOnly => {
                 self.logical.output_column_ids()
             }
-            // For backfill, we additionally need the primary key columns.
-            ChainType::Backfill => self.logical.output_and_pk_column_ids(),
             ChainType::ChainUnspecified => unreachable!(),
-        };
+        }
+        .iter()
+        .map(ColumnId::get_id)
+        .collect_vec();
 
-        ProstStreamPlan {
-            fields: self.schema().to_prost(),
-            input: vec![
-                // The merge node should be empty
-                ProstStreamPlan {
-                    node_body: Some(ProstStreamNode::Merge(Default::default())),
-                    identity: "Upstream".into(),
-                    fields: self
-                        .logical
-                        .table_desc()
-                        .columns
-                        .iter()
-                        .map(|c| Field::from(c).to_prost())
-                        .collect(),
-                    stream_key: self
-                        .logical
-                        .table_desc()
-                        .stream_key
-                        .iter()
-                        .map(|i| *i as _)
-                        .collect(),
-                    ..Default::default()
-                },
-                ProstStreamPlan {
-                    node_body: Some(ProstStreamNode::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
-                    identity: "BatchPlanNode".into(),
-                    stream_key: stream_key.clone(),
-                    fields: self.schema().to_prost(),
-                    input: vec![],
-                    append_only: true,
-                },
-            ],
-            node_body: Some(ProstStreamNode::Chain(ChainNode {
-                table_id: self.logical.table_desc().table_id.table_id,
-                chain_type: self.chain_type as i32,
-                // The fields from upstream
-                upstream_fields: self
+        // The schema of the upstream table (both scan and upstream).
+        let upstream_schema = upstream_column_ids
+            .iter()
+            .map(|&id| {
+                let col = self
                     .logical
                     .table_desc()
                     .columns
                     .iter()
-                    .map(|x| ProstField {
-                        data_type: Some(x.data_type.to_protobuf()),
-                        name: x.name.clone(),
-                    })
-                    .collect(),
-                // The column indices need to be forwarded to the downstream
-                upstream_column_indices: self
-                    .logical
-                    .output_column_indices()
+                    .find(|c| c.column_id.get_id() == id)
+                    .unwrap();
+                Field::from(col).to_prost()
+            })
+            .collect_vec();
+
+        let output_indices = self
+            .logical
+            .output_column_ids()
+            .iter()
+            .map(|i| {
+                upstream_column_ids
                     .iter()
-                    .map(|&i| i as _)
-                    .collect(),
-                upstream_column_ids: upstream_column_ids.iter().map(|i| i.get_id()).collect(),
-                is_singleton: *self.distribution() == Distribution::Single,
+                    .position(|&x| x == i.get_id())
+                    .unwrap() as u32
+            })
+            .collect_vec();
+
+        let batch_plan_node = BatchPlanNode {
+            table_desc: Some(self.logical.table_desc().to_protobuf()),
+            column_ids: upstream_column_ids.clone(),
+        };
+
+        PbStreamNode {
+            fields: self.schema().to_prost(),
+            input: vec![
+                // The merge node body will be filled by the `ActorBuilder` on the meta service.
+                PbStreamNode {
+                    node_body: Some(PbNodeBody::Merge(Default::default())),
+                    identity: "Upstream".into(),
+                    fields: upstream_schema.clone(),
+                    stream_key: vec![], // not used
+                    ..Default::default()
+                },
+                PbStreamNode {
+                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
+                    operator_id: self.batch_plan_id.0 as u64,
+                    identity: "BatchPlanNode".into(),
+                    fields: upstream_schema,
+                    stream_key: vec![], // not used
+                    input: vec![],
+                    append_only: true,
+                },
+            ],
+            node_body: Some(PbNodeBody::Chain(ChainNode {
+                table_id: self.logical.table_desc().table_id.table_id,
+                chain_type: self.chain_type as i32,
+                // The column indices need to be forwarded to the downstream
+                output_indices,
+                upstream_column_ids,
                 // The table desc used by backfill executor
                 table_desc: Some(self.logical.table_desc().to_protobuf()),
             })),

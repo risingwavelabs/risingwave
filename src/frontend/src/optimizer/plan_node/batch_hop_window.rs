@@ -19,7 +19,7 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::HopWindowNode;
 
 use super::{
-    ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalHopWindow, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter};
@@ -116,7 +116,7 @@ impl ToDistributedBatch for BatchHopWindow {
     }
 }
 
-impl ToBatchProst for BatchHopWindow {
+impl ToBatchPb for BatchHopWindow {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HopWindow(HopWindowNode {
             time_col: self.logical.core.time_col.index() as _,

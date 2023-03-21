@@ -58,7 +58,7 @@ impl FilterExecutor {
         #[for_await]
         for data_chunk in self.child.execute() {
             let data_chunk = data_chunk?.compact();
-            let vis_array = self.expr.eval(&data_chunk)?;
+            let vis_array = self.expr.eval(&data_chunk).await?;
 
             if let Bool(vis) = vis_array.as_ref() {
                 // TODO: should we yield masked data chunk directly?
@@ -131,7 +131,7 @@ mod tests {
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_expr::expr::build_from_prost;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::Datum as ProstDatum;
+    use risingwave_pb::data::PbDatum;
     use risingwave_pb::expr::expr_node::Type::InputRef;
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -242,7 +242,7 @@ mod tests {
                 }],
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(
                     Some(ScalarImpl::List(ListValue::new(vec![Some(
                         2.to_scalar_value(),

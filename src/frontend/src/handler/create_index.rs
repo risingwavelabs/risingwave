@@ -21,7 +21,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{IndexId, TableDesc, TableId};
 use risingwave_common::error::{ErrorCode, Result, RwError};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::catalog::{Index as ProstIndex, Table as ProstTable};
+use risingwave_pb::catalog::{PbIndex, PbTable};
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::user::grant_privilege::{Action, Object};
 use risingwave_sqlparser::ast::{Ident, ObjectName, OrderByExpr};
@@ -47,7 +47,7 @@ pub(crate) fn gen_create_index_plan(
     columns: Vec<OrderByExpr>,
     include: Vec<Ident>,
     distributed_by: Vec<Ident>,
-) -> Result<(PlanRef, ProstTable, ProstIndex)> {
+) -> Result<(PlanRef, PbTable, PbIndex)> {
     let columns = check_columns(columns)?;
     let db_name = session.database();
     let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
@@ -191,7 +191,7 @@ pub(crate) fn gen_create_index_plan(
 
     index_table_prost.owner = session.user_id();
 
-    let index_prost = ProstIndex {
+    let index_prost = PbIndex {
         id: IndexId::placeholder().index_id,
         schema_id: index_schema_id,
         database_id: index_database_id,
@@ -337,28 +337,12 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            // TODO(rc): support `NULLS FIRST | LAST`
-            if column.nulls_first.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    "nulls_first not supported".into(),
-                    None.into(),
-                )
-                .into());
-            }
+            let order_type = OrderType::from_bools(column.asc, column.nulls_first);
 
             use risingwave_sqlparser::ast::Expr;
 
             if let Expr::Identifier(ident) = column.expr {
-                Ok::<(_, _), RwError>((
-                    ident,
-                    column.asc.map_or(OrderType::ascending(), |x| {
-                        if x {
-                            OrderType::ascending()
-                        } else {
-                            OrderType::descending()
-                        }
-                    }),
-                ))
+                Ok::<(_, _), RwError>((ident, order_type))
             } else {
                 Err(ErrorCode::NotImplemented(
                     "only identifier is supported for create index".into(),

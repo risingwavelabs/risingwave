@@ -22,6 +22,8 @@ labels:
   title: "^test.*"
 - label: "component/doc"
   title: "^doc.*"
+- label: "type/deprecate"
+  title: "^deprecate.*"
 
 - label: "user-facing-changes"
   negate: true

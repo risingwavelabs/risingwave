@@ -39,7 +39,7 @@ jobs:
           - schema-registry
           - mysql-cdc
           - postgres-cdc
-          #- mysql-sink
+          - mysql-sink
           - postgres-sink
           - iceberg-sink
         format: ["json", "protobuf"]

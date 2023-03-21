@@ -73,15 +73,30 @@ message Sink {
   uint32 database_id = 3;
   string name = 4;
   repeated plan_common.ColumnCatalog columns = 5;
-  repeated common.ColumnOrder pk = 6;
+  // Primary key derived from the SQL by the frontend.
+  repeated common.ColumnOrder plan_pk = 6;
   repeated uint32 dependent_relations = 7;
   repeated int32 distribution_key = 8;
-  // pk_indices of the corresponding materialize operator's output.
-  repeated int32 stream_key = 9;
+  // User-defined primary key indices for the upsert sink.
+  repeated int32 downstream_pk = 9;
   SinkType sink_type = 10;
   uint32 owner = 11;
   map<string, string> properties = 12;
   string definition = 13;
+}
+
+message Connection {
+  message PrivateLinkService {
+    string provider = 1;
+    string endpoint_id = 2;
+    map<string, string> dns_entries = 3;
+  }
+
+  uint32 id = 1;
+  string name = 2;
+  oneof info {
+    PrivateLinkService private_link_service = 3;
+  }
 }
 
 message Index {
@@ -109,6 +124,15 @@ message Function {
   string language = 7;
   string link = 8;
   string identifier = 10;
+
+  oneof kind {
+    ScalarFunction scalar = 11;
+    TableFunction table = 12;
+    AggregateFunction aggregate = 13;
+  }
+  message ScalarFunction {}
+  message TableFunction {}
+  message AggregateFunction {}
 }
 
 // See `TableCatalog` struct in frontend crate for more information.
@@ -160,6 +184,8 @@ message Table {
   repeated int32 value_indices = 20;
   string definition = 21;
   HandleConflictBehavior handle_pk_conflict_behavior = 22;
+  // Anticipated read prefix pattern (number of fields) for the table, which can be utilized
+  // for implementing the table's bloom filter or other storage optimization techniques.
   uint32 read_prefix_len_hint = 23;
   repeated int32 watermark_indices = 24;
   repeated int32 dist_key_in_pk = 25;
