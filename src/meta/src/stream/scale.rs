@@ -432,10 +432,6 @@ where
             // treatment because the upstream and downstream of NoShuffle are always 1-1
             // correspondence, so we need to clone the reschedule plan to the downstream of all
             // cascading relations.
-            //
-            // Delta join will introduce a `NoShuffle` edge between index chain node and lookup node
-            // (index_mv --NoShuffle--> index_chain --NoShuffle--> lookup) which will break current
-            // `NoShuffle` scaling assumption. Currently we detect this case and forbid it to scale.
             if no_shuffle_source_fragment_ids.contains(fragment_id) {
                 let mut queue: VecDeque<_> = fragment_dispatcher_map
                     .get(fragment_id)
@@ -451,21 +447,12 @@ where
 
                     if let Some(downstream_fragments) = fragment_dispatcher_map.get(&downstream_id)
                     {
-                        // If `NoShuffle` used by other fragment type rather than `ChainNode`, bail.
-                        for downstream_fragment_id in downstream_fragments.keys() {
-                            let downstream_fragment = fragment_map
-                                .get(downstream_fragment_id)
-                                .ok_or_else(|| anyhow!("fragment {fragment_id} does not exist"))?;
-                            if (downstream_fragment.get_fragment_type_mask()
-                                & (FragmentTypeFlag::ChainNode as u32
-                                    | FragmentTypeFlag::Mview as u32))
-                                == 0
-                            {
-                                bail!("Rescheduling NoShuffle edge only supports ChainNode and Mview. Other usage for e.g. delta join is forbidden currently.");
-                            }
-                        }
+                        let no_shuffle_downstreams = downstream_fragments
+                            .iter()
+                            .filter(|(_, ty)| **ty == DispatcherType::NoShuffle)
+                            .map(|(fragment_id, _)| fragment_id);
 
-                        queue.extend(downstream_fragments.keys().cloned());
+                        queue.extend(no_shuffle_downstreams.copied());
                     }
 
                     no_shuffle_reschedule.insert(
@@ -743,7 +730,12 @@ where
                 .unwrap();
 
             if let Some(downstream_fragments) = ctx.fragment_dispatcher_map.get(fragment_id) {
-                for downstream_fragment_id in downstream_fragments.keys() {
+                let no_shuffle_downstreams = downstream_fragments
+                    .iter()
+                    .filter(|(_, ty)| **ty == DispatcherType::NoShuffle)
+                    .map(|(fragment_id, _)| fragment_id);
+
+                for downstream_fragment_id in no_shuffle_downstreams {
                     arrange_no_shuffle_relation(
                         ctx,
                         downstream_fragment_id,
@@ -1123,7 +1115,7 @@ where
 
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
-        tracing::trace!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::info!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
             .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
