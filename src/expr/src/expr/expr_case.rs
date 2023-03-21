@@ -18,7 +18,7 @@ use risingwave_common::array::{ArrayRef, DataChunk, Vis};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::{bail, ensure};
-use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
 use crate::expr::{build_from_prost, BoxedExpression, Expression};
@@ -116,7 +116,7 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
     type Error = ExprError;
 
     fn try_from(prost: &'a ExprNode) -> Result<Self> {
-        ensure!(prost.get_expr_type().unwrap() == Type::Case);
+        ensure!(prost.get_expr_type().unwrap() == PbType::Case);
 
         let ret_type = DataType::from(prost.get_return_type().unwrap());
         let RexNode::FuncCall(func_call_node) = prost.get_rex_node().unwrap() else {
@@ -160,8 +160,7 @@ impl<'a> TryFrom<&'a ExprNode> for CaseExpression {
 mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::Scalar;
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
@@ -173,7 +172,7 @@ mod tests {
     fn test_case_expr() {
         let p = make_expression(
             PbType::Case,
-            PbDataType::Int32,
+            PbTypeName::Int32,
             vec![make_bool_literal(false), make_i32_literal(1)],
         );
         assert!(CaseExpression::try_from(&p).is_ok());
@@ -196,14 +195,14 @@ mod tests {
     async fn test_eval_searched_case() {
         // when x <= 2 then 3.1 else 4.1
         let p = make_expression(
-            Type::Case,
-            TypeName::Float,
+            PbType::Case,
+            PbTypeName::Float,
             vec![
                 // when
                 make_expression(
-                    Type::LessThanOrEqual,
-                    TypeName::Boolean,
-                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(2)],
+                    PbType::LessThanOrEqual,
+                    PbTypeName::Boolean,
+                    vec![make_input_ref(0, PbTypeName::Int32), make_i32_literal(2)],
                 ),
                 // then
                 make_f32_literal(3.1),
@@ -232,14 +231,14 @@ mod tests {
     async fn test_eval_without_else() {
         // when x <= 3 then 3.1
         let p = make_expression(
-            Type::Case,
-            TypeName::Float,
+            PbType::Case,
+            PbTypeName::Float,
             vec![
                 // when
                 make_expression(
-                    Type::LessThanOrEqual,
-                    TypeName::Boolean,
-                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(3)],
+                    PbType::LessThanOrEqual,
+                    PbTypeName::Boolean,
+                    vec![make_input_ref(0, PbTypeName::Int32), make_i32_literal(3)],
                 ),
                 // then
                 make_f32_literal(3.1),
@@ -264,14 +263,14 @@ mod tests {
     async fn test_eval_row_searched_case() {
         // when x <= 2 then 3.1 else 4.1
         let p = make_expression(
-            Type::Case,
-            TypeName::Float,
+            PbType::Case,
+            PbTypeName::Float,
             vec![
                 // when
                 make_expression(
-                    Type::LessThanOrEqual,
-                    TypeName::Boolean,
-                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(2)],
+                    PbType::LessThanOrEqual,
+                    PbTypeName::Boolean,
+                    vec![make_input_ref(0, PbTypeName::Int32), make_i32_literal(2)],
                 ),
                 // then
                 make_f32_literal(3.1),
@@ -297,14 +296,14 @@ mod tests {
     async fn test_eval_row_without_else() {
         // when x <= 3 then 3.1
         let p = make_expression(
-            Type::Case,
-            TypeName::Float,
+            PbType::Case,
+            PbTypeName::Float,
             vec![
                 // when
                 make_expression(
-                    Type::LessThanOrEqual,
-                    TypeName::Boolean,
-                    vec![make_input_ref(0, TypeName::Int32), make_i32_literal(3)],
+                    PbType::LessThanOrEqual,
+                    PbTypeName::Boolean,
+                    vec![make_input_ref(0, PbTypeName::Int32), make_i32_literal(3)],
                 ),
                 // then
                 make_f32_literal(3.1),

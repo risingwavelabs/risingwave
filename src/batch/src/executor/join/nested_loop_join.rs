@@ -470,8 +470,10 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_prost;
+    use risingwave_expr::expr::test_utils::*;
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use crate::executor::join::nested_loop_join::NestedLoopJoinExecutor;
     use crate::executor::join::JoinType;
@@ -587,12 +589,14 @@ mod tests {
             };
 
             Box::new(NestedLoopJoinExecutor::new(
-                new_binary_expr(
-                    Type::Equal,
-                    DataType::Boolean,
-                    Box::new(InputRefExpression::new(DataType::Int32, 0)),
-                    Box::new(InputRefExpression::new(DataType::Int32, 2)),
-                )
+                build_from_prost(&make_expression(
+                    PbType::Equal,
+                    PbTypeName::Boolean,
+                    vec![
+                        make_input_ref(0, PbTypeName::Int32),
+                        make_input_ref(2, PbTypeName::Int32),
+                    ],
+                ))
                 .unwrap(),
                 join_type,
                 output_indices,

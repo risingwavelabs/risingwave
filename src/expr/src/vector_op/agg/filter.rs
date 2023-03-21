@@ -114,6 +114,7 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::DataChunkTestExt;
+    use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
@@ -191,8 +192,8 @@ mod tests {
         // filter (where $1 > 5)
         let prost = make_expression(
             PbType::GreaterThan,
-            TypeName::Boolean,
-            vec![make_input_ref(0, TypeName::Int64), make_i64_literal(5)],
+            PbTypeName::Boolean,
+            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(5)],
         );
         let condition = Arc::from(build_from_prost(&prost).unwrap());
         let agg_count = Arc::new(AtomicUsize::new(0));
@@ -230,10 +231,10 @@ mod tests {
     async fn test_selective_agg_null_condition() -> Result<()> {
         let prost = make_expression(
             PbType::Equal,
-            TypeName::Boolean,
+            PbTypeName::Boolean,
             vec![
-                make_input_ref(0, TypeName::Int64),
-                make_null_literal(TypeName::Int64),
+                make_input_ref(0, PbTypeName::Int64),
+                make_null_literal(PbTypeName::Int64),
             ],
         );
         let agg_count = Arc::new(AtomicUsize::new(0));

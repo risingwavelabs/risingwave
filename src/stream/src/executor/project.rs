@@ -188,8 +188,10 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_prost;
+    use risingwave_expr::expr::test_utils::{make_expression, make_i64_literal, make_input_ref};
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -216,14 +218,14 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
-            DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
+        let test_expr = build_from_prost(&make_expression(
+            PbType::Add,
+            PbTypeName::Int64,
+            vec![
+                make_input_ref(0, PbTypeName::Int64),
+                make_input_ref(1, PbTypeName::Int64),
+            ],
+        ))
         .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
@@ -269,24 +271,18 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let a_expr = new_binary_expr(
-            Type::Add,
-            DataType::Int64,
-            Box::new(a_left_expr),
-            Box::new(a_right_expr),
-        )
+        let a_expr = build_from_prost(&make_expression(
+            PbType::Add,
+            PbTypeName::Int64,
+            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(1)],
+        ))
         .unwrap();
 
-        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let b_expr = new_binary_expr(
-            Type::Subtract,
-            DataType::Int64,
-            Box::new(b_left_expr),
-            Box::new(b_right_expr),
-        )
+        let b_expr = build_from_prost(&make_expression(
+            PbType::Subtract,
+            PbTypeName::Int64,
+            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(1)],
+        ))
         .unwrap();
 
         let project = Box::new(ProjectExecutor::new(

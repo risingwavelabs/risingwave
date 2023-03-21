@@ -199,8 +199,10 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::build_from_prost;
+    use risingwave_expr::expr::test_utils::*;
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -234,15 +236,16 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::GreaterThan,
-            DataType::Boolean,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
+        let test_expr = build_from_prost(&make_expression(
+            PbType::GreaterThan,
+            PbTypeName::Boolean,
+            vec![
+                make_input_ref(0, PbTypeName::Int64),
+                make_input_ref(1, PbTypeName::Int64),
+            ],
+        ))
         .unwrap();
+
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),
             Box::new(source),

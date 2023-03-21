@@ -1032,8 +1032,10 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::test_utils::{make_expression, make_input_ref};
+    use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::expr::expr_node::PbType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -1088,14 +1090,14 @@ mod tests {
     }
 
     fn create_cond() -> BoxedExpression {
-        let left_expr = InputRefExpression::new(DataType::Int64, 1);
-        let right_expr = InputRefExpression::new(DataType::Int64, 3);
-        new_binary_expr(
-            Type::LessThan,
-            DataType::Boolean,
-            Box::new(left_expr),
-            Box::new(right_expr),
-        )
+        build_from_prost(&make_expression(
+            PbType::LessThan,
+            PbTypeName::Boolean,
+            vec![
+                make_input_ref(1, PbTypeName::Int64),
+                make_input_ref(3, PbTypeName::Int64),
+            ],
+        ))
         .unwrap()
     }
 

@@ -1799,8 +1799,10 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{new_binary_expr, BoxedExpression, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::test_utils::{make_expression, make_input_ref};
+    use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
@@ -1985,15 +1987,15 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            let left_expr = InputRefExpression::new(DataType::Float32, 1);
-            let right_expr = InputRefExpression::new(DataType::Float64, 3);
-            new_binary_expr(
-                Type::LessThan,
-                DataType::Boolean,
-                Box::new(left_expr),
-                Box::new(right_expr),
-            )
-            .unwrap()
+            let prost = make_expression(
+                PbType::LessThan,
+                PbTypeName::Boolean,
+                vec![
+                    make_input_ref(1, PbTypeName::Float),
+                    make_input_ref(3, PbTypeName::Double),
+                ],
+            );
+            build_from_prost(&prost).unwrap()
         }
 
         fn create_join_executor_with_chunk_size_and_executors(

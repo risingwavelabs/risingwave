@@ -22,9 +22,7 @@ use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
-use risingwave_expr::expr::{
-    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
-};
+use risingwave_expr::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
 use risingwave_storage::StateStore;
@@ -284,6 +282,9 @@ mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::{IntervalUnit, NaiveDateWrapper};
     use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::build_from_prost;
+    use risingwave_expr::expr::test_utils::*;
+    use risingwave_pb::expr::expr_node::PbType;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::Distribution;
 
@@ -332,18 +333,14 @@ mod tests {
             ],
         };
 
-        let watermark_expr = new_binary_expr(
-            Type::Subtract,
-            WATERMARK_TYPE.clone(),
-            InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
-            LiteralExpression::new(
-                interval_type,
-                Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                    0, 1, 0,
-                ))),
-            )
-            .boxed(),
-        )
+        let watermark_expr = build_from_prost(&make_expression(
+            PbType::Subtract,
+            WATERMARK_TYPE.to_protobuf().type_name(),
+            vec![
+                make_input_ref(1, WATERMARK_TYPE.to_protobuf().type_name()),
+                make_interval_literal(IntervalUnit::from_month_day_usec(0, 1, 0)),
+            ],
+        ))
         .unwrap();
 
         let table = create_in_memory_state_table(
