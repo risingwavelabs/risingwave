@@ -1957,15 +1957,12 @@ async fn test_move_tables_between_compaction_group() {
         2
     );
 
-    assert_eq!(
-        current_version
-            .get_compaction_group_levels(new_group_id)
-            .levels[base_level - 1]
-            .table_infos
-            .len(),
-        2
-    );
-
+    let level = &current_version
+        .get_compaction_group_levels(new_group_id)
+        .levels[base_level - 1];
+    assert_eq!(level.table_infos[0].table_ids, vec![100]);
+    assert_eq!(level.table_infos[1].table_ids, vec![100, 101]);
+    assert_eq!(level.table_infos.len(), 2);
     let branched_ssts = hummock_manager.get_branched_ssts_info().await;
     // object-id 11 and 12.
     assert_eq!(branched_ssts.len(), 2);

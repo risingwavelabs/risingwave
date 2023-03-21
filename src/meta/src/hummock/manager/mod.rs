@@ -2055,16 +2055,13 @@ fn drop_sst(
         Some(mut entry) => {
             // if group_id not exist, it would not pass the stale check before.
             let removed_sst_id = entry.get(&group_id).unwrap();
-            if *removed_sst_id == sst_id {
-                entry.remove(&group_id);
-                if entry.is_empty() {
-                    branched_ssts.remove(object_id);
-                    true
-                } else {
-                    false
-                }
-            } else {
+            assert_eq!(*removed_sst_id, sst_id);
+            entry.remove(&group_id);
+            if entry.is_empty() {
+                branched_ssts.remove(object_id);
                 true
+            } else {
+                false
             }
         }
         None => true,

@@ -629,7 +629,6 @@ fn split_sst_info_for_level(
                     Some(sst_info.get_sst_id())
                 },
             ));
-            branch_table_info.table_ids = removed_table_ids;
             if is_trivial {
                 level.total_file_size -= sst_info.file_size;
                 level.uncompressed_file_size -= sst_info.uncompressed_file_size;
