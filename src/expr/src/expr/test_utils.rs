@@ -50,30 +50,6 @@ pub fn make_input_ref(idx: usize, ret: TypeName) -> ExprNode {
     }
 }
 
-pub fn make_null_literal(ty: TypeName) -> ExprNode {
-    ExprNode {
-        expr_type: Type::ConstantValue as i32,
-        return_type: Some(PbDataType {
-            type_name: ty as i32,
-            ..Default::default()
-        }),
-        rex_node: None,
-    }
-}
-
-pub fn make_bool_literal(data: bool) -> ExprNode {
-    ExprNode {
-        expr_type: Type::ConstantValue as i32,
-        return_type: Some(PbDataType {
-            type_name: TypeName::Boolean as i32,
-            ..Default::default()
-        }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Bool(data)).as_ref()),
-        })),
-    }
-}
-
 pub fn make_i32_literal(data: i32) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,
@@ -87,33 +63,7 @@ pub fn make_i32_literal(data: i32) -> ExprNode {
     }
 }
 
-pub fn make_i64_literal(data: i64) -> ExprNode {
-    ExprNode {
-        expr_type: Type::ConstantValue as i32,
-        return_type: Some(PbDataType {
-            type_name: TypeName::Int64 as i32,
-            ..Default::default()
-        }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Int64(data)).as_ref()),
-        })),
-    }
-}
-
-pub fn make_f32_literal(data: f32) -> ExprNode {
-    ExprNode {
-        expr_type: Type::ConstantValue as i32,
-        return_type: Some(PbDataType {
-            type_name: TypeName::Float as i32,
-            ..Default::default()
-        }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Float32(data.into())).as_ref()),
-        })),
-    }
-}
-
-pub fn make_interval_literal(data: IntervalUnit) -> ExprNode {
+fn make_interval_literal(data: IntervalUnit) -> ExprNode {
     ExprNode {
         expr_type: Type::ConstantValue as i32,
         return_type: Some(PbDataType {
@@ -122,19 +72,6 @@ pub fn make_interval_literal(data: IntervalUnit) -> ExprNode {
         }),
         rex_node: Some(RexNode::Constant(PbDatum {
             body: serialize_datum(Some(ScalarImpl::Interval(data)).as_ref()),
-        })),
-    }
-}
-
-pub fn make_string_literal(data: &str) -> ExprNode {
-    ExprNode {
-        expr_type: Type::ConstantValue as i32,
-        return_type: Some(PbDataType {
-            type_name: TypeName::Varchar as i32,
-            ..Default::default()
-        }),
-        rex_node: Some(RexNode::Constant(PbDatum {
-            body: serialize_datum(Some(ScalarImpl::Utf8(data.into())).as_ref()),
         })),
     }
 }

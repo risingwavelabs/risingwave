@@ -199,9 +199,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_prost;
-    use risingwave_expr::expr::test_utils::*;
-    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_expr::expr::{build, InputRefExpression};
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
@@ -236,14 +234,14 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build_from_prost(&make_expression(
+        let test_expr = build(
             PbType::GreaterThan,
-            PbTypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, PbTypeName::Int64),
-                make_input_ref(1, PbTypeName::Int64),
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(InputRefExpression::new(DataType::Int64, 1)),
             ],
-        ))
+        )
         .unwrap();
 
         let filter = Box::new(FilterExecutor::new(

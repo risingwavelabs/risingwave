@@ -114,14 +114,10 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_pb::data::data_type::PbTypeName;
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
-    use crate::expr::test_utils::{
-        make_expression, make_i64_literal, make_input_ref, make_null_literal,
-    };
-    use crate::expr::{build_from_prost, Expression, LiteralExpression};
+    use crate::expr::{build, Expression, InputRefExpression, LiteralExpression};
 
     #[derive(Clone)]
     struct MockAgg {
@@ -190,12 +186,16 @@ mod tests {
     #[tokio::test]
     async fn test_selective_agg() -> Result<()> {
         // filter (where $1 > 5)
-        let prost = make_expression(
+        let expr = build(
             PbType::GreaterThan,
-            PbTypeName::Boolean,
-            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(5)],
-        );
-        let condition = Arc::from(build_from_prost(&prost).unwrap());
+            DataType::Boolean,
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(5))).boxed(),
+            ],
+        )
+        .unwrap();
+        let condition = Arc::from(expr);
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
             condition,
@@ -229,17 +229,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_selective_agg_null_condition() -> Result<()> {
-        let prost = make_expression(
+        let expr = build(
             PbType::Equal,
-            PbTypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, PbTypeName::Int64),
-                make_null_literal(PbTypeName::Int64),
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, None).boxed(),
             ],
-        );
+        )
+        .unwrap();
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            Arc::from(build_from_prost(&prost).unwrap()),
+            Arc::from(expr),
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),

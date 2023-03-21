@@ -1799,9 +1799,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::test_utils::{make_expression, make_input_ref};
-    use risingwave_expr::expr::{build_from_prost, BoxedExpression};
-    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_expr::expr::{build, BoxedExpression, Expression, InputRefExpression};
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::{
@@ -1987,15 +1985,15 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            let prost = make_expression(
+            build(
                 PbType::LessThan,
-                PbTypeName::Boolean,
+                DataType::Boolean,
                 vec![
-                    make_input_ref(1, PbTypeName::Float),
-                    make_input_ref(3, PbTypeName::Double),
+                    InputRefExpression::new(DataType::Float32, 1).boxed(),
+                    InputRefExpression::new(DataType::Float64, 3).boxed(),
                 ],
-            );
-            build_from_prost(&prost).unwrap()
+            )
+            .unwrap()
         }
 
         fn create_join_executor_with_chunk_size_and_executors(

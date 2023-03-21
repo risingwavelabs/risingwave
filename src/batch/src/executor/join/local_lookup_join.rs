@@ -458,12 +458,12 @@ mod tests {
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::HashKeyDispatcher;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-    use risingwave_expr::expr::test_utils::*;
-    use risingwave_expr::expr::{build_from_prost, BoxedExpression};
-    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_expr::expr::{
+        build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    };
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::LocalLookupJoinExecutorArgs;
@@ -676,11 +676,14 @@ mod tests {
         );
 
         let condition = Some(
-            build_from_prost(&make_expression(
+            build(
                 PbType::LessThan,
-                PbTypeName::Boolean,
-                vec![make_i32_literal(5), make_input_ref(3, PbTypeName::Float)],
-            ))
+                DataType::Boolean,
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
+            )
             .unwrap(),
         );
 
@@ -701,11 +704,14 @@ mod tests {
         );
 
         let condition = Some(
-            build_from_prost(&make_expression(
+            build(
                 PbType::LessThan,
-                PbTypeName::Boolean,
-                vec![make_i32_literal(5), make_input_ref(3, PbTypeName::Float)],
-            ))
+                DataType::Boolean,
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
+            )
             .unwrap(),
         );
 
@@ -722,11 +728,14 @@ mod tests {
         );
 
         let condition = Some(
-            build_from_prost(&make_expression(
+            build(
                 PbType::LessThan,
-                PbTypeName::Boolean,
-                vec![make_i32_literal(5), make_input_ref(3, PbTypeName::Float)],
-            ))
+                DataType::Boolean,
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
+            )
             .unwrap(),
         );
 
@@ -744,11 +753,14 @@ mod tests {
         );
 
         let condition = Some(
-            build_from_prost(&make_expression(
+            build(
                 PbType::LessThan,
-                PbTypeName::Boolean,
-                vec![make_i32_literal(5), make_input_ref(3, PbTypeName::Float)],
-            ))
+                DataType::Boolean,
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
+            )
             .unwrap(),
         );
 

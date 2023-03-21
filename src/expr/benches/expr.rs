@@ -29,14 +29,13 @@ use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
-use risingwave_expr::expr::test_utils::{make_expression, make_input_ref, make_string_literal};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
 use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
+use risingwave_pb::expr::expr_node::PbType;
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -223,18 +222,25 @@ fn bench_expr(c: &mut Criterion) {
             continue;
         }
 
-        let mut prost = make_expression(
+        let expr = build(
             sig.func,
             sig.ret_type.into(),
             sig.inputs_type
                 .iter()
                 .enumerate()
                 .map(|(i, t)| {
+                    if sig.func == PbType::ToChar && i == 1 {
+                        return LiteralExpression::new(
+                            DataType::Varchar,
+                            Some("YYYY/MM/DD HH:MM:SS".into()),
+                        )
+                        .boxed();
+                    }
                     let idx = match (sig.func, i) {
-                        (ExprType::AtTimeZone, 1) => TIMEZONE,
-                        (ExprType::DateTrunc, 0) => TIME_FIELD,
-                        (ExprType::DateTrunc, 2) => TIMEZONE,
-                        (ExprType::Extract, 0) => match sig.inputs_type[1] {
+                        (PbType::AtTimeZone, 1) => TIMEZONE,
+                        (PbType::DateTrunc, 0) => TIME_FIELD,
+                        (PbType::DateTrunc, 2) => TIMEZONE,
+                        (PbType::Extract, 0) => match sig.inputs_type[1] {
                             DataTypeName::Date => EXTRACT_FIELD_DATE,
                             DataTypeName::Time => EXTRACT_FIELD_TIME,
                             DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
@@ -243,21 +249,11 @@ fn bench_expr(c: &mut Criterion) {
                         },
                         _ => input_index_for_type((*t).into()),
                     };
-                    make_input_ref(idx, DataType::from(*t).prost_type_name())
+                    InputRefExpression::new(DataType::from(*t), idx).boxed()
                 })
                 .collect_vec(),
-        );
-        if sig.func == ExprType::ToChar {
-            let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
-            f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
-        }
-        let expr = match build_from_prost(&prost) {
-            Ok(expr) => expr,
-            Err(e) => {
-                println!("error: {e}");
-                continue;
-            }
-        };
+        )
+        .unwrap();
         c.bench_function(&sig.to_string_no_return(), |bencher| {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
@@ -295,7 +291,7 @@ fn bench_expr(c: &mut Criterion) {
     }
 
     for sig in cast_sigs() {
-        let prost = make_expression(ExprType::Cast, sig.to_type.into(), {
+        let expr = build(PbType::Cast, sig.to_type.into(), {
             let idx = if matches!(sig.from_type, DataTypeName::Varchar) {
                 use DataTypeName::*;
                 match sig.to_type {
@@ -315,15 +311,9 @@ fn bench_expr(c: &mut Criterion) {
             } else {
                 input_index_for_type(sig.from_type.into())
             };
-            vec![make_input_ref(idx, sig.from_type.into())]
-        });
-        let expr = match build_from_prost(&prost) {
-            Ok(expr) => expr,
-            Err(e) => {
-                println!("error: {e}");
-                continue;
-            }
-        };
+            vec![InputRefExpression::new(sig.from_type.into(), idx).boxed()]
+        })
+        .unwrap();
         c.bench_function(&sig.to_string_no_return(), |bencher| {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });

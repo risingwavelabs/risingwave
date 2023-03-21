@@ -136,12 +136,10 @@ fn build_or_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExp
 #[cfg(test)]
 mod tests {
     use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::Scalar;
-    use risingwave_pb::data::data_type::TypeName;
+    use risingwave_common::types::{DataType, Scalar};
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::expr::build_from_prost;
-    use crate::expr::test_utils::{make_expression, make_input_ref};
+    use crate::expr::{build, Expression, InputRefExpression};
 
     #[tokio::test]
     async fn test_and() {
@@ -179,22 +177,22 @@ mod tests {
             None,
         ];
 
-        let prost = make_expression(
+        let expr = build(
             Type::And,
-            TypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, TypeName::Boolean),
-                make_input_ref(1, TypeName::Boolean),
+                InputRefExpression::new(DataType::Boolean, 0).boxed(),
+                InputRefExpression::new(DataType::Boolean, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
+        )
+        .unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).await.unwrap();
+            let res = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
@@ -236,22 +234,22 @@ mod tests {
             None,
         ];
 
-        let prost = make_expression(
+        let expr = build(
             Type::Or,
-            TypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, TypeName::Boolean),
-                make_input_ref(1, TypeName::Boolean),
+                InputRefExpression::new(DataType::Boolean, 0).boxed(),
+                InputRefExpression::new(DataType::Boolean, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
+        )
+        .unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).await.unwrap();
+            let res = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
@@ -263,22 +261,22 @@ mod tests {
         let rhs = vec![None, Some(1), None, Some(2), Some(4)];
         let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
 
-        let prost = make_expression(
+        let expr = build(
             Type::IsDistinctFrom,
-            TypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, TypeName::Int32),
-                make_input_ref(1, TypeName::Int32),
+                InputRefExpression::new(DataType::Int32, 0).boxed(),
+                InputRefExpression::new(DataType::Int32, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
+        )
+        .unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).await.unwrap();
+            let res = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
@@ -296,22 +294,22 @@ mod tests {
             Some(false),
         ];
 
-        let prost = make_expression(
+        let expr = build(
             Type::IsNotDistinctFrom,
-            TypeName::Boolean,
+            DataType::Boolean,
             vec![
-                make_input_ref(0, TypeName::Int32),
-                make_input_ref(1, TypeName::Int32),
+                InputRefExpression::new(DataType::Int32, 0).boxed(),
+                InputRefExpression::new(DataType::Int32, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
+        )
+        .unwrap();
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
                 lhs[i].map(|x| x.to_scalar_value()),
                 rhs[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).await.unwrap();
+            let res = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|x| x.to_scalar_value());
             assert_eq!(res, expected);
         }
@@ -327,22 +325,22 @@ mod tests {
             Some("???".into()),
             None,
         ];
-        let prost = make_expression(
+        let expr = build(
             Type::FormatType,
-            TypeName::Varchar,
+            DataType::Varchar,
             vec![
-                make_input_ref(0, TypeName::Int32),
-                make_input_ref(1, TypeName::Int32),
+                InputRefExpression::new(DataType::Int32, 0).boxed(),
+                InputRefExpression::new(DataType::Int32, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
+        )
+        .unwrap();
 
         for i in 0..l.len() {
             let row = OwnedRow::new(vec![
                 l[i].map(|x| x.to_scalar_value()),
                 r[i].map(|x| x.to_scalar_value()),
             ]);
-            let res = vec_executor.eval_row(&row).await.unwrap();
+            let res = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().map(|x| x.into());
             assert_eq!(res, expected);
         }

@@ -188,9 +188,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::build_from_prost;
-    use risingwave_expr::expr::test_utils::{make_expression, make_i64_literal, make_input_ref};
-    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
@@ -218,14 +216,14 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build_from_prost(&make_expression(
+        let test_expr = build(
             PbType::Add,
-            PbTypeName::Int64,
+            DataType::Int64,
             vec![
-                make_input_ref(0, PbTypeName::Int64),
-                make_input_ref(1, PbTypeName::Int64),
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                InputRefExpression::new(DataType::Int64, 1).boxed(),
             ],
-        ))
+        )
         .unwrap();
 
         let project = Box::new(ProjectExecutor::new(
@@ -271,18 +269,27 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_expr = build_from_prost(&make_expression(
+        let a_expr = build(
             PbType::Add,
-            PbTypeName::Int64,
-            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(1)],
-        ))
+            DataType::Int64,
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1))).boxed(),
+            ],
+        )
         .unwrap();
 
-        let b_expr = build_from_prost(&make_expression(
+        let b_expr = build(
             PbType::Subtract,
-            PbTypeName::Int64,
-            vec![make_input_ref(0, PbTypeName::Int64), make_i64_literal(1)],
-        ))
+            DataType::Int64,
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(LiteralExpression::new(
+                    DataType::Int64,
+                    Some(ScalarImpl::Int64(1)),
+                )),
+            ],
+        )
         .unwrap();
 
         let project = Box::new(ProjectExecutor::new(

@@ -18,11 +18,9 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::types::test_utils::IntervalUnitTestExt;
     use risingwave_common::types::{Decimal, IntervalUnit, NaiveDateWrapper, Scalar};
-    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
-    use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::arithmetic_op::{date_interval_add, date_interval_sub};
 
     #[tokio::test]
@@ -92,19 +90,19 @@ mod tests {
         let col1 = I32Array::from_iter(&lhs).into();
         let col2 = I32Array::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let prost = make_expression(
+        let expr = build(
             kind,
             match kind {
-                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => TypeName::Int32,
-                _ => TypeName::Boolean,
+                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => DataType::Int32,
+                _ => DataType::Boolean,
             },
             vec![
-                make_input_ref(0, TypeName::Int32),
-                make_input_ref(1, TypeName::Int32),
+                InputRefExpression::new(DataType::Int32, 0).boxed(),
+                InputRefExpression::new(DataType::Int32, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -116,7 +114,7 @@ mod tests {
                 lhs[i].map(|int| int.to_scalar_value()),
                 rhs[i].map(|int| int.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -150,16 +148,16 @@ mod tests {
         let col1 = NaiveDateArray::from_iter(&lhs).into();
         let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let prost = make_expression(
+        let expr = build(
             kind,
-            TypeName::Timestamp,
+            DataType::Timestamp,
             vec![
-                make_input_ref(0, TypeName::Date),
-                make_input_ref(1, TypeName::Interval),
+                InputRefExpression::new(DataType::Date, 0).boxed(),
+                InputRefExpression::new(DataType::Interval, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -171,7 +169,7 @@ mod tests {
                 lhs[i].map(|date| date.to_scalar_value()),
                 rhs[i].map(|date| date.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -210,19 +208,19 @@ mod tests {
         let col1 = DecimalArray::from_iter(&lhs).into();
         let col2 = DecimalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let prost = make_expression(
+        let expr = build(
             kind,
             match kind {
-                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => TypeName::Decimal,
-                _ => TypeName::Boolean,
+                Type::Add | Type::Subtract | Type::Multiply | Type::Divide => DataType::Decimal,
+                _ => DataType::Boolean,
             },
             vec![
-                make_input_ref(0, TypeName::Decimal),
-                make_input_ref(1, TypeName::Decimal),
+                InputRefExpression::new(DataType::Decimal, 0).boxed(),
+                InputRefExpression::new(DataType::Decimal, 1).boxed(),
             ],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -234,7 +232,7 @@ mod tests {
                 lhs[i].map(|dec| dec.to_scalar_value()),
                 rhs[i].map(|dec| dec.to_scalar_value()),
             ]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }

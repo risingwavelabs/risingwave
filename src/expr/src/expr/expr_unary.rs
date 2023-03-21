@@ -19,19 +19,15 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
     use risingwave_common::types::{NaiveDateWrapper, Scalar};
-    use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType;
-    use risingwave_pb::expr::expr_node::{RexNode, Type};
-    use risingwave_pb::expr::{ExprNode, FunctionCall};
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::*;
-    use crate::expr::test_utils::{make_expression, make_input_ref};
     use crate::vector_op::cast::{str_parse, try_cast};
 
     #[tokio::test]
     async fn test_unary() {
-        test_unary_bool::<BoolArray, _>(|x| !x, Type::Not).await;
-        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), Type::Cast).await;
+        test_unary_bool::<BoolArray, _>(|x| !x, PbType::Not).await;
+        test_unary_date::<NaiveDateTimeArray, _>(|x| try_cast(x).unwrap(), PbType::Cast).await;
         test_str_to_int16::<I16Array, _>(|x| str_parse(x).unwrap()).await;
     }
 
@@ -50,20 +46,13 @@ mod tests {
         }
         let col1 = I16Array::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let return_type = DataType {
-            type_name: TypeName::Int32 as i32,
-            is_nullable: false,
-            ..Default::default()
-        };
-        let expr = ExprNode {
-            expr_type: Type::Cast as i32,
-            return_type: Some(return_type),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Int16)],
-            })),
-        };
-        let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        let expr = build(
+            PbType::Cast,
+            DataType::Int32,
+            vec![InputRefExpression::new(DataType::Int16, 0).boxed()],
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -72,7 +61,7 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -93,20 +82,13 @@ mod tests {
 
         let col1 = I32Array::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 3);
-        let return_type = DataType {
-            type_name: TypeName::Int32 as i32,
-            is_nullable: false,
-            ..Default::default()
-        };
-        let expr = ExprNode {
-            expr_type: Type::Neg as i32,
-            return_type: Some(return_type),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Int32)],
-            })),
-        };
-        let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        let expr = build(
+            PbType::Neg,
+            DataType::Int32,
+            vec![InputRefExpression::new(DataType::Int32, 0).boxed()],
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &I32Array = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -115,7 +97,7 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|int| int.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].map(|int| int.to_scalar_value());
             assert_eq!(result, expected);
         }
@@ -143,20 +125,13 @@ mod tests {
         let col1_data = &input.iter().map(|x| x.as_ref().map(|x| &**x)).collect_vec();
         let col1 = Utf8Array::from_iter(col1_data).into();
         let data_chunk = DataChunk::new(vec![col1], 1);
-        let return_type = DataType {
-            type_name: TypeName::Int16 as i32,
-            is_nullable: false,
-            ..Default::default()
-        };
-        let expr = ExprNode {
-            expr_type: Type::Cast as i32,
-            return_type: Some(return_type),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: vec![make_input_ref(0, TypeName::Varchar)],
-            })),
-        };
-        let vec_executor = build_from_prost(&expr).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+        let expr = build(
+            PbType::Cast,
+            DataType::Int16,
+            vec![InputRefExpression::new(DataType::Varchar, 0).boxed()],
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -168,13 +143,13 @@ mod tests {
                 .as_ref()
                 .cloned()
                 .map(|str| str.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    async fn test_unary_bool<A, F>(f: F, kind: Type)
+    async fn test_unary_bool<A, F>(f: F, kind: PbType)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -198,13 +173,13 @@ mod tests {
 
         let col1 = BoolArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let prost = make_expression(
+        let expr = build(
             kind,
-            TypeName::Boolean,
-            vec![make_input_ref(0, TypeName::Boolean)],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+            DataType::Boolean,
+            vec![InputRefExpression::new(DataType::Boolean, 0).boxed()],
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -213,13 +188,13 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|b| b.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
     }
 
-    async fn test_unary_date<A, F>(f: F, kind: Type)
+    async fn test_unary_date<A, F>(f: F, kind: PbType)
     where
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
@@ -241,13 +216,13 @@ mod tests {
 
         let col1 = NaiveDateArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
-        let prost = make_expression(
+        let expr = build(
             kind,
-            TypeName::Timestamp,
-            vec![make_input_ref(0, TypeName::Date)],
-        );
-        let vec_executor = build_from_prost(&prost).unwrap();
-        let res = vec_executor.eval(&data_chunk).await.unwrap();
+            DataType::Timestamp,
+            vec![InputRefExpression::new(DataType::Date, 0).boxed()],
+        )
+        .unwrap();
+        let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {
             let x = target[idx].as_ref().map(|x| x.as_scalar_ref());
@@ -256,7 +231,7 @@ mod tests {
 
         for i in 0..input.len() {
             let row = OwnedRow::new(vec![input[i].map(|d| d.to_scalar_value())]);
-            let result = vec_executor.eval_row(&row).await.unwrap();
+            let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);
         }
