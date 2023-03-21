@@ -347,9 +347,9 @@ mod tests {
     use risingwave_common::util::ordered::OrderedRowSerde;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_pb::catalog::table::TableType;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbOrderType};
-    use risingwave_pb::plan_common::ColumnCatalog as ProstColumnCatalog;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::common::{PbColumnOrder, PbDirection, PbNullsAre, PbOrderType};
+    use risingwave_pb::plan_common::PbColumnCatalog;
     use tokio::task;
 
     use super::{DummyFilterKeyExtractor, FilterKeyExtractor, SchemaFilterKeyExtractor};
@@ -377,33 +377,33 @@ mod tests {
         assert_eq!(full_key, output_key);
     }
 
-    fn build_table_with_prefix_column_num(column_count: u32) -> ProstTable {
-        ProstTable {
+    fn build_table_with_prefix_column_num(column_count: u32) -> PbTable {
+        PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
             table_type: TableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc::new_atomic(DataType::Int64, "_row_id", 0)).into(),
                     ),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc::new_atomic(DataType::Int64, "col_1", 0)).into(),
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc::new_atomic(DataType::Float64, "col_2", 0)).into(),
                     ),
                     is_hidden: false,
                 },
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some(
                         (&ColumnDesc::new_atomic(DataType::Varchar, "col_3", 0)).into(),
                     ),
@@ -415,12 +415,14 @@ mod tests {
                     column_index: 1,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
                 PbColumnOrder {
                     column_index: 3,
                     order_type: Some(PbOrderType {
                         direction: PbDirection::Ascending as _,
+                        nulls_are: PbNullsAre::Largest as _,
                     }),
                 },
             ],

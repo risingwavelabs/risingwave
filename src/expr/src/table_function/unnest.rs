@@ -36,13 +36,14 @@ impl Unnest {
     }
 }
 
+#[async_trait::async_trait]
 impl TableFunction for Unnest {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
-        let ret_list = self.list.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<Vec<ArrayRef>> {
+        let ret_list = self.list.eval_checked(input).await?;
         let arr_list: &ListArray = ret_list.as_ref().into();
 
         let bitmap = input.visibility();
@@ -77,7 +78,7 @@ impl TableFunction for Unnest {
     }
 }
 
-pub fn new_unnest(prost: &TableFunctionProst, chunk_size: usize) -> Result<BoxedTableFunction> {
+pub fn new_unnest(prost: &TableFunctionPb, chunk_size: usize) -> Result<BoxedTableFunction> {
     let return_type = DataType::from(prost.get_return_type().unwrap());
     let args: Vec<_> = prost.args.iter().map(expr_build_from_prost).try_collect()?;
     let [list]: [_; 1] = args.try_into().unwrap();

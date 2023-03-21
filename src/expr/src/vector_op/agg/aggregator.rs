@@ -33,14 +33,15 @@ use crate::vector_op::agg::string_agg::create_string_agg_state;
 use crate::Result;
 
 /// An `Aggregator` supports `update` data and `output` result.
+#[async_trait::async_trait]
 pub trait Aggregator: Send + DynClone + 'static {
     fn return_type(&self) -> DataType;
 
     /// `update_single` update the aggregator with a single row with type checked at runtime.
-    fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
+    async fn update_single(&mut self, input: &DataChunk, row_id: usize) -> Result<()>;
 
     /// `update_multi` update the aggregator with multiple rows with type checked at runtime.
-    fn update_multi(
+    async fn update_multi(
         &mut self,
         input: &DataChunk,
         start_row_id: usize,
@@ -76,8 +77,6 @@ impl AggStateFactory {
             .map(|col_order| {
                 let col_idx = col_order.get_column_index() as usize;
                 let order_type = OrderType::from_protobuf(col_order.get_order_type().unwrap());
-                // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
-                // see also `risingwave_common::util::sort_util::compare_values`
                 ColumnOrder::new(col_idx, order_type)
             })
             .collect();

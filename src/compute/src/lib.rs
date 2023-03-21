@@ -28,6 +28,7 @@ pub mod memory_management;
 pub mod observer;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
 use clap::Parser;
 use risingwave_common::config::AsyncStackTraceOption;
@@ -41,19 +42,14 @@ pub struct ComputeNodeOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:5688"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5688")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, alias = "client-address", env = "RW_ADVERTISE_ADDR", long)]
+    #[clap(long, env = "RW_ADVERTISE_ADDR", long)]
     pub advertise_addr: Option<String>,
 
     #[clap(
@@ -69,6 +65,10 @@ pub struct ComputeNodeOpts {
     /// Endpoint of the connector node
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
     pub connector_rpc_endpoint: Option<String>,
+
+    /// Payload format of connector sink rpc
+    #[clap(long, env = "RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT")]
+    pub connector_rpc_sink_payload_format: Option<String>,
 
     /// One of:
     /// 1. `hummock+{object_store}` where `object_store`

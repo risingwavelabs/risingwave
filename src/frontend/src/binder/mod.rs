@@ -23,6 +23,7 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_sqlparser::ast::Statement;
 
 mod bind_context;
+mod bind_param;
 mod create;
 mod delete;
 mod expr;
@@ -108,7 +109,7 @@ pub struct Binder {
 /// 4. After bind finished:
 ///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
 /// occur in the query. `export` will return error if there is a kind of
-/// parameter. This rule is compatible with PostgreSQL    
+/// parameter. This rule is compatible with PostgreSQL
 ///     (b) parameter is None means that it's a unknown type. The user didn't specify it
 /// and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
 /// compatible with PostgreSQL.
@@ -209,6 +210,10 @@ impl Binder {
         Self::new_inner(session, false, vec![])
     }
 
+    pub fn new_with_param_types(session: &SessionImpl, param_types: Vec<DataType>) -> Binder {
+        Self::new_inner(session, false, param_types)
+    }
+
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
         Self::new_inner(session, true, vec![])
     }
@@ -295,12 +300,19 @@ impl Binder {
 
 #[cfg(test)]
 pub mod test_utils {
+    use risingwave_common::types::DataType;
+
     use super::Binder;
     use crate::session::SessionImpl;
 
     #[cfg(test)]
     pub fn mock_binder() -> Binder {
         Binder::new(&SessionImpl::mock())
+    }
+
+    #[cfg(test)]
+    pub fn mock_binder_with_param_types(param_types: Vec<DataType>) -> Binder {
+        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
     }
 }
 

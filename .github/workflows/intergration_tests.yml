@@ -4,6 +4,9 @@ on:
   schedule:
   # Currently we build docker images at 12:00 (UTC), so run this at 13:00
   - cron: '0 13 * * *'
+push:
+    branches: [main]
+    paths: [integration_tests/**]
 
 jobs:
   golangci:
@@ -39,7 +42,7 @@ jobs:
           - schema-registry
           - mysql-cdc
           - postgres-cdc
-          #- mysql-sink
+          - mysql-sink
           - postgres-sink
           - iceberg-sink
         format: ["json", "protobuf"]

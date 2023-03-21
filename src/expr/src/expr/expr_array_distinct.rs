@@ -80,13 +80,14 @@ impl<'a> TryFrom<&'a ExprNode> for ArrayDistinctExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for ArrayDistinctExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let array = self.array.eval_checked(input)?;
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        let array = self.array.eval_checked(input).await?;
         let mut builder = self.return_type.create_array_builder(array.len());
         for (vis, arr) in input.vis().iter().zip_eq_fast(array.iter()) {
             if !vis {
@@ -98,8 +99,8 @@ impl Expression for ArrayDistinctExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let array_data = self.array.eval_row(input)?;
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        let array_data = self.array.eval_row(input).await?;
         Ok(self.evaluate(array_data.to_datum_ref()))
     }
 }
@@ -130,8 +131,8 @@ mod tests {
     use itertools::Itertools;
     use risingwave_common::array::DataChunk;
     use risingwave_common::types::ScalarImpl;
-    use risingwave_pb::data::Datum as ProstDatum;
-    use risingwave_pb::expr::expr_node::{RexNode, Type as ProstType};
+    use risingwave_pb::data::PbDatum;
+    use risingwave_pb::expr::expr_node::{PbType, RexNode};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
     use super::*;
@@ -139,9 +140,9 @@ mod tests {
 
     fn make_i64_expr_node(value: i64) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::ConstantValue as i32,
+            expr_type: PbType::ConstantValue as i32,
             return_type: Some(DataType::Int64.to_protobuf()),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: value.to_be_bytes().to_vec(),
             })),
         }
@@ -149,7 +150,7 @@ mod tests {
 
     fn make_i64_array_expr_node(values: Vec<i64>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::Int64),
@@ -164,7 +165,7 @@ mod tests {
 
     fn make_i64_array_array_expr_node(values: Vec<Vec<i64>>) -> ExprNode {
         ExprNode {
-            expr_type: ProstType::Array as i32,
+            expr_type: PbType::Array as i32,
             return_type: Some(
                 DataType::List {
                     datatype: Box::new(DataType::List {
@@ -184,7 +185,7 @@ mod tests {
         {
             let array = make_i64_array_expr_node(vec![12]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayDistinct as i32,
+                expr_type: PbType::ArrayDistinct as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -201,7 +202,7 @@ mod tests {
         {
             let array = make_i64_array_array_expr_node(vec![vec![42], vec![42]]);
             let expr = ExprNode {
-                expr_type: ProstType::ArrayDistinct as i32,
+                expr_type: PbType::ArrayDistinct as i32,
                 return_type: Some(
                     DataType::List {
                         datatype: Box::new(DataType::Int64),
@@ -226,8 +227,8 @@ mod tests {
         .boxed()
     }
 
-    #[test]
-    fn test_array_distinct_array_of_primitives() {
+    #[tokio::test]
+    async fn test_array_distinct_array_of_primitives() {
         let array = make_i64_array_expr(vec![42, 43, 42]);
         let expr = ArrayDistinctExpression {
             return_type: DataType::List {
@@ -250,6 +251,7 @@ mod tests {
         ];
         let actual = expr
             .eval(&chunk)
+            .await
             .unwrap()
             .iter()
             .map(|v| v.map(|s| s.into_scalar_impl()))

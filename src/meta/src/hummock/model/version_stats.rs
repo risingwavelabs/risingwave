@@ -23,13 +23,13 @@ use crate::model::{MetadataModel, MetadataModelResult};
 /// Currently it only persists one row for latest version.
 impl MetadataModel for HummockVersionStats {
     type KeyType = HummockVersionId;
-    type ProstType = HummockVersionStats;
+    type PbType = HummockVersionStats;
 
     fn cf_name() -> String {
         String::from(HUMMOCK_VERSION_STATS_CF_NAME)
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
@@ -37,7 +37,7 @@ impl MetadataModel for HummockVersionStats {
         self.encode_to_vec()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

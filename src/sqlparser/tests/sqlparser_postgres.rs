@@ -754,7 +754,7 @@ fn parse_create_function() {
                 OperateFunctionArg::unnamed(DataType::Int),
                 OperateFunctionArg::unnamed(DataType::Int),
             ]),
-            return_type: Some(DataType::Int),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some("SQL".into()),
                 behavior: Some(FunctionBehavior::Immutable),
@@ -782,7 +782,7 @@ fn parse_create_function() {
                     default_expr: Some(Expr::Value(Value::Number("1".into()))),
                 }
             ]),
-            return_type: Some(DataType::Int),
+            returns: Some(CreateFunctionReturns::Value(DataType::Int)),
             params: CreateFunctionBody {
                 language: Some("SQL".into()),
                 behavior: Some(FunctionBehavior::Immutable),
@@ -791,6 +791,29 @@ fn parse_create_function() {
                     op: BinaryOperator::Plus,
                     right: Box::new(Expr::Identifier("b".into())),
                 }),
+                ..Default::default()
+            },
+        }
+    );
+
+    let sql = "CREATE FUNCTION unnest(a INT[]) RETURNS TABLE (x INT) LANGUAGE SQL RETURN a";
+    assert_eq!(
+        verified_stmt(sql),
+        Statement::CreateFunction {
+            or_replace: false,
+            temporary: false,
+            name: ObjectName(vec![Ident::new_unchecked("unnest")]),
+            args: Some(vec![OperateFunctionArg::with_name(
+                "a",
+                DataType::Array(Box::new(DataType::Int))
+            ),]),
+            returns: Some(CreateFunctionReturns::Table(vec![TableColumnDef {
+                name: Ident::new_unchecked("x"),
+                data_type: DataType::Int,
+            }])),
+            params: CreateFunctionBody {
+                language: Some("SQL".into()),
+                return_: Some(Expr::Identifier("a".into())),
                 ..Default::default()
             },
         }
@@ -998,7 +1021,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:28'".to_string()
         ))
     );
 
@@ -1006,7 +1029,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near '['".to_string()
+            "syntax error at or near '[ at line:1, column:24'".to_string()
         ))
     );
 
@@ -1014,7 +1037,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:27'".to_string()
         ))
     );
 
@@ -1022,7 +1045,7 @@ fn parse_array() {
     assert_eq!(
         parse_sql_statements(sql),
         Err(ParserError::ParserError(
-            "syntax error at or near 'ARRAY'".to_string()
+            "syntax error at or near 'ARRAY at line:1, column:23'".to_string()
         ))
     );
 

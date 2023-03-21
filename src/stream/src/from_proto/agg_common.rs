@@ -52,8 +52,6 @@ pub fn build_agg_call_from_prost(
         .map(|col_order| {
             let col_idx = col_order.get_column_index() as usize;
             let order_type = OrderType::from_protobuf(col_order.get_order_type().unwrap());
-            // TODO(yuchao): `nulls first/last` is not supported yet, so it's ignore here,
-            // see also `risingwave_common::util::sort_util::compare_values`
             ColumnOrder::new(col_idx, order_type)
         })
         .collect();

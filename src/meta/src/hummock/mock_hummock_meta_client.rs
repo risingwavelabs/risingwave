@@ -29,8 +29,8 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::common::{HostAddress, WorkerType};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
 use risingwave_pb::hummock::{
-    compact_task, CompactTask, CompactTaskProgress, HummockSnapshot, HummockVersion,
-    SubscribeCompactTasksResponse, VacuumTask,
+    compact_task, CompactTask, CompactTaskProgress, CompactorWorkload, HummockSnapshot,
+    HummockVersion, SubscribeCompactTasksResponse, VacuumTask,
 };
 use risingwave_rpc_client::error::{Result, RpcError};
 use risingwave_rpc_client::{CompactTaskItem, HummockMetaClient};
@@ -172,6 +172,7 @@ impl HummockMetaClient for MockHummockMetaClient {
     async fn subscribe_compact_tasks(
         &self,
         _max_concurrent_task_number: u64,
+        _cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let (sched_tx, mut sched_rx) = tokio::sync::mpsc::unbounded_channel();
         let sched_channel = Arc::new(CompactionRequestChannel::new(sched_tx));
@@ -195,7 +196,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         let _ = self
             .hummock_manager
             .compactor_manager_ref_for_test()
-            .add_compactor(context_id, 8);
+            .add_compactor(context_id, 8, 8);
         self.compact_context_id.store(context_id, Ordering::Release);
 
         let hummock_manager_compact = self.hummock_manager.clone();
@@ -235,9 +236,10 @@ impl HummockMetaClient for MockHummockMetaClient {
         }))
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         _progress: Vec<CompactTaskProgress>,
+        _workload: CompactorWorkload,
     ) -> Result<()> {
         Ok(())
     }

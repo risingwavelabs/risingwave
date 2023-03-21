@@ -20,10 +20,8 @@ use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersion
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
-};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::PbTable;
 
 use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
 use crate::user::UserId;
@@ -150,27 +148,27 @@ impl Default for TableType {
 }
 
 impl TableType {
-    fn from_prost(prost: ProstTableType) -> Self {
+    fn from_prost(prost: PbTableType) -> Self {
         match prost {
-            ProstTableType::Table => Self::Table,
-            ProstTableType::MaterializedView => Self::MaterializedView,
-            ProstTableType::Index => Self::Index,
-            ProstTableType::Internal => Self::Internal,
-            ProstTableType::Unspecified => unreachable!(),
+            PbTableType::Table => Self::Table,
+            PbTableType::MaterializedView => Self::MaterializedView,
+            PbTableType::Index => Self::Index,
+            PbTableType::Internal => Self::Internal,
+            PbTableType::Unspecified => unreachable!(),
         }
     }
 
-    fn to_prost(self) -> ProstTableType {
+    fn to_prost(self) -> PbTableType {
         match self {
-            Self::Table => ProstTableType::Table,
-            Self::MaterializedView => ProstTableType::MaterializedView,
-            Self::Index => ProstTableType::Index,
-            Self::Internal => ProstTableType::Internal,
+            Self::Table => PbTableType::Table,
+            Self::MaterializedView => PbTableType::MaterializedView,
+            Self::Index => PbTableType::Index,
+            Self::Internal => PbTableType::Internal,
         }
     }
 }
 
-/// The version of a table, used by schema change. See [`ProstTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
@@ -189,15 +187,15 @@ impl TableVersion {
         }
     }
 
-    pub fn from_prost(prost: ProstTableVersion) -> Self {
+    pub fn from_prost(prost: PbTableVersion) -> Self {
         Self {
             version_id: prost.version,
             next_column_id: ColumnId::from(prost.next_column_id),
         }
     }
 
-    pub fn to_prost(&self) -> ProstTableVersion {
-        ProstTableVersion {
+    pub fn to_prost(&self) -> PbTableVersion {
+        PbTableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
@@ -315,7 +313,7 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_internal_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> PbTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
             SchemaId::placeholder().schema_id,
@@ -338,8 +336,8 @@ impl TableCatalog {
         self.version().map(|v| v.version_id)
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        ProstTable {
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+        PbTable {
             id: self.id.table_id,
             schema_id,
             database_id,
@@ -388,8 +386,8 @@ impl TableCatalog {
     }
 }
 
-impl From<ProstTable> for TableCatalog {
-    fn from(tb: ProstTable) -> Self {
+impl From<PbTable> for TableCatalog {
+    fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
@@ -447,8 +445,8 @@ impl From<ProstTable> for TableCatalog {
     }
 }
 
-impl From<&ProstTable> for TableCatalog {
-    fn from(tb: &ProstTable) -> Self {
+impl From<&PbTable> for TableCatalog {
+    fn from(tb: &PbTable) -> Self {
         tb.clone().into()
     }
 }
@@ -470,10 +468,8 @@ mod tests {
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan_common::{
-        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
-    };
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
@@ -481,33 +477,25 @@ mod tests {
 
     #[test]
     fn test_into_table_catalog() {
-        let table: TableCatalog = ProstTable {
+        let table: TableCatalog = PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
-            table_type: ProstTableType::Table as i32,
+            table_type: PbTableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
-                    column_desc: Some(ProstColumnDesc::new_struct(
+                PbColumnCatalog {
+                    column_desc: Some(PbColumnDesc::new_struct(
                         "country",
                         1,
                         ".test.Country",
                         vec![
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "address",
-                                2,
-                            ),
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "zipcode",
-                                3,
-                            ),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
                         ],
                     )),
                     is_hidden: false,
@@ -531,7 +519,7 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
-            version: Some(ProstTableVersion {
+            version: Some(PbTableVersion {
                 version: 0,
                 next_column_id: 2,
             }),

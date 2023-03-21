@@ -15,6 +15,7 @@
 //! Build executor from protobuf.
 
 mod agg_common;
+mod barrier_recv;
 mod batch_query;
 mod chain;
 mod dml;
@@ -51,6 +52,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
+use self::barrier_recv::*;
 use self::batch_query::*;
 use self::chain::*;
 use self::dml::*;
@@ -125,7 +127,7 @@ pub async fn create_executor(
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorNewBuilder,
+        NodeBody::TopN => TopNExecutorBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
@@ -152,5 +154,6 @@ pub async fn create_executor(
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
         NodeBody::Now => NowExecutorBuilder,
         NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
+        NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
     }
 }

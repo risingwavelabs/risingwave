@@ -22,7 +22,7 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.risingwave.connector.api.TableSchema;
-import com.risingwave.connector.api.sink.ArraySinkrow;
+import com.risingwave.connector.api.sink.ArraySinkRow;
 import com.risingwave.proto.Data;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -129,7 +129,7 @@ public class UpsertIcebergSinkPartitionTest {
                         FileFormat.PARQUET);
 
         try {
-            sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 1, "Alice", "aaa")));
+            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa")));
             sink.sync();
 
             Record record1 = GenericRecord.create(icebergTableSchema);
@@ -140,7 +140,7 @@ public class UpsertIcebergSinkPartitionTest {
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
-            sink.write(Iterators.forArray(new ArraySinkrow(Op.INSERT, 2, "Bob", "bbb")));
+            sink.write(Iterators.forArray(new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb")));
             validateTableWithIceberg(expected);
             validateTableWithSpark(expected);
 
@@ -176,11 +176,11 @@ public class UpsertIcebergSinkPartitionTest {
         try {
             sink.write(
                     Iterators.forArray(
-                            new ArraySinkrow(Op.INSERT, 1, "Alice", "aaa"),
-                            new ArraySinkrow(Op.INSERT, 2, "Bob", "bbb"),
-                            new ArraySinkrow(Op.UPDATE_DELETE, 1, "Alice", "aaa"),
-                            new ArraySinkrow(Op.UPDATE_INSERT, 1, "Clare", "ccc"),
-                            new ArraySinkrow(Op.DELETE, 2, "Bob", "bbb")));
+                            new ArraySinkRow(Op.INSERT, 1, "Alice", "aaa"),
+                            new ArraySinkRow(Op.INSERT, 2, "Bob", "bbb"),
+                            new ArraySinkRow(Op.UPDATE_DELETE, 1, "Alice", "aaa"),
+                            new ArraySinkRow(Op.UPDATE_INSERT, 1, "Clare", "ccc"),
+                            new ArraySinkRow(Op.DELETE, 2, "Bob", "bbb")));
             sink.sync();
 
             Record record1 = GenericRecord.create(icebergTableSchema);
@@ -193,9 +193,9 @@ public class UpsertIcebergSinkPartitionTest {
 
             sink.write(
                     Iterators.forArray(
-                            new ArraySinkrow(Op.UPDATE_DELETE, 1, "Clare", "ccc"),
-                            new ArraySinkrow(Op.UPDATE_INSERT, 1, "Alice", "aaa"),
-                            new ArraySinkrow(Op.DELETE, 1, "Alice", "aaa")));
+                            new ArraySinkRow(Op.UPDATE_DELETE, 1, "Clare", "ccc"),
+                            new ArraySinkRow(Op.UPDATE_INSERT, 1, "Alice", "aaa"),
+                            new ArraySinkRow(Op.DELETE, 1, "Alice", "aaa")));
             sink.sync();
 
             validateTableWithIceberg(Sets.newHashSet());

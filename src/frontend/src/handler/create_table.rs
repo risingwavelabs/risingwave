@@ -23,9 +23,7 @@ use risingwave_common::catalog::{
     USER_COLUMN_ID_OFFSET,
 };
 use risingwave_common::error::{ErrorCode, Result};
-use risingwave_pb::catalog::{
-    Source as ProstSource, StreamSourceInfo, Table as ProstTable, WatermarkDesc,
-};
+use risingwave_pb::catalog::{PbSource, PbTable, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::GeneratedColumnDesc;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_sqlparser::ast::{
@@ -370,7 +368,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
     source_watermarks: Vec<SourceWatermark>,
     mut col_id_gen: ColumnIdGenerator,
     append_only: bool,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
     let column_descs = bind_sql_columns(column_defs.clone(), &mut col_id_gen)?;
     let mut properties = context.with_options().inner().clone().into_iter().collect();
@@ -426,7 +424,7 @@ pub(crate) fn gen_create_table_plan(
     mut col_id_gen: ColumnIdGenerator,
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let definition = context.normalized_sql().to_owned();
     let column_descs = bind_sql_columns(columns.clone(), &mut col_id_gen)?;
 
@@ -457,7 +455,7 @@ pub(crate) fn gen_create_table_plan_without_bind(
     source_watermarks: Vec<SourceWatermark>,
     append_only: bool,
     version: Option<TableVersion>,
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let (mut columns, pk_column_ids, row_id_index) =
         bind_sql_table_column_constraints(column_descs, column_defs.clone(), constraints)?;
 
@@ -504,13 +502,13 @@ fn gen_table_plan_inner(
     append_only: bool,
     version: Option<TableVersion>, /* TODO: this should always be `Some` if we support `ALTER
                                     * TABLE` for `CREATE TABLE AS`. */
-) -> Result<(PlanRef, Option<ProstSource>, ProstTable)> {
+) -> Result<(PlanRef, Option<PbSource>, PbTable)> {
     let session = context.session_ctx();
     let db_name = session.database();
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let source = source_info.map(|source_info| ProstSource {
+    let source = source_info.map(|source_info| PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
         database_id,
@@ -749,7 +747,7 @@ mod tests {
 
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "v1" => DataType::Int16,
             "v2" => DataType::new_struct(
                 vec![DataType::Int64,DataType::Float64,DataType::Float64],

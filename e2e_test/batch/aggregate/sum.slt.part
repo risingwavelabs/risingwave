@@ -77,7 +77,7 @@ select sum(d) from t;
 statement ok
 insert into t values (9000000000000000000000000000);
 
-statement error QueryError: Expr error: Numeric out of range
+statement error Expr error: Numeric out of range
 select sum(d) from t;
 
 statement ok

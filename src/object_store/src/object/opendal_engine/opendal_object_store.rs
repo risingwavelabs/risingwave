@@ -39,6 +39,8 @@ pub enum EngineType {
     Gcs,
     Oss,
     Webhdfs,
+    Azblob,
+    Fs,
 }
 
 impl OpendalObjectStore {
@@ -185,6 +187,8 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Gcs => "Gcs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
+            EngineType::Azblob => "Azblob",
+            EngineType::Fs => "Fs",
         }
     }
 }

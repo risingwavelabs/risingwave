@@ -27,7 +27,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ToOwnedDatum};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_expr::expr::BoxedExpression;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 
 use crate::exchange_source::{ExchangeSource, ExchangeSourceImpl};
 use crate::executor::{
@@ -113,7 +113,7 @@ pub fn gen_projected_data(
 
         let chunk = DataChunk::new(vec![array_builder.finish().into()], batch_size);
 
-        let array = expr.eval(&chunk).unwrap();
+        let array = futures::executor::block_on(expr.eval(&chunk)).unwrap();
         let chunk = DataChunk::new(vec![Column::new(array)], batch_size);
         ret.push(chunk);
     }
@@ -288,7 +288,7 @@ impl CreateSource for FakeCreateSource {
     async fn create_source(
         &self,
         _: impl BatchTaskContext,
-        _: &ProstExchangeSource,
+        _: &PbExchangeSource,
     ) -> Result<ExchangeSourceImpl> {
         Ok(ExchangeSourceImpl::Fake(self.fake_exchange_source.clone()))
     }

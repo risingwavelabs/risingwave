@@ -83,7 +83,7 @@ pub const USER_COLUMN_ID_OFFSET: i32 = ROW_ID_COLUMN_ID.next().get_id();
 /// Creates a row ID column (for implicit primary key). It'll always have the ID `0` for now.
 pub fn row_id_column_desc() -> ColumnDesc {
     ColumnDesc {
-        data_type: DataType::Int64,
+        data_type: DataType::Serial,
         column_id: ROW_ID_COLUMN_ID,
         name: row_id_column_name(),
         field_descs: vec![],

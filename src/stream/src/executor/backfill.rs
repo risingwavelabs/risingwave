@@ -20,13 +20,12 @@ use either::Either;
 use futures::stream::select_with_strategy;
 use futures::{pin_mut, stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
-use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{Direction, OrderType};
+use risingwave_common::util::sort_util::{compare_datum, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -65,8 +64,8 @@ pub struct BackfillExecutor<S: StateStore> {
     /// Upstream with the same schema with the upstream table.
     upstream: BoxedExecutor,
 
-    /// The column indices need to be forwarded to the downstream.
-    upstream_indices: Vec<usize>,
+    /// The column indices need to be forwarded to the downstream from the upstream and table scan.
+    output_indices: Vec<usize>,
 
     progress: CreateMviewProgress,
 
@@ -84,7 +83,7 @@ where
     pub fn new(
         table: StorageTable<S>,
         upstream: BoxedExecutor,
-        upstream_indices: Vec<usize>,
+        output_indices: Vec<usize>,
         progress: CreateMviewProgress,
         schema: Schema,
         pk_indices: PkIndices,
@@ -97,7 +96,7 @@ where
             },
             table,
             upstream,
-            upstream_indices,
+            output_indices,
             actor_id: progress.actor_id(),
             progress,
         }
@@ -108,21 +107,6 @@ where
         // The primary key columns, in the output columns of the table scan.
         let pk_in_output_indices = self.table.pk_in_output_indices().unwrap();
         let pk_order = self.table.pk_serializer().get_order_types();
-
-        // TODO: unify these two mappings if we make the upstream and table output the same.
-        // The columns to be forwarded to the downstream, in the upstream columns.
-        let downstream_in_upstream_indices = self.upstream_indices;
-        // The columns to be forwarded to the downstream, in the output columns of the table scan.
-        let downstream_in_output_indices = downstream_in_upstream_indices
-            .iter()
-            .map(|&i| {
-                self.table
-                    .output_indices()
-                    .iter()
-                    .position(|&j| i == j)
-                    .unwrap()
-            })
-            .collect_vec();
 
         let mut upstream = self.upstream.execute();
 
@@ -154,9 +138,7 @@ where
             // Forward messages directly to the downstream.
             #[for_await]
             for message in upstream {
-                if let Some(message) =
-                    Self::mapping_message(message?, &downstream_in_upstream_indices)
-                {
+                if let Some(message) = Self::mapping_message(message?, &self.output_indices) {
                     yield message;
                 }
             }
@@ -233,7 +215,7 @@ where
                                                 &pk_in_output_indices,
                                                 pk_order,
                                             ),
-                                            &downstream_in_upstream_indices,
+                                            &self.output_indices,
                                         ));
                                     }
                                 }
@@ -272,7 +254,7 @@ where
                                     processed_rows += chunk.cardinality() as u64;
                                     yield Message::Chunk(Self::mapping_chunk(
                                         chunk,
-                                        &downstream_in_upstream_indices,
+                                        &self.output_indices,
                                     ));
                                 }
 
@@ -295,7 +277,7 @@ where
                                 processed_rows += chunk.cardinality() as u64;
                                 yield Message::Chunk(Self::mapping_chunk(
                                     chunk,
-                                    &downstream_in_output_indices,
+                                    &self.output_indices,
                                 ));
                             }
                         }
@@ -313,7 +295,7 @@ where
         // Forward messages directly to the downstream.
         #[for_await]
         for msg in upstream {
-            if let Some(msg) = Self::mapping_message(msg?, &downstream_in_upstream_indices) {
+            if let Some(msg) = Self::mapping_message(msg?, &self.output_indices) {
                 if let Some(barrier) = msg.as_barrier() {
                     self.progress.finish(barrier.epoch.curr);
                 }
@@ -391,12 +373,9 @@ where
             match row
                 .project(pk_in_output_indices)
                 .iter()
-                .zip_eq_fast(pk_order.iter())
+                .zip_eq_fast(pk_order.iter().copied())
                 .cmp_by(current_pos.iter(), |(x, order), y| {
-                    match order.direction() {
-                        Direction::Ascending => x.cmp(&y),
-                        Direction::Descending => y.cmp(&x),
-                    }
+                    compare_datum(x, y, order)
                 }) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,

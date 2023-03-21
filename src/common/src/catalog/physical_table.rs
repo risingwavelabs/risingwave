@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use fixedbitset::FixedBitSet;
+use itertools::Itertools;
 use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::StorageTableDesc;
 
@@ -77,11 +78,32 @@ impl TableDesc {
     }
 
     pub fn to_protobuf(&self) -> StorageTableDesc {
+        let dist_key_indices: Vec<u32> = self.distribution_key.iter().map(|&k| k as u32).collect();
+        let pk_indices: Vec<u32> = self
+            .pk
+            .iter()
+            .map(|v| v.to_protobuf().column_index)
+            .collect();
+        let dist_key_in_pk_indices = dist_key_indices
+            .iter()
+            .map(|&di| {
+                pk_indices
+                    .iter()
+                    .position(|&pi| di == pi)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "distribution key {:?} must be a subset of primary key {:?}",
+                            dist_key_indices, pk_indices
+                        )
+                    })
+            })
+            .map(|d| d as u32)
+            .collect_vec();
         StorageTableDesc {
             table_id: self.table_id.into(),
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
-            dist_key_indices: self.distribution_key.iter().map(|&k| k as u32).collect(),
+            dist_key_in_pk_indices,
             retention_seconds: self.retention_seconds,
             value_indices: self.value_indices.iter().map(|&v| v as u32).collect(),
             read_prefix_len_hint: self.read_prefix_len_hint as u32,

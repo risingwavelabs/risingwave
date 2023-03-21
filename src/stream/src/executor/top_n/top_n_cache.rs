@@ -14,10 +14,13 @@
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+use std::fmt::Debug;
 
 use async_trait::async_trait;
+use itertools::Itertools;
 use risingwave_common::array::{Op, RowRef};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer};
+use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::types::DataType;
 use risingwave_storage::StateStore;
 
 use crate::executor::error::StreamExecutorResult;
@@ -53,6 +56,52 @@ pub struct TopNCache<const WITH_TIES: bool> {
     pub offset: usize,
     /// Assumption: `limit != 0`
     pub limit: usize,
+
+    /// Data types for the full row.
+    ///
+    /// For debug formatting only.
+    data_types: Vec<DataType>,
+}
+
+impl<const WITH_TIES: bool> Debug for TopNCache<WITH_TIES> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "TopNCache {{\n  offset: {}, limit: {}, high_capacity: {},\n",
+            self.offset, self.limit, self.high_capacity
+        )?;
+
+        fn format_cache(
+            f: &mut std::fmt::Formatter<'_>,
+            cache: &BTreeMap<CacheKey, CompactedRow>,
+            data_types: &[DataType],
+        ) -> std::fmt::Result {
+            if cache.is_empty() {
+                return write!(f, "    <empty>");
+            }
+            write!(
+                f,
+                "    {}",
+                cache
+                    .iter()
+                    .format_with("\n    ", |item, f| f(&format_args!(
+                        "{:?}, {}",
+                        item.0,
+                        item.1.deserialize(data_types).unwrap().display(),
+                    )))
+            )
+        }
+
+        writeln!(f, "  low:")?;
+        format_cache(f, &self.low, &self.data_types)?;
+        writeln!(f, "\n  middle:")?;
+        format_cache(f, &self.middle, &self.data_types)?;
+        writeln!(f, "\n  high:")?;
+        format_cache(f, &self.high, &self.data_types)?;
+
+        write!(f, "\n}}")?;
+        Ok(())
+    }
 }
 
 /// `CacheKey` is composed of `(order_by, remaining columns of pk)`.
@@ -67,10 +116,11 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
+    #[allow(clippy::too_many_arguments)]
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     );
@@ -96,7 +146,8 @@ pub trait TopNCacheTrait {
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
-    pub fn new(offset: usize, limit: usize) -> Self {
+    /// `data_types` -- Data types for the full row.
+    pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
         assert!(limit != 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -113,6 +164,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
+            data_types,
         }
     }
 
@@ -137,13 +189,19 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     pub fn is_middle_cache_full(&self) -> bool {
         // For WITH_TIES, the middle cache can exceed the capacity.
         if !WITH_TIES {
-            assert!(self.middle.len() <= self.limit);
+            assert!(
+                self.middle.len() <= self.limit,
+                "the middle cache exceeds the capacity\n{self:?}"
+            );
         }
         let full = self.middle.len() >= self.limit;
         if full {
             assert!(self.is_low_cache_full());
         } else {
-            assert!(self.high.is_empty());
+            assert!(
+                self.high.is_empty(),
+                "the high cache is not empty when middle cache is not full:\n{self:?}"
+            );
         }
         full
     }
@@ -153,11 +211,33 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         if !WITH_TIES {
             assert!(self.high.len() <= self.high_capacity);
         }
-        let full = self.high.len() >= self.high_capacity;
-        if full {
-            assert!(self.is_middle_cache_full());
+        self.high.len() >= self.high_capacity
+    }
+
+    /// Use this method instead of `self.high.insert` directly when possible.
+    ///
+    /// It only inserts into high cache if the key is smaller than the largest key in the high
+    /// cache. Otherwise, we simply ignore the row. We will wait until the high cache becomes
+    /// empty and fill it at that time.
+    fn insert_high_cache(&mut self, cache_key: CacheKey, row: CompactedRow, is_from_middle: bool) {
+        if !self.is_high_cache_full() {
+            if is_from_middle {
+                self.high.insert(cache_key, row);
+                return;
+            }
+            // For direct insert, we need to check if the key is smaller than the largest key
+            if let Some(high_last) = self.high.last_key_value() && cache_key <= *high_last.0 {
+                debug_assert!(cache_key != *high_last.0, "cache_key should be unique");
+                self.high.insert(cache_key, row);
+            }
+        } else {
+            let high_last = self.high.last_entry().unwrap();
+            if cache_key <= *high_last.key() {
+                debug_assert!(cache_key != *high_last.key(), "cache_key should be unique");
+                high_last.remove_entry();
+                self.high.insert(cache_key, row);
+            }
         }
-        full
     }
 }
 
@@ -166,7 +246,7 @@ impl TopNCacheTrait for TopNCache<false> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -195,6 +275,7 @@ impl TopNCacheTrait for TopNCache<false> {
             return;
         }
 
+        let mut is_from_middle = false;
         let elem_to_compare_with_high = {
             let middle_last = self.middle.last_entry().unwrap();
             if elem_to_compare_with_middle.0 <= *middle_last.key() {
@@ -207,23 +288,18 @@ impl TopNCacheTrait for TopNCache<false> {
                 res_rows.push(elem_to_compare_with_middle.1.clone());
                 self.middle
                     .insert(elem_to_compare_with_middle.0, elem_to_compare_with_middle.1);
+                is_from_middle = true;
                 res
             } else {
                 elem_to_compare_with_middle
             }
         };
 
-        if !self.is_high_cache_full() {
-            self.high
-                .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
-        } else {
-            let high_last = self.high.last_entry().unwrap();
-            if elem_to_compare_with_high.0 <= *high_last.key() {
-                high_last.remove_entry();
-                self.high
-                    .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
-            }
-        }
+        self.insert_high_cache(
+            elem_to_compare_with_high.0,
+            elem_to_compare_with_high.1,
+            is_from_middle,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -308,7 +384,7 @@ impl TopNCacheTrait for TopNCache<true> {
     fn insert(
         &mut self,
         cache_key: CacheKey,
-        row: impl Row,
+        row: impl Row + Send,
         res_ops: &mut Vec<Op>,
         res_rows: &mut Vec<CompactedRow>,
     ) {
@@ -381,21 +457,11 @@ impl TopNCacheTrait for TopNCache<true> {
             Ordering::Greater => {
                 // The row is in high.
                 let elem_to_compare_with_high = elem_to_compare_with_middle;
-                if !self.is_high_cache_full() {
-                    self.high.insert(
-                        elem_to_compare_with_high.0,
-                        (&elem_to_compare_with_high.1).into(),
-                    );
-                } else {
-                    let high_last = self.high.last_entry().unwrap();
-                    if elem_to_compare_with_high.0 <= *high_last.key() {
-                        high_last.remove_entry();
-                        self.high.insert(
-                            elem_to_compare_with_high.0,
-                            (&elem_to_compare_with_high.1).into(),
-                        );
-                    }
-                }
+                self.insert_high_cache(
+                    elem_to_compare_with_high.0,
+                    elem_to_compare_with_high.1.into(),
+                    false,
+                );
             }
         }
     }

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
-use risingwave_pb::catalog::{Database, Function, Schema, Source, Table, View};
+use risingwave_pb::catalog::{Connection, Database, Function, Schema, Source, Table, View};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 
@@ -65,6 +65,8 @@ pub enum DdlCommand {
     CreatingStreamingJob(StreamingJob, StreamFragmentGraphProto),
     DropStreamingJob(StreamingJobId),
     ReplaceTable(StreamingJob, StreamFragmentGraphProto, ColIndexMapping),
+    CreateConnection(Connection),
+    DropConnection(String),
 }
 
 #[derive(Clone)]
@@ -141,6 +143,10 @@ where
                     ctrl.replace_table(stream_job, fragment_graph, table_col_index_mapping)
                         .await
                 }
+                DdlCommand::CreateConnection(connection) => {
+                    ctrl.create_connection(connection).await
+                }
+                DdlCommand::DropConnection(conn_name) => ctrl.drop_connection(&conn_name).await,
             }
         });
         handler.await.unwrap()
@@ -217,6 +223,14 @@ where
 
     async fn drop_view(&self, view_id: ViewId) -> MetaResult<NotificationVersion> {
         self.catalog_manager.drop_view(view_id).await
+    }
+
+    async fn create_connection(&self, connection: Connection) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.create_connection(connection).await
+    }
+
+    async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        self.catalog_manager.drop_connection(conn_name).await
     }
 
     async fn create_streaming_job(
@@ -536,7 +550,12 @@ where
 
         let result = try {
             let (ctx, table_fragments) = self
-                .build_replace_table(env, &stream_job, fragment_graph, table_col_index_mapping)
+                .build_replace_table(
+                    env,
+                    &stream_job,
+                    fragment_graph,
+                    table_col_index_mapping.clone(),
+                )
                 .await?;
 
             self.stream_manager
@@ -545,7 +564,10 @@ where
         };
 
         match result {
-            Ok(_) => self.finish_replace_table(&stream_job).await,
+            Ok(_) => {
+                self.finish_replace_table(&stream_job, table_col_index_mapping)
+                    .await
+            }
             Err(err) => {
                 self.cancel_replace_table(&stream_job).await?;
                 Err(err)
@@ -673,13 +695,14 @@ where
     async fn finish_replace_table(
         &self,
         stream_job: &StreamingJob,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(None, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table)
+            .finish_replace_table_procedure(table, table_col_index_mapping)
             .await
     }
 

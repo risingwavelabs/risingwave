@@ -14,10 +14,10 @@
 
 package com.risingwave.sourcenode;
 
-import com.risingwave.connector.api.source.ConnectorConfig;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType;
+import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import com.risingwave.sourcenode.core.SourceHandlerFactory;
 import io.grpc.Status;
 import io.grpc.StatusException;
@@ -46,19 +46,19 @@ public class SourceRequestHandler {
                 break;
             case START:
                 var startRequest = request.getStart();
-                var handler =
-                        SourceHandlerFactory.createSourceHandler(
-                                SourceTypeE.valueOf(startRequest.getSourceType()),
-                                startRequest.getSourceId(),
-                                startRequest.getStartOffset(),
-                                new ConnectorConfig(startRequest.getPropertiesMap()));
-                if (handler == null) {
-                    LOG.error("failed to create source handler");
-                    responseObserver.onCompleted();
-                } else {
-                    handler.handle(
+                try {
+                    var handler =
+                            SourceHandlerFactory.createSourceHandler(
+                                    SourceTypeE.valueOf(startRequest.getSourceType()),
+                                    startRequest.getSourceId(),
+                                    startRequest.getStartOffset(),
+                                    startRequest.getPropertiesMap());
+                    handler.startSource(
                             (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                                     responseObserver);
+                } catch (Throwable t) {
+                    LOG.error("failed to start source", t);
+                    responseObserver.onError(t);
                 }
                 break;
             case REQUEST_NOT_SET:
@@ -75,11 +75,11 @@ public class SourceRequestHandler {
         String jdbcUrl =
                 toJdbcPrefix(validate.getSourceType())
                         + "://"
-                        + props.get(ConnectorConfig.HOST)
+                        + props.get(DbzConnectorConfig.HOST)
                         + ":"
-                        + props.get(ConnectorConfig.PORT)
+                        + props.get(DbzConnectorConfig.PORT)
                         + "/"
-                        + props.get(ConnectorConfig.DB_NAME);
+                        + props.get(DbzConnectorConfig.DB_NAME);
         LOG.debug("validate jdbc url: {}", jdbcUrl);
 
         var sqlStmts = new Properties();
@@ -93,8 +93,8 @@ public class SourceRequestHandler {
         try (var conn =
                 DriverManager.getConnection(
                         jdbcUrl,
-                        props.get(ConnectorConfig.USER),
-                        props.get(ConnectorConfig.PASSWORD))) {
+                        props.get(DbzConnectorConfig.USER),
+                        props.get(DbzConnectorConfig.PASSWORD))) {
             // usernamed and password are correct
             var dbMeta = conn.getMetaData();
 
@@ -138,8 +138,8 @@ public class SourceRequestHandler {
                     }
                     // check whether table exist
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("mysql.table"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.DB_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.DB_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             var ret = res.getInt(1);
@@ -152,8 +152,8 @@ public class SourceRequestHandler {
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("mysql.table_schema"))) {
                         var sourceSchema = validate.getTableSchema();
-                        stmt.setString(1, props.get(ConnectorConfig.DB_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.DB_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         var pkFields = new HashSet<String>();
                         int index = 0;
@@ -203,8 +203,8 @@ public class SourceRequestHandler {
                     }
                     // check schema name and table name
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("postgres.table"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         while (res.next()) {
                             var ret = res.getString(1);
@@ -219,9 +219,9 @@ public class SourceRequestHandler {
                     try (var stmt = conn.prepareStatement(sqlStmts.getProperty("postgres.pk"))) {
                         stmt.setString(
                                 1,
-                                props.get(ConnectorConfig.PG_SCHEMA_NAME)
+                                props.get(DbzConnectorConfig.PG_SCHEMA_NAME)
                                         + "."
-                                        + props.get(ConnectorConfig.TABLE_NAME));
+                                        + props.get(DbzConnectorConfig.TABLE_NAME));
 
                         var res = stmt.executeQuery();
                         var pkFields = new HashSet<String>();
@@ -237,8 +237,8 @@ public class SourceRequestHandler {
                     // check whether source schema match table schema on upstream
                     try (var stmt =
                             conn.prepareStatement(sqlStmts.getProperty("postgres.table_schema"))) {
-                        stmt.setString(1, props.get(ConnectorConfig.PG_SCHEMA_NAME));
-                        stmt.setString(2, props.get(ConnectorConfig.TABLE_NAME));
+                        stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
                         var res = stmt.executeQuery();
                         var sourceSchema = validate.getTableSchema();
                         int index = 0;
@@ -261,6 +261,159 @@ public class SourceRequestHandler {
                                                 "incompatible data type of column %s",
                                                 srcCol.getName()));
                             }
+                        }
+                    }
+                    // check whether user is superuser or replication role
+                    try (var stmt =
+                            conn.prepareStatement(sqlStmts.getProperty("postgres.role.check"))) {
+                        stmt.setString(1, props.get(DbzConnectorConfig.USER));
+                        var res = stmt.executeQuery();
+                        while (res.next()) {
+                            if (!res.getBoolean(1)) {
+                                throw new StatusException(
+                                        Status.INTERNAL.withDescription(
+                                                "Postgres user must be superuser or replication role to start walsender."));
+                            }
+                        }
+                    }
+                    // check whether user has select privilege on table for initial snapshot
+                    try (var stmt =
+                            conn.prepareStatement(
+                                    sqlStmts.getProperty("postgres.table_privilege.check"))) {
+                        stmt.setString(1, props.get(DbzConnectorConfig.TABLE_NAME));
+                        stmt.setString(2, props.get(DbzConnectorConfig.USER));
+                        var res = stmt.executeQuery();
+                        while (res.next()) {
+                            if (!res.getBoolean(1)) {
+                                throw new StatusException(
+                                        Status.INTERNAL.withDescription(
+                                                "Postgres user must have select privilege on table "
+                                                        + props.get(
+                                                                DbzConnectorConfig.TABLE_NAME)));
+                            }
+                        }
+                    }
+                    // check whether publication exists
+                    boolean publicationExists = false;
+                    boolean partialPublication = false;
+                    try (var stmt = conn.createStatement()) {
+                        var res =
+                                stmt.executeQuery(
+                                        sqlStmts.getProperty("postgres.publication_att_exists"));
+                        while (res.next()) {
+                            partialPublication = res.getBoolean(1);
+                        }
+                    }
+                    // pg 15 and up supports partial publication of table
+                    // check whether publication covers all columns
+                    if (partialPublication) {
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.publication_att"))) {
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                String[] columnsPub =
+                                        (String[]) res.getArray("attnames").getArray();
+                                var sourceSchema = validate.getTableSchema();
+                                for (int i = 0; i < sourceSchema.getColumnsCount(); i++) {
+                                    String columnName = sourceSchema.getColumns(i).getName();
+                                    if (Arrays.stream(columnsPub).noneMatch(columnName::equals)) {
+                                        throw new StatusException(
+                                                Status.INTERNAL.withDescription(
+                                                        "The publication 'dbz_publication' does not cover all necessary columns in table "
+                                                                + props.get(
+                                                                        DbzConnectorConfig
+                                                                                .TABLE_NAME)));
+                                    }
+                                    if (i == sourceSchema.getColumnsCount() - 1) {
+                                        publicationExists = true;
+                                    }
+                                }
+                                if (publicationExists) {
+                                    LOG.info("publication exists");
+                                    break;
+                                }
+                            }
+                        }
+                    } else { // check directly whether publication exists
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.publication_cnt"))) {
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                if (res.getInt("count") > 0) {
+                                    publicationExists = true;
+                                    LOG.info("publication exists");
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // if publication does not exist, check permission to create publication
+                    if (!publicationExists) {
+                        // check create privilege on database
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty(
+                                                "postgres.database_privilege.check"))) {
+                            stmt.setString(1, props.get(DbzConnectorConfig.USER));
+                            stmt.setString(2, props.get(DbzConnectorConfig.DB_NAME));
+                            stmt.setString(3, props.get(DbzConnectorConfig.USER));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                if (!res.getBoolean(1)) {
+                                    throw new StatusException(
+                                            Status.INTERNAL.withDescription(
+                                                    "Postgres user must have create privilege on database"
+                                                            + props.get(
+                                                                    DbzConnectorConfig.DB_NAME)));
+                                }
+                            }
+                        }
+                        // check ownership on table
+                        boolean isTableOwner = false;
+                        String owner = null;
+                        // check if user is owner
+                        try (var stmt =
+                                conn.prepareStatement(
+                                        sqlStmts.getProperty("postgres.table_owner"))) {
+                            stmt.setString(1, props.get(DbzConnectorConfig.PG_SCHEMA_NAME));
+                            stmt.setString(2, props.get(DbzConnectorConfig.TABLE_NAME));
+                            var res = stmt.executeQuery();
+                            while (res.next()) {
+                                owner = res.getString("tableowner");
+                                if (owner.equals(props.get(DbzConnectorConfig.USER))) {
+                                    isTableOwner = true;
+                                    break;
+                                }
+                            }
+                        }
+                        // if user is not owner, check if user belongs to owner group
+                        if (!isTableOwner && !owner.isEmpty()) {
+                            try (var stmt =
+                                    conn.prepareStatement(
+                                            sqlStmts.getProperty("postgres.users_of_group"))) {
+                                stmt.setString(1, owner);
+                                var res = stmt.executeQuery();
+                                while (res.next()) {
+                                    String[] users = (String[]) res.getArray("members").getArray();
+                                    if (Arrays.stream(users)
+                                            .anyMatch(props.get(DbzConnectorConfig.USER)::equals)) {
+                                        isTableOwner = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!isTableOwner) {
+                            throw new StatusException(
+                                    Status.INTERNAL.withDescription(
+                                            "Postgres user must be owner of table "
+                                                    + props.get(DbzConnectorConfig.TABLE_NAME)));
                         }
                     }
                     break;

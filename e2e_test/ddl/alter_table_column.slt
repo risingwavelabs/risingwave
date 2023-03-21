@@ -127,7 +127,6 @@ select * from mv3;
 3 3.3 3-3
 
 # Drop column
-# TODO(#4529): create mview on partial columns and test whether dropping the unrefereced column works.
 statement error being referenced
 alter table t drop column s;
 
@@ -138,6 +137,10 @@ statement ok
 drop materialized view mv3;
 
 statement ok
+create materialized view mv5 as select v, s from t;
+
+# This should succeed as there's no materialized view referencing the column, including `mv5`. (#4529)
+statement ok
 alter table t drop column r;
 
 query TT
@@ -147,6 +150,13 @@ public.t CREATE TABLE t (v INT, s CHARACTER VARYING)
 
 query IR rowsort
 select v, s from t;
+----
+1 1-1
+2 NULL
+3 3-3
+
+query IR rowsort
+select v, s from mv5;
 ----
 1 1-1
 2 NULL
@@ -192,7 +202,42 @@ select v, s, r from t;
 
 # Clean up
 statement ok
+drop materialized view mv5;
+
+statement ok
 drop materialized view mv;
+
+statement ok
+drop table t;
+
+# Test the consistency of tables and indexes #https://github.com/risingwavelabs/risingwave/issues/8649
+statement ok
+create table t(id int primary key, a int, b varchar);
+
+statement ok
+create index idx on t(a);
+
+statement ok
+alter table t add column c int;
+
+query IITI rowsort
+select * from t;
+----
+
+statement ok
+drop table t;
+
+statement ok
+create table t(id int primary key, a int, b varchar);
+
+statement ok
+create index idx on t(b) include(b);
+
+statement ok
+alter table t drop column a;
+
+query II rowsort
+select * from t where b = '1';
 
 statement ok
 drop table t;
