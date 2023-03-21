@@ -227,10 +227,11 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         cache_key: CacheKey,
         row: CompactedRow,
     ) -> StreamExecutorResult<()> {
-        let need_refill = match self.high.last_key_value() {
-            Some(high_last) => cache_key > *high_last.0 && self.is_high_cache_dirty,
-            None => true,
-        };
+        let need_refill = self.is_high_cache_dirty
+            && match self.high.last_key_value() {
+                Some(high_last) => cache_key > *high_last.0,
+                None => false,
+            };
         if need_refill {
             managed_state
                 .fill_high_cache(
