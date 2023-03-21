@@ -485,6 +485,15 @@ impl LogicalMultiJoin {
         Ok(join_ordering)
     }
 
+    /// transform multijoin into bushy tree join.
+    ///
+    /// 1. First, use equivalent condition derivation to get derive join relation.
+    /// 2. Second, for every isolated node will create connection to every other nodes.
+    /// 3. Third, select and merge one node for a iteration, and use a bfs policy for which node the
+    ///    selected node merged with.
+    ///   i. The select node mentioned above is the node with least numer of relations and the
+    ///      lowerst join tree.
+    ///   ii. nodes with a join tree higher than the temporal optimal join tree will be pruned.
     pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
         let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
             .map(|idx| GraphNode {
@@ -612,6 +621,8 @@ impl LogicalMultiJoin {
         }
 
         let isolated = isolated.into_iter().collect_vec();
+
+        // maintain join order to mapping columns.
         let mut join_ordering = vec![];
         let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
             let mut output =
@@ -668,8 +679,6 @@ impl LogicalMultiJoin {
             LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
                 .into();
 
-        // We will later push down all of the filters back to the individual joins via the
-        // `FilterJoinRule`.
         output = LogicalFilter::create(output, self.on.clone());
         output =
             LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
@@ -699,6 +708,7 @@ struct GraphNode {
     relations: BTreeSet<usize>,
 }
 
+///  equivalent condition derivation by `a = b && a & c` ==> `b = c`
 fn graph_augmentation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<usize, GraphNode> {
     let keys = nodes.keys().cloned().collect_vec();
     for node in keys {
