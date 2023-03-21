@@ -220,30 +220,41 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
         full
     }
 
-    async fn refill_high_cache<S: StateStore>(
+    /// Use this method instead of `self.high.insert` directly when possible.
+    /// It checks `is_high_cache_dirty` flag and refills the high cache if needed.
+    async fn insert_high_cache<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
         row: CompactedRow,
     ) -> StreamExecutorResult<()> {
-        let need_refill = self.is_high_cache_dirty
-            && match self.high.last_key_value() {
-                Some(high_last) => cache_key > *high_last.0,
-                None => false,
-            };
-        if need_refill {
-            managed_state
-                .fill_high_cache(
-                    group_key,
-                    self,
-                    self.middle.last_key_value().unwrap().0.clone(),
-                    self.high_capacity,
-                )
-                .await?;
-            self.is_high_cache_dirty = false;
+        if !self.is_high_cache_full() {
+            let need_refill = self.is_high_cache_dirty
+                && match self.high.last_key_value() {
+                    Some(high_last) => cache_key > *high_last.0,
+                    None => false,
+                };
+            if need_refill {
+                managed_state
+                    .fill_high_cache(
+                        group_key,
+                        self,
+                        self.middle.last_key_value().unwrap().0.clone(),
+                        self.high_capacity,
+                    )
+                    .await?;
+                self.is_high_cache_dirty = false;
+            }
+            self.high.insert(cache_key, row);
+        } else {
+            let high_last = self.high.last_entry().unwrap();
+            if cache_key <= *high_last.key() {
+                high_last.remove_entry();
+                self.high.insert(cache_key, row);
+            }
         }
-        self.high.insert(cache_key, row);
+
         Ok(())
     }
 }
@@ -302,22 +313,13 @@ impl TopNCacheTrait for TopNCache<false> {
             }
         };
 
-        if !self.is_high_cache_full() {
-            self.refill_high_cache(
-                group_key,
-                managed_state,
-                elem_to_compare_with_high.0,
-                elem_to_compare_with_high.1,
-            )
-            .await?;
-        } else {
-            let high_last = self.high.last_entry().unwrap();
-            if elem_to_compare_with_high.0 <= *high_last.key() {
-                high_last.remove_entry();
-                self.high
-                    .insert(elem_to_compare_with_high.0, elem_to_compare_with_high.1);
-            }
-        }
+        self.insert_high_cache(
+            group_key,
+            managed_state,
+            elem_to_compare_with_high.0,
+            elem_to_compare_with_high.1,
+        )
+        .await?;
 
         Ok(())
     }
@@ -482,24 +484,13 @@ impl TopNCacheTrait for TopNCache<true> {
             Ordering::Greater => {
                 // The row is in high.
                 let elem_to_compare_with_high = elem_to_compare_with_middle;
-                if !self.is_high_cache_full() {
-                    self.refill_high_cache(
-                        group_key,
-                        managed_state,
-                        elem_to_compare_with_high.0,
-                        elem_to_compare_with_high.1.into(),
-                    )
-                    .await?;
-                } else {
-                    let high_last = self.high.last_entry().unwrap();
-                    if elem_to_compare_with_high.0 <= *high_last.key() {
-                        high_last.remove_entry();
-                        self.high.insert(
-                            elem_to_compare_with_high.0,
-                            (&elem_to_compare_with_high.1).into(),
-                        );
-                    }
-                }
+                self.insert_high_cache(
+                    group_key,
+                    managed_state,
+                    elem_to_compare_with_high.0,
+                    elem_to_compare_with_high.1.into(),
+                )
+                .await?;
             }
         }
 
