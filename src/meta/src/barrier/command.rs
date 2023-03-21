@@ -443,7 +443,7 @@ where
                     dropped_actors,
                     actor_splits,
                 });
-                tracing::info!("update mutation: {mutation:#?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
         };

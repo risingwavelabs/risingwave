@@ -1114,7 +1114,7 @@ where
 
         let _source_pause_guard = self.source_manager.paused.lock().await;
 
-        tracing::info!("reschedule plan: {:#?}", reschedule_fragment);
+        tracing::debug!("reschedule plan: {:#?}", reschedule_fragment);
 
         self.barrier_scheduler
             .run_command_with_paused(Command::RescheduleFragment(reschedule_fragment))
