@@ -354,9 +354,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_top_n_state_fill_cache() {
+        let data_types = vec![DataType::Varchar, DataType::Int64];
         let state_table = {
             let mut tb = create_in_memory_state_table(
-                &[DataType::Varchar, DataType::Int64],
+                &data_types,
                 &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
@@ -382,7 +383,7 @@ mod tests {
         let rows = vec![row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
-        let mut cache = TopNCache::<false>::new(1, 1);
+        let mut cache = TopNCache::<false>::new(1, 1, data_types);
 
         managed_state.insert(rows[3].clone());
         managed_state.insert(rows[1].clone());
