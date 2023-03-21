@@ -723,8 +723,8 @@ fn eq_condition_derivation(mut nodes: BTreeMap<usize, GraphNode>) -> BTreeMap<us
         let n_rel = rel.len();
         for i in 0..n_rel {
             for j in i + 1..n_rel {
-                nodes.get_mut(&i).unwrap().relations.insert(j);
-                nodes.get_mut(&j).unwrap().relations.insert(i);
+                nodes.get_mut(&rel[i]).unwrap().relations.insert(rel[j]);
+                nodes.get_mut(&rel[j]).unwrap().relations.insert(rel[i]);
             }
         }
     }
