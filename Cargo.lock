@@ -8782,6 +8782,8 @@ dependencies = [
  "clap 4.1.11",
  "combine",
  "criterion",
+ "crossbeam-channel",
+ "crossbeam-deque",
  "crossbeam-epoch",
  "crossbeam-utils",
  "either",
