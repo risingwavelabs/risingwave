@@ -1,6 +1,7 @@
 /* eslint-disable */
 import { ColumnOrder } from "./common";
 import { DataType } from "./data";
+import { ExprNode } from "./expr";
 
 export const protobufPackage = "plan_common";
 
@@ -202,11 +203,17 @@ export interface ColumnDesc {
    * this field will store the message name.
    */
   typeName: string;
+  /** The the column is a generated column. */
+  generatedColumn: GeneratedColumnDesc | undefined;
 }
 
 export interface ColumnCatalog {
   columnDesc: ColumnDesc | undefined;
   isHidden: boolean;
+}
+
+export interface GeneratedColumnDesc {
+  expr: ExprNode | undefined;
 }
 
 export interface StorageTableDesc {
@@ -255,7 +262,7 @@ export const Field = {
 };
 
 function createBaseColumnDesc(): ColumnDesc {
-  return { columnType: undefined, columnId: 0, name: "", fieldDescs: [], typeName: "" };
+  return { columnType: undefined, columnId: 0, name: "", fieldDescs: [], typeName: "", generatedColumn: undefined };
 }
 
 export const ColumnDesc = {
@@ -266,6 +273,7 @@ export const ColumnDesc = {
       name: isSet(object.name) ? String(object.name) : "",
       fieldDescs: Array.isArray(object?.fieldDescs) ? object.fieldDescs.map((e: any) => ColumnDesc.fromJSON(e)) : [],
       typeName: isSet(object.typeName) ? String(object.typeName) : "",
+      generatedColumn: isSet(object.generatedColumn) ? GeneratedColumnDesc.fromJSON(object.generatedColumn) : undefined,
     };
   },
 
@@ -281,6 +289,8 @@ export const ColumnDesc = {
       obj.fieldDescs = [];
     }
     message.typeName !== undefined && (obj.typeName = message.typeName);
+    message.generatedColumn !== undefined &&
+      (obj.generatedColumn = message.generatedColumn ? GeneratedColumnDesc.toJSON(message.generatedColumn) : undefined);
     return obj;
   },
 
@@ -293,6 +303,9 @@ export const ColumnDesc = {
     message.name = object.name ?? "";
     message.fieldDescs = object.fieldDescs?.map((e) => ColumnDesc.fromPartial(e)) || [];
     message.typeName = object.typeName ?? "";
+    message.generatedColumn = (object.generatedColumn !== undefined && object.generatedColumn !== null)
+      ? GeneratedColumnDesc.fromPartial(object.generatedColumn)
+      : undefined;
     return message;
   },
 };
@@ -323,6 +336,28 @@ export const ColumnCatalog = {
       ? ColumnDesc.fromPartial(object.columnDesc)
       : undefined;
     message.isHidden = object.isHidden ?? false;
+    return message;
+  },
+};
+
+function createBaseGeneratedColumnDesc(): GeneratedColumnDesc {
+  return { expr: undefined };
+}
+
+export const GeneratedColumnDesc = {
+  fromJSON(object: any): GeneratedColumnDesc {
+    return { expr: isSet(object.expr) ? ExprNode.fromJSON(object.expr) : undefined };
+  },
+
+  toJSON(message: GeneratedColumnDesc): unknown {
+    const obj: any = {};
+    message.expr !== undefined && (obj.expr = message.expr ? ExprNode.toJSON(message.expr) : undefined);
+    return obj;
+  },
+
+  fromPartial<I extends Exact<DeepPartial<GeneratedColumnDesc>, I>>(object: I): GeneratedColumnDesc {
+    const message = createBaseGeneratedColumnDesc();
+    message.expr = (object.expr !== undefined && object.expr !== null) ? ExprNode.fromPartial(object.expr) : undefined;
     return message;
   },
 };
