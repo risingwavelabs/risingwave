@@ -603,54 +603,40 @@ macro_rules! for_all_cast_variants {
 
 // TODO(nanderstabel): optimize for multidimensional List. Depth can be given as a parameter to this
 // function.
-fn unnest(input: &str) -> Result<Vec<String>> {
-    // Trim input
+/// Takes a string input in the form of a comma-separated list enclosed in braces, and returns a
+/// vector of strings containing the list items.
+///
+/// # Examples
+/// - "{1, 2, 3}" => ["1", "2", "3"]
+/// - "{1, {2, 3}}" => ["1", "{2, 3}"]
+fn unnest(input: &str) -> Result<Vec<&str>> {
     let trimmed = input.trim();
-
-    let mut chars = trimmed.chars();
-    if chars.next() != Some('{') || chars.next_back() != Some('}') {
+    if !trimmed.starts_with('{') || !trimmed.ends_with('}') {
         return Err(ExprError::Parse("Input must be braced".into()));
     }
+    let trimmed = &trimmed[1..trimmed.len() - 1];
 
     let mut items = Vec::new();
-    while let Some(c) = chars.next() {
+    let mut depth = 0;
+    let mut start = 0;
+    for (i, c) in trimmed.chars().enumerate() {
         match c {
-            '{' => {
-                let mut string = String::from(c);
-                let mut depth = 1;
-                while depth != 0 {
-                    let c = match chars.next() {
-                        Some(c) => {
-                            if c == '{' {
-                                depth += 1;
-                            } else if c == '}' {
-                                depth -= 1;
-                            }
-                            c
-                        }
-                        None => {
-                            return Err(ExprError::Parse(
-                                "Missing closing brace '}}' character".into(),
-                            ))
-                        }
-                    };
-                    string.push(c);
-                }
-                items.push(string);
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            ',' if depth == 0 => {
+                let item = trimmed[start..i].trim();
+                items.push(item);
+                start = i + 1;
             }
-            '}' => {
-                return Err(ExprError::Parse(
-                    "Unexpected closing brace '}}' character".into(),
-                ))
-            }
-            ',' => {}
-            c if c.is_whitespace() => {}
-            c => items.push(format!(
-                "{}{}",
-                c,
-                chars.take_while_ref(|&c| c != ',').collect::<String>()
-            )),
+            _ => {}
         }
+    }
+    if depth != 0 {
+        return Err(ExprError::Parse("Unbalanced braces".into()));
+    }
+    let last = trimmed[start..].trim();
+    if !last.is_empty() {
+        items.push(last);
     }
     Ok(items)
 }
@@ -905,6 +891,7 @@ mod tests {
 
     #[test]
     fn test_unnest() {
+        assert_eq!(unnest("{ }").unwrap(), vec![] as Vec<String>);
         assert_eq!(
             unnest("{1, 2, 3}").unwrap(),
             vec!["1".to_string(), "2".to_string(), "3".to_string()]
