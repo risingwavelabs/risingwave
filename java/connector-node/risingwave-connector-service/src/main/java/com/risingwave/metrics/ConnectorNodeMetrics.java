@@ -61,7 +61,7 @@ public class ConnectorNodeMetrics {
 
     private static final Counter sourceRowsReceived =
             Counter.build()
-                    .name("source_rows_received")
+                    .name("connector_source_rows_received")
                     .help("Number of rows received by source")
                     .register();
     private static final Counter sinkRowsReceived =
