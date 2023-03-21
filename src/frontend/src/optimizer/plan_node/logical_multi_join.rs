@@ -699,7 +699,7 @@ impl LogicalMultiJoin {
         let mut input_ref_map = HashMap::new();
 
         for con in eq_join_conditions.values() {
-            for conj in con.conjunctions.iter() {
+            for conj in &con.conjunctions {
                 let (l, r) = conj.as_eq_cond().unwrap();
                 new_conj.entry(l.index).or_default().insert(r.index);
                 new_conj.entry(r.index).or_default().insert(l.index);
@@ -710,12 +710,12 @@ impl LogicalMultiJoin {
 
         let mut new_pairs = BTreeSet::new();
 
-        for (_, conjs) in new_conj.iter() {
+        for conjs in new_conj.values() {
             if conjs.len() < 2 {
                 continue;
             }
 
-            let conjs = conjs.iter().map(|i| *i).collect_vec();
+            let conjs = conjs.iter().copied().collect_vec();
             for i in 0..conjs.len() {
                 for j in i + 1..conjs.len() {
                     if !new_conj.get(&conjs[i]).unwrap().contains(&conjs[j]) {
