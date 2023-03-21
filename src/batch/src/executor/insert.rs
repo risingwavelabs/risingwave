@@ -126,7 +126,6 @@ impl InsertExecutor {
                 let row_id_col = I64Array::from_iter(repeat(None).take(cap));
                 columns.insert(row_id_index, row_id_col.into())
             }
-
             let stream_chunk =
                 StreamChunk::new(vec![Op::Insert; cap], columns, vis.into_visibility());
 

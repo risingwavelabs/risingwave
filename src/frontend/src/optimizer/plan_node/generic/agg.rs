@@ -550,7 +550,7 @@ impl PlanAggCall {
         });
 
         // modify filter
-        let mut rewriter = IndexRewriter { mapping };
+        let mut rewriter = IndexRewriter::new(mapping);
         self.filter.conjunctions.iter_mut().for_each(|x| {
             *x = rewriter.rewrite_expr(x.clone());
         });

@@ -206,6 +206,10 @@ impl ColumnDesc {
     pub fn from_field_without_column_id(field: &Field) -> Self {
         Self::from_field_with_column_id(field, 0)
     }
+
+    pub fn is_generated_column(&self) -> bool {
+        self.generated_column.is_some()
+    }
 }
 
 impl From<PbColumnDesc> for ColumnDesc {
@@ -255,6 +259,11 @@ impl ColumnCatalog {
     /// Get the column catalog's is hidden.
     pub fn is_hidden(&self) -> bool {
         self.is_hidden
+    }
+
+    /// If the column is a generated column
+    pub fn is_generated(&self) -> bool {
+        self.column_desc.generated_column.is_some()
     }
 
     /// Get a reference to the column desc's data type.

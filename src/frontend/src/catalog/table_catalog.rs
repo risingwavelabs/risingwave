@@ -372,6 +372,20 @@ impl TableCatalog {
             handle_pk_conflict_behavior: self.conflict_behavior_type,
         }
     }
+
+    /// Get columns excluding hidden columns and generated golumns.
+    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden() && !c.is_generated())
+    }
+
+    pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_generated())
+            .map(|c| c.name())
+    }
 }
 
 impl From<ProstTable> for TableCatalog {

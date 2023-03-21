@@ -38,7 +38,7 @@ use super::RwPgResponse;
 use crate::binder::{bind_data_type, bind_struct_field};
 use crate::catalog::table_catalog::TableVersion;
 use crate::catalog::{check_valid_column_name, ColumnId};
-use crate::expr::Expr;
+use crate::expr::{Expr, ExprImpl};
 use crate::handler::create_source::{bind_source_watermark, UPSTREAM_SOURCE_KEY};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::LogicalSource;
@@ -147,9 +147,9 @@ pub fn bind_sql_columns(
             )
             .into());
         }
-        
+
         check_valid_column_name(&name.real_value())?;
-        
+
         let field_descs = if let AstDataType::Struct(fields) = &data_type {
             fields
                 .iter()
@@ -171,18 +171,68 @@ pub fn bind_sql_columns(
     Ok(column_descs)
 }
 
-/// Binds constraits that can be only specified in column definitions.
-pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, column_catalogs: &mut[ColumnCatalog], columns: Vec<ColumnDef>) -> Result<()> {
-    let mut binder = Binder::new(session);
+fn check_generated_column_constraints(
+    column_name: &String,
+    expr: &ExprImpl,
+    column_catalogs: &[ColumnCatalog],
+    generated_column_names: &[String],
+) -> Result<()> {
+    let input_refs = expr.collect_input_refs(column_catalogs.len());
+    for idx in input_refs.ones() {
+        let referred_generated_column = &column_catalogs[idx].column_desc.name;
+        if generated_column_names
+            .iter()
+            .any(|c| c == referred_generated_column)
+        {
+            return Err(ErrorCode::BindError(
+                format!("Generated can not reference another generated column, but here generated column \"{}\" referenced another generated column \"{}\"", column_name, referred_generated_column),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
+/// Binds constraints that can be only specified in column definitions.
+pub fn bind_sql_column_constraints(
+    session: &SessionImpl,
+    table_name: String,
+    column_catalogs: &mut [ColumnCatalog],
+    columns: Vec<ColumnDef>,
+) -> Result<()> {
+    let generated_column_names = {
+        let mut names = vec![];
+        for column in &columns {
+            for option_def in &column.options {
+                if let ColumnOption::GeneratedColumns(_) = option_def.option {
+                    names.push(column.name.real_value());
+                    break;
+                }
+            }
+        }
+        names
+    };
+
+    let mut binder = Binder::new_for_stream(session);
     binder.bind_columns_to_context(table_name.clone(), column_catalogs.to_vec())?;
     for column in columns {
-
         for option_def in column.options {
             match option_def.option {
                 ColumnOption::GeneratedColumns(expr) => {
-                    let idx = binder.get_column_binding_index(table_name.clone(), &column.name.real_value())?;
-                    let expr_node = binder.bind_expr(expr)?.to_expr_proto();
-                    column_catalogs[idx].column_desc.generated_column = Some(GeneratedColumnDesc{expr: Some(expr_node)});
+                    let idx = binder
+                        .get_column_binding_index(table_name.clone(), &column.name.real_value())?;
+                    let expr_impl = binder.bind_expr(expr)?;
+
+                    check_generated_column_constraints(
+                        &column.name.real_value(),
+                        &expr_impl,
+                        column_catalogs,
+                        &generated_column_names,
+                    )?;
+
+                    column_catalogs[idx].column_desc.generated_column = Some(GeneratedColumnDesc {
+                        expr: Some(expr_impl.to_expr_proto()),
+                    });
                 }
                 ColumnOption::Unique { is_primary: true } => {
                     // Bind primary key in `bind_sql_table_column_constraints`
@@ -201,7 +251,7 @@ pub fn bind_sql_column_constraints(session: &SessionImpl, table_name: String, co
 }
 
 /// Binds constraints that can be specified in both column definitions and table definition.
-/// 
+///
 /// It returns the columns together with `pk_column_ids`, and an optional row id column index if
 /// added.
 pub fn bind_sql_table_column_constraints(
@@ -270,15 +320,13 @@ pub fn bind_sql_table_column_constraints(
     }
 
     let mut pk_column_ids: Vec<_> = pk_column_names
-    .iter()
-    .map(|name| {
-        name_to_id.get(name.as_str()).copied().ok_or_else(|| {
-            ErrorCode::BindError(format!(
-                "column \"{name}\" named in key does not exist"
-            ))
+        .iter()
+        .map(|name| {
+            name_to_id.get(name.as_str()).copied().ok_or_else(|| {
+                ErrorCode::BindError(format!("column \"{name}\" named in key does not exist"))
+            })
         })
-    })
-    .try_collect()?;
+        .try_collect()?;
 
     let mut columns_catalog = columns_descs
         .into_iter()
@@ -420,7 +468,12 @@ pub(crate) fn gen_create_table_plan_without_bind(
         &columns,
     )?;
 
-    bind_sql_column_constraints(context.session_ctx(), table_name.real_value(), &mut columns, column_defs)?;
+    bind_sql_column_constraints(
+        context.session_ctx(),
+        table_name.real_value(),
+        &mut columns,
+        column_defs,
+    )?;
 
     gen_table_plan_inner(
         context.into(),
@@ -757,11 +810,8 @@ mod tests {
             let actual: Result<_> = (|| {
                 let column_descs =
                     bind_sql_columns(columns.clone(), &mut ColumnIdGenerator::new_initial())?;
-                let (_, pk_column_ids, _) = bind_sql_table_column_constraints(
-                    column_descs,
-                    columns,
-                    constraints,
-                )?;
+                let (_, pk_column_ids, _) =
+                    bind_sql_table_column_constraints(column_descs, columns, constraints)?;
                 Ok(pk_column_ids)
             })();
             match (expected, actual) {

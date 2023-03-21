@@ -46,7 +46,9 @@ use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
-use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator, bind_sql_column_constraints};
+use crate::handler::create_table::{
+    bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
@@ -594,18 +596,13 @@ pub async fn handle_create_source(
         .collect();
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
-        
-    let mut column_descs =
-        bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
+
+    let mut column_descs = bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
-    let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_column_constraints(
-        column_descs,
-        stmt.columns.clone(),
-            stmt.constraints,
-        )?;
-
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
+        bind_sql_table_column_constraints(column_descs, stmt.columns.clone(), stmt.constraints)?;
 
     if row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(

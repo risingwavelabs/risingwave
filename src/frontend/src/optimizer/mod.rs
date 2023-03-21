@@ -38,12 +38,11 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::catalog::WatermarkDesc;
-use risingwave_pb::plan_common::GeneratedColumnDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -51,7 +50,7 @@ use self::plan_visitor::InputRefValidator;
 use self::property::RequiredDist;
 use self::rule::*;
 use crate::catalog::table_catalog::{TableType, TableVersion};
-use crate::expr::{InputRef, ExprRewriter};
+use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
@@ -369,31 +368,6 @@ impl PlanRoot {
         Ok(plan)
     }
 
-    pub fn gen_optional_generated_column_project(columns: Vec<ColumnCatalog>) -> Option<StreamProject> {
-        let col_mapping = {
-            let mut mapping = Vec::with_capacity(columns.len());
-            let mut cur = 0;
-            for (idx, column) in columns.iter().enumerate() {
-                if column.column_desc.generated_column.is_some() {
-                    mapping[idx] = Some(cur);
-                    cur += 1;
-                } else {
-                    mapping[idx] = None;
-                }
-            }
-            ColIndexMapping::new(mapping)
-        };
-        for column in columns {
-            let GeneratedColumnDesc{expr} = column.column_desc.generated_column.unwrap();
-            if let Some(expr) = expr {
-                    
-            }
-
-        }
-        None
-
-    }
-
     /// Optimize and generate a create table plan.
     #[allow(clippy::too_many_arguments)]
     pub fn gen_table_plan(
@@ -412,9 +386,21 @@ impl PlanRoot {
         stream_plan = StreamDml::new(
             stream_plan,
             append_only,
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
+            columns
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then_some(c.column_desc.clone()))
+                .collect(),
         )
         .into();
+
+        // Add generated columns.
+        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
+            columns.iter().map(|c| c.column_desc.clone()).collect(),
+        )?;
+        if let Some(exprs) = exprs {
+            let logical_project = LogicalProject::new(stream_plan, exprs);
+            stream_plan = StreamProject::new(logical_project).into();
+        }
 
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {

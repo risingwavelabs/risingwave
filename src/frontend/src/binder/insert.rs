@@ -81,18 +81,40 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
-        let columns_to_insert = table_catalog
-            .columns
-            .clone()
-            .into_iter()
-            .filter(|c| !c.is_hidden())
-            .collect_vec();
-        let row_id_index = table_catalog.row_id_index;
+        let columns_to_insert = table_catalog.columns_to_insert().cloned().collect_vec();
 
         let expected_types: Vec<DataType> = columns_to_insert
             .iter()
             .map(|c| c.data_type().clone())
             .collect();
+
+        let generated_column_names: HashSet<_> = table_catalog.generated_column_names().collect();
+        for query_col in &columns {
+            let query_col_name = query_col.real_value();
+            if generated_column_names.contains(query_col_name.as_str()) {
+                return Err(RwError::from(ErrorCode::BindError(format!(
+                    "cannot insert a non-DEFAULT value into column \"{0}\".  Column \"{0}\" is a generated column.",
+                    &query_col_name
+                ))));
+            }
+        }
+
+        // TODO(yuhao): refine this if row_id is always the last column.
+        //
+        // `row_id_index` in bin insert operation should rule out generated column
+        let row_id_index = {
+            if let Some(row_id_index) = table_catalog.row_id_index {
+                let mut cnt = 0;
+                for col in table_catalog.columns().iter().take(row_id_index + 1) {
+                    if col.is_generated() {
+                        cnt += 1;
+                    }
+                }
+                Some(row_id_index - cnt)
+            } else {
+                None
+            }
+        };
 
         // When the column types of `source` query do not match `expected_types`, casting is
         // needed.
