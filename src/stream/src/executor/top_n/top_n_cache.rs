@@ -57,8 +57,6 @@ pub struct TopNCache<const WITH_TIES: bool> {
     /// Assumption: `limit != 0`
     pub limit: usize,
 
-    is_high_cache_dirty: bool,
-
     /// Data types for the full row.
     ///
     /// For debug formatting only.
@@ -168,7 +166,6 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
                 .unwrap_or(usize::MAX),
             offset,
             limit,
-            is_high_cache_dirty: false,
             data_types,
         }
     }
@@ -317,7 +314,6 @@ impl TopNCacheTrait for TopNCache<false> {
         if self.is_middle_cache_full() && cache_key > *self.middle.last_key_value().unwrap().0 {
             // The row is in high
             self.high.remove(&cache_key);
-            self.is_high_cache_dirty = true;
         } else if self.is_low_cache_full()
             && (self.offset == 0 || cache_key > *self.low.last_key_value().unwrap().0)
         {
@@ -340,7 +336,6 @@ impl TopNCacheTrait for TopNCache<false> {
 
             // Bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
-                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 res_ops.push(Op::Insert);
                 res_rows.push(high_first.1.clone());
@@ -371,7 +366,6 @@ impl TopNCacheTrait for TopNCache<false> {
 
                 // Bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
-                    self.is_high_cache_dirty = true;
                     let high_first = self.high.pop_first().unwrap();
                     res_ops.push(Op::Insert);
                     res_rows.push(high_first.1.clone());
@@ -518,7 +512,6 @@ impl TopNCacheTrait for TopNCache<true> {
         if sort_key > middle_last_order_by {
             // The row is in high.
             self.high.remove(&cache_key);
-            self.is_high_cache_dirty = true;
         } else {
             // The row is in middle
             self.middle.remove(&cache_key);
@@ -543,7 +536,6 @@ impl TopNCacheTrait for TopNCache<true> {
 
             // Bring elements with the same sort key, if any, from high cache to middle cache.
             if !self.high.is_empty() {
-                self.is_high_cache_dirty = true;
                 let high_first = self.high.pop_first().unwrap();
                 let high_first_order_by = high_first.0 .0.clone();
                 assert!(high_first_order_by > middle_last_order_by);
