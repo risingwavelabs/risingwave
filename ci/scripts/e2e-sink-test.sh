@@ -31,7 +31,8 @@ mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
+# TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=json
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
