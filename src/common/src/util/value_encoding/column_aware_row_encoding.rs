@@ -19,6 +19,8 @@
 //! We have a `Serializer` and a `Deserializer` for each schema of `Row`, which can be reused
 //! until schema changes
 
+#![expect(clippy::disallowed_methods, "used by bitflags!")]
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
