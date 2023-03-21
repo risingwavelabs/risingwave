@@ -329,6 +329,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             context,
             runtime,
             sender,
+            runtime_task_handle: Mutex::new(None),
         })
     }
 
@@ -577,7 +578,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
     pub async fn cancel(&self) {
         if let Some(handle) = self.runtime_task_handle.lock().take() {
-            /// Cancel task running.
+            // Cancel task running.
             handle.abort();
         }
     }
