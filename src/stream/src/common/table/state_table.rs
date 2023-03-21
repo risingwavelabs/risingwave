@@ -35,6 +35,7 @@ use risingwave_hummock_sdk::key::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_storage::error::StorageError;
+use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::row_serde_util::{
     deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
@@ -576,6 +577,7 @@ where
             ignore_range_tombstone: false,
             read_version_from_backup: false,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill,
         };
 
         self.local_store
@@ -1007,6 +1009,7 @@ where
             table_id: self.table_id,
             read_version_from_backup: false,
             prefetch_options,
+            cache_policy: CachePolicy::Fill,
         };
 
         Ok(self.local_store.iter(key_range, read_options).await?)
@@ -1053,6 +1056,7 @@ where
             table_id: self.table_id,
             read_version_from_backup: false,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill,
         };
 
         self.local_store

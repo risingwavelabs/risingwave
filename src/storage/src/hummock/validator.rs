@@ -58,7 +58,7 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
         let mut iter = SstableIterator::new(
             holder,
             sstable_store.clone(),
-            Arc::new(SstableIteratorReadOptions::default()),
+            Arc::new(SstableIteratorReadOptions::cache_not_fill()),
         );
         let mut previous_key: Option<FullKey<Vec<u8>>> = None;
         if let Err(err) = iter.rewind().await {

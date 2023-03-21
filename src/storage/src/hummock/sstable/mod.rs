@@ -62,6 +62,8 @@ use xxhash_rust::{xxh32, xxh64};
 
 use self::utils::{xxhash64_checksum, xxhash64_verify};
 use super::{HummockError, HummockResult};
+use crate::hummock::CachePolicy;
+use crate::store::ReadOptions;
 
 const DEFAULT_META_BUFFER_CAPACITY: usize = 4096;
 const MAGIC: u32 = 0x5785ab73;
@@ -397,8 +399,26 @@ impl SstableMeta {
 
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
-    pub prefetch: bool,
+    pub cache_policy: CachePolicy,
     pub must_iterated_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
+}
+
+impl From<&ReadOptions> for SstableIteratorReadOptions {
+    fn from(read_options: &ReadOptions) -> Self {
+        Self {
+            cache_policy: read_options.cache_policy,
+            must_iterated_end_user_key: None,
+        }
+    }
+}
+
+impl SstableIteratorReadOptions {
+    pub fn cache_not_fill() -> Self {
+        Self {
+            cache_policy: CachePolicy::NotFill,
+            must_iterated_end_user_key: None,
+        }
+    }
 }
 
 #[cfg(test)]

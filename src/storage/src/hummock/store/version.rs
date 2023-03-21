@@ -583,7 +583,7 @@ impl HummockVersionReader {
             staging_iters.push(HummockIteratorUnion::Second(SstableIterator::new(
                 table_holder,
                 self.sstable_store.clone(),
-                Arc::new(SstableIteratorReadOptions::default()),
+                Arc::new(SstableIteratorReadOptions::from(&read_options)),
             )));
         }
         local_stats.staging_sst_iter_count = staging_sst_iter_count;
@@ -662,7 +662,7 @@ impl HummockVersionReader {
         drop(buffered);
         timer.observe_duration();
 
-        let mut sst_read_options = SstableIteratorReadOptions::default();
+        let mut sst_read_options = SstableIteratorReadOptions::from(&read_options);
         if read_options.prefetch_options.exhaust_iter {
             sst_read_options.must_iterated_end_user_key =
                 Some(user_key_range.1.map(|key| key.cloned()));

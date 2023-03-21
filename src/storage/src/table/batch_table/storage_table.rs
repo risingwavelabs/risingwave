@@ -40,6 +40,7 @@ use tracing::trace;
 
 use super::iter_utils;
 use crate::error::{StorageError, StorageResult};
+use crate::hummock::CachePolicy;
 use crate::row_serde::row_serde_util::{
     parse_raw_key_to_vnode_and_key, serialize_pk, serialize_pk_with_vnode,
 };
@@ -337,6 +338,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             table_id: self.table_id,
             read_version_from_backup: read_backup,
             prefetch_options: Default::default(),
+            cache_policy: CachePolicy::Fill,
         };
         if let Some(value) = self.store.get(serialized_pk, epoch, read_options).await? {
             // Refer to [`StorageTableInnerIterInner::new`] for necessity of `validate_read_epoch`.
@@ -410,6 +412,14 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         ordered: bool,
         prefetch_options: PrefetchOptions,
     ) -> StorageResult<StorageTableInnerIter<S, SD>> {
+        let cache_policy = match (
+            encoded_key_range.start_bound(),
+            encoded_key_range.end_bound(),
+        ) {
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::NotFill,
+            _ => CachePolicy::Fill,
+        };
+
         let raw_key_ranges = if !ordered
             && matches!(encoded_key_range.start_bound(), Unbounded)
             && matches!(encoded_key_range.end_bound(), Unbounded)
@@ -453,6 +463,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
                     table_id: self.table_id,
                     read_version_from_backup: read_backup,
                     prefetch_options,
+                    cache_policy,
                 };
                 let pk_serializer = match self.output_row_in_key_indices.is_empty() {
                     true => None,

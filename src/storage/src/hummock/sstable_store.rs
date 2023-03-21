@@ -100,11 +100,12 @@ impl LruCacheEventListener for BlockCacheEventListener {
 // END section for tiered cache
 
 // TODO: Define policy based on use cases (read / compaction / ...).
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Default)]
 pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
+    #[default]
     Fill,
     /// Read the cache but not fill the cache afterwards.
     NotFill,
