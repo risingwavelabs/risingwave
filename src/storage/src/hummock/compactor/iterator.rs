@@ -19,6 +19,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{atomic, Arc};
 use std::time::Instant;
 
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::KeyComparator;
@@ -46,7 +47,7 @@ struct SstableStreamIterator {
 
     /// For key sanity check of divided SST and debugging
     sstable_info: SstableInfo,
-    existing_table_ids: HashSet<u32>,
+    existing_table_ids: HashSet<StateTableId>,
 }
 
 impl SstableStreamIterator {
@@ -66,7 +67,7 @@ impl SstableStreamIterator {
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable_info: &SstableInfo,
-        existing_table_ids: HashSet<u32>,
+        existing_table_ids: HashSet<StateTableId>,
         block_stream: BlockStream,
         max_block_count: usize,
         stats: &StoreLocalStatistic,
@@ -219,7 +220,7 @@ pub struct ConcatSstableIterator {
     /// All non-overlapping tables.
     sstables: Vec<SstableInfo>,
 
-    existing_table_ids: HashSet<u32>,
+    existing_table_ids: HashSet<StateTableId>,
 
     sstable_store: SstableStoreRef,
 
@@ -231,7 +232,7 @@ impl ConcatSstableIterator {
     /// arranged in ascending order when it serves as a forward iterator,
     /// and arranged in descending order when it serves as a backward iterator.
     pub fn new(
-        existing_table_ids: Vec<u32>,
+        existing_table_ids: Vec<StateTableId>,
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
@@ -250,7 +251,7 @@ impl ConcatSstableIterator {
     /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
     async fn seek_idx(
         &mut self,
-        mut idx: usize,
+        idx: usize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
         self.sstable_iter.take();
@@ -264,14 +265,15 @@ impl ConcatSstableIterator {
             (None, true) => None,
             (None, false) => Some(FullKey::decode(&self.key_range.left)),
         };
-        while idx < self.sstables.len() {
-            let table_info = &self.sstables[idx];
+        self.cur_idx = idx;
+        while self.cur_idx < self.sstables.len() {
+            let table_info = &self.sstables[self.cur_idx];
             let mut found = table_info
                 .table_ids
                 .iter()
                 .any(|table_id| self.existing_table_ids.contains(table_id));
             if !found {
-                idx += 1;
+                self.cur_idx += 1;
                 seek_key = None;
                 continue;
             }
@@ -338,12 +340,11 @@ impl ConcatSstableIterator {
                 } else {
                     found = false;
                 }
-                self.cur_idx = idx;
             }
             if found {
                 return Ok(());
             } else {
-                idx += 1;
+                self.cur_idx += 1;
                 seek_key = None;
             }
         }
