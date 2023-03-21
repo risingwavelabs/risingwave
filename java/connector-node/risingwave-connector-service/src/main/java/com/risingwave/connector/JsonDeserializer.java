@@ -22,7 +22,6 @@ import com.risingwave.connector.api.sink.*;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.ConnectorServiceProto.SinkStreamRequest.WriteBatch.JsonPayload;
 import com.risingwave.proto.Data;
-
 import java.sql.Timestamp;
 import java.util.Map;
 
@@ -145,7 +144,8 @@ public class JsonDeserializer implements Deserializer {
             case TIMESTAMPTZ:
                 if (!(value instanceof String)) {
                     throw io.grpc.Status.INVALID_ARGUMENT
-                            .withDescription("Expected timestamp in string, got " + value.getClass())
+                            .withDescription(
+                                    "Expected timestamp in string, got " + value.getClass())
                             .asRuntimeException();
                 }
                 return Timestamp.valueOf((String) value);
