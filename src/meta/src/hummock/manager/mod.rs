@@ -52,7 +52,7 @@ use tokio::sync::{Notify, RwLockWriteGuard};
 use tokio::task::JoinHandle;
 
 use crate::hummock::compaction::{
-    CompactStatus, LevelSelector, LocalSelectorStatistic, ManualCompactionOption,
+    CompactStatus, LocalSelectorStatistic, ManualCompactionOption, ScaleCompactorInfo,
 };
 use crate::hummock::compaction_scheduler::CompactionRequestChannelRef;
 use crate::hummock::error::{Error, Result};
@@ -91,7 +91,7 @@ type Snapshot = ArcSwap<HummockSnapshot>;
 // - Call `commit_multi_var` to commit the changes via meta store transaction. If transaction
 //   succeeds, the in-mem state will be updated by the way.
 pub struct HummockManager<S: MetaStore> {
-    env: MetaSrvEnv<S>,
+    pub env: MetaSrvEnv<S>,
     cluster_manager: ClusterManagerRef<S>,
     catalog_manager: CatalogManagerRef<S>,
     // `CompactionGroupManager` manages `CompactionGroup`'s members.
@@ -112,7 +112,7 @@ pub struct HummockManager<S: MetaStore> {
     compaction_resume_notifier: parking_lot::RwLock<Option<Arc<Notify>>>,
     compaction_tasks_to_cancel: parking_lot::Mutex<Vec<HummockCompactionTaskId>>,
 
-    compactor_manager: CompactorManagerRef,
+    pub compactor_manager: CompactorManagerRef,
     event_sender: HummockManagerEventSender,
 }
 
@@ -194,13 +194,13 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
-use super::compaction::ManualCompactionSelector;
+use super::compaction::{LevelSelector, ManualCompactionSelector};
 use super::Compactor;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
 
-static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
+pub static CANCEL_STATUS_SET: LazyLock<HashSet<TaskStatus>> = LazyLock::new(|| {
     [
         TaskStatus::ManualCanceled,
         TaskStatus::SendFailCanceled,
@@ -1982,6 +1982,50 @@ where
         &self.cluster_manager
     }
 
+    pub async fn report_scale_compactor_info(&self) {
+        let info = self.get_scale_compactor_info().await;
+        let suggest_scale_out_core = info.scale_out_cores();
+        self.metrics
+            .scale_compactor_core_num
+            .set(suggest_scale_out_core as i64);
+
+        tracing::info!(
+            "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
+            info,
+            suggest_scale_out_core
+        );
+    }
+
+    #[named]
+    pub async fn get_scale_compactor_info(&self) -> ScaleCompactorInfo {
+        let total_cpu_core = self.compactor_manager.total_cpu_core_num();
+        let total_running_cpu_core = self.compactor_manager.total_running_cpu_core_num();
+        let version = {
+            let guard = read_lock!(self, versioning).await;
+            guard.current_version.clone()
+        };
+        let mut global_info = ScaleCompactorInfo {
+            total_cores: total_cpu_core as u64,
+            running_cores: total_running_cpu_core as u64,
+            ..Default::default()
+        };
+
+        let compaction = read_lock!(self, compaction).await;
+        for (group_id, status) in &compaction.compaction_statuses {
+            if let Some(levels) = version.levels.get(group_id) {
+                let cg = self
+                    .compaction_group_manager
+                    .read()
+                    .await
+                    .get_compaction_group_config(*group_id);
+                let info = status.get_compaction_info(levels, cg.compaction_config());
+                global_info.add(&info);
+                tracing::debug!("cg {} info {:?}", group_id, info);
+            }
+        }
+        global_info
+    }
+
     fn notify_last_version_delta(&self, versioning: &Versioning) {
         self.env
             .notification_manager()
@@ -2016,30 +2060,37 @@ where
                     }
                 }
 
-                let id_to_config = hummock_manager.get_compaction_group_map().await;
-                let current_version = {
-                    let mut versioning_guard =
-                        write_lock!(hummock_manager.as_ref(), versioning).await;
-                    versioning_guard.deref_mut().current_version.clone()
-                };
+                {
+                    let id_to_config = hummock_manager.get_compaction_group_map().await;
+                    let current_version = {
+                        let mut versioning_guard =
+                            write_lock!(hummock_manager.as_ref(), versioning).await;
+                        versioning_guard.deref_mut().current_version.clone()
+                    };
 
-                let compaction_group_ids_from_version = get_compaction_group_ids(&current_version);
-                let default_config = CompactionConfigBuilder::new().build();
-                for compaction_group_id in &compaction_group_ids_from_version {
-                    let compaction_group_config = id_to_config
-                        .get(compaction_group_id)
-                        .cloned()
-                        .unwrap_or_else(|| {
-                            CompactionGroup::new(*compaction_group_id, default_config.clone())
-                        });
+                    let compaction_group_ids_from_version =
+                        get_compaction_group_ids(&current_version);
+                    let default_config = CompactionConfigBuilder::new().build();
+                    for compaction_group_id in &compaction_group_ids_from_version {
+                        let compaction_group_config = id_to_config
+                            .get(compaction_group_id)
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                CompactionGroup::new(*compaction_group_id, default_config.clone())
+                            });
 
-                    trigger_lsm_stat(
-                        &hummock_manager.metrics,
-                        compaction_group_config.compaction_config(),
-                        current_version
-                            .get_compaction_group_levels(compaction_group_config.group_id()),
-                        compaction_group_config.group_id(),
-                    )
+                        trigger_lsm_stat(
+                            &hummock_manager.metrics,
+                            compaction_group_config.compaction_config(),
+                            current_version
+                                .get_compaction_group_levels(compaction_group_config.group_id()),
+                            compaction_group_config.group_id(),
+                        )
+                    }
+                }
+
+                {
+                    hummock_manager.report_scale_compactor_info().await;
                 }
             }
         });

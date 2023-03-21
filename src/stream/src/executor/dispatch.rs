@@ -25,7 +25,6 @@ use itertools::Itertools;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
-use risingwave_common::util::hash_util::Crc32FastBuilder;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::PbDispatcher;
@@ -174,7 +173,7 @@ impl DispatchExecutorInner {
     /// For `Add` and `Update`, update the dispatchers before we dispatch the barrier.
     fn pre_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
@@ -199,7 +198,7 @@ impl DispatchExecutorInner {
     /// For `Stop` and `Update`, update the dispatchers after we dispatch the barrier.
     fn post_mutate_dispatchers(&mut self, mutation: &Option<Arc<Mutation>>) -> StreamResult<()> {
         let Some(mutation) = mutation.as_deref() else {
-            return Ok(())
+            return Ok(());
         };
 
         match mutation {
@@ -593,13 +592,7 @@ impl Dispatcher for HashDataDispatcher {
             let num_outputs = self.outputs.len();
 
             // get hash value of every line by its key
-            let hash_builder = Crc32FastBuilder;
-            let vnodes = chunk
-                .data_chunk()
-                .get_hash_values(&self.keys, hash_builder)
-                .into_iter()
-                .map(|hash| hash.to_vnode())
-                .collect_vec();
+            let vnodes = VirtualNode::compute_chunk(chunk.data_chunk(), &self.keys);
 
             tracing::trace!(target: "events::stream::dispatch::hash", "\n{}\n keys {:?} => {:?}", chunk.to_pretty_string(), self.keys, vnodes);
 
@@ -895,6 +888,7 @@ mod tests {
     use risingwave_common::array::{Array, ArrayBuilder, I32ArrayBuilder, Op};
     use risingwave_common::catalog::Schema;
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::util::hash_util::Crc32FastBuilder;
     use risingwave_common::util::iter_util::ZipEqFast;
     use risingwave_pb::stream_plan::DispatcherType;
 

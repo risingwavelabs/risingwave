@@ -23,7 +23,10 @@ auto_enums = "0.8"
 bitflags = "2"
 byteorder = "1"
 bytes = "1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4", default-features = false, features = [
+    "clock",
+    "std",
+] }
 chrono-tz = { version = "0.7", features = ["case-insensitive"] }
 clap = { version = "4", features = ["derive"] }
 comfy-table = "6"
@@ -44,11 +47,16 @@ num-traits = "0.2"
 parking_lot = "0.12"
 parse-display = "0.6"
 paste = "1"
-postgres-types = { version = "0.2.4", features = ["derive","with-chrono-0_4","with-serde_json-1"] }
+postgres-types = { version = "0.2.4", features = [
+    "derive",
+    "with-chrono-0_4",
+    "with-serde_json-1",
+] }
 prometheus = { version = "0.13" }
 prost = "0.11"
 rand = "0.8"
 regex = "1"
+reqwest = { version = "0.11", features = ["json"] }
 risingwave_pb = { path = "../prost" }
 rust_decimal = { version = "1", features = ["db-tokio-postgres"] }
 ryu = "1.0"
@@ -57,13 +65,21 @@ serde_json = "1"
 static_assertions = "1"
 strum = "0.24"
 strum_macros = "0.24"
-sysinfo = "0.26"
+sysinfo = { version = "0.26", default-features = false }
 thiserror = "1"
-tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+] }
 toml = "0.7"
 tonic = { version = "0.2", package = "madsim-tonic" }
 tracing = "0.1"
 url = "2"
+uuid = "1.2.2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

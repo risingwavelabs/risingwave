@@ -5878,6 +5878,7 @@ dependencies = [
  "prost 0.11.8",
  "rand 0.8.5",
  "regex",
+ "reqwest",
  "risingwave_pb",
  "rust_decimal",
  "ryu",
@@ -5893,6 +5894,7 @@ dependencies = [
  "tracing",
  "twox-hash",
  "url",
+ "uuid",
  "workspace-hack",
 ]
 
@@ -5957,6 +5959,7 @@ dependencies = [
 name = "risingwave_compactor"
 version = "0.2.0-alpha"
 dependencies = [
+ "anyhow",
  "async-trait",
  "clap 4.1.11",
  "madsim-tokio",
@@ -5970,6 +5973,8 @@ dependencies = [
  "risingwave_pb",
  "risingwave_rpc_client",
  "risingwave_storage",
+ "serde",
+ "serde_json",
  "tracing",
  "workspace-hack",
 ]
@@ -6006,12 +6011,14 @@ dependencies = [
  "risingwave_storage",
  "risingwave_stream",
  "risingwave_tracing",
+ "serde",
  "serde_json",
  "tempfile",
  "tikv-jemalloc-ctl",
  "tokio-stream",
  "tower",
  "tracing",
+ "uuid",
  "workspace-hack",
 ]
 
@@ -6596,6 +6603,7 @@ dependencies = [
  "bytes",
  "criterion",
  "crossbeam",
+ "darwin-libproc",
  "dashmap",
  "dyn-clone",
  "enum-as-inner",
@@ -6606,6 +6614,7 @@ dependencies = [
  "itertools",
  "libc",
  "lz4",
+ "mach",
  "madsim-tokio",
  "memcomparable",
  "minitrace",
@@ -6613,6 +6622,7 @@ dependencies = [
  "moka",
  "nix 0.25.1",
  "parking_lot 0.12.1",
+ "procfs 0.12.0",
  "prometheus",
  "prost 0.11.8",
  "rand 0.8.5",
@@ -6629,6 +6639,7 @@ dependencies = [
  "sled",
  "spin 0.9.6",
  "sync-point",
+ "sysinfo",
  "tempfile",
  "thiserror",
  "tokio-retry",
@@ -7596,7 +7607,6 @@ dependencies = [
  "libc",
  "ntapi",
  "once_cell",
- "rayon",
  "winapi",
 ]
 
