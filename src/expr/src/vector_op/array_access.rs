@@ -18,7 +18,6 @@ use risingwave_expr_macro::function;
 
 use crate::Result;
 
-// FIXME: don't know why this is not working
 #[function("array_access(list, int32) -> *")]
 pub fn array_access<T: Scalar>(list: ListRef<'_>, index: i32) -> Result<Option<T>> {
     // index must be greater than 0 following a one-based numbering convention for arrays

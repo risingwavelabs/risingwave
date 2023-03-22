@@ -28,10 +28,10 @@ use crate::expr::BoxedExpression;
 
 pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
     let mut map = FuncSigMap::default();
+    tracing::info!("{} function signatures loaded.", FUNC_SIG_MAP_INIT.len());
     for desc in FUNC_SIG_MAP_INIT.drain(..) {
         map.insert(desc);
     }
-    // eprintln!("Function signatures: {:#?}", map.0);
     map
 });
 

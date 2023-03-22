@@ -145,8 +145,7 @@ where
 #[function("less_than(time, interval) -> boolean")]
 #[function("less_than(interval, time) -> boolean")]
 #[function("less_than(varchar, varchar) -> boolean")]
-// FIXME: panic `select array[1] < SOME(null);`
-// #[function("less_than(list, list) -> boolean")]
+#[function("less_than(list, list) -> boolean")]
 #[function("less_than(struct, struct) -> boolean")]
 pub fn general_lt<T1, T2, T3>(l: T1, r: T2) -> bool
 where
@@ -332,7 +331,7 @@ fn boolarray_is_true(a: &BoolArray) -> BoolArray {
 }
 
 fn boolarray_is_not_true(a: &BoolArray) -> BoolArray {
-    BoolArray::new(a.to_bitmap(), Bitmap::ones(a.len()))
+    BoolArray::new(!a.to_bitmap(), Bitmap::ones(a.len()))
 }
 
 fn boolarray_is_false(a: &BoolArray) -> BoolArray {
