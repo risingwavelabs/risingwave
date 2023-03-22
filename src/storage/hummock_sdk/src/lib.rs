@@ -52,6 +52,8 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 
 #[macro_export]
 /// This is wrapper for `info` log.

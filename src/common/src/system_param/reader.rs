@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use risingwave_pb::meta::PbSystemParams;
-use tracing::warn;
 
 use super::system_params_to_kv;
 
@@ -53,15 +52,8 @@ impl SystemParamsReader {
         self.prost.bloom_false_positive.unwrap()
     }
 
-    // TODO(zhidong): Only read from system params in v0.1.18.
-    pub fn state_store(&self, from_local: String) -> String {
-        let from_prost = self.prost.state_store.as_ref().unwrap();
-        if from_prost.is_empty() {
-            warn!("--state-store is not specified on meta node, reading from CLI instead");
-            from_local
-        } else {
-            from_prost.clone()
-        }
+    pub fn state_store(&self) -> &str {
+        self.prost.state_store.as_ref().unwrap()
     }
 
     pub fn data_directory(&self) -> &str {
