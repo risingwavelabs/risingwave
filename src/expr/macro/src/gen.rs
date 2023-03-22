@@ -79,13 +79,13 @@ impl FunctionAttr {
         Ok(quote! {
             #[ctor::ctor]
             fn #ctor_name() {
-                crate::sig::func::register(#descriptor_type {
+                unsafe { crate::sig::func::_register(#descriptor_type {
                     name: #name,
                     func: risingwave_pb::expr::expr_node::Type::#pb_type,
                     inputs_type: &[#(#args),*],
                     ret_type: #ret,
                     build: #build_fn,
-                });
+                }) };
             }
         })
     }

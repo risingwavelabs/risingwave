@@ -41,6 +41,7 @@ speedate = "0.7.0"
 static_assertions = "1"
 thiserror = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }
+tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }

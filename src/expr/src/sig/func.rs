@@ -31,6 +31,7 @@ pub static FUNC_SIG_MAP: LazyLock<FuncSigMap> = LazyLock::new(|| unsafe {
     for desc in FUNC_SIG_MAP_INIT.drain(..) {
         map.insert(desc);
     }
+    // eprintln!("Function signatures: {:#?}", map.0);
     map
 });
 
@@ -103,8 +104,21 @@ impl FuncSign {
 }
 
 /// Register a function into global registry.
-pub fn register(desc: FuncSign) {
-    unsafe { FUNC_SIG_MAP_INIT.push(desc) }
+///
+/// # Safety
+///
+/// This function must be called sequentially.
+///
+/// It is designed to be used by `#[function]` macro.
+/// Users SHOULD NOT call this function.
+#[doc(hidden)]
+pub unsafe fn _register(desc: FuncSign) {
+    FUNC_SIG_MAP_INIT.push(desc)
 }
 
+/// The global registry of function signatures on initialization.
+///
+/// `#[function]` macro will generate a `#[ctor]` function to register the signature into this
+/// vector. The calls are guaranteed to be sequential. The vector will be drained and moved into
+/// `FUNC_SIG_MAP` on the first access of `FUNC_SIG_MAP`.
 static mut FUNC_SIG_MAP_INIT: Vec<FuncSign> = Vec::new();

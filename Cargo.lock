@@ -6148,6 +6148,7 @@ dependencies = [
  "speedate",
  "static_assertions",
  "thiserror",
+ "tracing",
  "workspace-hack",
 ]
 
