@@ -284,6 +284,15 @@ impl HummockVersionUpdateExt for HummockVersion {
                     &member_table_ids,
                     &mut new_sst_id,
                 );
+                sub_level
+                    .table_infos
+                    .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                    .for_each(|sst_info| {
+                        sub_level.total_file_size -= sst_info.file_size;
+                        sub_level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                        l0.total_file_size -= sst_info.file_size;
+                        l0.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                    });
                 add_ssts_to_sub_level(
                     target_l0,
                     target_level_idx,
@@ -314,6 +323,13 @@ impl HummockVersionUpdateExt for HummockVersion {
                 let b = sst2.key_range.as_ref().unwrap();
                 a.compare(b)
             });
+            level
+                .table_infos
+                .drain_filter(|sst_info| sst_info.table_ids.is_empty())
+                .for_each(|sst_info| {
+                    level.total_file_size -= sst_info.file_size;
+                    level.uncompressed_file_size -= sst_info.uncompressed_file_size;
+                });
         }
         split_id_vers
     }
@@ -570,30 +586,6 @@ pub fn build_initial_compaction_group_levels(
     }
 }
 
-pub fn check_sst_id_exist(
-    sst_id: HummockSstableId,
-    level: &mut Level,
-    move_table_ids: &[u32],
-) -> bool {
-    if level.level_type == LevelType::Overlapping as i32 {
-        if let Some(ret) = level
-            .table_infos
-            .iter_mut()
-            .find(|sst| sst.sst_id == sst_id)
-        {
-            ret.table_ids.extend(move_table_ids);
-            return true;
-        }
-    } else if let Ok(idx) = level
-        .table_infos
-        .binary_search_by(|sst| sst.sst_id.cmp(&sst_id))
-    {
-        level.table_infos[idx].table_ids.extend(move_table_ids);
-        return true;
-    }
-    false
-}
-
 fn split_sst_info_for_level(
     level: &mut Level,
     split_id_vers: &mut Vec<SstSplitInfo>,
@@ -630,31 +622,13 @@ fn split_sst_info_for_level(
                 },
             ));
             if is_trivial {
-                level.total_file_size -= sst_info.file_size;
-                level.uncompressed_file_size -= sst_info.uncompressed_file_size;
                 sst_info.table_ids.clear();
                 removed.push(sst_info.clone());
             }
             insert_table_infos.push(branch_table_info);
         }
     }
-    level
-        .table_infos
-        .drain_filter(|sst_info| sst_info.table_ids.is_empty())
-        .collect_vec();
     insert_table_infos
-}
-
-pub fn check_sst_id_exist_in_l0(
-    sst_id: HummockSstableId,
-    l0: &mut OverlappingLevel,
-    sub_level_idx: usize,
-    move_table_ids: &[u32],
-) -> bool {
-    if sub_level_idx < l0.sub_levels.len() {
-        return check_sst_id_exist(sst_id, &mut l0.sub_levels[sub_level_idx], move_table_ids);
-    }
-    false
 }
 
 pub fn try_get_compaction_group_id_by_table_id(
@@ -741,6 +715,12 @@ pub fn add_ssts_to_sub_level(
     insert_table_infos: Vec<SstableInfo>,
 ) {
     if sub_level_idx < l0.sub_levels.len() {
+        insert_table_infos.iter().for_each(|sst| {
+            l0.sub_levels[sub_level_idx].total_file_size += sst.file_size;
+            l0.sub_levels[sub_level_idx].uncompressed_file_size += sst.uncompressed_file_size;
+            l0.total_file_size += sst.file_size;
+            l0.uncompressed_file_size += sst.uncompressed_file_size;
+        });
         l0.sub_levels[sub_level_idx]
             .table_infos
             .extend(insert_table_infos);

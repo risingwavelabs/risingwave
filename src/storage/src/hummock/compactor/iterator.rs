@@ -306,13 +306,16 @@ impl ConcatSstableIterator {
                 })
             };
             while start_index < end_index {
+                let start_block_table_id = block_metas[start_index].table_id();
                 if self
                     .existing_table_ids
                     .contains(&block_metas[start_index].table_id().table_id)
                 {
                     break;
                 }
-                start_index += 1;
+                start_index += &block_metas[(start_index + 1)..]
+                    .partition_point(|block_meta| block_meta.table_id() == start_block_table_id)
+                    + 1;
             }
             if start_index >= end_index {
                 found = false;

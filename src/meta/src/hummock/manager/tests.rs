@@ -1793,7 +1793,7 @@ async fn test_split_compaction_group_on_demand_bottom_levels() {
             .levels[base_level - 1]
             .table_infos[0]
             .table_ids,
-        vec![100]
+        vec![100, 101]
     );
     assert_eq!(
         current_version
