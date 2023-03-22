@@ -60,7 +60,6 @@ impl ProjectExecutor {
                 let expr = expr.clone();
                 async move {
                     let data_chunk = data_chunk?;
-                    // let data_chunk = data_chunk.compact();
                     let arrays = {
                         let data_chunk = &data_chunk;
                         let expr_futs = expr.iter().map(|expr| async move {
