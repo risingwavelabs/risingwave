@@ -46,14 +46,14 @@ impl Executor for ProjectExecutor {
     }
 
     fn execute(self: Box<Self>) -> BoxedDataChunkStream {
-        self.do_execute().boxed()
+        (*self).do_execute().boxed()
     }
 }
 
 impl ProjectExecutor {
     // #[try_stream(boxed, ok = DataChunk, error = RwError)]
-    fn do_execute(self: Box<Self>) -> impl Stream<Item = Result<DataChunk>> + 'static {
-        let Self { expr, child, .. } = *self;
+    fn do_execute(self) -> impl Stream<Item = Result<DataChunk>> + 'static {
+        let Self { expr, child, .. } = self;
         let expr: Arc<[Box<dyn Expression>]> = expr.into();
         child
             .execute()
@@ -64,8 +64,8 @@ impl ProjectExecutor {
                     // let data_chunk = data_chunk.compact();
                     let arrays = {
                         let data_chunk = &data_chunk;
-                        let expr_futs = expr.into_iter().map(|expr| async move {
-                            Ok::<_, ExprError>(Column::new(expr.eval(&data_chunk).await?))
+                        let expr_futs = expr.iter().map(|expr| async move {
+                            Ok::<_, ExprError>(Column::new(expr.eval(data_chunk).await?))
                         });
                         let arrays: Vec<Column> = futures::future::join_all(expr_futs)
                             .await
