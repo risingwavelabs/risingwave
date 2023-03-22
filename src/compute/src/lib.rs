@@ -28,6 +28,7 @@ pub mod memory_management;
 pub mod observer;
 pub mod rpc;
 pub mod server;
+pub mod telemetry;
 
 use clap::Parser;
 use risingwave_common::config::AsyncStackTraceOption;

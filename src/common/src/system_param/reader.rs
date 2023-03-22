@@ -76,6 +76,10 @@ impl SystemParamsReader {
         self.prost.backup_storage_directory.as_ref().unwrap()
     }
 
+    pub fn telemetry_enabled(&self) -> bool {
+        self.prost.telemetry_enabled.unwrap()
+    }
+
     pub fn to_kv(&self) -> Vec<(String, String)> {
         system_params_to_kv(&self.prost).unwrap()
     }

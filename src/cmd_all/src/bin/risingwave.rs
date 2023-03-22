@@ -21,10 +21,10 @@ use std::env;
 use anyhow::{bail, Result};
 use clap::Parser;
 use risingwave_cmd_all::playground;
-use risingwave_common::enable_task_local_jemalloc_on_linux;
+use risingwave_common::enable_task_local_jemalloc_on_unix;
 use tracing::Level;
 
-enable_task_local_jemalloc_on_linux!();
+enable_task_local_jemalloc_on_unix!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 

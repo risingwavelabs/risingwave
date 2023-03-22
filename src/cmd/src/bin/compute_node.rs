@@ -14,9 +14,9 @@
 
 #![cfg_attr(coverage, feature(no_coverage))]
 
-use risingwave_common::enable_task_local_jemalloc_on_linux;
+use risingwave_common::enable_task_local_jemalloc_on_unix;
 
-enable_task_local_jemalloc_on_linux!();
+enable_task_local_jemalloc_on_unix!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() {

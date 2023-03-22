@@ -74,8 +74,12 @@ impl StreamHashJoin {
                 if logical.left().watermark_columns().contains(left_key)
                     && logical.right().watermark_columns().contains(right_key)
                 {
-                    watermark_columns.insert(l2i.map(left_key));
-                    watermark_columns.insert(r2i.map(right_key));
+                    if let Some(internal) = l2i.try_map(left_key) {
+                        watermark_columns.insert(internal);
+                    }
+                    if let Some(internal) = r2i.try_map(right_key) {
+                        watermark_columns.insert(internal);
+                    }
                 }
             }
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)

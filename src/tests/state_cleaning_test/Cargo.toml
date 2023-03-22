@@ -26,7 +26,7 @@ serde_with = "2"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7.7"
 tokio-stream = { version = "0.1", features = ["fs"] }
-toml = "0.4"
+toml = "0.7"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
