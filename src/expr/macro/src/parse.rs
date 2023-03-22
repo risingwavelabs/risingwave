@@ -37,7 +37,7 @@ impl FunctionAttr {
             .split_once("->")
             .ok_or_else(|| Error::new_spanned(sig, "expected '->'"))?;
         let (name, args) = name_args
-            .split_once("(")
+            .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
 
         let batch = attr.iter().find_map(|n| {
@@ -110,7 +110,7 @@ fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
 }
 
 /// Extract `#[prebuild("function_name")]` from arguments.
-fn extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
+fn _extract_prebuild_arg(item: &mut syn::ItemFn) -> Option<(usize, String)> {
     for (i, arg) in item.sig.inputs.iter_mut().enumerate() {
         let syn::FnArg::Typed(arg) = arg else { continue };
         if let Some(idx) = arg

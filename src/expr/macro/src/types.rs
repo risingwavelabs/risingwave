@@ -153,7 +153,7 @@ pub fn to_array_type(ty: &str) -> &str {
     }
 }
 
-/// Maps a data type to its corresponding ScalarRef type name.
+/// Maps a data type to its corresponding `ScalarRef` type name.
 pub fn to_data_type(ty: &str) -> &str {
     match ty {
         "boolean" => "bool",

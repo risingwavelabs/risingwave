@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::unit_arg)]
+
 use std::fmt::Write;
 
 use risingwave_common::array::*;

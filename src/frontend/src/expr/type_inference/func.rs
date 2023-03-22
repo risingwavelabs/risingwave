@@ -1024,21 +1024,16 @@ mod tests {
         // func_name and ret_type does not affect the overload resolution logic
         const DUMMY_FUNC: ExprType = ExprType::Add;
         const DUMMY_RET: T = T::Int32;
-        let testcases: [(
-            &'static str,
-            &'static [&'static [T]],
-            &'static [Option<T>],
-            std::result::Result<&'static [T], &'static str>,
-        ); 10] = [
+        let testcases = [
             (
                 "Binary special rule prefers arguments of same type.",
                 &[
-                    &[T::Int32, T::Int32],
+                    &[T::Int32, T::Int32][..],
                     &[T::Int32, T::Varchar],
                     &[T::Int32, T::Float64],
-                ],
-                &[Some(T::Int32), None],
-                Ok(&[T::Int32, T::Int32]),
+                ][..],
+                &[Some(T::Int32), None][..],
+                Ok(&[T::Int32, T::Int32][..]),
             ),
             (
                 "Without binary special rule, Rule 4e selects varchar.",
@@ -1131,15 +1126,15 @@ mod tests {
         ];
         for (desc, candidates, inputs, expected) in testcases {
             let mut sig_map = FuncSigMap::default();
-            candidates.into_iter().for_each(|formals| {
+            for formals in candidates {
                 sig_map.insert(FuncSign {
                     name: "add",
                     func: DUMMY_FUNC,
                     inputs_type: formals,
                     ret_type: DUMMY_RET,
                     build: |_, _| unreachable!(),
-                })
-            });
+                });
+            }
             let result = infer_type_name(&sig_map, DUMMY_FUNC, inputs);
             match (expected, result) {
                 (Ok(expected), Ok(found)) => {

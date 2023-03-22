@@ -70,7 +70,7 @@ mod tests {
             let mut writer = String::new();
             match (off, len) {
                 (Some(off), Some(len)) => {
-                    let result = substr_start_for(&s, off, len, &mut writer);
+                    let result = substr_start_for(s, off, len, &mut writer);
                     if len < 0 {
                         assert!(result.is_err());
                         continue;
@@ -78,8 +78,8 @@ mod tests {
                         result?
                     }
                 }
-                (Some(off), None) => substr_start(&s, off, &mut writer)?,
-                (None, Some(len)) => substr_for(&s, len, &mut writer)?,
+                (Some(off), None) => substr_start(s, off, &mut writer)?,
+                (None, Some(len)) => substr_for(s, len, &mut writer)?,
                 _ => unreachable!(),
             }
             assert_eq!(writer, expected);

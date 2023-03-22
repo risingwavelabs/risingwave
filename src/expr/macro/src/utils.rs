@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Convert a string from snake_case to CamelCase.
+/// Convert a string from `snake_case` to `CamelCase`.
 pub fn to_camel_case(input: &str) -> String {
     input
         .split('_')

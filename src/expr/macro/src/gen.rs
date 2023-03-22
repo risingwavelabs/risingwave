@@ -26,7 +26,7 @@ impl FunctionAttr {
     /// If the function arguments or return type contains wildcard, it will generate descriptors for
     /// each of them.
     pub fn generate_descriptors(&self, build_fn: bool) -> Result<TokenStream2> {
-        let args = self.args.iter().map(|ty| types::expand_type_wildcard(&ty));
+        let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
         let mut tokens = TokenStream2::new();
         for (args, mut ret) in args.multi_cartesian_product().cartesian_product(ret) {

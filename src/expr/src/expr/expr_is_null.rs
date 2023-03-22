@@ -91,16 +91,16 @@ impl Expression for IsNotNullExpression {
 
 #[build_function("is_null(*) -> boolean")]
 fn build_is_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Ok(Box::new(IsNullExpression {
-        child: children.into_iter().next().unwrap(),
-    }))
+    Ok(Box::new(IsNullExpression::new(
+        children.into_iter().next().unwrap(),
+    )))
 }
 
 #[build_function("is_not_null(*) -> boolean")]
 fn build_is_not_null_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Ok(Box::new(IsNotNullExpression {
-        child: children.into_iter().next().unwrap(),
-    }))
+    Ok(Box::new(IsNotNullExpression::new(
+        children.into_iter().next().unwrap(),
+    )))
 }
 
 #[cfg(test)]

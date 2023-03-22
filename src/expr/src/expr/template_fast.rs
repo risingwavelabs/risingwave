@@ -436,6 +436,7 @@ where
     for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
     for<'a> &'a B: std::convert::From<&'a ArrayImpl>,
 {
+    #[allow(dead_code)]
     pub fn new(left: BoxedExpression, right: BoxedExpression, ne: F, not: bool) -> Self {
         IsDistinctFromExpression {
             left,

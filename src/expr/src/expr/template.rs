@@ -319,6 +319,7 @@ macro_rules! gen_expr_nullable {
             > $ty_name<$($arg, )* OA, F> {
                 // Compile failed due to some GAT lifetime issues so make this field private.
                 // Check issues #742.
+                #[allow(dead_code)]
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*
                     return_type: DataType,

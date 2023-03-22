@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::unit_arg)]
+
 use itertools::Itertools;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
@@ -38,7 +40,7 @@ use crate::expr::expr_jsonb_access::build_jsonb_expr;
 use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
-use crate::{bail, ensure, ExprError, Result};
+use crate::{bail, ExprError, Result};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {

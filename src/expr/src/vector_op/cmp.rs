@@ -221,6 +221,7 @@ pub fn boolean_ge(l: bool, r: bool) -> bool {
     l >= r
 }
 
+#[allow(clippy::bool_comparison)]
 #[function("greater_than(boolean, boolean) -> boolean", batch = "boolarray_gt")]
 pub fn boolean_gt(l: bool, r: bool) -> bool {
     l > r
@@ -234,6 +235,7 @@ pub fn boolean_le(l: bool, r: bool) -> bool {
     l <= r
 }
 
+#[allow(clippy::bool_comparison)]
 #[function("less_than(boolean, boolean) -> boolean", batch = "boolarray_lt")]
 pub fn boolean_lt(l: bool, r: bool) -> bool {
     l < r
