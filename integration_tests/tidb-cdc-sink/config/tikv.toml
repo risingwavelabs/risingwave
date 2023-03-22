@@ -151,7 +151,7 @@ address = "prometheus-0:9091"
 # When entry count exceed this value, gc will be forced trigger.
 # raft-log-gc-count-limit = 72000
 # When the approximate size of raft log entries exceed this value, gc will be forced trigger.
-# It's recommanded to set it to 3/4 of region-split-size.
+# It's recommended to set it to 3/4 of region-split-size.
 # raft-log-gc-size-limit = "72MB"
 
 # When a peer hasn't been active for max-peer-down-duration,
@@ -338,7 +338,7 @@ max-open-files = 1024
 # rate, but increase memory usage and space amplification.
 # bloom-filter-bits-per-key = 10
 
-# false means one sst file one bloom filter, true means evry block has a corresponding bloom filter
+# false means one sst file one bloom filter, true means every block has a corresponding bloom filter
 # block-based-bloom-filter = false
 
 # level0-file-num-compaction-trigger = 4
@@ -401,7 +401,7 @@ max-open-files = 1024
 # dynamic-level-bytes = true
 
 # Options for Column Family write
-# Column Family write used to store commit informations in MVCC model
+# Column Family write used to store commit information in MVCC model
 [rocksdb.writecf]
 # compression-per-level = ["no", "no", "lz4", "lz4", "lz4", "zstd", "zstd"]
 # block-size = "64KB"
