@@ -30,7 +30,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      ENABLE_TELEMETRY: "false"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: compactor-0
     healthcheck:
       test:
@@ -72,7 +73,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      ENABLE_TELEMETRY: "false"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: compute-node-0
     healthcheck:
       test:
@@ -152,7 +154,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      ENABLE_TELEMETRY: "false"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -221,7 +224,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
-      ENABLE_TELEMETRY: "false"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: meta-node-0
     healthcheck:
       test:
