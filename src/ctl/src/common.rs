@@ -16,3 +16,4 @@ mod context;
 mod hummock_service;
 mod meta_service;
 pub use context::*;
+pub use hummock_service::HummockServiceOpts;

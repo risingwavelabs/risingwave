@@ -283,6 +283,7 @@ impl SstableMeta {
     /// | estimated size (4B) | key count (4B) |
     /// | smallest key len (4B) | smallest key |
     /// | largest key len (4B) | largest key |
+    /// | M (4B) |
     /// | range-tombstone 0 | ... | range-tombstone M-1 |
     /// | file offset of this meta block (8B) |
     /// | checksum (8B) | version (4B) | magic (4B) |
