@@ -491,11 +491,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // We prioritize abort signal over normal data chunks.
                 biased;
                 err_reason = &mut shutdown_rx => {
-                    state = TaskStatus::Aborted;
-                    // When aborted, there are two cases:
-                    // 1. Caused by some error(e.g. oom), in this case we should report it to user.
-                    // 2. Normal cancel(e.g. cancelled since other task failed), in this case we should not report an error.
-                    error = err_reason.map(|s| Some(Aborted(s))).unwrap_or(None);
+                    match err_reason {
+                        Ok(reason_str) => {
+                            state = TaskStatus::Aborted;
+                            error = Some(Aborted(reason_str));
+                        }
+                        Err(_) => {
+                            // We use early close shutdown channel to cancel task.
+                            // Cancelling a task is different from aboring a task
+                            // in that it's not an error and should not be reported to user.
+                            state = TaskStatus::Cancelled;
+                        }
+                    }
                     break;
                 }
                 res = data_chunk_stream.next() => {

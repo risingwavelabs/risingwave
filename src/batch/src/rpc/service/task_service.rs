@@ -18,7 +18,7 @@ use std::sync::Arc;
 use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::task_service::task_service_server::TaskService;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataResponse,
     TaskInfoResponse,
 };
 use tokio_stream::wrappers::ReceiverStream;
@@ -95,15 +95,15 @@ impl TaskService for BatchServiceImpl {
     }
 
     #[cfg_attr(coverage, no_coverage)]
-    async fn abort_task(
+    async fn cancel_task(
         &self,
-        req: Request<AbortTaskRequest>,
-    ) -> Result<Response<AbortTaskResponse>, Status> {
+        req: Request<CancelTaskRequest>,
+    ) -> Result<Response<CancelTaskResponse>, Status> {
         let req = req.into_inner();
         tracing::trace!("Aborting task: {:?}", req.get_task_id().unwrap());
         self.mgr
             .cancel_task(req.get_task_id().expect("no task id found"));
-        Ok(Response::new(AbortTaskResponse { status: None }))
+        Ok(Response::new(CancelTaskResponse { status: None }))
     }
 
     #[cfg_attr(coverage, no_coverage)]
