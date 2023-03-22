@@ -53,7 +53,7 @@ use std::time::Duration;
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
 use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
-use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
+use risingwave_pb::meta::HeartbeatRequest;
 use risingwave_rpc_client::error::{Result, RpcError};
 use tokio_retry::strategy::{jitter, ExponentialBackoff};
 use tonic::transport::{Channel, Endpoint};
@@ -107,8 +107,10 @@ async fn try_build_rpc_channel(addr: String) -> Result<Channel> {
 
 // Returns false if heartbeat timed out
 async fn heartbeat_ok(request: HeartbeatRequest, addr: String) -> bool {
-    let channel = try_build_rpc_channel(addr).await.unwrap();
-    // TODO: IF you cannot establish a channel, then the probe fails
+    let channel = match try_build_rpc_channel(addr).await {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
     let mut heartbeat_client = HeartbeatServiceClient::new(channel.clone());
 
     match heartbeat_client.heartbeat(request).await {
@@ -121,9 +123,9 @@ async fn heartbeat_ok(request: HeartbeatRequest, addr: String) -> bool {
         }
     }
 }
-
+// TODO rewrite this to get request?
 /// Send heartbeat signal to meta service.
-pub async fn meta_up(info: Vec<extra_info::Info>, addr: String) -> bool {
+async fn meta_up(info: Vec<extra_info::Info>, addr: String) -> bool {
     let request = HeartbeatRequest {
         node_id: u32::MAX,
         info: info
@@ -134,20 +136,18 @@ pub async fn meta_up(info: Vec<extra_info::Info>, addr: String) -> bool {
     heartbeat_ok(request, addr).await
 }
 
-/// Start meta node
-pub fn start(opts: MetaProbeOpts) -> Pin<Box<dyn Future<Output = bool> + Send>> {
+/// True if meta node is up
+pub async fn ok(opts: MetaProbeOpts) -> bool {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
-    Box::pin(async move {
-        info!("Starting probe 2");
-        info!("> options: {:?}", opts);
-        // TODO: Maybe remove this. We can check somewhere else if this addr is valid
-        let listen_addr: SocketAddr = opts
-            .listen_addr
-            .parse()
-            .expect("Expected a valid listen address");
-        info!("probing on {}", listen_addr);
-        let x_info: Vec<extra_info::Info> = vec![];
-        return meta_up(x_info, listen_addr.to_string()).await;
-    })
+    info!("Starting probe");
+    info!("> options: {:?}", opts);
+    // TODO: Maybe remove this. We can check somewhere else if this addr is valid
+    let listen_addr: SocketAddr = opts
+        .listen_addr
+        .parse()
+        .expect("Expected a valid listen address");
+    info!("probing on {}", listen_addr);
+    let x_info: Vec<extra_info::Info> = vec![];
+    meta_up(x_info, listen_addr.to_string()).await
 }

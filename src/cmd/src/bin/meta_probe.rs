@@ -19,12 +19,13 @@ use risingwave_common::enable_jemalloc_on_unix;
 enable_jemalloc_on_unix!();
 
 #[cfg_attr(coverage, no_coverage)]
-fn main() {
+#[tokio::main]
+async fn main() {
     use clap::Parser;
 
     let opts = risingwave_meta_probe::MetaProbeOpts::parse();
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
-    risingwave_rt::main_okk(risingwave_meta_probe::start(opts))
+    std::process::exit(risingwave_meta_probe::ok(opts).await.into())
 }
