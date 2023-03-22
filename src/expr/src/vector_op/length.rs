@@ -15,6 +15,7 @@
 use risingwave_expr_macro::function;
 
 #[function("length(varchar) -> int32")]
+#[function("char_length(varchar) -> int32")]
 pub fn length(s: &str) -> i32 {
     s.chars().count() as i32
 }
