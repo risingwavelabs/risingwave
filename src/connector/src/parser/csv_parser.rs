@@ -126,10 +126,11 @@ impl CsvParser {
             }
             writer.insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
-                    Self::parse_string(
-                        &desc.data_type,
-                        fields.get_mut(i).map(std::mem::take).unwrap_or_default(),
-                    )
+                    let value = fields.get_mut(i).map(std::mem::take).unwrap_or_default();
+                    if value.is_empty() {
+                        return Ok(None);
+                    }
+                    Self::parse_string(&desc.data_type, value)
                 } else {
                     Ok(None)
                 }
@@ -138,6 +139,9 @@ impl CsvParser {
             fields.reverse();
             writer.insert(|desc| {
                 if let Some(value) = fields.pop() {
+                    if value.is_empty() {
+                        return Ok(None);
+                    }
                     Self::parse_string(&desc.data_type, value)
                 } else {
                     Ok(None)
@@ -162,6 +166,7 @@ mod tests {
             r#""15541","a,1,1,",4"#,
             r#"0,"""0",0"#,
             r#"0,0,0,0,0,0,0,0,0,0,0,0,0,"#,
+            r#",,,,"#,
         ];
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
@@ -251,6 +256,14 @@ mod tests {
                 row.datum_at(2).to_owned_datum(),
                 (Some(ScalarImpl::Int32(0)))
             );
+        }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0), None);
+            assert_eq!(row.datum_at(1), None);
+            assert_eq!(row.datum_at(2), None);
         }
     }
     #[tokio::test]
