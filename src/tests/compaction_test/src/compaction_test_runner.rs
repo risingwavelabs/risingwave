@@ -82,6 +82,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
+        opts.state_store.clone(),
         opts.config_path_for_meta.clone(),
     ));
 
@@ -124,7 +125,7 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-pub async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
     let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
@@ -135,6 +136,8 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         "mem",
         "--checkpoint-frequency",
         &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
+        "--state-store",
+        &state_store,
         "--config-path",
         &config_path,
     ]);
