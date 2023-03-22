@@ -20,9 +20,9 @@
 #![feature(stmt_expr_attributes)]
 
 mod cascade_materialized_view;
+mod delta_join;
 mod dynamic_filter;
 mod hello;
-mod lookup_joins;
 mod nexmark_chaos;
 mod nexmark_q4;
 mod nexmark_recovery;
