@@ -2619,13 +2619,13 @@ def section_connector_node(outer_panels):
         outer_panels.row_collapsed(
             "Connector Node",
             [
-                panels.timeseries_count(
-                    "Job Count",
+                panels.timeseries_rowsps(
+                    "Connector Source Throughput(rows)",
                     "",
                     [
                         panels.target(
-                            f"{metric('connector_source_rows_received')}",
-                            "connector source rows received number",
+                            f"rate({metric('connector_source_rows_received')}[$__interval])",
+                            "connector-node source throughput",
                         ),
                     ],
                 ),
