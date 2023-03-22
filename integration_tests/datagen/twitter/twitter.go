@@ -43,14 +43,6 @@ func (r *twitterEvent) ToPostgresSql() string {
 	)
 }
 
-func (r *twitterUser) objectString() string {
-	return fmt.Sprintf("('%s', '%s', '%s', '%s')", r.CreatedAt, r.Id, r.Name, r.UserName)
-}
-
-func (r *tweetData) objectString() string {
-	return fmt.Sprintf("('%s', '%s', '%s', '%s')", r.CreatedAt, r.Id, r.Text, r.Lang)
-}
-
 func (r *twitterEvent) ToJson() (topic string, key string, data []byte) {
 	data, _ = json.Marshal(r)
 	return "twitter", r.Data.Id, data
