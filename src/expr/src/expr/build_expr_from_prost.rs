@@ -172,7 +172,7 @@ pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
 }
 
-#[build_function("to_timestamp(varchar, varchar) -> timestamp")]
+#[build_function("to_timestamp1(varchar, varchar) -> timestamp")]
 pub fn build_to_timestamp_expr(
     return_type: DataType,
     children: Vec<BoxedExpression>,
