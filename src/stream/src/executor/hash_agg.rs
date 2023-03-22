@@ -21,11 +21,11 @@ use futures::{stream, StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iter_chunks::IterChunks;
 use itertools::Itertools;
-use risingwave_common::array::StreamChunk;
+use risingwave_common::array::{ArrayError, DataChunk, StreamChunk};
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::RowExt;
+use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
@@ -127,7 +127,7 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
     /// Cache for [`AggGroup`]s. `HashKey` -> `AggGroup`.
     agg_group_cache: AggGroupCache<K, S>,
 
-    /// Changed group keys in the current epoch (before next flush).
+    /// Changed group `HashKey`s in the current epoch (before next flush).
     group_change_set: HashSet<K>,
 
     /// Distinct deduplicater to deduplicate input rows for each distinct agg call.
@@ -177,6 +177,15 @@ impl<K: HashKey, S: StateStore> Executor for HashAggExecutor<K, S> {
     }
 }
 
+/// WARNING: This type of values should only exist in memory temporarily, i.e. not exist across
+/// multiple calls to `apply_chunk`.
+struct TempGroupKey<K: HashKey> {
+    /// `HashKey` used as key of `HashMap`s.
+    hash_key: K,
+    /// Group key as a row.
+    row: OwnedRow,
+}
+
 impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     pub fn new(args: AggExecutorArgs<S>) -> StreamResult<Self> {
         let extra_args = args.extra.unwrap();
@@ -216,40 +225,50 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
     /// Get visibilities that mask rows in the chunk for each group. The returned visibility
     /// is a `Bitmap` rather than `Option<Bitmap>` because it's likely to have multiple groups
     /// in one chunk.
-    ///
-    /// * `keys`: Hash Keys of rows.
-    /// * `base_visibility`: Visibility of rows, `None` means all are visible.
-    fn get_group_visibilities(keys: Vec<K>, base_visibility: Option<&Bitmap>) -> Vec<(K, Bitmap)> {
-        let n_rows = keys.len();
-        let mut vis_builders = HashMap::new();
-        for (row_idx, key) in keys.into_iter().enumerate().filter(|(row_idx, _)| {
+    fn collect_groups(
+        this: &mut ExecutorInner<K, S>,
+        chunk: &DataChunk,
+    ) -> StreamExecutorResult<Vec<(TempGroupKey<K>, Bitmap)>> {
+        let hash_keys = K::build(&this.group_key_indices, chunk)?;
+        let n_rows = hash_keys.len();
+        let base_visibility = chunk.visibility();
+        let mut groups = HashMap::new();
+        for (row_idx, hash_key) in hash_keys.into_iter().enumerate().filter(|(row_idx, _)| {
             base_visibility
                 .map(|vis| vis.is_set(*row_idx))
                 .unwrap_or(true)
         }) {
-            vis_builders
-                .entry(key)
-                .or_insert_with(|| BitmapBuilder::zeroed(n_rows))
+            groups
+                .entry(hash_key)
+                .or_insert_with(|| {
+                    let row = chunk.row_at(row_idx).0;
+                    (
+                        row.project(&this.group_key_indices).into_owned_row(),
+                        BitmapBuilder::zeroed(n_rows),
+                    )
+                })
+                .1
                 .set(row_idx, true);
         }
-        vis_builders
+        Ok(groups
             .into_iter()
-            .map(|(key, vis_builder)| (key, vis_builder.finish()))
-            .collect()
+            .map(|(hash_key, (row, vis_builder))| {
+                (TempGroupKey { hash_key, row }, vis_builder.finish())
+            })
+            .collect())
     }
 
     async fn ensure_keys_in_cache(
         this: &mut ExecutorInner<K, S>,
         cache: &mut AggGroupCache<K, S>,
-        keys: impl IntoIterator<Item = &K>,
+        group_keys: impl IntoIterator<Item = &TempGroupKey<K>>,
         stats: &mut ExecutionStats,
     ) -> StreamExecutorResult<()> {
-        let group_key_types = &this.info.schema.data_types()[..this.group_key_indices.len()];
-        let futs = keys
+        let futs = group_keys
             .into_iter()
-            .filter_map(|key| {
+            .filter_map(|group_key| {
                 stats.total_lookup_count += 1;
-                if cache.contains(key) {
+                if cache.contains(&group_key.hash_key) {
                     None
                 } else {
                     stats.lookup_miss_count += 1;
@@ -258,7 +277,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         // fetch previous agg result from the result table.
                         let agg_group = Box::new(
                             AggGroup::create(
-                                Some(key.deserialize(group_key_types)?),
+                                Some(&group_key.row),
                                 &this.agg_calls,
                                 &this.storages,
                                 &this.result_table,
@@ -269,7 +288,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                             )
                             .await?,
                         );
-                        Ok::<_, StreamExecutorError>((key.clone(), agg_group))
+                        Ok::<_, StreamExecutorError>((group_key.hash_key.clone(), agg_group))
                     })
                 }
             })
@@ -281,8 +300,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             stats.chunk_lookup_miss_count += 1;
             let mut buffered = stream::iter(futs).buffer_unordered(10).fuse();
             while let Some(result) = buffered.next().await {
-                let (key, agg_group) = result?;
-                cache.put(key, agg_group);
+                let (hash_key, agg_group) = result?;
+                cache.put(hash_key, agg_group);
             }
         }
         Ok(())
@@ -294,14 +313,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<()> {
         // Find groups in this chunk and generate visibility for each group key.
-        let keys = K::build(&this.group_key_indices, chunk.data_chunk())?;
-        let group_visibilities = Self::get_group_visibilities(keys, chunk.visibility());
+        let groups = Self::collect_groups(this, chunk.data_chunk())?;
 
         // Create `AggGroup` for each group if not exists.
         Self::ensure_keys_in_cache(
             this,
             &mut vars.agg_group_cache,
-            group_visibilities.iter().map(|(k, _)| k),
+            groups.iter().map(|(k, _)| k),
             &mut vars.stats,
         )
         .await?;
@@ -345,8 +363,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             });
 
         // Apply chunk to each of the state (per agg_call), for each group.
-        for (key, visibility) in group_visibilities {
-            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap().as_mut();
+        for (group_key, visibility) in groups {
+            let agg_group = vars
+                .agg_group_cache
+                .get_mut(&group_key.hash_key)
+                .unwrap()
+                .as_mut();
             let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
@@ -360,12 +382,12 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     &columns,
                     visibilities,
                     &mut this.distinct_dedup_tables,
-                    agg_group.group_key(),
+                    Some(&group_key.row),
                 )
                 .await?;
             agg_group.apply_chunk(&mut this.storages, &ops, &columns, visibilities)?;
             // Mark the group as changed.
-            vars.group_change_set.insert(key);
+            vars.group_change_set.insert(group_key.hash_key);
         }
 
         Ok(())
@@ -411,22 +433,30 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         let dirty_cnt = vars.group_change_set.len();
         if dirty_cnt > 0 {
-            // Produce the stream chunk
+            // Produce the stream chunk.
             let group_key_data_types =
                 &this.info.schema.data_types()[..this.group_key_indices.len()];
             let mut group_chunks =
                 IterChunks::chunks(vars.group_change_set.drain(), this.chunk_size);
             while let Some(batch) = group_chunks.next() {
-                let keys_in_batch = batch.into_iter().collect_vec();
+                let keys_in_batch: Vec<_> = batch
+                    .into_iter()
+                    .map(|hash_key| -> Result<_, ArrayError> {
+                        let row = hash_key.deserialize(group_key_data_types)?;
+                        Ok(TempGroupKey { hash_key, row })
+                    })
+                    .try_collect()?;
 
                 // Flush agg states.
-                for key in &keys_in_batch {
+                for group_key in &keys_in_batch {
                     let agg_group = vars
                         .agg_group_cache
-                        .get_mut(key)
+                        .get_mut(&group_key.hash_key)
                         .expect("changed group must have corresponding AggGroup")
                         .as_mut();
-                    agg_group.flush_state_if_needed(&mut this.storages).await?;
+                    agg_group
+                        .flush_state_if_needed(Some(&group_key.row), &mut this.storages)
+                        .await?;
                 }
 
                 // Create array builders.
@@ -436,21 +466,23 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 let mut new_ops = Vec::with_capacity(this.chunk_size * 2);
 
                 // Calculate current outputs, concurrently.
-                let futs = keys_in_batch.into_iter().map(|key| {
+                let futs = keys_in_batch.into_iter().map(|group_key| {
                     // Get agg group of the key.
                     let agg_group = {
                         let mut ptr: NonNull<_> = vars
                             .agg_group_cache
-                            .get_mut(&key)
+                            .get_mut(&group_key.hash_key)
                             .expect("changed group must have corresponding AggGroup")
                             .into();
-                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
-                        // from `group_change_set` which is a set.
+                        // SAFETY: `group_key`s in `keys_in_batch` are unique by nature, because
+                        // they're from `group_change_set` which is a set.
                         unsafe { ptr.as_mut() }
                     };
                     async {
-                        let curr_outputs = agg_group.get_outputs(&this.storages).await?;
-                        Ok::<_, StreamExecutorError>((key, agg_group, curr_outputs))
+                        let curr_outputs = agg_group
+                            .get_outputs(Some(&group_key.row), &this.storages)
+                            .await?;
+                        Ok::<_, StreamExecutorError>((group_key, agg_group, curr_outputs))
                     }
                 });
                 let outputs_in_batch: Vec<_> = stream::iter(futs)
@@ -459,26 +491,25 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     .try_collect()
                     .await?;
 
-                for (key, agg_group, curr_outputs) in outputs_in_batch {
+                for (group_key, agg_group, curr_outputs) in outputs_in_batch {
                     let AggChangesInfo {
                         n_appended_ops,
                         result_row,
                         prev_outputs,
                     } = agg_group.build_changes(
+                        Some(&group_key.row),
                         curr_outputs,
                         &mut builders[this.group_key_indices.len()..],
                         &mut new_ops,
                     );
 
                     if n_appended_ops != 0 {
-                        for _ in 0..n_appended_ops {
-                            key.deserialize_to_builders(
-                                &mut builders[..this.group_key_indices.len()],
-                                group_key_data_types,
-                            )?;
-                        }
+                        builders[..this.group_key_indices.len()]
+                            .iter_mut()
+                            .enumerate()
+                            .for_each(|(i, b)| b.append_datum_n(n_appended_ops, &group_key.row[i]));
                         if let Some(prev_outputs) = prev_outputs {
-                            let old_row = agg_group.group_key().chain(prev_outputs);
+                            let old_row = group_key.row.chain(prev_outputs);
                             this.result_table.update(old_row, result_row);
                         } else {
                             this.result_table.insert(result_row);
