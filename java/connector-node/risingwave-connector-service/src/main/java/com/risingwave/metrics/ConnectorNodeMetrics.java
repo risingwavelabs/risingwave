@@ -16,13 +16,13 @@ package com.risingwave.metrics;
 
 import static io.grpc.Status.INTERNAL;
 
+import com.sun.management.OperatingSystemMXBean;
 import io.prometheus.client.CollectorRegistry;
 import io.prometheus.client.Counter;
 import io.prometheus.client.Gauge;
 import io.prometheus.client.exporter.HTTPServer;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
-import java.lang.management.OperatingSystemMXBean;
 import java.net.InetSocketAddress;
 
 public class ConnectorNodeMetrics {
@@ -46,11 +46,11 @@ public class ConnectorNodeMetrics {
                     .labelNames("sink_type", "ip")
                     .help("Number of total connections")
                     .register();
-    private static final Gauge cpuUsage =
-            Gauge.build()
+    private static final Counter cpuUsage =
+            Counter.build()
                     .name("process_cpu_seconds_total")
                     .labelNames("job")
-                    .help("CPU usage in percentage")
+                    .help("Total user and system CPU time spent in seconds.")
                     .register();
     private static final Gauge ramUsage =
             Gauge.build()
@@ -85,9 +85,10 @@ public class ConnectorNodeMetrics {
         public PeriodicMetricsCollector(int intervalMillis, String job) {
             this.interval = intervalMillis;
             this.job = job;
-            this.osBean = ManagementFactory.getOperatingSystemMXBean();
+            this.osBean = (OperatingSystemMXBean) ManagementFactory.getOperatingSystemMXBean();
         }
 
+        @SuppressWarnings({"InfiniteLoopStatement", "BusyWait"})
         @Override
         public void run() {
             while (true) {
@@ -101,8 +102,9 @@ public class ConnectorNodeMetrics {
         }
 
         private void collect() {
-            double cpuUsage = osBean.getSystemLoadAverage();
-            ConnectorNodeMetrics.cpuUsage.labels(job).set(cpuUsage);
+            double cpuTotal = osBean.getProcessCpuTime() / 1000000000.0;
+            double cpuPast = ConnectorNodeMetrics.cpuUsage.labels(job).get();
+            ConnectorNodeMetrics.cpuUsage.labels(job).inc(cpuTotal - cpuPast);
             long ramUsageBytes =
                     Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
             ConnectorNodeMetrics.ramUsage.labels(job).set(ramUsageBytes);
@@ -120,7 +122,7 @@ public class ConnectorNodeMetrics {
         collector.start();
 
         try {
-            HTTPServer server = new HTTPServer(new InetSocketAddress("localhost", port), registry);
+            new HTTPServer(new InetSocketAddress("localhost", port), registry);
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)
@@ -158,10 +160,6 @@ public class ConnectorNodeMetrics {
 
     public static void incErrorCount(String sinkType, String ip) {
         errorCount.labels(sinkType, ip).inc();
-    }
-
-    public static void setCpuUsage(String ip, double cpuUsagePercentage) {
-        cpuUsage.labels(ip).set(cpuUsagePercentage);
     }
 
     public static void setRamUsage(String ip, long usedRamInBytes) {
