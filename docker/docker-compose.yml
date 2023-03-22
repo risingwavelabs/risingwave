@@ -13,8 +13,6 @@ services:
       - "0.0.0.0:1260"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -52,8 +50,6 @@ services:
       - "0.0.0.0:1222"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -203,6 +199,8 @@ services:
       - "etcd-0:2388"
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--config-path"
       - /risingwave.toml
     expose:

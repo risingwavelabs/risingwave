@@ -21,7 +21,7 @@ use itertools::Itertools;
 
 use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::MetaNodeConfig;
+use crate::{add_storage_backend, HummockInMemoryStrategy, MetaNodeConfig};
 
 pub struct MetaNodeService {
     config: MetaNodeConfig,
@@ -43,7 +43,11 @@ impl MetaNodeService {
     }
 
     /// Apply command args according to config
-    pub fn apply_command_args(cmd: &mut Command, config: &MetaNodeConfig) -> Result<()> {
+    pub fn apply_command_args(
+        cmd: &mut Command,
+        config: &MetaNodeConfig,
+        hummock_in_memory_strategy: HummockInMemoryStrategy,
+    ) -> Result<()> {
         cmd.arg("--listen-addr")
             .arg(format!("{}:{}", config.listen_address, config.port))
             .arg("--advertise-addr")
@@ -93,6 +97,66 @@ impl MetaNodeService {
             }
         }
 
+        let provide_minio = config.provide_minio.as_ref().unwrap();
+        let provide_opendal = config.provide_opendal.as_ref().unwrap();
+        let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+
+        let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
+
+        // If compactors are provided, disable in-memory hummock (unshared).
+        let hummock_in_memory_strategy = if matches!(
+            hummock_in_memory_strategy,
+            HummockInMemoryStrategy::Isolated
+        ) {
+            HummockInMemoryStrategy::Disallowed
+        } else {
+            hummock_in_memory_strategy
+        };
+
+        let is_shared_backend = match (
+            config.enable_in_memory_kv_state_backend,
+            provide_minio.as_slice(),
+            provide_aws_s3.as_slice(),
+            provide_opendal.as_slice(),
+        ) {
+            (true, [], [], []) => {
+                cmd.arg("--state-store").arg("in-memory");
+                false
+            }
+            (true, _, _, _) => {
+                return Err(anyhow!(
+                    "When `enable_in_memory_kv_state_backend` is enabled, no minio and aws-s3 should be provided.",
+                ));
+            }
+            (_, provide_minio, provide_aws_s3, provide_opendal) => add_storage_backend(
+                &config.id,
+                provide_opendal,
+                provide_minio,
+                provide_aws_s3,
+                hummock_in_memory_strategy,
+                cmd,
+            )?,
+        };
+
+        if provide_compute_node.len() > 1 && !is_shared_backend {
+            if config.enable_in_memory_kv_state_backend {
+                // Using a non-shared backend with multiple compute nodes will be problematic for
+                // state sharing like scaling. However, for distributed end-to-end tests with
+                // in-memory state store, this is acceptable.
+            } else {
+                return Err(anyhow!(
+                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
+                ));
+            }
+        }
+
+        let provide_compactor = config.provide_compactor.as_ref().unwrap();
+        if is_shared_backend && provide_compactor.is_empty() {
+            return Err(anyhow!(
+                "When using a shared backend (minio, aws-s3, or shared in-memory with `risedev playground`), at least one compactor is required. Consider adding `use: compactor` in risedev config."
+            ));
+        }
+
         Ok(())
     }
 }
@@ -121,7 +185,7 @@ impl Task for MetaNodeService {
             );
         }
 
-        Self::apply_command_args(&mut cmd, &self.config)?;
+        Self::apply_command_args(&mut cmd, &self.config, HummockInMemoryStrategy::Isolated)?;
 
         let prefix_config = env::var("PREFIX_CONFIG")?;
         cmd.arg("--config-path")
