@@ -112,7 +112,6 @@ pub async fn compute_node_serve(
 
     let embedded_compactor_enabled =
         embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
-    embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
 
     let (reserved_memory_bytes, non_reserved_memory_bytes) =
         reserve_memory_bytes(opts.total_memory_bytes);
