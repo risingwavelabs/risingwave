@@ -560,10 +560,7 @@ impl<S: MetaStore> HummockManager<S> {
                     },
                 );
 
-                new_group = Some(CompactionGroup {
-                    group_id: new_compaction_group_id,
-                    compaction_config: Arc::new(config),
-                });
+                new_group = Some((new_compaction_group_id, config));
                 new_version_delta.group_deltas.insert(
                     parent_group_id,
                     GroupDeltas {
@@ -581,13 +578,21 @@ impl<S: MetaStore> HummockManager<S> {
         let mut branched_ssts = BTreeMapTransaction::new(&mut versioning.branched_ssts);
         let mut trx = Transaction::default();
         new_version_delta.apply_to_txn(&mut trx)?;
-        self.env.meta_store().txn(trx).await?;
-        if let Some(new_compaction_group) = new_group {
-            self.compaction_group_manager
-                .write()
-                .await
-                .compaction_groups
-                .insert(new_compaction_group.group_id, new_compaction_group);
+        if let Some((new_compaction_group_id, config)) = new_group {
+            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let insert = BTreeMapEntryTransaction::new_insert(
+                &mut compaction_group_manager.compaction_groups,
+                new_compaction_group_id,
+                CompactionGroup {
+                    group_id: new_compaction_group_id,
+                    compaction_config: Arc::new(config),
+                },
+            );
+            insert.apply_to_txn(&mut trx)?;
+            self.env.meta_store().txn(trx).await?;
+            insert.commit();
+        } else {
+            self.env.meta_store().txn(trx).await?;
         }
         let sst_split_info = versioning
             .current_version
