@@ -94,6 +94,7 @@ impl ValuesExecutor {
                     .collect();
 
                 let chunk = DataChunk::new(columns, chunk_size);
+
                 yield chunk
             }
         }

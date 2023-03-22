@@ -540,21 +540,13 @@ fn gen_table_plan_inner(
     )
     .into();
 
-    let mut required_cols = FixedBitSet::with_capacity(source_node.schema().len());
-    required_cols.toggle_range(..);
-    let mut out_names = source_node.schema().names();
-
-    if let Some(row_id_index) = row_id_index {
-        required_cols.toggle(row_id_index);
-        out_names.remove(row_id_index);
-    }
-
+    let required_cols = FixedBitSet::with_capacity(source_node.schema().len());
     let mut plan_root = PlanRoot::new(
         source_node,
         RequiredDist::Any,
         Order::any(),
         required_cols,
-        out_names,
+        vec![],
     );
 
     if append_only && row_id_index.is_none() {

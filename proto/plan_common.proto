@@ -28,7 +28,7 @@ message ColumnDesc {
   // this field will store the message name.
   string type_name = 5;
   // The the column is a generated column.
-  GeneratedColumnDesc generated_column = 7;
+  GeneratedColumnDesc generated_column = 6;
 }
 
 message ColumnCatalog {
