@@ -51,7 +51,6 @@ impl Executor for ProjectExecutor {
 }
 
 impl ProjectExecutor {
-    // #[try_stream(boxed, ok = DataChunk, error = RwError)]
     fn do_execute(self) -> impl Stream<Item = Result<DataChunk>> + 'static {
         let Self { expr, child, .. } = self;
         let expr: Arc<[Box<dyn Expression>]> = expr.into();
