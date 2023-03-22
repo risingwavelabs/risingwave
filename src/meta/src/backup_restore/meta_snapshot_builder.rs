@@ -28,6 +28,7 @@ use risingwave_pb::user::UserInfo;
 use crate::manager::model::SystemParamsModel;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
+use crate::telemetry::{get_tracking_id, get_tracking_id_snapshot};
 
 const VERSION: u32 = 1;
 
@@ -98,6 +99,13 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
         let system_param = SystemParams::get_at_snapshot::<S>(&meta_store_snapshot)
             .await?
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
+
+        // if tracking_id is None, we set default string
+        // tracking_id is always set in backup
+        let tracking_id = get_tracking_id_snapshot::<S>(&meta_store_snapshot)
+            .await?
+            .unwrap_or_default();
+
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
             hummock_version,
@@ -114,6 +122,7 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             user_info,
             function,
             system_param,
+            tracking_id,
         };
         Ok(())
     }

@@ -22,7 +22,8 @@ use risingwave_common::telemetry::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::storage::MetaStore;
+use crate::model::{MetadataModelError, MetadataModelResult};
+use crate::storage::{MetaStore, Snapshot};
 
 /// Column in meta store
 pub const TELEMETRY_CF: &str = "cf/telemetry";
@@ -97,6 +98,17 @@ pub(crate) async fn get_tracking_id(meta_store: &Arc<impl MetaStore>) -> anyhow:
         Ok(bytes) => String::from_utf8(bytes)
             .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
         Err(e) => Err(anyhow::format_err!("tracking_id not exist, {}", e)),
+    }
+}
+
+pub(crate) async fn get_tracking_id_snapshot<S: MetaStore>(
+    s: &S::Snapshot,
+) -> MetadataModelResult<Option<String>> {
+    match s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(MetadataModelError::internal)
+            .map(|id| Some(id)),
+        Err(e) => Err(MetadataModelError::internal(e)),
     }
 }
 
