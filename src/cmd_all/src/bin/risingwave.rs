@@ -70,6 +70,27 @@ fn main() -> Result<()> {
         );
     }
 
+
+     // TODO: I need to add the kill node here
+     // meta node configuration
+     for fn_name in ["probe", "meta-probe"] {
+        fns.insert(
+            fn_name,
+            Box::new(move |args: Vec<String>| {
+                eprintln!("launching meta-probe container");
+
+                // TODO: change the otps here
+                let opts = risingwave_kill::KillOpts::parse_from(args);
+
+                risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
+
+                risingwave_rt::main_okk(risingwave_kill::start(opts));
+
+                Ok(())
+            }),
+        );
+    }
+
     // frontend node configuration
     for fn_name in ["frontend", "frontend-node", "frontend_node"] {
         fns.insert(

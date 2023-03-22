@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// TODO: Which of these features do we need?
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(trait_alias)]
 #![feature(binary_heap_drain_sorted)]
@@ -47,17 +48,106 @@ pub struct MetaProbeOpts {
 use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
+use std::time::Duration;
 
+use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
+use risingwave_pb::meta::heartbeat_request::{extra_info, ExtraInfo};
+use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
+use risingwave_pb::meta::{HeartbeatRequest, HeartbeatResponse};
+use risingwave_rpc_client::error::{Result, RpcError};
+use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tonic::transport::{Channel, Endpoint};
 use tracing::info;
 
+// ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
+
+const CONN_RETRY_MAX_INTERVAL_MS: u64 = 500;
+const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 1;
+const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 1;
+
+async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
+    endpoint
+        .http2_keep_alive_interval(Duration::from_secs(ENDPOINT_KEEP_ALIVE_INTERVAL_SEC))
+        .keep_alive_timeout(Duration::from_secs(ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC))
+        .connect_timeout(Duration::from_secs(5))
+        .connect()
+        .await
+        .map_err(RpcError::TransportError)
+}
+
+fn addr_to_endpoint(addr: String) -> Result<Endpoint> {
+    Endpoint::from_shared(addr)
+        .map(|endpoint| endpoint.initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE))
+        .map_err(RpcError::TransportError)
+}
+
+async fn try_build_rpc_channel(addr: String) -> Result<Channel> {
+    let endpoint = addr_to_endpoint(addr).expect("Expected that a valid meta address");
+
+    let retry_strategy = ExponentialBackoff::from_millis(CONN_RETRY_BASE_INTERVAL_MS)
+        .max_delay(Duration::from_millis(CONN_RETRY_MAX_INTERVAL_MS))
+        .map(jitter);
+
+    let channel_res = tokio_retry::Retry::spawn(retry_strategy, || async {
+        let endpoint_clone = endpoint.clone();
+        match connect_to_endpoint(endpoint_clone).await {
+            Ok(channel) => {
+                return Ok(channel);
+            }
+            Err(e) => return Err(e),
+        }
+    })
+    .await;
+    match channel_res {
+        Ok(channel) => Ok(channel),
+        Err(e) => Err(e),
+    }
+}
+
+// Returns false if heartbeat timed out
+async fn heartbeat_ok(request: HeartbeatRequest, addr: String) -> bool {
+    let channel = try_build_rpc_channel(addr).await.unwrap();
+    // TODO: IF you cannot establish a channel, then the probe fails
+    let mut heartbeat_client = HeartbeatServiceClient::new(channel.clone());
+
+    match heartbeat_client.heartbeat(request).await {
+        Ok(_) => true,
+        Err(e) => {
+            if e.code() == tonic::Code::DeadlineExceeded {
+                false;
+            }
+            true
+        }
+    }
+}
+
+/// Send heartbeat signal to meta service.
+pub async fn meta_up(info: Vec<extra_info::Info>, addr: String) -> bool {
+    let request = HeartbeatRequest {
+        node_id: u32::MAX,
+        info: info
+            .into_iter()
+            .map(|info| ExtraInfo { info: Some(info) })
+            .collect(),
+    };
+    heartbeat_ok(request, addr).await
+}
+
 /// Start meta node
-pub fn start(opts: MetaProbeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
+pub fn start(opts: MetaProbeOpts) -> Pin<Box<dyn Future<Output = bool> + Send>> {
     // WARNING: don't change the function signature. Making it `async fn` will cause
     // slow compile in release mode.
     Box::pin(async move {
         info!("Starting probe 2");
         info!("> options: {:?}", opts);
-        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
+        // TODO: Maybe remove this. We can check somewhere else if this addr is valid
+        let listen_addr: SocketAddr = opts
+            .listen_addr
+            .parse()
+            .expect("Expected a valid listen address");
         info!("probing on {}", listen_addr);
+        let x_info: Vec<extra_info::Info> = vec![];
+        return meta_up(x_info, listen_addr.to_string()).await;
     })
 }
