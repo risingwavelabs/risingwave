@@ -15,7 +15,7 @@ SELECT
     COUNT(*) AS hashtag_occurrences,
     window_start
 FROM
-    TUMBLE(tags, created_at, INTERVAL '1 day')
+    TUMBLE(tags, created_at, INTERVAL '5 minute')
 GROUP BY
     hashtag,
     window_start
