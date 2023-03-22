@@ -15,10 +15,8 @@
 #![cfg(madsim)]
 
 use anyhow::Result;
-use risingwave_simulation::client::RisingWave;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::predicate::identity_contains;
-use sqllogictest::runner::AsyncDB;
 
 #[madsim::test]
 async fn test_streaming_parallelism_default() -> Result<()> {
@@ -32,33 +30,19 @@ async fn test_streaming_parallelism_default() -> Result<()> {
     Ok(())
 }
 
-async fn run_sqls_in_session(cluster: &Cluster, sqls: Vec<String>) {
-    cluster
-        .run_on_client(async move {
-            let mut session = RisingWave::connect("frontend".into(), "dev".into())
-                .await
-                .expect("failed to connect to RisingWave");
-            for sql in sqls {
-                session.run(&sql).await.unwrap();
-            }
-        })
-        .await;
-}
-
 #[madsim::test]
 async fn test_streaming_parallelism_set_some() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     let target_parallelism = default_parallelism - 1;
     assert!(target_parallelism > 0);
-    run_sqls_in_session(
-        &cluster,
-        vec![
-            format!("set streaming_parallelism={};", target_parallelism),
-            "create table t1 (c1 int, c2 int);".to_string(),
-        ],
-    )
-    .await;
+
+    let mut session = cluster.start_session();
+    session
+        .run(format!("set streaming_parallelism={};", target_parallelism))
+        .await?;
+    session.run("create table t1 (c1 int, c2 int);").await?;
+
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
@@ -70,14 +54,11 @@ async fn test_streaming_parallelism_set_some() -> Result<()> {
 async fn test_streaming_parallelism_set_zero() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
-    run_sqls_in_session(
-        &cluster,
-        vec![
-            "set streaming_parallelism=0;".to_string(),
-            "create table t1 (c1 int, c2 int);".to_string(),
-        ],
-    )
-    .await;
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism=0;").await?;
+    session.run("create table t1 (c1 int, c2 int);").await?;
+
     let materialize_fragment = cluster
         .locate_one_fragment([identity_contains("materialize")])
         .await?;
@@ -91,17 +72,22 @@ async fn test_streaming_parallelism_mv_on_mv() -> Result<()> {
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     let target_parallelism = default_parallelism - 1;
     assert!(target_parallelism - 1 > 0);
-    run_sqls_in_session(
-        &cluster,
-        vec![
-            format!("set streaming_parallelism={};", target_parallelism),
-            "create table t1 (c1 int, c2 int);".to_string(),
-            format!("set streaming_parallelism={};", target_parallelism - 1),
-            "create materialized view mv3 as select c1,count(*) as cc from t1 group by c1;"
-                .to_string(),
-        ],
-    )
-    .await;
+
+    let mut session = cluster.start_session();
+    session
+        .run(format!("set streaming_parallelism={};", target_parallelism))
+        .await?;
+    session.run("create table t1 (c1 int, c2 int);").await?;
+    session
+        .run(format!(
+            "set streaming_parallelism={};",
+            target_parallelism - 1
+        ))
+        .await?;
+    session
+        .run("create materialized view mv1 as select c1,count(*) as cc from t1 group by c1;")
+        .await?;
+
     let materialize_fragments = cluster
         .locate_fragments([identity_contains("materialize")])
         .await?;
@@ -123,16 +109,20 @@ async fn test_streaming_parallelism_index() -> Result<()> {
     let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     let target_parallelism = default_parallelism - 1;
     assert!(target_parallelism - 1 > 0);
-    run_sqls_in_session(
-        &cluster,
-        vec![
-            format!("set streaming_parallelism={};", target_parallelism),
-            "create table t1 (c1 int, c2 int);".to_string(),
-            format!("set streaming_parallelism={};", target_parallelism - 1),
-            "create index idx1 on t1(c2);".to_string(),
-        ],
-    )
-    .await;
+
+    let mut session = cluster.start_session();
+    session
+        .run(format!("set streaming_parallelism={};", target_parallelism))
+        .await?;
+    session.run("create table t1 (c1 int, c2 int);").await?;
+    session
+        .run(format!(
+            "set streaming_parallelism={};",
+            target_parallelism - 1
+        ))
+        .await?;
+    session.run("create index idx1 on t1(c2);").await?;
+
     let materialize_fragments = cluster
         .locate_fragments([identity_contains("materialize")])
         .await?;
