@@ -120,21 +120,21 @@ impl FunctionAttr {
             };
             let args = (0..=num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = if self.user_fn.return_result {
-                quote! { |#(#args),*| #fn_name(#(#args1),*) }
-            } else {
-                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            let func = match self.user_fn.return_type {
+                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
+                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
+                _ => todo!("returning Option is not supported yet"),
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, _>::new(
                     #(#exprs),*,
                     return_type,
-                    #func,
+                    |#(#args),*| #func,
                 )))
             }
         } else if self.args.iter().all(|t| t == "boolean")
             && self.ret == "boolean"
-            && !self.user_fn.return_result
+            && !self.user_fn.return_type.contains_result()
             && self.batch.is_some()
         {
             let template_struct = match num_args {
@@ -145,15 +145,16 @@ impl FunctionAttr {
             let batch = format_ident!("{}", self.batch.as_ref().unwrap());
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = if self.user_fn.arg_option && self.user_fn.return_option {
-                quote! { |#(#args),*| #fn_name(#(#args1),*) }
+            let func = if self.user_fn.arg_option && self.user_fn.return_type == ReturnType::Option
+            {
+                quote! { #fn_name(#(#args1),*) }
             } else if self.user_fn.arg_option {
-                quote! { |#(#args),*| Some(#fn_name(#(#args1),*)) }
+                quote! { Some(#fn_name(#(#args1),*)) }
             } else {
                 let args2 = args.clone();
                 let args3 = args.clone();
                 quote! {
-                    |#(#args),*| match (#(#args1),*) {
+                    match (#(#args1),*) {
                         (#(Some(#args2)),*) => Some(#fn_name(#(#args3),*)),
                         _ => None,
                     }
@@ -161,7 +162,9 @@ impl FunctionAttr {
             };
             quote! {
                 Ok(Box::new(crate::expr::template_fast::#template_struct::new(
-                    #(#exprs),*, #batch, #func,
+                    #(#exprs),*,
+                    #batch,
+                    |#(#args),*| #func,
                 )))
             }
         } else if self.args.len() == 2 && self.ret == "boolean" && self.user_fn.is_pure() {
@@ -195,7 +198,7 @@ impl FunctionAttr {
                     #fn_name,
                 )))
             }
-        } else if self.user_fn.arg_option {
+        } else if self.user_fn.arg_option || self.user_fn.return_type.contains_option() {
             let template_struct = match num_args {
                 1 => format_ident!("UnaryNullableExpression"),
                 2 => format_ident!("BinaryNullableExpression"),
@@ -213,18 +216,28 @@ impl FunctionAttr {
             } else {
                 quote! {}
             };
-            let func = if self.user_fn.return_result {
-                quote! { |#(#args),*| #fn_name #generic(#(#args1),*) }
-            } else if self.user_fn.return_option {
-                quote! { |#(#args),*| Ok(#fn_name #generic(#(#args1),*)) }
-            } else {
-                quote! { |#(#args),*| Ok(Some(#fn_name #generic(#(#args1),*))) }
+            let mut func = quote! { #fn_name #generic(#(#args1),*) };
+            func = match self.user_fn.return_type {
+                ReturnType::T => quote! { Ok(Some(#func)) },
+                ReturnType::Option => quote! { Ok(#func) },
+                ReturnType::Result => quote! { #func.map(Some) },
+                ReturnType::ResultOption => quote! { #func },
+            };
+            if !self.user_fn.arg_option {
+                let args2 = args.clone();
+                let args3 = args.clone();
+                func = quote! {
+                    match (#(#args2),*) {
+                        (#(Some(#args3)),*) => #func,
+                        _ => Ok(None),
+                    }
+                };
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
                     #(#exprs),*,
                     return_type,
-                    #func,
+                    |#(#args),*| #func,
                 )))
             }
         } else {
@@ -236,16 +249,16 @@ impl FunctionAttr {
             };
             let args = (0..num_args).map(|i| format_ident!("x{i}"));
             let args1 = args.clone();
-            let func = if self.user_fn.return_result {
-                quote! { |#(#args),*| #fn_name(#(#args1),*) }
-            } else {
-                quote! { |#(#args),*| Ok(#fn_name(#(#args1),*)) }
+            let func = match self.user_fn.return_type {
+                ReturnType::T => quote! { Ok(#fn_name(#(#args1),*)) },
+                ReturnType::Result => quote! { #fn_name(#(#args1),*) },
+                _ => panic!("return type should not contain Option"),
             };
             quote! {
                 Ok(Box::new(crate::expr::template::#template_struct::<#(#arg_arrays),*, #ret_array, _>::new(
                     #(#exprs),*,
                     return_type,
-                    #func,
+                    |#(#args),*| #func,
                 )))
             }
         };

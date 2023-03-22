@@ -71,8 +71,7 @@ impl UserFunctionAttr {
             name: item.sig.ident.to_string(),
             write: last_arg_is_write(item),
             arg_option: args_are_all_option(item),
-            return_option: return_value_is(item, "Option"),
-            return_result: return_value_is(item, "Result"),
+            return_type: return_type(item),
             generic: item.sig.generics.params.len(),
             // prebuild: extract_prebuild_arg(item),
         })
@@ -101,12 +100,40 @@ fn args_are_all_option(item: &syn::ItemFn) -> bool {
     true
 }
 
-/// Check if the return value is `Result`.
+/// Check the return type.
+fn return_type(item: &syn::ItemFn) -> ReturnType {
+    if return_value_is_result_option(item) {
+        ReturnType::ResultOption
+    } else if return_value_is(item, "Result") {
+        ReturnType::Result
+    } else if return_value_is(item, "Option") {
+        ReturnType::Option
+    } else {
+        ReturnType::T
+    }
+}
+
+/// Check if the return value is `type_`.
 fn return_value_is(item: &syn::ItemFn, type_: &str) -> bool {
     let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
     let syn::Type::Path(path) = ty.as_ref() else { return false };
     let Some(seg) = path.path.segments.last() else { return false };
     seg.ident == type_
+}
+
+/// Check if the return value is `Result<Option<T>>`.
+fn return_value_is_result_option(item: &syn::ItemFn) -> bool {
+    let syn::ReturnType::Type(_, ty) = &item.sig.output else { return false };
+    let syn::Type::Path(path) = ty.as_ref() else { return false };
+    let Some(seg) = path.path.segments.last() else { return false };
+    if seg.ident != "Result" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &seg.arguments else { return false };
+    let Some(syn::GenericArgument::Type(ty)) = args.args.first() else { return false };
+    let syn::Type::Path(path) = ty else { return false };
+    let Some(seg) = path.path.segments.last() else { return false };
+    seg.ident == "Option"
 }
 
 /// Extract `#[prebuild("function_name")]` from arguments.

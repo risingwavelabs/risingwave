@@ -75,10 +75,8 @@ struct UserFunctionAttr {
     write: bool,
     /// The argument type are `Option`s.
     arg_option: bool,
-    /// The return type is `Option`.
-    return_option: bool,
-    /// The return type is `Result`.
-    return_result: bool,
+    /// The return type.
+    return_type: ReturnType,
     /// The number of generic types.
     generic: usize,
     // /// `#[list(0)]` in arguments.
@@ -87,12 +85,30 @@ struct UserFunctionAttr {
     // struct_: Vec<(usize, usize)>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum ReturnType {
+    T,
+    Option,
+    Result,
+    ResultOption,
+}
+
+impl ReturnType {
+    fn contains_result(&self) -> bool {
+        matches!(self, ReturnType::Result | ReturnType::ResultOption)
+    }
+
+    fn contains_option(&self) -> bool {
+        matches!(self, ReturnType::Option | ReturnType::ResultOption)
+    }
+}
+
 impl UserFunctionAttr {
     fn is_writer_style(&self) -> bool {
         self.write && !self.arg_option
     }
 
     fn is_pure(&self) -> bool {
-        !self.write && !self.arg_option && !self.return_option && !self.return_result
+        !self.write && !self.arg_option && self.return_type == ReturnType::T
     }
 }
