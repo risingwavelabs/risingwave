@@ -16,7 +16,7 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, FilterExecutor};
-use risingwave_common::enable_jemalloc_on_linux;
+use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
@@ -30,7 +30,7 @@ use risingwave_pb::expr::{ExprNode, FunctionCall};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_filter_executor(chunk_size: usize, chunk_num: usize) -> BoxedExecutor {
     const CHUNK_SIZE: usize = 1024;

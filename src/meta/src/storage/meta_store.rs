@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use risingwave_common::config::MetaBackend;
 use thiserror::Error;
 
 use crate::storage::transaction::Transaction;
@@ -44,6 +45,8 @@ pub trait MetaStore: Clone + Sync + Send + 'static {
     async fn get_cf(&self, cf: &str, key: &[u8]) -> MetaStoreResult<Vec<u8>> {
         self.snapshot().await.get_cf(cf, key).await
     }
+
+    fn meta_store_type(&self) -> MetaBackend;
 }
 
 // Error of metastore

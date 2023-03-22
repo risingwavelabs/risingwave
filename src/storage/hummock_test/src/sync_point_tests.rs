@@ -278,7 +278,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     ));
 
     let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-    compactor_manager.add_compactor(worker_node.id, u64::MAX);
+    compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
     let mut local = storage
         .new_local(NewLocalOptions::for_test(existing_table_id.into()))

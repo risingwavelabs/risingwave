@@ -16,10 +16,13 @@
 /build
 
 # misc
-.DS_Store
+**/*.DS_Store
 .env*
 
 # debug
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# generated proto
+proto/gen

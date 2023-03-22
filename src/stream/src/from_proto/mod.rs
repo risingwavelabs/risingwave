@@ -127,7 +127,7 @@ pub async fn create_executor(
         NodeBody::Source => SourceExecutorBuilder,
         NodeBody::Sink => SinkExecutorBuilder,
         NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorNewBuilder,
+        NodeBody::TopN => TopNExecutorBuilder,
         NodeBody::AppendOnlyTopN => AppendOnlyTopNExecutorBuilder,
         NodeBody::LocalSimpleAgg => LocalSimpleAggExecutorBuilder,
         NodeBody::GlobalSimpleAgg => GlobalSimpleAggExecutorBuilder,
