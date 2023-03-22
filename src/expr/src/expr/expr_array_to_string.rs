@@ -16,7 +16,32 @@ use std::fmt::Write;
 
 use risingwave_common::array::*;
 use risingwave_common::types::to_text::ToText;
-use risingwave_expr_macro::function;
+use risingwave_common::types::DataType;
+use risingwave_expr_macro::build_function;
+
+use super::template::{BinaryBytesExpression, TernaryBytesExpression};
+use super::{BoxedExpression, Result};
+
+#[build_function("array_to_string(list, varchar) -> varchar")]
+fn build_array_to_string(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let list = iter.next().unwrap();
+    let delimiter = iter.next().unwrap();
+    let elem_type = match list.return_type() {
+        DataType::List { datatype } => *datatype,
+        _ => panic!("expected list type"),
+    };
+    let expr = BinaryBytesExpression::<ListArray, Utf8Array, _>::new(
+        list,
+        delimiter,
+        return_type,
+        move |a, d, writer| Ok(array_to_string(a, &elem_type, d, writer)),
+    );
+    Ok(Box::new(expr))
+}
 
 /// Converts each array element to its text representation, and concatenates those
 /// separated by the delimiter string. If `null_string` is given and is not NULL,
@@ -67,9 +92,12 @@ use risingwave_expr_macro::function;
 /// query error polymorphic type
 /// select array_to_string(null, ',');
 /// ```
-
-#[function("array_to_string(list, varchar) -> varchar")]
-fn array_to_string(array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Write) {
+fn array_to_string(
+    array: ListRef<'_>,
+    element_data_type: &DataType,
+    delimiter: &str,
+    mut writer: &mut dyn Write,
+) {
     let mut first = true;
     for element in array.values_ref().iter().flat_map(|f| f.iter()) {
         if !first {
@@ -78,14 +106,37 @@ fn array_to_string(array: ListRef<'_>, delimiter: &str, mut writer: &mut dyn Wri
             first = false;
         }
         element
-            .write_with_type(array.data_type(), &mut writer)
+            .write_with_type(element_data_type, &mut writer)
             .unwrap();
     }
 }
 
-#[function("array_to_string(list, varchar, varchar) -> varchar")]
+#[build_function("array_to_string(list, varchar, varchar) -> varchar")]
+fn build_array_to_string_with_null(
+    return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let list = iter.next().unwrap();
+    let delimiter = iter.next().unwrap();
+    let null_string = iter.next().unwrap();
+    let elem_type = match list.return_type() {
+        DataType::List { datatype } => *datatype,
+        _ => panic!("expected list type"),
+    };
+    let expr = TernaryBytesExpression::<ListArray, Utf8Array, Utf8Array, _>::new(
+        list,
+        delimiter,
+        null_string,
+        return_type,
+        move |a, d, n, writer| Ok(array_to_string_with_null(a, &elem_type, d, n, writer)),
+    );
+    Ok(Box::new(expr))
+}
+
 fn array_to_string_with_null(
     array: ListRef<'_>,
+    element_data_type: &DataType,
     delimiter: &str,
     null_string: &str,
     mut writer: &mut dyn Write,
@@ -98,7 +149,7 @@ fn array_to_string_with_null(
             first = false;
         }
         match element {
-            Some(s) => s.write_with_type(array.data_type(), &mut writer).unwrap(),
+            Some(s) => s.write_with_type(element_data_type, &mut writer).unwrap(),
             None => write!(writer, "{}", null_string).unwrap(),
         }
     }

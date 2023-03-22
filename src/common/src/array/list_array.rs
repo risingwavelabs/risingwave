@@ -445,13 +445,6 @@ impl<'a> ListRef<'a> {
             }
         })
     }
-
-    pub fn data_type(&self) -> &DataType {
-        match self {
-            ListRef::Indexed { arr, .. } => &arr.value_type,
-            ListRef::ValueRef { .. } => panic!("ListRef::ValueRef has no data type"),
-        }
-    }
 }
 
 impl PartialEq for ListRef<'_> {
