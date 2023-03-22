@@ -85,6 +85,34 @@ impl SchemaCatalog {
         self.table_by_id.insert(id, table_ref);
     }
 
+    pub fn update_index(&mut self, prost: &PbIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let primary_table = self
+            .get_table_by_id(&prost.primary_table_id.into())
+            .unwrap();
+        let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
+        let index_ref = Arc::new(index);
+
+        self.index_by_name.insert(name, index_ref.clone());
+        self.index_by_id.insert(id, index_ref.clone());
+
+        match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
+            Occupied(mut entry) => {
+                let pos = entry
+                    .get()
+                    .iter()
+                    .position(|x| x.id == index_ref.id)
+                    .unwrap();
+                *entry.get_mut().get_mut(pos).unwrap() = index_ref;
+            }
+            Vacant(_entry) => {
+                unreachable!()
+            }
+        };
+    }
+
     pub fn drop_table(&mut self, id: TableId) {
         let table_ref = self.table_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&table_ref.name).unwrap();

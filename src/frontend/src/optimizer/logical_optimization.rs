@@ -248,6 +248,12 @@ lazy_static! {
              MinMaxOnIndexRule::create()],
         ApplyOrder::TopDown,
     );
+
+    static ref ALWAYS_FALSE_FILTER: OptimizationStage = OptimizationStage::new(
+        "Void always-false filter's downstream",
+        vec![AlwaysFalseFilterRule::create()],
+        ApplyOrder::TopDown,
+    );
 }
 
 impl LogicalOptimizer {
@@ -440,6 +446,7 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR);
         plan = plan.optimize_by_rules(&UNION_MERGE);
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER);
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 

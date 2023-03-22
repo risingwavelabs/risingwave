@@ -92,13 +92,18 @@ statement ok
 insert into t values (1),(2),(3),(4),(5);
 
 query I rowsort
-Select * from t join i using(x)
+select * from t join i using(x)
 ----
 1
 2
 3
 4
 5
+
+query I
+select * from t natural join (select * from t where 1=0);
+----
+
 
 statement ok
 drop index i;

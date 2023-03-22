@@ -266,6 +266,7 @@ mod tests {
             data_directory: Some("data_directory".to_string()),
             backup_storage_url: Some("backup_storage_url".to_string()),
             backup_storage_directory: Some("backup_storage_directory".to_string()),
+            telemetry_enabled: Some(false),
         }
     }
 

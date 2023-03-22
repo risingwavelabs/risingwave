@@ -28,12 +28,13 @@ const SELECT: &str = "select * from mv1 order by v1;";
 #[madsim::test]
 async fn test_dynamic_filter() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let mut session = cluster.start_session();
 
-    cluster.run("create table t1 (v1 int);").await?;
-    cluster.run("create table t2 (v2 int);").await?;
-    cluster.run("create materialized view mv1 as with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;").await?;
-    cluster.run("insert into t1 values (1), (2), (3)").await?;
-    cluster.run("flush").await?;
+    session.run("create table t1 (v1 int);").await?;
+    session.run("create table t2 (v2 int);").await?;
+    session.run("create materialized view mv1 as with max_v2 as (select max(v2) max from t2) select v1 from t1, max_v2 where v1 > max;").await?;
+    session.run("insert into t1 values (1), (2), (3)").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
 
     let dynamic_filter_fragment = cluster
@@ -60,53 +61,53 @@ async fn test_dynamic_filter() -> Result<()> {
     cluster.reschedule(format!("{id}-[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
 
-    cluster.run(SELECT).await?.assert_result_eq("");
-    cluster.run("insert into t2 values (0)").await?;
-    cluster.run("flush").await?;
+    session.run(SELECT).await?.assert_result_eq("");
+    session.run("insert into t2 values (0)").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
-    cluster.run(SELECT).await?.assert_result_eq("1\n2\n3");
+    session.run(SELECT).await?.assert_result_eq("1\n2\n3");
     // 1
     // 2
     // 3
 
     cluster.reschedule(format!("{id}-[4,5]+[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
-    cluster.run(SELECT).await?.assert_result_eq("1\n2\n3");
+    session.run(SELECT).await?.assert_result_eq("1\n2\n3");
 
-    cluster.run("insert into t2 values (2)").await?;
-    cluster.run("flush").await?;
+    session.run("insert into t2 values (2)").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
-    cluster.run(SELECT).await?.assert_result_eq("3");
+    session.run(SELECT).await?.assert_result_eq("3");
     // 3
 
     cluster.reschedule(format!("{id}-[1,2,3]+[4,5]")).await?;
     sleep(Duration::from_secs(3)).await;
-    cluster.run(SELECT).await?.assert_result_eq("3");
+    session.run(SELECT).await?.assert_result_eq("3");
 
-    cluster.run("update t2 set v2 = 1 where v2 = 2").await?;
-    cluster.run("flush").await?;
+    session.run("update t2 set v2 = 1 where v2 = 2").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
-    cluster.run(SELECT).await?.assert_result_eq("2\n3");
+    session.run(SELECT).await?.assert_result_eq("2\n3");
     // 2
     // 3
     //
     cluster.reschedule(format!("{id}+[1,2,3]")).await?;
     sleep(Duration::from_secs(3)).await;
-    cluster.run(SELECT).await?.assert_result_eq("2\n3");
+    session.run(SELECT).await?.assert_result_eq("2\n3");
 
-    cluster.run("delete from t2 where true").await?;
-    cluster.run("flush").await?;
+    session.run("delete from t2 where true").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
-    cluster.run(SELECT).await?.assert_result_eq("");
+    session.run(SELECT).await?.assert_result_eq("");
 
     cluster.reschedule(format!("{id}-[1]")).await?;
     sleep(Duration::from_secs(3)).await;
-    cluster.run(SELECT).await?.assert_result_eq("");
+    session.run(SELECT).await?.assert_result_eq("");
 
-    cluster.run("insert into t2 values (1)").await?;
-    cluster.run("flush").await?;
+    session.run("insert into t2 values (1)").await?;
+    session.run("flush").await?;
     sleep(Duration::from_secs(5)).await;
-    cluster.run(SELECT).await?.assert_result_eq("2\n3");
+    session.run(SELECT).await?.assert_result_eq("2\n3");
 
     Ok(())
 }

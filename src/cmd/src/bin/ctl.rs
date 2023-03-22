@@ -15,9 +15,9 @@
 #![cfg_attr(coverage, feature(no_coverage))]
 
 use anyhow::Result;
-use risingwave_common::enable_jemalloc_on_linux;
+use risingwave_common::enable_jemalloc_on_unix;
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 #[cfg_attr(coverage, no_coverage)]
 fn main() -> Result<()> {
