@@ -36,7 +36,6 @@ use super::expr_to_timestamp_const_tmpl::{
 };
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_jsonb_access::build_jsonb_expr;
 use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
@@ -87,7 +86,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             // the implementation to improve performance.
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
-        E::JsonbAccessInner | E::JsonbAccessStr => build_jsonb_expr(prost),
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         E::Now => build_now_expr(prost),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),

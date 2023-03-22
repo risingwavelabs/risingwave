@@ -17,17 +17,13 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I32Array, JsonbArray, JsonbArrayBuilder,
     JsonbRef, Utf8Array, Utf8ArrayBuilder,
 };
-use risingwave_common::ensure;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarRef};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::expr::expr_node::Type;
-use risingwave_pb::expr::ExprNode;
+use risingwave_expr_macro::build_function;
 
 use super::{BoxedExpression, Expression};
-use crate::expr::build_expr_from_prost::get_children_and_return_type;
-use crate::expr::build_from_prost;
-use crate::{ExprError, Result};
+use crate::Result;
 
 /// This is forked from [`BinaryExpression`] for the following reasons:
 /// * Optimize for the case when rhs path is const. (not implemented yet)
@@ -149,13 +145,10 @@ where
     }
 }
 
-// TODO: this needs template support for returning Option.
-// #[function("jsonb_access_inner(jsonb, varchar) -> jsonb")]
 pub fn jsonb_object_field<'a>(v: JsonbRef<'a>, p: &str) -> Option<JsonbRef<'a>> {
     v.access_object_field(p)
 }
 
-// #[function("jsonb_access_inner(jsonb, int32) -> jsonb")]
 pub fn jsonb_array_element(v: JsonbRef<'_>, p: i32) -> Option<JsonbRef<'_>> {
     let idx = if p < 0 {
         let Ok(len) = v.array_len() else {
@@ -231,57 +224,68 @@ impl AccessOutput for Utf8ArrayBuilder {
     }
 }
 
-/// Create a new jsonb expression.
-pub fn build_jsonb_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let (children, _) = get_children_and_return_type(prost)?;
-    ensure!(children.len() == 2);
-    let l = build_from_prost(&children[0])?;
-    let r = build_from_prost(&children[1])?;
+#[build_function("jsonb_access_inner(jsonb, varchar) -> jsonb")]
+fn build_jsonb_access_object_field(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<Utf8Array, JsonbArrayBuilder, _>::new_expr(
+            l,
+            r,
+            jsonb_object_field,
+        )
+        .boxed(),
+    )
+}
 
-    let expr = match prost.get_expr_type().unwrap() {
-        Type::JsonbAccessInner => match r.return_type() {
-            DataType::Varchar => {
-                JsonbAccessExpression::<Utf8Array, JsonbArrayBuilder, _>::new_expr(
-                    l,
-                    r,
-                    jsonb_object_field,
-                )
-                .boxed()
-            }
-            DataType::Int32 => JsonbAccessExpression::<I32Array, JsonbArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_array_element,
-            )
-            .boxed(),
-            t => return Err(ExprError::UnsupportedFunction(format!("jsonb -> {t}"))),
-        },
-        Type::JsonbAccessStr => match r.return_type() {
-            DataType::Varchar => JsonbAccessExpression::<Utf8Array, Utf8ArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_object_field,
-            )
-            .boxed(),
-            DataType::Int32 => JsonbAccessExpression::<I32Array, Utf8ArrayBuilder, _>::new_expr(
-                l,
-                r,
-                jsonb_array_element,
-            )
-            .boxed(),
-            t => return Err(ExprError::UnsupportedFunction(format!("jsonb ->> {t}"))),
-        },
+#[build_function("jsonb_access_inner(jsonb, int32) -> jsonb")]
+fn build_jsonb_access_array_element(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<I32Array, JsonbArrayBuilder, _>::new_expr(
+            l,
+            r,
+            jsonb_array_element,
+        )
+        .boxed(),
+    )
+}
 
-        tp => {
-            return Err(ExprError::UnsupportedFunction(format!(
-                "{:?}({:?}, {:?})",
-                tp,
-                l.return_type(),
-                r.return_type(),
-            )));
-        }
-    };
-    Ok(expr)
+#[build_function("jsonb_access_str(jsonb, varchar) -> varchar")]
+fn build_jsonb_access_object_field_str(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<Utf8Array, Utf8ArrayBuilder, _>::new_expr(l, r, jsonb_object_field)
+            .boxed(),
+    )
+}
+
+#[build_function("jsonb_access_str(jsonb, int32) -> varchar")]
+fn build_jsonb_access_array_element_str(
+    _return_type: DataType,
+    children: Vec<BoxedExpression>,
+) -> Result<BoxedExpression> {
+    let mut iter = children.into_iter();
+    let l = iter.next().unwrap();
+    let r = iter.next().unwrap();
+    Ok(
+        JsonbAccessExpression::<I32Array, Utf8ArrayBuilder, _>::new_expr(l, r, jsonb_array_element)
+            .boxed(),
+    )
 }
 
 #[cfg(test)]
@@ -296,7 +300,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::{RexNode, Type};
     use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-    use super::*;
+    use crate::expr::build_from_prost;
 
     #[tokio::test]
     async fn test_array_access_expr() {
