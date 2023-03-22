@@ -26,6 +26,7 @@ risingwave_compute = { path = "../compute" }
 risingwave_ctl = { path = "../ctl" }
 risingwave_frontend = { path = "../frontend" }
 risingwave_meta = { path = "../meta" }
+risingwave_meta_probe = { path = "../meta_probe" }
 risingwave_rt = { path = "../utils/runtime" }
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
@@ -64,3 +65,7 @@ path = "src/bin/compactor.rs"
 [[bin]]
 name = "risectl"
 path = "src/bin/ctl.rs"
+
+[[bin]]
+name = "meta-probe"
+path = "src/bin/meta_probe.rs"
