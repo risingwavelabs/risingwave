@@ -30,6 +30,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: "false"
     container_name: compactor-0
     healthcheck:
       test:
@@ -71,6 +72,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: "false"
     container_name: compute-node-0
     healthcheck:
       test:
@@ -150,6 +152,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: "false"
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -218,6 +221,7 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      ENABLE_TELEMETRY: "false"
     container_name: meta-node-0
     healthcheck:
       test:
@@ -246,7 +250,17 @@ services:
     depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
+    entrypoint: "
+
+      /bin/sh -c '
+
+      set -e
+
+      mkdir -p \"/data/hummock001\"
+
+      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+
+      '"
     environment:
       MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public
