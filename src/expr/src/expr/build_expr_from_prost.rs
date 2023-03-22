@@ -137,7 +137,6 @@ fn build_to_char_expr(
 
     use crate::vector_op::to_char::{compile_pattern_to_chrono, to_char_timestamp};
 
-    ensure!(children.len() == 2);
     let mut iter = children.into_iter();
     let data_expr = iter.next().unwrap();
     let tmpl_expr = iter.next().unwrap();
@@ -182,7 +181,6 @@ pub fn build_to_timestamp_expr(
     use crate::vector_op::to_char::compile_pattern_to_chrono;
     use crate::vector_op::to_timestamp::to_timestamp;
 
-    ensure!(children.len() == 2);
     let mut iter = children.into_iter();
     let data_expr = iter.next().unwrap();
     let tmpl_expr = iter.next().unwrap();
