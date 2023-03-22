@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::future::{Either, Shared};
 use futures::stream::select;
 use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
+use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
@@ -29,7 +32,7 @@ use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
-use tokio_stream::wrappers::{IntervalStream, UnboundedReceiverStream};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::Compactor;
 use crate::hummock::compaction::{
@@ -145,6 +148,7 @@ where
             sched_rx,
             self.env.opts.periodic_space_reclaim_compaction_interval_sec,
             self.env.opts.periodic_ttl_reclaim_compaction_interval_sec,
+            self.env.opts.periodic_compaction_interval_sec,
             self.env.opts.periodic_compaction_interval_sec,
         );
         self.schedule_loop(
@@ -389,6 +393,13 @@ where
                                 .await;
                                 continue;
                             }
+                            SchedulerEvent::GroupSplitTrigger => {
+                                // Disable periodic trigger for compaction_deterministic_test.
+                                if self.env.opts.compaction_deterministic_test {
+                                    continue;
+                                }
+                                // TODO
+                            }
                         }
                     }
                 }
@@ -468,11 +479,35 @@ where
     }
 }
 
-enum SchedulerEvent {
+#[derive(Clone)]
+pub enum SchedulerEvent {
     Channel((CompactionGroupId, compact_task::TaskType)),
     DynamicTrigger,
     SpaceReclaimTrigger,
     TtlReclaimTrigger,
+    GroupSplitTrigger,
+}
+
+pub struct IntervalStream {
+    interval: tokio::time::Interval,
+    event: SchedulerEvent,
+}
+
+impl IntervalStream {
+    pub fn new(interval: tokio::time::Interval, event: SchedulerEvent) -> Self {
+        Self { interval, event }
+    }
+}
+
+impl Stream for IntervalStream {
+    type Item = SchedulerEvent;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<SchedulerEvent>> {
+        match self.interval.poll_tick(cx) {
+            Poll::Ready(_) => Poll::Ready(Some(self.event.clone())),
+            Poll::Pending => Poll::Pending,
+        }
+    }
 }
 
 impl<S> CompactionScheduler<S>
@@ -484,6 +519,7 @@ where
         periodic_space_reclaim_compaction_interval_sec: u64,
         periodic_ttl_reclaim_compaction_interval_sec: u64,
         periodic_compaction_interval_sec: u64,
+        periodic_check_split_group_interval_sec: u64,
     ) -> impl Stream<Item = SchedulerEvent> {
         let dynamic_channel_trigger =
             UnboundedReceiverStream::new(sched_rx).map(SchedulerEvent::Channel);
@@ -492,7 +528,7 @@ where
             tokio::time::interval(Duration::from_secs(periodic_compaction_interval_sec));
         min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let dynamic_tick_trigger =
-            IntervalStream::new(min_trigger_interval).map(|_| SchedulerEvent::DynamicTrigger);
+            IntervalStream::new(min_trigger_interval, SchedulerEvent::DynamicTrigger);
 
         let mut min_space_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
             periodic_space_reclaim_compaction_interval_sec,
@@ -500,23 +536,36 @@ where
 
         min_space_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let space_reclaim_trigger = IntervalStream::new(min_space_reclaim_trigger_interval)
-            .map(|_| SchedulerEvent::SpaceReclaimTrigger);
+        let space_reclaim_trigger = IntervalStream::new(
+            min_space_reclaim_trigger_interval,
+            SchedulerEvent::SpaceReclaimTrigger,
+        );
 
         let mut min_ttl_reclaim_trigger_interval = tokio::time::interval(Duration::from_secs(
             periodic_ttl_reclaim_compaction_interval_sec,
         ));
         min_ttl_reclaim_trigger_interval
             .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        let ttl_reclaim_trigger = IntervalStream::new(min_ttl_reclaim_trigger_interval)
-            .map(|_| SchedulerEvent::TtlReclaimTrigger);
-
+        let ttl_reclaim_trigger = IntervalStream::new(
+            min_ttl_reclaim_trigger_interval,
+            SchedulerEvent::TtlReclaimTrigger,
+        );
+        let mut split_group_trigger_interval =
+            tokio::time::interval(Duration::from_secs(periodic_check_split_group_interval_sec));
+        split_group_trigger_interval
+            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let split_group_trigger = IntervalStream::new(
+            split_group_trigger_interval,
+            SchedulerEvent::GroupSplitTrigger,
+        );
         select(
             dynamic_channel_trigger,
-            select(
+            select_all(vec![
+                split_group_trigger,
                 dynamic_tick_trigger,
-                select(space_reclaim_trigger, ttl_reclaim_trigger),
-            ),
+                space_reclaim_trigger,
+                ttl_reclaim_trigger,
+            ]),
         )
     }
 }

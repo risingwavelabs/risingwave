@@ -107,6 +107,9 @@ pub struct MetaOpts {
 
     ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
     pub max_compactor_task_multiplier: u32,
+
+    /// Schedule split_compaction_group for all compaction groups with this interval.
+    pub periodic_split_compact_group_interval_sec: u64,
 }
 
 impl MetaOpts {
@@ -130,6 +133,7 @@ impl MetaOpts {
             periodic_space_reclaim_compaction_interval_sec: 60,
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            periodic_split_compact_group_interval_sec: 60,
             max_compactor_task_multiplier: 2,
         }
     }
