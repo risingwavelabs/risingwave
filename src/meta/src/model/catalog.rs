@@ -37,17 +37,17 @@ macro_rules! impl_model_for_catalog {
     ($name:ident, $cf:ident, $key_ty:ty, $key_fn:ident) => {
         impl MetadataModel for $name {
             type KeyType = $key_ty;
-            type ProstType = Self;
+            type PbType = Self;
 
             fn cf_name() -> String {
                 $cf.to_string()
             }
 
-            fn to_protobuf(&self) -> Self::ProstType {
+            fn to_protobuf(&self) -> Self::PbType {
                 self.clone()
             }
 
-            fn from_protobuf(prost: Self::ProstType) -> Self {
+            fn from_protobuf(prost: Self::PbType) -> Self {
                 prost
             }
 

@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use itertools::Itertools;
@@ -481,6 +483,243 @@ impl LogicalMultiJoin {
             }
         }
         Ok(join_ordering)
+    }
+
+    pub fn as_bushy_tree_join(&self) -> Result<PlanRef> {
+        // Join tree internal representation
+        #[derive(Clone, Default, Debug)]
+        struct JoinTreeNode {
+            idx: Option<usize>,
+            left: Option<Box<JoinTreeNode>>,
+            right: Option<Box<JoinTreeNode>>,
+            height: usize,
+        }
+
+        // join graph internal representation
+        #[derive(Clone, Debug)]
+        struct GraphNode {
+            id: usize,
+            join_tree: JoinTreeNode,
+            // use BTreeSet for deterministic
+            relations: BTreeSet<usize>,
+        }
+
+        let mut nodes: BTreeMap<_, _> = (0..self.inputs.len())
+            .map(|idx| GraphNode {
+                id: idx,
+                relations: BTreeSet::new(),
+                join_tree: JoinTreeNode {
+                    idx: Some(idx),
+                    left: None,
+                    right: None,
+                    height: 0,
+                },
+            })
+            .enumerate()
+            .collect();
+        let (eq_join_conditions, _) = self
+            .on
+            .clone()
+            .split_by_input_col_nums(&self.input_col_nums(), true);
+
+        for ((src, dst), _) in eq_join_conditions {
+            nodes.get_mut(&src).unwrap().relations.insert(dst);
+            nodes.get_mut(&dst).unwrap().relations.insert(src);
+        }
+
+        // isolated nodes can be joined at any where.
+        let iso_nodes = nodes
+            .iter()
+            .filter_map(|n| {
+                if n.1.relations.is_empty() {
+                    Some(*n.0)
+                } else {
+                    None
+                }
+            })
+            .collect_vec();
+
+        for n in iso_nodes {
+            for adj in 0..nodes.len() {
+                if adj != n {
+                    nodes.get_mut(&n).unwrap().relations.insert(adj);
+                    nodes.get_mut(&adj).unwrap().relations.insert(n);
+                }
+            }
+        }
+
+        let mut optimized_bushy_tree = None;
+        let mut que = VecDeque::from([nodes]);
+        let mut isolated = BTreeSet::new();
+
+        while let Some(mut nodes) = que.pop_front() {
+            if nodes.len() == 1 {
+                let node = nodes.into_values().next().unwrap();
+                optimized_bushy_tree = Some(optimized_bushy_tree.map_or(
+                    node.clone(),
+                    |old_tree: GraphNode| {
+                        if node.join_tree.height < old_tree.join_tree.height {
+                            node
+                        } else {
+                            old_tree
+                        }
+                    },
+                ));
+                continue;
+            }
+
+            let (idx, _) = nodes
+                .iter()
+                .min_by(
+                    |(_, x), (_, y)| match x.relations.len().cmp(&y.relations.len()) {
+                        Ordering::Less => Ordering::Less,
+                        Ordering::Greater => Ordering::Greater,
+                        Ordering::Equal => x.join_tree.height.cmp(&y.join_tree.height),
+                    },
+                )
+                .unwrap();
+            let n = nodes.remove(&idx.clone()).unwrap();
+
+            if n.relations.is_empty() {
+                isolated.insert(n.id);
+                que.push_back(nodes);
+                continue;
+            }
+
+            for merge_node in &n.relations {
+                let mut nodes = nodes.clone();
+                for adjacent_node in &n.relations {
+                    if *adjacent_node != *merge_node {
+                        nodes
+                            .get_mut(adjacent_node)
+                            .unwrap()
+                            .relations
+                            .remove(&n.id);
+                        nodes
+                            .get_mut(adjacent_node)
+                            .unwrap()
+                            .relations
+                            .insert(*merge_node);
+                        nodes
+                            .get_mut(merge_node)
+                            .unwrap()
+                            .relations
+                            .insert(*adjacent_node);
+                    }
+                }
+                let mut merge_graph_node = nodes.get_mut(merge_node).unwrap();
+                merge_graph_node.relations.remove(&n.id);
+                let l_tree = n.join_tree.clone();
+                let r_tree = std::mem::take(&mut merge_graph_node.join_tree);
+                let new_height = usize::max(l_tree.height, r_tree.height) + 1;
+
+                if let Some(min_height) = optimized_bushy_tree.as_ref().map(|t| t.join_tree.height) && min_height < new_height {
+                    continue;
+                }
+
+                merge_graph_node.join_tree = JoinTreeNode {
+                    idx: None,
+                    left: Some(Box::new(l_tree)),
+                    right: Some(Box::new(r_tree)),
+                    height: new_height,
+                };
+                que.push_back(nodes);
+            }
+        }
+
+        fn create_logical_join(
+            s: &LogicalMultiJoin,
+            mut join_tree: JoinTreeNode,
+            join_ordering: &mut Vec<usize>,
+        ) -> Result<PlanRef> {
+            Ok(match (join_tree.left.take(), join_tree.right.take()) {
+                (Some(l), Some(r)) => LogicalJoin::new(
+                    create_logical_join(s, *l, join_ordering)?,
+                    create_logical_join(s, *r, join_ordering)?,
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into(),
+                (None, None) => {
+                    if let Some(idx) = join_tree.idx {
+                        join_ordering.push(idx);
+                        s.inputs[idx].clone()
+                    } else {
+                        return Err(RwError::from(ErrorCode::InternalError(
+                            "id of the leaf node not found in the join tree".into(),
+                        )));
+                    }
+                }
+                (_, _) => {
+                    return Err(RwError::from(ErrorCode::InternalError(
+                        "only leaf node can have None subtree".into(),
+                    )))
+                }
+            })
+        }
+
+        let isolated = isolated.into_iter().collect_vec();
+        let mut join_ordering = vec![];
+        let mut output = if let Some(optimized_bushy_tree) = optimized_bushy_tree {
+            let mut output =
+                create_logical_join(self, optimized_bushy_tree.join_tree, &mut join_ordering)?;
+
+            output = isolated.into_iter().fold(output, |chain, n| {
+                join_ordering.push(n);
+                LogicalJoin::new(
+                    chain,
+                    self.inputs[n].clone(),
+                    JoinType::Inner,
+                    Condition::true_cond(),
+                )
+                .into()
+            });
+            output
+        } else if !isolated.is_empty() {
+            let base = isolated[0];
+            join_ordering.push(isolated[0]);
+            isolated[1..]
+                .iter()
+                .fold(self.inputs[base].clone(), |chain, n| {
+                    join_ordering.push(*n);
+                    LogicalJoin::new(
+                        chain,
+                        self.inputs[*n].clone(),
+                        JoinType::Inner,
+                        Condition::true_cond(),
+                    )
+                    .into()
+                })
+        } else {
+            return Err(RwError::from(ErrorCode::InternalError(
+                "no plan remain".into(),
+            )));
+        };
+        let total_col_num = self.inner2output.source_size();
+        let reorder_mapping = {
+            let mut reorder_mapping = vec![None; total_col_num];
+
+            join_ordering
+                .iter()
+                .cloned()
+                .flat_map(|input_idx| {
+                    (0..self.inputs[input_idx].schema().len())
+                        .map(move |col_idx| self.inner_i2o_mappings[input_idx].map(col_idx))
+                })
+                .enumerate()
+                .for_each(|(tar, src)| reorder_mapping[src] = Some(tar));
+            reorder_mapping
+        };
+        output =
+            LogicalProject::with_out_col_idx(output, reorder_mapping.iter().map(|i| i.unwrap()))
+                .into();
+
+        // We will later push down all of the filters back to the individual joins via the
+        // `FilterJoinRule`.
+        output = LogicalFilter::create(output, self.on.clone());
+        output =
+            LogicalProject::with_out_col_idx(output, self.output_indices.iter().cloned()).into();
+        Ok(output)
     }
 
     pub(crate) fn input_col_nums(&self) -> Vec<usize> {

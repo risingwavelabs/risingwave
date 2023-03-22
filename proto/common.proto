@@ -82,17 +82,15 @@ enum Direction {
   DIRECTION_DESCENDING = 2;
 }
 
-// TODO(rc): enable `NULLS FIRST | LAST`
-// enum NullsAre {
-//   NULLS_ARE_UNSPECIFIED = 0;
-//   NULLS_ARE_SMALLEST = 1;
-//   NULLS_ARE_LARGEST = 2;
-// }
+enum NullsAre {
+  NULLS_ARE_UNSPECIFIED = 0;
+  NULLS_ARE_LARGEST = 1;
+  NULLS_ARE_SMALLEST = 2;
+}
 
 message OrderType {
   Direction direction = 1;
-  // TODO(rc): enable `NULLS FIRST | LAST`
-  // NullsAre nulls_are = 2;
+  NullsAre nulls_are = 2;
 }
 
 // Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).

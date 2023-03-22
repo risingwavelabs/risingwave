@@ -102,6 +102,47 @@ export function directionToJSON(object: Direction): string {
   }
 }
 
+export const NullsAre = {
+  NULLS_ARE_UNSPECIFIED: "NULLS_ARE_UNSPECIFIED",
+  NULLS_ARE_LARGEST: "NULLS_ARE_LARGEST",
+  NULLS_ARE_SMALLEST: "NULLS_ARE_SMALLEST",
+  UNRECOGNIZED: "UNRECOGNIZED",
+} as const;
+
+export type NullsAre = typeof NullsAre[keyof typeof NullsAre];
+
+export function nullsAreFromJSON(object: any): NullsAre {
+  switch (object) {
+    case 0:
+    case "NULLS_ARE_UNSPECIFIED":
+      return NullsAre.NULLS_ARE_UNSPECIFIED;
+    case 1:
+    case "NULLS_ARE_LARGEST":
+      return NullsAre.NULLS_ARE_LARGEST;
+    case 2:
+    case "NULLS_ARE_SMALLEST":
+      return NullsAre.NULLS_ARE_SMALLEST;
+    case -1:
+    case "UNRECOGNIZED":
+    default:
+      return NullsAre.UNRECOGNIZED;
+  }
+}
+
+export function nullsAreToJSON(object: NullsAre): string {
+  switch (object) {
+    case NullsAre.NULLS_ARE_UNSPECIFIED:
+      return "NULLS_ARE_UNSPECIFIED";
+    case NullsAre.NULLS_ARE_LARGEST:
+      return "NULLS_ARE_LARGEST";
+    case NullsAre.NULLS_ARE_SMALLEST:
+      return "NULLS_ARE_SMALLEST";
+    case NullsAre.UNRECOGNIZED:
+    default:
+      return "UNRECOGNIZED";
+  }
+}
+
 export interface Status {
   code: Status_Code;
   message: string;
@@ -267,11 +308,8 @@ export interface BatchQueryEpoch {
 }
 
 export interface OrderType {
-  /**
-   * TODO(rc): enable `NULLS FIRST | LAST`
-   * NullsAre nulls_are = 2;
-   */
   direction: Direction;
+  nullsAre: NullsAre;
 }
 
 /** Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`). */
@@ -545,25 +583,28 @@ export const BatchQueryEpoch = {
 };
 
 function createBaseOrderType(): OrderType {
-  return { direction: Direction.DIRECTION_UNSPECIFIED };
+  return { direction: Direction.DIRECTION_UNSPECIFIED, nullsAre: NullsAre.NULLS_ARE_UNSPECIFIED };
 }
 
 export const OrderType = {
   fromJSON(object: any): OrderType {
     return {
       direction: isSet(object.direction) ? directionFromJSON(object.direction) : Direction.DIRECTION_UNSPECIFIED,
+      nullsAre: isSet(object.nullsAre) ? nullsAreFromJSON(object.nullsAre) : NullsAre.NULLS_ARE_UNSPECIFIED,
     };
   },
 
   toJSON(message: OrderType): unknown {
     const obj: any = {};
     message.direction !== undefined && (obj.direction = directionToJSON(message.direction));
+    message.nullsAre !== undefined && (obj.nullsAre = nullsAreToJSON(message.nullsAre));
     return obj;
   },
 
   fromPartial<I extends Exact<DeepPartial<OrderType>, I>>(object: I): OrderType {
     const message = createBaseOrderType();
     message.direction = object.direction ?? Direction.DIRECTION_UNSPECIFIED;
+    message.nullsAre = object.nullsAre ?? NullsAre.NULLS_ARE_UNSPECIFIED;
     return message;
   },
 };

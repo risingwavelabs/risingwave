@@ -35,8 +35,8 @@ use risingwave_pb::batch_plan::exchange_info::DistributionMode;
 use risingwave_pb::batch_plan::exchange_source::LocalExecutePlan::Plan;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{
-    ExchangeInfo, ExchangeSource, LocalExecutePlan, PlanFragment, PlanNode as PlanNodeProst,
-    TaskId as ProstTaskId, TaskOutputId,
+    ExchangeInfo, ExchangeSource, LocalExecutePlan, PbTaskId, PlanFragment, PlanNode as PlanNodePb,
+    TaskOutputId,
 };
 use risingwave_pb::common::WorkerNode;
 use tokio::sync::mpsc;
@@ -203,7 +203,7 @@ impl LocalQueryExecution {
         execution_plan_node: &ExecutionPlanNode,
         second_stages: &mut Option<HashMap<StageId, QueryStageRef>>,
         partition: Option<PartitionInfo>,
-    ) -> SchedulerResult<PlanNodeProst> {
+    ) -> SchedulerResult<PlanNodePb> {
         match execution_plan_node.plan_node_type {
             PlanNodeType::BatchExchange => {
                 let exchange_source_stage_id = execution_plan_node
@@ -258,7 +258,7 @@ impl LocalQueryExecution {
                         };
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
-                                task_id: Some(ProstTaskId {
+                                task_id: Some(PbTaskId {
                                     task_id: idx as u32,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
@@ -292,7 +292,7 @@ impl LocalQueryExecution {
                         let worker_node = self.front_env.worker_node_manager().next_random()?;
                         let exchange_source = ExchangeSource {
                             task_output_id: Some(TaskOutputId {
-                                task_id: Some(ProstTaskId {
+                                task_id: Some(PbTaskId {
                                     task_id: id as u32,
                                     stage_id: exchange_source_stage_id,
                                     query_id: self.query.query_id.id.clone(),
@@ -328,7 +328,7 @@ impl LocalQueryExecution {
                         .map(|(idx, worker_node)| {
                             let exchange_source = ExchangeSource {
                                 task_output_id: Some(TaskOutputId {
-                                    task_id: Some(ProstTaskId {
+                                    task_id: Some(PbTaskId {
                                         task_id: idx as u32,
                                         stage_id: exchange_source_stage_id,
                                         query_id: self.query.query_id.id.clone(),
@@ -343,7 +343,7 @@ impl LocalQueryExecution {
                         .collect();
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     /// Since all the rest plan is embedded into the exchange node,
                     /// there is no children any more.
                     children: vec![],
@@ -367,7 +367,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![],
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
@@ -388,7 +388,7 @@ impl LocalQueryExecution {
                     _ => unreachable!(),
                 }
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![],
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),
@@ -429,7 +429,7 @@ impl LocalQueryExecution {
                     partition,
                 )?;
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children: vec![left_child],
                     identity: Uuid::new_v4().to_string(),
                     node_body: Some(node_body),
@@ -440,9 +440,9 @@ impl LocalQueryExecution {
                     .children
                     .iter()
                     .map(|e| self.convert_plan_node(e, second_stages, partition.clone()))
-                    .collect::<SchedulerResult<Vec<PlanNodeProst>>>()?;
+                    .collect::<SchedulerResult<Vec<PlanNodePb>>>()?;
 
-                Ok(PlanNodeProst {
+                Ok(PlanNodePb {
                     children,
                     // TODO: Generate meaningful identify
                     identity: Uuid::new_v4().to_string(),

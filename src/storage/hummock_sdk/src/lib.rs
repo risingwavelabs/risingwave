@@ -32,7 +32,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
+use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
@@ -133,14 +133,14 @@ impl LocalSstableInfo {
 pub struct ExtendedSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: ProstTableStatsMap,
+    pub table_stats: PbTableStatsMap,
 }
 
 impl ExtendedSstableInfo {
     pub fn new(
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
-        table_stats: ProstTableStatsMap,
+        table_stats: PbTableStatsMap,
     ) -> Self {
         Self {
             compaction_group_id,
@@ -153,7 +153,7 @@ impl ExtendedSstableInfo {
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
     ) -> Self {
-        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
     }
 }
 

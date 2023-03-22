@@ -548,7 +548,7 @@ mod tests {
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         // Add a compactor with invalid context_id.
-        let _receiver = compactor_manager.add_compactor(1234, 1);
+        let _receiver = compactor_manager.add_compactor(1234, 1, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
 
         // No task
@@ -582,7 +582,7 @@ mod tests {
         assert_eq!(compactor_manager.compactor_num(), 0);
 
         // Add a valid compactor and succeed
-        let _receiver = compactor_manager.add_compactor(context_id, 1);
+        let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
         assert_eq!(compactor_manager.compactor_num(), 1);
         let compactor = hummock_manager.get_idle_compactor().await.unwrap();
         assert_eq!(
@@ -609,7 +609,7 @@ mod tests {
         assert_matches!(hummock_manager.get_idle_compactor().await, None);
 
         // Increase compactor concurrency and succeed
-        let _receiver = compactor_manager.add_compactor(context_id, 10);
+        let _receiver = compactor_manager.add_compactor(context_id, 10, 10);
         assert_eq!(
             hummock_manager.get_assigned_tasks_number(context_id).await,
             1
@@ -653,7 +653,7 @@ mod tests {
         let request_channel = Arc::new(CompactionRequestChannel::new(request_tx));
 
         let _sst_infos = add_ssts(1, hummock_manager.as_ref(), context_id).await;
-        let _receiver = compactor_manager.add_compactor(context_id, 1);
+        let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 
         // Pick failure
         let fp_get_compact_task = "fp_get_compact_task";
@@ -711,7 +711,7 @@ mod tests {
         // There is no idle compactor, because the compactor is paused after send failure.
         assert_matches!(hummock_manager.get_idle_compactor().await, None);
         assert!(hummock_manager.list_all_tasks_ids().await.is_empty());
-        let _receiver = compactor_manager.add_compactor(context_id, 1);
+        let _receiver = compactor_manager.add_compactor(context_id, 1, 1);
 
         // Assign failed and task cancellation failed.
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();

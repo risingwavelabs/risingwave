@@ -15,6 +15,7 @@ ignored = ["workspace-hack"]
 normal = ["workspace-hack"]
 
 [dependencies]
+anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 prometheus = { version = "0.13" }
@@ -26,6 +27,8 @@ risingwave_object_store = { path = "../../object_store" }
 risingwave_pb = { path = "../../prost" }
 risingwave_rpc_client = { path = "../../rpc_client" }
 risingwave_storage = { path = "../../storage" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
     "rt",

@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
@@ -199,8 +199,8 @@ impl From<MetaError> for tonic::Status {
     }
 }
 
-impl From<ProstFieldNotFound> for MetaError {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for MetaError {
+    fn from(e: PbFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
     }
 }

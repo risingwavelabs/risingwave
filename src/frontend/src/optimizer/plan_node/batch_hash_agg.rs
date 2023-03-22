@@ -21,7 +21,7 @@ use risingwave_pb::batch_plan::HashAggNode;
 
 use super::generic::{GenericPlanRef, PlanAggCall};
 use super::{
-    ExprRewritable, LogicalAgg, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchProst,
+    ExprRewritable, LogicalAgg, PlanBase, PlanNodeType, PlanRef, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::expr::ExprRewriter;
@@ -135,7 +135,7 @@ impl ToDistributedBatch for BatchHashAgg {
     }
 }
 
-impl ToBatchProst for BatchHashAgg {
+impl ToBatchPb for BatchHashAgg {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::HashAgg(HashAggNode {
             agg_calls: self

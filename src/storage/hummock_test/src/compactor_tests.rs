@@ -254,7 +254,7 @@ pub(crate) mod tests {
         val.extend_from_slice(&compact_task.watermark.to_be_bytes());
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -379,7 +379,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = 0;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -734,7 +734,7 @@ pub(crate) mod tests {
 
         // 3. pick compactor and assign
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -914,7 +914,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = epoch;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -1097,7 +1097,7 @@ pub(crate) mod tests {
         compact_task.current_epoch_time = epoch;
 
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
         let compactor = hummock_manager_ref.get_idle_compactor().await.unwrap();
         hummock_manager_ref
             .assign_compaction_task(&compact_task, compactor.context_id())
@@ -1221,7 +1221,7 @@ pub(crate) mod tests {
 
         flush_and_commit(&hummock_meta_client, &storage, 130).await;
         let compactor_manager = hummock_manager_ref.compactor_manager_ref_for_test();
-        compactor_manager.add_compactor(worker_node.id, u64::MAX);
+        compactor_manager.add_compactor(worker_node.id, u64::MAX, 16);
 
         // 2. get compact task
         let manual_compcation_option = ManualCompactionOption {

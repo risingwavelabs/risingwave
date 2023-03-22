@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::FieldDisplay;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::PlanAggCall;
 use super::{ExprRewritable, LogicalAgg, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
@@ -138,13 +138,13 @@ impl PlanTreeNodeUnary for StreamHashAgg {
 impl_plan_tree_node_for_unary! { StreamHashAgg }
 
 impl StreamNode for StreamHashAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let result_table = self.logical.infer_result_table(self.vnode_col_idx);
         let agg_states = self.logical.infer_stream_agg_state(self.vnode_col_idx);
         let distinct_dedup_tables = self.logical.infer_distinct_dedup_tables(self.vnode_col_idx);
 
-        ProstStreamNode::HashAgg(HashAggNode {
+        PbNodeBody::HashAgg(HashAggNode {
             group_key: self.group_key().iter().map(|idx| *idx as u32).collect(),
             agg_calls: self
                 .agg_calls()

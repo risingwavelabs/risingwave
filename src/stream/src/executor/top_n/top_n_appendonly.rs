@@ -129,6 +129,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
         let cache_key_serde =
             create_cache_key_serde(&storage_key, &pk_indices, &schema, &order_by, &[]);
         let managed_state = ManagedTopNState::<S>::new(state_table, cache_key_serde.clone());
+        let data_types = schema.data_types();
 
         Ok(Self {
             info: ExecutorInfo {
@@ -138,7 +139,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
             },
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
-            cache: TopNCache::new(num_offset, num_limit),
+            cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
         })
     }
