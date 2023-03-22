@@ -416,7 +416,9 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             encoded_key_range.start_bound(),
             encoded_key_range.end_bound(),
         ) {
-            (Unbounded, _) | (_, Unbounded) => CachePolicy::NotFill,
+            // To prevent unbounded range scan queries from polluting the block cache, use the
+            // `FillFileCacheOnly` policy.
+            (Unbounded, _) | (_, Unbounded) => CachePolicy::FillFileCacheOnly,
             _ => CachePolicy::Fill,
         };
 

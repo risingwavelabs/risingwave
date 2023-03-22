@@ -107,8 +107,10 @@ pub enum CachePolicy {
     /// Try reading the cache and fill the cache afterwards.
     #[default]
     Fill,
-    /// Read the cache but not fill the block cache afterwards. Fill tiered cache instead.
+    /// Read the cache but not fill the cache afterwards.
     NotFill,
+    /// Read the cache but not fill the block cache and fill the file cache instead.
+    FillFileCacheOnly,
 }
 
 pub struct SstableStore {
@@ -233,6 +235,7 @@ impl SstableStore {
             let data_path = self.get_sst_data_path(object_id);
             let store = self.store.clone();
             let use_tiered_cache = !matches!(policy, CachePolicy::Disable);
+            let fill_tiered_cache = matches!(policy, CachePolicy::FillFileCacheOnly);
 
             async move {
                 if use_tiered_cache && let Some(holder) = tiered_cache
@@ -247,16 +250,11 @@ impl SstableStore {
                 let block_data = store.read(&data_path, Some(block_loc)).await?;
                 let block = Block::decode(block_data, uncompressed_capacity)?;
 
-                match policy {
-                    CachePolicy::NotFill => {
-                        // CachePolicy::NotFill means it doesn't fill block cache, but it is still
-                        // worthwhile to fill the tiered cache.
-                        tiered_cache
-                            .insert((object_id, block_index as u64), Box::new(block.clone()))
-                            .unwrap();
-                    }
-                    CachePolicy::Fill | CachePolicy::Disable => {}
-                };
+                if fill_tiered_cache {
+                    tiered_cache
+                        .insert((object_id, block_index as u64), Box::new(block.clone()))
+                        .unwrap();
+                }
 
                 Ok(Box::new(block))
             }
@@ -279,23 +277,25 @@ impl SstableStore {
                     .block_cache
                     .get_or_insert_with(object_id, block_index as u64, fetch_block))
             }
-            CachePolicy::NotFill => match self.block_cache.get(object_id, block_index as u64) {
-                Some(block) => Ok(BlockResponse::Block(block)),
-                None => match self
-                    .tiered_cache
-                    .get(&(object_id, block_index as u64))
-                    .await
-                    .map_err(HummockError::tiered_cache)?
-                {
-                    Some(holder) => Ok(BlockResponse::Block(BlockHolder::from_tiered_cache(
-                        holder.into_inner(),
-                    ))),
-                    None => fetch_block()
+            CachePolicy::NotFill | CachePolicy::FillFileCacheOnly => {
+                match self.block_cache.get(object_id, block_index as u64) {
+                    Some(block) => Ok(BlockResponse::Block(block)),
+                    None => match self
+                        .tiered_cache
+                        .get(&(object_id, block_index as u64))
                         .await
-                        .map(BlockHolder::from_owned_block)
-                        .map(BlockResponse::Block),
-                },
-            },
+                        .map_err(HummockError::tiered_cache)?
+                    {
+                        Some(holder) => Ok(BlockResponse::Block(BlockHolder::from_tiered_cache(
+                            holder.into_inner(),
+                        ))),
+                        None => fetch_block()
+                            .await
+                            .map(BlockHolder::from_owned_block)
+                            .map(BlockResponse::Block),
+                    },
+                }
+            }
             CachePolicy::Disable => fetch_block()
                 .await
                 .map(BlockHolder::from_owned_block)

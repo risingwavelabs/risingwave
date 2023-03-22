@@ -412,15 +412,6 @@ impl From<&ReadOptions> for SstableIteratorReadOptions {
     }
 }
 
-impl SstableIteratorReadOptions {
-    pub fn cache_not_fill() -> Self {
-        Self {
-            cache_policy: CachePolicy::NotFill,
-            must_iterated_end_user_key: None,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
