@@ -150,7 +150,7 @@ impl BatchManager {
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                // Use `cancel` rather `abort` here since this is not an error which should be
+                // Use `cancel` rather than `abort` here since this is not an error which should be
                 // propagated to upstream.
                 task.cancel();
                 self.metrics.task_num.dec()

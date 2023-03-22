@@ -498,7 +498,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                         }
                         Err(_) => {
                             // We use early close shutdown channel to cancel task.
-                            // Cancelling a task is different from aboring a task
+                            // Cancelling a task is different from aborting a task
                             // in that it's not an error and should not be reported to user.
                             state = TaskStatus::Cancelled;
                         }
