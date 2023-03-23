@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{
     ColumnDef, ColumnOption, DataType as AstDataType, ObjectName, SourceSchema, SourceWatermark,
     TableConstraint,
 };
+use tracing::log::trace;
 
 use super::create_source::resolve_source_schema;
 use super::RwPgResponse;
@@ -649,6 +650,8 @@ pub async fn handle_create_table(
 
     let catalog_writer = session.env().catalog_writer();
     catalog_writer.create_table(source, table, graph).await?;
+
+    trace!("Succeed to create table {table_name}");
 
     Ok(PgResponse::empty_result(StatementType::CREATE_TABLE))
 }
