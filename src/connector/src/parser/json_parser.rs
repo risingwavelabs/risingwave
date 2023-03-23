@@ -69,14 +69,11 @@ impl JsonParser {
         writer: &mut SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         writer.insert(|desc| {
-            simd_json_parse_value(
-                &desc.data_type,
-                value.get(desc.name.to_ascii_lowercase().as_str()),
-            )
-            .map_err(|e| {
-                tracing::error!("failed to process value ({}): {}", value, e);
-                e.into()
-            })
+            simd_json_parse_value(&desc.data_type, value.get(desc.name_in_lower_case.as_str()))
+                .map_err(|e| {
+                    tracing::error!("failed to process value ({}): {}", value, e);
+                    e.into()
+                })
         })
     }
 
@@ -119,7 +116,7 @@ impl JsonParser {
             let fill_fn = |desc: &SourceColumnDesc| {
                 simd_json_parse_value(
                     &desc.data_type,
-                    value.get(desc.name.to_ascii_lowercase().as_str()),
+                    value.get(desc.name_in_lower_case.as_str()),
                 )
                 .map_err(|e| {
                     tracing::error!(
