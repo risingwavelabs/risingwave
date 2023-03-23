@@ -22,8 +22,8 @@ use crate::array::{ArrayImpl, ArrayRef};
 
 /// A [`Column`] consists of its logical data type
 /// and its corresponding physical array implementation,
-/// which contains all the datums bound to this [`Column`].
-/// It is owned by [`DataChunk`].
+/// The array contains all the datums bound to this [`Column`].
+/// [`Column`] is owned by [`DataChunk`].
 ///
 /// For instance, in this [`DataChunk`],
 /// for column `v1`, [`ArrayRef`] will contain: [1,1,1]
