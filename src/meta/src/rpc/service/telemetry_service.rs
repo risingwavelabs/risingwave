@@ -36,7 +36,7 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
     async fn get_tracking_id(&self) -> Option<String> {
         match self.meta_store.meta_store_type() {
             MetaBackend::Etcd => match self.meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-                Ok(id) => Uuid::from_slice_le(&id)
+                Ok(bytes) => String::from_utf8(bytes)
                     .map_err(|e| anyhow!("failed to parse uuid, {}", e))
                     .ok()
                     .map(|uuid| uuid.to_string()),
