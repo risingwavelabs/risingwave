@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -175,7 +176,7 @@ impl AvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         enum Op {
@@ -184,7 +185,7 @@ impl AvroParser {
         }
 
         let (_payload, op) = if self.is_enable_upsert() {
-            let msg: UpsertMessage<'_> = bincode::deserialize(payload).map_err(|e| {
+            let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
                     e
@@ -196,7 +197,7 @@ impl AvroParser {
                 (msg.primary_key, Op::Delete)
             }
         } else {
-            (payload.into(), Op::Insert)
+            (Cow::from(&payload), Op::Insert)
         };
 
         // parse payload to avro value
@@ -212,7 +213,7 @@ impl AvroParser {
             from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
         } else {
-            let mut reader = Reader::with_schema(&self.schema, payload as &[u8])
+            let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             match reader.next() {
                 Some(Ok(v)) => v,
@@ -237,7 +238,7 @@ impl AvroParser {
                 from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
                     tracing::error!(
                         "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
+                        String::from_utf8_lossy(&payload),
                         e
                     );
                     e
@@ -271,7 +272,7 @@ impl AvroParser {
                         .map_err(|e| {
                             tracing::error!(
                                 "failed to process value ({}): {}",
-                                String::from_utf8_lossy(payload),
+                                String::from_utf8_lossy(&payload),
                                 e
                             );
                             e
@@ -386,10 +387,7 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser
-                .parse_inner(&input_data[..], writer)
-                .await
-                .unwrap();
+            avro_parser.parse_inner(input_data, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();

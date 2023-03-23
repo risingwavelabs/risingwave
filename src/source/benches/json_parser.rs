@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use rand::distributions::Alphanumeric;
 use rand::prelude::*;
 use risingwave_common::catalog::ColumnId;
@@ -68,19 +68,24 @@ fn get_descs() -> Vec<SourceColumnDesc> {
 fn bench_json_parser(c: &mut Criterion) {
     let descs = get_descs();
     let parser = JsonParser::new_for_test(descs.clone()).unwrap();
-    let records = generate_all_json();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .unwrap();
+    let records = generate_all_json();
     c.bench_function("json_parser", |b| {
-        b.to_async(&rt).iter(|| async {
-            let mut builder = SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
-            for record in &records {
-                let writer = builder.row_writer();
-                parser.parse_inner(record, writer).await.unwrap();
-            }
-        })
+        b.to_async(&rt).iter_batched(
+            || records.clone(),
+            |records| async {
+                let mut builder =
+                    SourceStreamChunkBuilder::with_capacity(descs.clone(), NUM_RECORDS);
+                for record in records {
+                    let writer = builder.row_writer();
+                    parser.parse_inner(record, writer).await.unwrap();
+                }
+            },
+            BatchSize::SmallInput,
+        )
     });
 }
 
