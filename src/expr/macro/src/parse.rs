@@ -39,6 +39,7 @@ impl FunctionAttr {
         let (name, args) = name_args
             .split_once('(')
             .ok_or_else(|| Error::new_spanned(sig, "expected '('"))?;
+        let args = args.trim_start().trim_end_matches([')', ' ']);
 
         let batch = attr.iter().find_map(|n| {
             let syn::NestedMeta::Meta(syn::Meta::NameValue(nv)) = n else { return None };
@@ -53,11 +54,11 @@ impl FunctionAttr {
 
         Ok(FunctionAttr {
             name: name.trim().to_string(),
-            args: args
-                .trim_end_matches([')', ' '])
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .collect(),
+            args: if args.is_empty() {
+                vec![]
+            } else {
+                args.split(',').map(|s| s.trim().to_string()).collect()
+            },
             ret: ret.trim().to_string(),
             batch,
             user_fn,
@@ -89,6 +90,9 @@ fn last_arg_is_write(item: &syn::ItemFn) -> bool {
 
 /// Check if all arguments are `Option`s.
 fn args_are_all_option(item: &syn::ItemFn) -> bool {
+    if item.sig.inputs.is_empty() {
+        return false;
+    }
     for arg in &item.sig.inputs {
         let syn::FnArg::Typed(arg) = arg else { return false };
         let syn::Type::Path(path) = arg.ty.as_ref() else { return false };

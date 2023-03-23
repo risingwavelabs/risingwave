@@ -29,7 +29,14 @@ impl FunctionAttr {
         let args = self.args.iter().map(|ty| types::expand_type_wildcard(ty));
         let ret = types::expand_type_wildcard(&self.ret);
         let mut tokens = TokenStream2::new();
-        for (args, mut ret) in args.multi_cartesian_product().cartesian_product(ret) {
+        // multi_cartesian_product should emit an empty set if the input is empty.
+        let args_cartesian_product =
+            args.multi_cartesian_product()
+                .chain(match self.args.is_empty() {
+                    true => vec![vec![]],
+                    false => vec![],
+                });
+        for (args, mut ret) in args_cartesian_product.cartesian_product(ret) {
             if ret == "auto" {
                 ret = types::min_compatible_type(&args);
             }

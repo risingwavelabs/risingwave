@@ -15,7 +15,6 @@
 #![allow(clippy::unit_arg)]
 
 use itertools::Itertools;
-use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
@@ -81,7 +80,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
-        E::Now => build_now_expr(prost),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
             "{:?}",
@@ -120,15 +118,4 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
     } else {
         bail!("Expected RexNode::FuncCall");
     }
-}
-
-pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
-    let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
-    let RexNode::FuncCall(func_call_node) = rex_node else {
-        bail!("Expected RexNode::FuncCall in Now");
-    };
-    let Some(bind_timestamp) = func_call_node.children.first() else {
-        bail!("Expected epoch timestamp bound into Now");
-    };
-    LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
 }
