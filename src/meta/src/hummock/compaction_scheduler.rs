@@ -24,6 +24,7 @@ use futures::{FutureExt, Stream, StreamExt};
 use parking_lot::Mutex;
 use risingwave_common::util::select_all;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
+use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::CompactionGroupId;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
@@ -33,6 +34,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::log::info;
 
 use super::Compactor;
 use crate::hummock::compaction::{
@@ -475,12 +477,59 @@ where
         true
     }
 
-
     async fn on_handle_check_split_multi_group(&self) {
-        let compact_groups = self.hummock_manager.get_compaction_group_map().await;
-        for (group_id, group) in compact_groups {
-            if let Some(table_id) = self.hummock_manager.check_split_compact_group(group_id).await {
-
+        let mut group_infos = self
+            .hummock_manager
+            .calculate_compaction_group_statistic()
+            .await;
+        group_infos.sort_by_key(|group| group.group_size);
+        group_infos.reverse();
+        let group_split_limit = self.env.opts.split_check_size_limit;
+        let group_size_limit = group_split_limit * 2;
+        let table_split_limit = group_split_limit / 4;
+        let mut table_infos = vec![];
+        for group in &group_infos {
+            if group.table_statistic.len() == 1 || group.group_size < group_size_limit {
+                continue;
+            }
+            for (table_id, table_size) in &group.table_statistic {
+                table_infos.push((*table_id, group.group_id, *table_size));
+            }
+        }
+        table_infos.sort_by(|a, b| b.2.cmp(&a.2));
+        let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
+        let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
+        for (table_id, parent_group_id, table_size) in table_infos {
+            let mut target_compact_group_id = None;
+            if table_size < table_split_limit {
+                continue;
+            }
+            for group in &group_infos {
+                if group.group_id == mv_group_id || group.group_id == default_group_id {
+                    continue;
+                }
+                if group.group_id == parent_group_id
+                    || group.group_size + table_size > group_size_limit
+                {
+                    continue;
+                }
+                target_compact_group_id = Some(group.group_id);
+            }
+            let ret = self
+                .hummock_manager
+                .move_state_table_to_compaction_group(
+                    parent_group_id,
+                    &[table_id],
+                    target_compact_group_id,
+                    false,
+                )
+                .await;
+            match ret {
+                Ok(_) => return,
+                Err(e) => info!(
+                    "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
+                    table_id, parent_group_id, target_compact_group_id, e
+                ),
             }
         }
     }
