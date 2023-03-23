@@ -21,7 +21,7 @@ use risingwave_common::types::{DataType, ScalarImpl, F32, F64};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 fn build_row(index: usize) -> OwnedRow {
-    let mut row_value = Vec::with_capacity(8);
+    let mut row_value = Vec::with_capacity(9);
     row_value.push(Some(ScalarImpl::Int16(index as i16)));
     row_value.push(Some(ScalarImpl::Int32(index as i32)));
     row_value.push(Some(ScalarImpl::Int64(index as i64)));
@@ -30,6 +30,9 @@ fn build_row(index: usize) -> OwnedRow {
     row_value.push(Some(ScalarImpl::Bool(index % 3 == 0)));
     row_value.push(Some(ScalarImpl::Utf8(
         format!("{}", index).repeat((index % 10) + 1).into(),
+    )));
+    row_value.push(Some(ScalarImpl::NaiveDateTime(
+        NaiveDateTimeWrapper::default(),
     )));
     row_value.push(if index % 5 == 0 {
         None
@@ -46,10 +49,11 @@ fn main() {
         DataType::Int16,
         DataType::Int32,
         DataType::Int64,
-        DataType::Float32,
+        DataType::Decimal,
         DataType::Float64,
         DataType::Boolean,
         DataType::Varchar,
+        DataType::Timestamp,
         DataType::Int64,
     ];
     let mut ops = Vec::with_capacity(row_count);

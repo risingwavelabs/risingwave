@@ -426,6 +426,43 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetStringValu
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDateTimeValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let millis = pointer
+            .as_ref()
+            .get_datetime(idx as usize)
+            .0
+            .timestamp_millis();
+        let date_class = env.find_class("java/sql/Date")?;
+        let constructor = env.get_method_id(date_class, "<init>", "(J)V")?;
+        let date_obj = env.new_object_unchecked(date_class, constructor, &[millis.into()])?;
+
+        Ok(date_obj)
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowGetDecimalValue<'a>(
+    env: EnvParam<'a>,
+    pointer: Pointer<'a, JavaBindingRow>,
+    idx: jint,
+) -> JObject<'a> {
+    execute_and_catch(env, move || {
+        let value = pointer.as_ref().get_decimal(idx as usize).to_string();
+        let string_value = env.new_string(value)?;
+        let decimal_class = env.find_class("java/math/BigDecimal")?;
+        let constructor = env.get_method_id(decimal_class, "<init>", "(Ljava/lang/String;)V")?;
+        let date_obj = env.new_object_unchecked(decimal_class, constructor, &[string_value.into()])?;
+
+        Ok(date_obj)
+    })
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_risingwave_java_binding_Binding_rowClose<'a>(
     _env: EnvParam<'a>,
     pointer: Pointer<'a, JavaBindingRow>,
