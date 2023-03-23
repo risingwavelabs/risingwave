@@ -815,12 +815,10 @@ where
             )
         });
         if let Some(watermark_suffix) = watermark_suffix {
-            let range_begin_suffix =
-                if prefix_serializer.unwrap().get_order_types()[0].nulls_are_largest() {
-                    vec![]
-                } else {
-                    vec![1u8]
-                };
+            let range_begin_suffix = watermark_suffix
+                .first()
+                .map(|bit| vec![*bit])
+                .unwrap_or_default();
             trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
