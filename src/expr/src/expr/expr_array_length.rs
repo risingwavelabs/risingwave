@@ -54,12 +54,12 @@ use crate::{bail, ensure, ExprError, Result};
 /// NULL
 ///
 /// query T
-/// select array_length([[1, 2, 3]]);
+/// select array_length(array[array[1, 2, 3]]);
 /// ----
 /// 1
 ///
 /// query T
-/// select array_length([NULL]);
+/// select array_length(array[NULL]);
 /// ----
 /// 1
 ///
