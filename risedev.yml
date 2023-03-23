@@ -192,6 +192,7 @@ profile:
 
   3etcd-3meta:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -219,9 +220,11 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
 
   3etcd-3meta-1cn-1fe:
     steps:
+      - use: minio
       - use: etcd
         unsafe-no-fsync: true
         port: 2388
@@ -249,6 +252,7 @@ profile:
         port: 25690
         dashboard-port: 25691
         exporter-port: 21250
+      - use: compactor
       - use: compute-node
       - use: frontend
 
