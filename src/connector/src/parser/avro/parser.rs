@@ -423,7 +423,7 @@ mod test {
                     assert_eq!(row[i], date);
                 }
                 Value::TimestampMillis(millis) => {
-                    let millis = Some(ScalarImpl::Int64(millis));
+                    let millis = Some(ScalarImpl::Int64(millis * 1000));
                     assert_eq!(row[i], millis);
                 }
                 Value::TimestampMicros(micros) => {
