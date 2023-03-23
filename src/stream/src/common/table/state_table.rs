@@ -808,22 +808,27 @@ where
         } else {
             Some(self.pk_serde.prefix(1))
         };
-        let range_end_suffix = watermark.map(|watermark| {
+        let watermark_suffix = watermark.map(|watermark| {
             serialize_pk(
                 row::once(Some(watermark)),
                 prefix_serializer.as_ref().unwrap(),
             )
         });
-        if let Some(range_end_suffix) = range_end_suffix {
-            let range_begin_suffix = vec![];
-            trace!(table_id = %self.table_id, range_end = ?range_end_suffix, vnodes = ?{
+        if let Some(watermark_suffix) = watermark_suffix {
+            let range_begin_suffix =
+                if prefix_serializer.unwrap().get_order_types()[0].nulls_are_largest() {
+                    vec![]
+                } else {
+                    vec![1u8]
+                };
+            trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
                 self.vnodes.iter_vnodes().collect_vec()
             }, "delete range");
             for vnode in self.vnodes.iter_vnodes() {
                 let mut range_begin = vnode.to_be_bytes().to_vec();
                 let mut range_end = range_begin.clone();
                 range_begin.extend(&range_begin_suffix);
-                range_end.extend(&range_end_suffix);
+                range_end.extend(&watermark_suffix);
                 delete_ranges.push((Bytes::from(range_begin), Bytes::from(range_end)));
             }
         }
