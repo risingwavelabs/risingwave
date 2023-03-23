@@ -58,7 +58,7 @@ use crate::{bail, ensure, ExprError, Result};
 /// ----
 /// 1
 ///
-/// /// query T
+/// query T
 /// select array_length([NULL]);
 /// ----
 /// 1
