@@ -6118,6 +6118,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_e2e_extended_mode_test"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 4.1.11",
+ "pg_interval",
+ "rust_decimal",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "risingwave_expr"
 version = "0.2.0-alpha"
 dependencies = [
@@ -8838,6 +8853,7 @@ dependencies = [
  "regex-syntax",
  "reqwest",
  "ring",
+ "rust_decimal",
  "scopeguard",
  "serde",
  "serde_json",
@@ -8849,6 +8865,7 @@ dependencies = [
  "syn",
  "time 0.3.17",
  "tokio",
+ "tokio-postgres",
  "tokio-stream",
  "tokio-util",
  "tonic",
