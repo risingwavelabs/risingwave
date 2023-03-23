@@ -312,7 +312,7 @@ steps:
       #     files: "*-junit.xml"
       #     format: "junit"
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 15
+    timeout_in_minutes: 18
     retry: *auto-retry
 
   - label: "misc check"
