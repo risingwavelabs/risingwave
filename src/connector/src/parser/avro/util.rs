@@ -22,7 +22,6 @@ use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
     DataType, Datum, IntervalUnit, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
 };
-use risingwave_expr::vector_op::cast::i64_to_timestamptz;
 use risingwave_pb::plan_common::ColumnDesc;
 
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
@@ -281,12 +280,13 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
                 RwError::from(InternalError(err_msg))
             })?,
         ),
-        Value::TimestampMicros(t) | Value::TimestampMillis(t) => {
-            ScalarImpl::Int64(i64_to_timestamptz(t).map_err(|e| {
-                let err_msg = format!("avro parse error.wrong timestamp value {}, err {:?}", t, e);
-                RwError::from(InternalError(err_msg))
-            })?)
-        }
+        Value::TimestampMicros(us) => ScalarImpl::Int64(us),
+        Value::TimestampMillis(ms) => ScalarImpl::Int64(ms.checked_mul(1000).ok_or_else(|| {
+            RwError::from(InternalError(format!(
+                "avro parse millis overflow, value: {}",
+                ms
+            )))
+        })?),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
             let days = u32::from(duration.days()) as i32;
@@ -353,7 +353,7 @@ mod tests {
         let value_schema2 = Schema::TimestampMillis;
         let datum1 = from_avro_value(v1, &value_schema1).unwrap();
         let datum2 = from_avro_value(v2, &value_schema2).unwrap();
-        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000000)));
-        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000000)));
+        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000)));
+        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000)));
     }
 }
