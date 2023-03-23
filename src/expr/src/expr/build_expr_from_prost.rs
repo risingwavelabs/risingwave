@@ -17,7 +17,6 @@
 use itertools::Itertools;
 use risingwave_common::try_match_expand;
 use risingwave_common::types::DataType;
-use risingwave_expr_macro::build_function;
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
@@ -30,13 +29,8 @@ use super::expr_in::InExpression;
 use super::expr_nested_construct::NestedConstructExpression;
 use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
-use super::expr_to_char_const_tmpl::{ExprToCharConstTmpl, ExprToCharConstTmplContext};
-use super::expr_to_timestamp_const_tmpl::{
-    ExprToTimestampConstTmpl, ExprToTimestampConstTmplContext,
-};
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::template::{BinaryBytesExpression, BinaryExpression};
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ExprError, Result};
@@ -128,38 +122,6 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
     }
 }
 
-#[build_function("to_char(timestamp, varchar) -> varchar")]
-fn build_to_char_expr(
-    return_type: DataType,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    use risingwave_common::array::*;
-
-    use crate::vector_op::to_char::{compile_pattern_to_chrono, to_char_timestamp};
-
-    let mut iter = children.into_iter();
-    let data_expr = iter.next().unwrap();
-    let tmpl_expr = iter.next().unwrap();
-
-    Ok(if let Ok(Some(tmpl)) = tmpl_expr.eval_const() {
-        ExprToCharConstTmpl {
-            ctx: ExprToCharConstTmplContext {
-                chrono_pattern: compile_pattern_to_chrono(tmpl.as_utf8()),
-            },
-            child: data_expr,
-        }
-        .boxed()
-    } else {
-        BinaryBytesExpression::<NaiveDateTimeArray, Utf8Array, _>::new(
-            data_expr,
-            tmpl_expr,
-            return_type,
-            |a, b, w| Ok(to_char_timestamp(a, b, w)),
-        )
-        .boxed()
-    })
-}
-
 pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
     let rex_node = try_match_expand!(prost.get_rex_node(), Ok)?;
     let RexNode::FuncCall(func_call_node) = rex_node else {
@@ -169,37 +131,4 @@ pub fn build_now_expr(prost: &ExprNode) -> Result<BoxedExpression> {
         bail!("Expected epoch timestamp bound into Now");
     };
     LiteralExpression::try_from(bind_timestamp).map(Expression::boxed)
-}
-
-#[build_function("to_timestamp1(varchar, varchar) -> timestamp")]
-pub fn build_to_timestamp_expr(
-    return_type: DataType,
-    children: Vec<BoxedExpression>,
-) -> Result<BoxedExpression> {
-    use risingwave_common::array::*;
-
-    use crate::vector_op::to_char::compile_pattern_to_chrono;
-    use crate::vector_op::to_timestamp::to_timestamp;
-
-    let mut iter = children.into_iter();
-    let data_expr = iter.next().unwrap();
-    let tmpl_expr = iter.next().unwrap();
-
-    Ok(if let Ok(Some(tmpl)) = tmpl_expr.eval_const() {
-        ExprToTimestampConstTmpl {
-            ctx: ExprToTimestampConstTmplContext {
-                chrono_pattern: compile_pattern_to_chrono(tmpl.as_utf8()),
-            },
-            child: data_expr,
-        }
-        .boxed()
-    } else {
-        BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
-            data_expr,
-            tmpl_expr,
-            return_type,
-            to_timestamp,
-        )
-        .boxed()
-    })
 }

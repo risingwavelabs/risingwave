@@ -20,8 +20,6 @@ use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
 use risingwave_common::types::NaiveDateTimeWrapper;
 
-// use risingwave_expr_macro::function;
-
 #[self_referencing]
 pub struct ChronoPattern {
     pub(crate) tmpl: String,
