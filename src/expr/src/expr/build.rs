@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::iter::Peekable;
+
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
@@ -126,32 +128,97 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
 /// build_from_pretty("42:int2");
 /// build_from_pretty("#0:int8");
 /// build_from_pretty("(add:int8 42:int2 #1:int8)");
+/// build_from_pretty("(add:int8 42:int2 (add:int8 42:int2 #1:int8))");
 /// ```
 pub fn build_from_pretty(s: impl AsRef<str>) -> BoxedExpression {
-    let s = s.as_ref().trim();
-    if let Some(s) = s.strip_prefix('#') {
-        let (index, ty) = s.split_once(':').expect_str(":", s);
-        let index = index.parse::<usize>().expect_str("number", index);
-        let ty = ty.parse::<DataType>().expect_str("type", ty);
-        InputRefExpression::new(ty, index).boxed()
-    } else if let Some(s) = s.strip_prefix('(') {
-        let end = s.rfind(')').expect_str(")", s);
-        let mut tokens = s[..end].split_whitespace();
-        let name_type = tokens.next().unwrap();
-        let (name, ty) = name_type.split_once(':').expect_str(":", name_type);
-        let func = PbType::from_str_name(&name.to_uppercase()).expect_str("function", name);
-        let ty = ty.parse::<DataType>().expect_str("type", ty);
-        let children = tokens.map(build_from_pretty).collect();
-        build(func, ty, children).expect("failed to build")
-    } else {
-        let (value, ty) = s.split_once(':').expect_str(":", s);
-        let ty = ty.parse::<DataType>().expect_str("type", ty);
-        let value = match value {
-            "null" => None,
-            _ => Some(ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", value)),
-        };
-        LiteralExpression::new(ty, value).boxed()
+    let tokens = lexer(s.as_ref());
+    parse_expression(&mut tokens.into_iter().peekable())
+}
+
+fn parse_expression(tokens: &mut Peekable<impl Iterator<Item = Token>>) -> BoxedExpression {
+    match tokens.next().expect("Unexpected end of input") {
+        Token::Index(index) => {
+            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
+            let ty = match tokens.next().expect("Unexpected end of input") {
+                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
+                t => panic!("Expected a Literal, got {t:?}"),
+            };
+            InputRefExpression::new(ty, index).boxed()
+        }
+        Token::LParen => {
+            let func = match tokens.next().expect("Unexpected end of input") {
+                Token::Literal(name) => PbType::from_str_name(&name.to_uppercase())
+                    .expect_str("Invalid function", &name),
+                t => panic!("Expected a Literal, got {t:?}"),
+            };
+            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
+            let ty = match tokens.next().expect("Unexpected end of input") {
+                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
+                t => panic!("Expected a Literal, got {t:?}"),
+            };
+
+            let mut children = Vec::new();
+            while tokens.peek() != Some(&Token::RParen) {
+                children.push(parse_expression(tokens));
+            }
+            tokens.next(); // Consume the RParen
+
+            build(func, ty, children).expect("Failed to build")
+        }
+        Token::Literal(value) => {
+            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
+            let ty = match tokens.next().expect("Unexpected end of input") {
+                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
+                t => panic!("Expected a Literal, got {t:?}"),
+            };
+            let value = match value.as_str() {
+                "null" => None,
+                _ => Some(ScalarImpl::from_text(value.as_bytes(), &ty).expect("Invalid value")),
+            };
+            LiteralExpression::new(ty, value).boxed()
+        }
+        _ => panic!("Unexpected token"),
     }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Token {
+    LParen,
+    RParen,
+    Colon,
+    Index(usize),
+    Literal(String),
+}
+
+fn lexer(input: &str) -> Vec<Token> {
+    let mut tokens = Vec::new();
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        let token = match c {
+            '(' => Token::LParen,
+            ')' => Token::RParen,
+            ':' => Token::Colon,
+            '#' => {
+                let mut number = String::new();
+                while let Some(c) = chars.peek() && c.is_ascii_digit() {
+                    number.push(chars.next().unwrap());
+                }
+                let index = number.parse::<usize>().expect("Invalid number");
+                Token::Index(index)
+            }
+            ' ' | '\t' | '\r' | '\n' => continue,
+            _ => {
+                let mut literal = String::new();
+                literal.push(c);
+                while let Some(&c) = chars.peek() && !matches!(c, '(' | ')' | ':' | ' ' | '\t' | '\r' | '\n') {
+                    literal.push(chars.next().unwrap());
+                }
+                Token::Literal(literal)
+            }
+        };
+        tokens.push(token);
+    }
+    tokens
 }
 
 trait ExpectExt<T> {
