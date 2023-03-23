@@ -631,6 +631,13 @@ pub async fn handle_create_source(
 
     bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
 
+    if columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow generated columns on source
+        return Err(RwError::from(ErrorCode::BindError(
+            "Generated columns on source has not been implemented.".to_string(),
+        )));
+    }
+
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
 

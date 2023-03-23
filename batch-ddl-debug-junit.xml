@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="batch-ddl-debug" tests="1" failures="0" errors="0" timestamp="2023-03-23T09:48:15.247+00:00">
+    <testsuite name="sqllogictest" tests="1" disabled="0" errors="0" failures="0" timestamp="2023-03-23T09:48:15.247+00:00">
+        <testcase name="e2e_test_ddl_table_slt" classname="batch-ddl-debug" timestamp="2023-03-23T09:48:23.841+00:00" time="8.590">
+        </testcase>
+    </testsuite>
+</testsuites>

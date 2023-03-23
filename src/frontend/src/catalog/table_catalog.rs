@@ -384,6 +384,10 @@ impl TableCatalog {
             .filter(|c| c.is_generated())
             .map(|c| c.name())
     }
+
+    pub fn has_generated_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_generated())
+    }
 }
 
 impl From<PbTable> for TableCatalog {
