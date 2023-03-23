@@ -353,13 +353,7 @@ mod tests {
         let value_schema2 = Schema::TimestampMillis;
         let datum1 = from_avro_value(v1, &value_schema1).unwrap();
         let datum2 = from_avro_value(v2, &value_schema2).unwrap();
-        assert_eq!(
-            datum1,
-            Some(ScalarImpl::Int64(1620000000000000))
-        );
-        assert_eq!(
-            datum2,
-            Some(ScalarImpl::Int64(1620000000000000))
-        );
+        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000000)));
+        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000000)));
     }
 }
