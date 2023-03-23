@@ -541,12 +541,13 @@ impl ExprImpl {
         }
     }
 
-    fn reverse_comparison(comparison: ExprType) -> ExprType {
+    pub fn reverse_comparison(comparison: ExprType) -> ExprType {
         match comparison {
             ExprType::LessThan => ExprType::GreaterThan,
             ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
             ExprType::GreaterThan => ExprType::LessThan,
             ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            ExprType::Equal | ExprType::IsNotDistinctFrom => comparison,
             _ => unreachable!(),
         }
     }
