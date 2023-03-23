@@ -47,6 +47,7 @@ use risingwave_storage::StateStore;
 use tracing::trace;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
+use crate::cache::cache_may_stale;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -315,31 +316,6 @@ where
             Distribution::fallback(),
             None,
             false,
-            0,
-        )
-        .await
-    }
-
-    /// Create a state table without distribution, with given `prefix_hint_len`, used for unit
-    /// tests.
-    pub async fn new_without_distribution_with_prefix_hint_len(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        prefix_hint_len: usize,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-            None,
-            true,
-            prefix_hint_len,
         )
         .await
     }
@@ -364,7 +340,6 @@ where
             distribution,
             value_indices,
             true,
-            0,
         )
         .await
     }
@@ -387,7 +362,6 @@ where
             distribution,
             value_indices,
             false,
-            0,
         )
         .await
     }
@@ -405,7 +379,6 @@ where
         }: Distribution,
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
-        prefix_hint_len: usize,
     ) -> Self {
         let local_state_store = store
             .new_local(NewLocalOptions {
@@ -446,7 +419,7 @@ where
             row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
             pk_indices,
             dist_key_in_pk_indices,
-            prefix_hint_len,
+            prefix_hint_len: 0,
             vnodes,
             table_option: Default::default(),
             vnode_col_idx_in_pk: None,
@@ -605,7 +578,7 @@ where
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -618,9 +591,16 @@ where
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
-        self.cur_watermark = None;
+        let cache_may_stale = cache_may_stale(&self.vnodes, &new_vnodes);
 
-        std::mem::replace(&mut self.vnodes, new_vnodes)
+        if cache_may_stale {
+            self.cur_watermark = None;
+        }
+
+        (
+            std::mem::replace(&mut self.vnodes, new_vnodes),
+            cache_may_stale,
+        )
     }
 }
 

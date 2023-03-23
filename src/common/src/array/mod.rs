@@ -496,7 +496,8 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            /// Append a [`Datum`] or [`DatumRef`] multiple times,
+            /// panicking if the datum's type does not match the array builder's type.
             pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {

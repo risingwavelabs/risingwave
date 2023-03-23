@@ -729,7 +729,6 @@ pub(crate) mod tests {
             .await
             .unwrap()
             .unwrap();
-        compact_task.existing_table_ids.push(2);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
 
@@ -903,7 +902,6 @@ pub(crate) mod tests {
             .unwrap()
             .unwrap();
 
-        compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         let retention_seconds_expire_second = 1;
@@ -1092,7 +1090,6 @@ pub(crate) mod tests {
             kv_count,
         );
 
-        compact_task.existing_table_ids.push(existing_table_id);
         let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN | CompactionFilterFlag::TTL;
         compact_task.compaction_filter_mask = compaction_filter_flag.bits();
         // compact_task.table_options =

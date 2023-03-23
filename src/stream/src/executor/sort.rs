@@ -217,7 +217,7 @@ impl<S: StateStore> SortExecutor<S> {
 
                     // Update the vnode bitmap for the state table if asked. Also update the buffer.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.context.id) {
-                        let prev_vnode_bitmap =
+                        let (prev_vnode_bitmap, _cache_may_stale) =
                             self.state_table.update_vnode_bitmap(vnode_bitmap.clone());
                         self.fill_buffer(Some(&prev_vnode_bitmap), &vnode_bitmap)
                             .await?;
