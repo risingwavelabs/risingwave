@@ -376,7 +376,7 @@ pub type SplitId = Arc<str>;
 /// The third-party message structs will eventually be transformed into this struct.
 #[derive(Debug, Clone)]
 pub struct SourceMessage {
-    pub payload: Option<Bytes>,
+    pub payload: Option<Vec<u8>>,
     pub offset: String,
     pub split_id: SplitId,
 
@@ -488,6 +488,25 @@ mod tests {
             assert_eq!(props.split_num, 1);
         } else {
             panic!("extract nexmark config failed");
+        }
+    }
+
+    #[test]
+    fn test_extract_kafka_config() {
+        let props: HashMap<String, String> = convert_args!(hashmap!(
+            "connector" => "kafka",
+            "properties.bootstrap.server" => "b1,b2",
+            "topic" => "test",
+            "scan.startup.mode" => "earliest",
+            "broker.rewrite.endpoints" => r#"{"b-1:9092":"dns-1", "b-2:9092":"dns-2"}"#,
+        ));
+
+        let props = ConnectorProperties::extract(props).unwrap();
+        if let ConnectorProperties::Kafka(k) = props {
+            assert!(k.common.broker_rewrite_map.is_some());
+            println!("{:?}", k.common.broker_rewrite_map);
+        } else {
+            panic!("extract kafka config failed");
         }
     }
 

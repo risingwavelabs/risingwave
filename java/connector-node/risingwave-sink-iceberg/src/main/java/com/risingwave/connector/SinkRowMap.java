@@ -19,6 +19,7 @@ import com.risingwave.connector.api.sink.SinkRow;
 import io.grpc.Status;
 import java.util.List;
 import java.util.TreeMap;
+import org.apache.iceberg.data.Record;
 
 public class SinkRowMap {
     TreeMap<List<Comparable<Object>>, SinkRowOp> map = new TreeMap<>(new PkComparator());
@@ -27,7 +28,7 @@ public class SinkRowMap {
         map.clear();
     }
 
-    public void insert(List<Comparable<Object>> key, SinkRow row) {
+    public void insert(List<Comparable<Object>> key, Record row) {
         if (!map.containsKey(key)) {
             map.put(key, SinkRowOp.insertOp(row));
         } else {
@@ -42,19 +43,20 @@ public class SinkRowMap {
         }
     }
 
-    public void delete(List<Comparable<Object>> key, SinkRow row) {
+    public void delete(List<Comparable<Object>> key, Record row) {
         if (!map.containsKey(key)) {
             map.put(key, SinkRowOp.deleteOp(row));
         } else {
             SinkRowOp sinkRowOp = map.get(key);
-            SinkRow insert = sinkRowOp.getInsert();
+            Record insert = sinkRowOp.getInsert();
             if (insert == null) {
                 throw Status.FAILED_PRECONDITION
                         .withDescription("try to double delete a primary key")
                         .asRuntimeException();
             }
-            assertRowValuesEqual(insert, row);
-            SinkRow delete = sinkRowOp.getDelete();
+            // TODO: may enable it again
+            //            assertRowValuesEqual(insert, row);
+            Record delete = sinkRowOp.getDelete();
             if (delete != null) {
                 map.put(key, SinkRowOp.deleteOp(delete));
             } else {

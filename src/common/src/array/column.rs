@@ -15,13 +15,23 @@
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
-use risingwave_pb::data::Column as ProstColumn;
+use risingwave_pb::data::PbColumn;
 
 use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
 
-/// Column is owned by `DataChunk`. It consists of logic data type and physical array
-/// implementation.
+/// A [`Column`] consists of its logical data type
+/// and its corresponding physical array implementation,
+/// The array contains all the datums bound to this [`Column`].
+/// [`Column`] is owned by [`DataChunk`].
+///
+/// For instance, in this [`DataChunk`],
+/// for column `v1`, [`ArrayRef`] will contain: [1,1,1]
+/// | v1 | v2 |
+/// |----|----|
+/// | 1 |  a |
+/// | 1 |  b |
+/// | 1 |  c |
 #[derive(Clone, Debug, PartialEq)]
 pub struct Column {
     array: ArrayRef,
@@ -32,12 +42,12 @@ impl Column {
         Column { array }
     }
 
-    pub fn to_protobuf(&self) -> ProstColumn {
+    pub fn to_protobuf(&self) -> PbColumn {
         let array = self.array.to_protobuf();
-        ProstColumn { array: Some(array) }
+        PbColumn { array: Some(array) }
     }
 
-    pub fn from_protobuf(col: &ProstColumn, cardinality: usize) -> ArrayResult<Self> {
+    pub fn from_protobuf(col: &PbColumn, cardinality: usize) -> ArrayResult<Self> {
         Ok(Column {
             array: Arc::new(ArrayImpl::from_protobuf(col.get_array()?, cardinality)?),
         })

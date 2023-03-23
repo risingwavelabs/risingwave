@@ -13,8 +13,6 @@ services:
       - "0.0.0.0:1260"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--config-path"
@@ -30,6 +28,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: compactor-0
     healthcheck:
       test:
@@ -52,8 +52,6 @@ services:
       - "0.0.0.0:1222"
       - "--metrics-level"
       - "1"
-      - "--state-store"
-      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--meta-address"
       - "http://meta-node-0:5690"
       - "--connector-rpc-endpoint"
@@ -71,6 +69,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: compute-node-0
     healthcheck:
       test:
@@ -150,6 +150,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: frontend-node-0
     healthcheck:
       test:
@@ -203,6 +205,8 @@ services:
       - "etcd-0:2388"
       - "--connector-rpc-endpoint"
       - "connector-node:50051"
+      - "--state-store"
+      - "hummock+minio://hummockadmin:hummockadmin@minio-0:9301/hummock001"
       - "--config-path"
       - /risingwave.toml
     expose:
@@ -218,6 +222,8 @@ services:
       - "./risingwave.toml:/risingwave.toml"
     environment:
       RUST_BACKTRACE: "1"
+      # If ENABLE_TELEMETRY is not set, telemetry will start by default
+      ENABLE_TELEMETRY: ${ENABLE_TELEMETRY}
     container_name: meta-node-0
     healthcheck:
       test:
@@ -246,7 +252,17 @@ services:
     depends_on: []
     volumes:
       - "minio-0:/data"
-    entrypoint: "\n/bin/sh -c '\nset -e\nmkdir -p \"/data/hummock001\"\n/usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"\n'"
+    entrypoint: "
+
+      /bin/sh -c '
+
+      set -e
+
+      mkdir -p \"/data/hummock001\"
+
+      /usr/bin/docker-entrypoint.sh \"$$0\" \"$$@\"
+
+      '"
     environment:
       MINIO_CI_CD: "1"
       MINIO_PROMETHEUS_AUTH_TYPE: public

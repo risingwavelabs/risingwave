@@ -3,7 +3,7 @@ name: Connector Node Integration tests
 on:
   push:
     branches: [main]
-    path: [java/**, proto/**]
+    paths: [java/**, proto/**]
   pull_request:
     branches: [main]
     paths: [java/**, proto/**]

@@ -14,17 +14,16 @@
 
 use std::fmt::{Debug, Formatter};
 use std::future::Future;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{FutureExt, StreamExt};
 use minitrace::prelude::*;
 use parking_lot::Mutex;
 use risingwave_common::array::DataChunk;
 use risingwave_common::error::{ErrorCode, Result, RwError};
-use risingwave_pb::batch_plan::{
-    PlanFragment, TaskId as ProstTaskId, TaskOutputId as ProstOutputId,
-};
+use risingwave_pb::batch_plan::{PbTaskId, PbTaskOutputId, PlanFragment};
 use risingwave_pb::common::BatchQueryEpoch;
 use risingwave_pb::task_service::task_info_response::TaskStatus;
 use risingwave_pb::task_service::{GetDataResponse, TaskInfoResponse};
@@ -139,8 +138,8 @@ impl Debug for TaskOutputId {
     }
 }
 
-impl From<&ProstTaskId> for TaskId {
-    fn from(prost: &ProstTaskId) -> Self {
+impl From<&PbTaskId> for TaskId {
+    fn from(prost: &PbTaskId) -> Self {
         TaskId {
             task_id: prost.task_id,
             stage_id: prost.stage_id,
@@ -150,8 +149,8 @@ impl From<&ProstTaskId> for TaskId {
 }
 
 impl TaskId {
-    pub fn to_prost(&self) -> ProstTaskId {
-        ProstTaskId {
+    pub fn to_prost(&self) -> PbTaskId {
+        PbTaskId {
             task_id: self.task_id,
             stage_id: self.stage_id,
             query_id: self.query_id.clone(),
@@ -159,10 +158,10 @@ impl TaskId {
     }
 }
 
-impl TryFrom<&ProstOutputId> for TaskOutputId {
+impl TryFrom<&PbTaskOutputId> for TaskOutputId {
     type Error = RwError;
 
-    fn try_from(prost: &ProstOutputId) -> Result<Self> {
+    fn try_from(prost: &PbTaskOutputId) -> Result<Self> {
         Ok(TaskOutputId {
             task_id: TaskId::from(prost.get_task_id()?),
             output_id: prost.get_output_id(),
@@ -171,8 +170,8 @@ impl TryFrom<&ProstOutputId> for TaskOutputId {
 }
 
 impl TaskOutputId {
-    pub fn to_prost(&self) -> ProstOutputId {
-        ProstOutputId {
+    pub fn to_prost(&self) -> PbTaskOutputId {
+        PbTaskOutputId {
             task_id: Some(self.task_id.to_prost()),
             output_id: self.output_id,
         }
@@ -299,7 +298,7 @@ pub struct BatchTaskExecution<C> {
 
 impl<C: BatchTaskContext> BatchTaskExecution<C> {
     pub fn new(
-        prost_tid: &ProstTaskId,
+        prost_tid: &PbTaskId,
         plan: PlanFragment,
         context: C,
         epoch: BatchQueryEpoch,
@@ -372,7 +371,6 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
         // Clone `self` to make compiler happy because of the move block.
         let t_1 = self.clone();
-        let t_2 = self.clone();
         // Spawn task for real execution.
         let fut = async move {
             trace!("Executing plan [{:?}]", task_id);
@@ -396,9 +394,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
 
             if let Some(task_metrics) = task_metrics {
                 let monitor = TaskMonitor::new();
-                let join_handle = t_2.runtime.spawn(monitor.instrument(task(task_id.clone())));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
+                let instrumented_task = AssertUnwindSafe(monitor.instrument(task(task_id.clone())));
+                if let Err(error) = instrumented_task.catch_unwind().await {
+                    error!("Batch task {:?} panic: {:?}", task_id, error);
                 }
                 let cumulative = monitor.cumulative();
                 let labels = &task_metrics.task_labels();
@@ -427,11 +425,9 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                     .task_slow_poll_duration
                     .with_label_values(labels)
                     .set(cumulative.total_slow_poll_duration.as_secs_f64());
-            } else {
-                let join_handle = t_2.runtime.spawn(task(task_id.clone()));
-                if let Err(join_error) = join_handle.await && join_error.is_panic() {
-                    error!("Batch task {:?} panic!", task_id);
-                }
+            } else if let Err(error) = AssertUnwindSafe(task(task_id.clone())).catch_unwind().await
+            {
+                error!("Batch task {:?} panic: {:?}", task_id, error);
             }
         };
 
@@ -448,6 +444,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             ctx2,
         );
         self.runtime.spawn(alloc_stat_wrap_fut);
+
         Ok(())
     }
 
@@ -492,8 +489,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // We prioritize abort signal over normal data chunks.
                 biased;
                 err_reason = &mut shutdown_rx => {
-                    state = TaskStatus::Aborted;
-                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
+                    match err_reason {
+                        Ok(reason_str) => {
+                            state = TaskStatus::Aborted;
+                            error = Some(Aborted(reason_str));
+                        }
+                        Err(_) => {
+                            // We use early close shutdown channel to cancel task.
+                            // Cancelling a task is different from aborting a task
+                            // in that it's not an error and should not be reported to user.
+                            state = TaskStatus::Cancelled;
+                        }
+                    }
                     break;
                 }
                 res = data_chunk_stream.next() => {
@@ -560,7 +567,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn abort_task(&self, err_msg: String) {
+    pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
@@ -572,7 +579,14 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         };
     }
 
-    pub fn get_task_output(&self, output_id: &ProstOutputId) -> Result<TaskOutput> {
+    pub fn cancel(&self) {
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            // Drop sender directly to mark cancel without error.
+            drop(sender);
+        };
+    }
+
+    pub fn get_task_output(&self, output_id: &PbTaskOutputId) -> Result<TaskOutput> {
         let task_id = TaskId::from(output_id.get_task_id()?);
         let receiver = self.receivers.lock()[output_id.get_output_id() as usize]
             .take()

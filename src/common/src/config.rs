@@ -21,6 +21,7 @@ use std::collections::HashMap;
 use std::fs;
 
 use clap::ValueEnum;
+use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -112,6 +113,9 @@ pub struct RwConfig {
     #[serde(default)]
     pub storage: StorageConfig,
 
+    #[serde(default)]
+    pub system: SystemConfig,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -182,6 +186,12 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    /// Compute compactor_task_limit for machines with different hardware.Currently cpu is used as
+    /// the main consideration,and is adjusted by max_compactor_task_multiplier, calculated as
+    /// compactor_task_limit = core_num * max_compactor_task_multiplier;
+    #[serde(default = "default::meta::max_compactor_task_multiplier")]
+    pub max_compactor_task_multiplier: u32,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -211,6 +221,9 @@ pub struct ServerConfig {
     /// 0 = close metrics
     /// >0 = open metrics
     pub metrics_level: u32,
+
+    #[serde(default = "default::server::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
@@ -451,6 +464,71 @@ impl Default for DeveloperConfig {
     }
 }
 
+/// The section `[system]` in `risingwave.toml`.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SystemConfig {
+    /// The interval of periodic barrier.
+    #[serde(default = "default::system::barrier_interval_ms")]
+    pub barrier_interval_ms: u32,
+
+    /// There will be a checkpoint for every n barriers
+    #[serde(default = "default::system::checkpoint_frequency")]
+    pub checkpoint_frequency: u64,
+
+    /// Target size of the Sstable.
+    #[serde(default = "default::system::sstable_size_mb")]
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    #[serde(default = "default::system::block_size_kb")]
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    #[serde(default = "default::system::bloom_false_positive")]
+    pub bloom_false_positive: f64,
+
+    #[serde(default = "default::system::state_store")]
+    pub state_store: String,
+
+    /// Remote directory for storing data and metadata objects.
+    #[serde(default = "default::system::data_directory")]
+    pub data_directory: String,
+
+    /// Remote storage url for storing snapshots.
+    #[serde(default = "default::system::backup_storage_url")]
+    pub backup_storage_url: String,
+
+    /// Remote directory for storing snapshots.
+    #[serde(default = "default::system::backup_storage_directory")]
+    pub backup_storage_directory: String,
+
+    #[serde(default = "default::system::telemetry_enabled")]
+    pub telemetry_enabled: bool,
+}
+
+impl Default for SystemConfig {
+    fn default() -> Self {
+        toml::from_str("").unwrap()
+    }
+}
+
+impl SystemConfig {
+    pub fn into_init_system_params(self) -> SystemParams {
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval_ms),
+            checkpoint_frequency: Some(self.checkpoint_frequency),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            block_size_kb: Some(self.block_size_kb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            state_store: Some(self.state_store),
+            data_directory: Some(self.data_directory),
+            backup_storage_url: Some(self.backup_storage_url),
+            backup_storage_directory: Some(self.backup_storage_directory),
+            telemetry_enabled: Some(self.telemetry_enabled),
+        }
+    }
+}
+
 mod default {
     pub mod meta {
         use crate::config::MetaBackend;
@@ -494,6 +572,10 @@ mod default {
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
             1800 // 30mi
         }
+
+        pub fn max_compactor_task_multiplier() -> u32 {
+            2
+        }
     }
 
     pub mod server {
@@ -512,6 +594,10 @@ mod default {
 
         pub fn metrics_level() -> u32 {
             0
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            true
         }
     }
 
@@ -660,6 +746,50 @@ mod default {
 
         pub fn stream_exchange_batched_permits() -> usize {
             1024
+        }
+    }
+
+    pub mod system {
+        use crate::system_param;
+
+        pub fn barrier_interval_ms() -> u32 {
+            system_param::default::barrier_interval_ms()
+        }
+
+        pub fn checkpoint_frequency() -> u64 {
+            system_param::default::checkpoint_frequency()
+        }
+
+        pub fn sstable_size_mb() -> u32 {
+            system_param::default::sstable_size_mb()
+        }
+
+        pub fn block_size_kb() -> u32 {
+            system_param::default::block_size_kb()
+        }
+
+        pub fn bloom_false_positive() -> f64 {
+            system_param::default::bloom_false_positive()
+        }
+
+        pub fn state_store() -> String {
+            system_param::default::state_store()
+        }
+
+        pub fn data_directory() -> String {
+            system_param::default::data_directory()
+        }
+
+        pub fn backup_storage_url() -> String {
+            system_param::default::backup_storage_url()
+        }
+
+        pub fn backup_storage_directory() -> String {
+            system_param::default::backup_storage_directory()
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            system_param::default::telemetry_enabled()
         }
     }
 }

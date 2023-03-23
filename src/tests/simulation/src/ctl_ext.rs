@@ -24,7 +24,7 @@ use rand::seq::{IteratorRandom, SliceRandom};
 use rand::Rng;
 use risingwave_common::hash::ParallelUnitId;
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::table_fragments::Fragment as ProstFragment;
+use risingwave_pb::meta::table_fragments::PbFragment;
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::stream_plan::StreamNode;
 
@@ -35,10 +35,10 @@ use crate::cluster::Cluster;
 pub mod predicate {
     use super::*;
 
-    trait Predicate = Fn(&ProstFragment) -> bool + Send + 'static;
+    trait Predicate = Fn(&PbFragment) -> bool + Send + 'static;
     pub type BoxedPredicate = Box<dyn Predicate>;
 
-    fn root(fragment: &ProstFragment) -> &StreamNode {
+    fn root(fragment: &PbFragment) -> &StreamNode {
         fragment.actors.first().unwrap().nodes.as_ref().unwrap()
     }
 
@@ -58,7 +58,7 @@ pub mod predicate {
     /// There're exactly `n` operators whose identity contains `s` in the fragment.
     pub fn identity_contains_n(n: usize, s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             count(root(f), &|n| {
                 n.identity.to_lowercase().contains(&s.to_lowercase())
             }) == n
@@ -69,7 +69,7 @@ pub mod predicate {
     /// There exists operators whose identity contains `s` in the fragment.
     pub fn identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             any(root(f), &|n| {
                 n.identity.to_lowercase().contains(&s.to_lowercase())
             })
@@ -80,7 +80,7 @@ pub mod predicate {
     /// There does not exist any operator whose identity contains `s` in the fragment.
     pub fn no_identity_contains(s: impl Into<String>) -> BoxedPredicate {
         let s: String = s.into();
-        let p = move |f: &ProstFragment| {
+        let p = move |f: &PbFragment| {
             all(root(f), &|n| {
                 !n.identity.to_lowercase().contains(&s.to_lowercase())
             })
@@ -90,20 +90,22 @@ pub mod predicate {
 
     /// There're `n` upstream fragments of the fragment.
     pub fn upstream_fragment_count(n: usize) -> BoxedPredicate {
-        let p = move |f: &ProstFragment| f.upstream_fragment_ids.len() == n;
+        let p = move |f: &PbFragment| f.upstream_fragment_ids.len() == n;
         Box::new(p)
     }
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
-        // specified by the user.
-        no_identity_contains("StreamTableScan")
+        // The rescheduling of no-shuffle downstreams must be derived from the upstream
+        // `Materialize`, not specified by the user.
+        let p =
+            |f: &PbFragment| no_identity_contains("Chain")(f) && no_identity_contains("Lookup")(f);
+        Box::new(p)
     }
 
     /// The fragment with the given id.
     pub fn id(id: u32) -> BoxedPredicate {
-        let p = move |f: &ProstFragment| f.fragment_id == id;
+        let p = move |f: &PbFragment| f.fragment_id == id;
         Box::new(p)
     }
 }

@@ -82,6 +82,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
+        opts.state_store.clone(),
         opts.config_path_for_meta.clone(),
     ));
 
@@ -124,24 +125,31 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-pub async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
     let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
+        &listen_addr,
+        "--advertise-addr",
         &listen_addr,
         "--backend",
         "mem",
         "--checkpoint-frequency",
         &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
+        "--state-store",
+        &state_store,
         "--config-path",
         &config_path,
     ]);
-    // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version during version log replay.
-    assert_eq!(CHECKPOINT_FREQ_FOR_REPLAY, meta_opts.checkpoint_frequency);
     let config = load_config(
         &meta_opts.config_path,
         Some(meta_opts.override_opts.clone()),
+    );
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
+    assert_eq!(
+        CHECKPOINT_FREQ_FOR_REPLAY,
+        config.system.checkpoint_frequency
     );
     assert!(
         config.meta.enable_compaction_deterministic,
@@ -159,7 +167,7 @@ async fn start_compactor_node(
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
         "compactor-node",
-        "--host",
+        "--listen-addr",
         "127.0.0.1:5550",
         "--advertise-addr",
         &advertise_addr,

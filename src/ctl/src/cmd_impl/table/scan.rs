@@ -28,6 +28,7 @@ use risingwave_storage::table::Distribution;
 use risingwave_storage::StateStore;
 use risingwave_stream::common::table::state_table::StateTable;
 
+use crate::common::HummockServiceOpts;
 use crate::CtlContext;
 
 pub async fn get_table_catalog(meta: MetaClient, mv_name: String) -> Result<TableCatalog> {
@@ -95,16 +96,20 @@ pub fn make_storage_table<S: StateStore>(hummock: S, table: &TableCatalog) -> St
     )
 }
 
-pub async fn scan(context: &CtlContext, mv_name: String) -> Result<()> {
+pub async fn scan(context: &CtlContext, mv_name: String, data_dir: Option<String>) -> Result<()> {
     let meta_client = context.meta_client().await?;
-    let hummock = context.hummock_store().await?;
+    let hummock = context
+        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .await?;
     let table = get_table_catalog(meta_client, mv_name).await?;
     do_scan(table, hummock).await
 }
 
-pub async fn scan_id(context: &CtlContext, table_id: u32) -> Result<()> {
+pub async fn scan_id(context: &CtlContext, table_id: u32, data_dir: Option<String>) -> Result<()> {
     let meta_client = context.meta_client().await?;
-    let hummock = context.hummock_store().await?;
+    let hummock = context
+        .hummock_store(HummockServiceOpts::from_env(data_dir)?)
+        .await?;
     let table = get_table_catalog_by_id(meta_client, table_id).await?;
     do_scan(table, hummock).await
 }

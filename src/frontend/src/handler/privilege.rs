@@ -14,7 +14,7 @@
 
 use risingwave_common::error::ErrorCode::PermissionDenied;
 use risingwave_common::error::Result;
-use risingwave_pb::user::grant_privilege::{Action as ProstAction, Object as ProstObject};
+use risingwave_pb::user::grant_privilege::{PbAction, PbObject};
 
 use crate::binder::{BoundStatement, Relation};
 use crate::catalog::RelationCatalog;
@@ -23,12 +23,12 @@ use crate::user::UserId;
 
 pub struct ObjectCheckItem {
     owner: UserId,
-    action: ProstAction,
-    object: ProstObject,
+    action: PbAction,
+    object: PbObject,
 }
 
 impl ObjectCheckItem {
-    pub fn new(owner: UserId, action: ProstAction, object: ProstObject) -> Self {
+    pub fn new(owner: UserId, action: PbAction, object: PbObject) -> Self {
         Self {
             owner,
             action,
@@ -40,7 +40,7 @@ impl ObjectCheckItem {
 /// resolve privileges in `relation`
 pub(crate) fn resolve_relation_privileges(
     relation: &Relation,
-    action: ProstAction,
+    action: PbAction,
     objects: &mut Vec<ObjectCheckItem>,
 ) {
     match relation {
@@ -48,7 +48,7 @@ pub(crate) fn resolve_relation_privileges(
             let item = ObjectCheckItem {
                 owner: source.catalog.owner,
                 action,
-                object: ProstObject::SourceId(source.catalog.id),
+                object: PbObject::SourceId(source.catalog.id),
             };
             objects.push(item);
         }
@@ -56,7 +56,7 @@ pub(crate) fn resolve_relation_privileges(
             let item = ObjectCheckItem {
                 owner: table.table_catalog.owner,
                 action,
-                object: ProstObject::TableId(table.table_id.table_id),
+                object: PbObject::TableId(table.table_id.table_id),
             };
             objects.push(item);
         }
@@ -85,36 +85,36 @@ pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> 
         BoundStatement::Insert(ref insert) => {
             let object = ObjectCheckItem {
                 owner: insert.owner,
-                action: ProstAction::Insert,
-                object: ProstObject::TableId(insert.table_id.table_id),
+                action: PbAction::Insert,
+                object: PbObject::TableId(insert.table_id.table_id),
             };
             objects.push(object);
             if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, ProstAction::Select, &mut objects);
+                    resolve_relation_privileges(sub_relation, PbAction::Select, &mut objects);
                 }
             }
         }
         BoundStatement::Delete(ref delete) => {
             let object = ObjectCheckItem {
                 owner: delete.owner,
-                action: ProstAction::Delete,
-                object: ProstObject::TableId(delete.table_id.table_id),
+                action: PbAction::Delete,
+                object: PbObject::TableId(delete.table_id.table_id),
             };
             objects.push(object);
         }
         BoundStatement::Update(ref update) => {
             let object = ObjectCheckItem {
                 owner: update.owner,
-                action: ProstAction::Update,
-                object: ProstObject::TableId(update.table_id.table_id),
+                action: PbAction::Update,
+                object: PbObject::TableId(update.table_id.table_id),
             };
             objects.push(object);
         }
         BoundStatement::Query(ref query) => {
             if let crate::binder::BoundSetExpr::Select(select) = &query.body {
                 if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, ProstAction::Select, &mut objects);
+                    resolve_relation_privileges(sub_relation, PbAction::Select, &mut objects);
                 }
             }
         }
@@ -226,8 +226,8 @@ mod tests {
             .clone();
         let check_items = vec![ObjectCheckItem::new(
             DEFAULT_SUPER_USER_ID,
-            ProstAction::Create,
-            ProstObject::SchemaId(schema.id()),
+            PbAction::Create,
+            PbObject::SchemaId(schema.id()),
         )];
         assert!(&session.check_privileges(&check_items).is_ok());
 

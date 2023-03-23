@@ -14,11 +14,11 @@
 
 use std::fmt;
 
-use fixedbitset::FixedBitSet;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
+use crate::{optimizer::property::Distribution, stream_fragmenter::BuildFragmentGraphState};
+
 use super::{ExprRewritable, LogicalRowIdGen, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamRowIdGen` holds a stream `PlanBase` and a `LogicalRowIdGen`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -30,15 +30,20 @@ pub struct StreamRowIdGen {
 impl StreamRowIdGen {
     /// Create a `StreamRowIdGen` with intermediate `LogicalRowIdGen`
     pub fn new(logical: LogicalRowIdGen) -> Self {
-        let watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
+        let distribution = if logical.input().append_only() {
+            // remove exchange for append only source
+            Distribution::HashShard(vec![logical.row_id_index()])
+        } else {
+            logical.input().distribution().clone()
+        };
         let base = PlanBase::new_stream(
             logical.ctx(),
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
-            logical.input().distribution().clone(),
+            distribution,
             logical.input().append_only(),
-            watermark_columns,
+            logical.input().watermark_columns().clone(),
         );
         Self { base, logical }
     }
@@ -67,7 +72,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
 impl_plan_tree_node_for_unary! {StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode{
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::RowIdGen(RowIdGenNode {

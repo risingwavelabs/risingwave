@@ -131,6 +131,10 @@ message StreamSource {
   string source_name = 8;
 }
 
+// The executor only for receiving barrier from the meta service. It always resides in the leaves
+// of the streaming graph.
+message BarrierRecvNode {}
+
 message SourceNode {
   // The source node can contain either a stream source or nothing. So here we extract all
   // information about stream source to a message, and here it will be an `Option` in Rust.
@@ -142,8 +146,8 @@ message SinkDesc {
   string name = 2;
   string definition = 3;
   repeated plan_common.ColumnDesc columns = 4;
-  repeated common.ColumnOrder pk = 5;
-  repeated uint32 stream_key = 6;
+  repeated common.ColumnOrder plan_pk = 5;
+  repeated uint32 downstream_pk = 6;
   repeated uint32 distribution_key = 7;
   map<string, string> properties = 8;
   catalog.SinkType sink_type = 9;
@@ -553,7 +557,8 @@ message StreamNode {
     NowNode now = 129;
     GroupTopNNode append_only_group_top_n = 130;
     TemporalJoinNode temporal_join = 131;
-    ValuesNode values = 132;
+    BarrierRecvNode barrier_recv = 132;
+    ValuesNode values = 133;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
@@ -639,9 +644,10 @@ enum FragmentTypeFlag {
   SOURCE = 1;
   MVIEW = 2;
   SINK = 4;
-  NOW = 8;
+  NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
   CHAIN_NODE = 16;
-  VALUES = 32;
+  BARRIER_RECV = 32;
+  VALUES = 64;
 }
 
 // The environment associated with a stream plan

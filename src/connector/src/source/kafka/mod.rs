@@ -17,16 +17,19 @@ use std::time::Duration;
 use serde::Deserialize;
 
 pub mod enumerator;
+pub mod private_link;
 pub mod source;
 pub mod split;
 
 pub use enumerator::*;
+pub use private_link::*;
 pub use source::*;
 pub use split::*;
 
 use crate::common::KafkaCommon;
-
 pub const KAFKA_CONNECTOR: &str = "kafka";
+pub const KAFKA_PROPS_BROKER_KEY: &str = "properties.bootstrap.server";
+pub const KAFKA_PROPS_BROKER_KEY_ALIAS: &str = "kafka.brokers";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct KafkaProperties {

@@ -18,9 +18,7 @@ use risingwave_common::error::Result;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeNode, MergeSortExchangeNode};
 
-use super::{
-    ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch,
-};
+use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
 use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, DistributionDisplay, Order, OrderDisplay};
 
@@ -76,7 +74,7 @@ impl ToDistributedBatch for BatchExchange {
 }
 
 /// The serialization of Batch Exchange is default cuz it will be rewritten in scheduler.
-impl ToBatchProst for BatchExchange {
+impl ToBatchPb for BatchExchange {
     fn to_batch_prost_body(&self) -> NodeBody {
         if self.base.order.is_any() {
             NodeBody::Exchange(ExchangeNode {

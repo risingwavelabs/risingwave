@@ -15,7 +15,7 @@
 use std::ops::Index;
 
 use itertools::Itertools;
-use risingwave_pb::plan_common::{ColumnDesc as ProstColumnDesc, Field as ProstField};
+use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
@@ -40,8 +40,8 @@ impl std::fmt::Debug for Field {
 }
 
 impl Field {
-    pub fn to_prost(&self) -> ProstField {
-        ProstField {
+    pub fn to_prost(&self) -> PbField {
+        PbField {
             data_type: Some(self.data_type.to_protobuf()),
             name: self.name.to_string(),
         }
@@ -74,8 +74,8 @@ impl From<ColumnDesc> for Field {
     }
 }
 
-impl From<&ProstColumnDesc> for Field {
-    fn from(pb_column_desc: &ProstColumnDesc) -> Self {
+impl From<&PbColumnDesc> for Field {
+    fn from(pb_column_desc: &PbColumnDesc) -> Self {
         Self {
             data_type: pb_column_desc.column_type.as_ref().unwrap().into(),
             name: pb_column_desc.name.clone(),
@@ -118,6 +118,11 @@ pub struct Schema {
 }
 
 impl Schema {
+    pub fn empty() -> &'static Self {
+        static EMPTY: Schema = Schema { fields: Vec::new() };
+        &EMPTY
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
@@ -157,7 +162,7 @@ impl Schema {
             .collect()
     }
 
-    pub fn to_prost(&self) -> Vec<ProstField> {
+    pub fn to_prost(&self) -> Vec<PbField> {
         self.fields
             .clone()
             .into_iter()
@@ -219,8 +224,8 @@ impl Field {
     }
 }
 
-impl From<&ProstField> for Field {
-    fn from(prost_field: &ProstField) -> Self {
+impl From<&PbField> for Field {
+    fn from(prost_field: &PbField) -> Self {
         Self {
             data_type: DataType::from(prost_field.get_data_type().expect("data type not found")),
             name: prost_field.get_name().clone(),

@@ -16,7 +16,7 @@ use risingwave_common::array::list_array::display_for_explain;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{literal_type_match, DataType, Datum};
 use risingwave_common::util::value_encoding::{deserialize_datum, serialize_datum};
-use risingwave_pb::data::Datum as ProstDatum;
+use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 
 use super::Expr;
@@ -110,7 +110,7 @@ impl Expr for Literal {
 /// Convert a literal value (datum) into protobuf.
 fn literal_to_value_encoding(d: &Datum) -> RexNode {
     let body = serialize_datum(d.as_ref());
-    RexNode::Constant(ProstDatum { body })
+    RexNode::Constant(PbDatum { body })
 }
 
 /// Convert protobuf into a literal value (datum).

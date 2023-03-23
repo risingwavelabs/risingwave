@@ -15,10 +15,8 @@
 use std::fmt;
 
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
-use risingwave_pb::stream_plan::{
-    DispatchStrategy, DispatcherType, ExchangeNode, StreamNode as ProstStreamPlan,
-};
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{DispatchStrategy, DispatcherType, ExchangeNode, PbStreamNode};
 
 use super::{ExprRewritable, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::plan_node::{LogicalShare, PlanBase, PlanTreeNode};
@@ -77,13 +75,13 @@ impl StreamShare {
 impl_plan_tree_node_for_unary! { StreamShare }
 
 impl StreamNode for StreamShare {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
         unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
     }
 }
 
 impl StreamShare {
-    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> ProstStreamPlan {
+    pub fn adhoc_to_stream_prost(&self, state: &mut BuildFragmentGraphState) -> PbStreamNode {
         let operator_id = self.base.id.0 as u32;
         let output_indices = (0..self.schema().len() as u32).collect_vec();
 
@@ -122,7 +120,7 @@ impl StreamShare {
                     }
                 };
 
-                let node_body = Some(ProstStreamNode::Exchange(ExchangeNode {
+                let node_body = Some(PbNodeBody::Exchange(ExchangeNode {
                     strategy: Some(dispatch_strategy),
                 }));
                 let input = self
@@ -131,7 +129,7 @@ impl StreamShare {
                     .map(|plan| plan.to_stream_prost(state))
                     .collect();
 
-                let stream_node = ProstStreamPlan {
+                let stream_node = PbStreamNode {
                     input,
                     identity: format!("{}", self),
                     node_body,

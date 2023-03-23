@@ -1,0 +1,70 @@
+# Test different statements(DDL,DQL,DML) in extended mode.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t(v int);
+
+statement ok
+explain create index i on t(v);
+
+statement ok
+create materialized view mv1 as select sum(v) as sum_v1 from t;
+
+statement ok
+insert into t (v) values (1);
+
+query T
+show create table t;
+----
+public.t CREATE TABLE t (v INT)
+
+query I
+select * from t;
+----
+1
+
+statement ok
+drop materialized view mv1
+
+statement ok
+drop table t;
+
+query I
+values(round(42.4382));
+----
+42
+
+statement ok
+create table t3 (v1 int, v2 int, v3 int);
+
+query TT
+describe t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+primary key _row_id
+
+query TT
+show columns from t3;
+----
+v1 Int32
+v2 Int32
+v3 Int32
+
+statement ok
+drop table t3;
+
+query T
+show RW_IMPLICIT_FLUSH;
+----
+true
+
+query I
+with t as (select generate_series(1,3,1)) select * from t;
+----
+1
+2
+3

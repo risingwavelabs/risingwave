@@ -19,7 +19,7 @@ use std::collections::HashSet;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::Result;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::catalog::View as ProstView;
+use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
 
 use super::RwPgResponse;
@@ -80,7 +80,7 @@ pub async fn handle_create_view(
             .collect()
     };
 
-    let view = ProstView {
+    let view = PbView {
         id: 0,
         schema_id,
         database_id,

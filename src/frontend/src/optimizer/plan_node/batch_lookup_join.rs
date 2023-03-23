@@ -25,7 +25,7 @@ use crate::expr::{Expr, ExprRewriter};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, LogicalJoin, PlanBase, PlanTreeNodeBinary,
-    PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::optimizer::PlanRef;
@@ -50,7 +50,7 @@ pub struct BatchLookupJoin {
     lookup_prefix_len: usize,
 
     /// If `distributed_lookup` is true, it will generate `DistributedLookupJoinNode` for
-    /// `ToBatchProst`. Otherwise, it will generate `LookupJoinNode`.
+    /// `ToBatchPb`. Otherwise, it will generate `LookupJoinNode`.
     distributed_lookup: bool,
 }
 
@@ -192,7 +192,7 @@ impl ToDistributedBatch for BatchLookupJoin {
     }
 }
 
-impl ToBatchProst for BatchLookupJoin {
+impl ToBatchPb for BatchLookupJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         if self.distributed_lookup {
             NodeBody::DistributedLookupJoin(DistributedLookupJoinNode {

@@ -71,6 +71,13 @@ message GroupMetaChange {
   repeated uint32 table_ids_remove = 2;
 }
 
+message GroupTableChange {
+  repeated uint32 table_ids = 1;
+  uint64 target_group_id = 2;
+  uint64 origin_group_id = 3;
+  uint64 new_sst_start_id = 4;
+}
+
 message GroupDestroy {}
 
 message GroupDelta {
@@ -79,6 +86,7 @@ message GroupDelta {
     GroupConstruct group_construct = 2;
     GroupDestroy group_destroy = 3;
     GroupMetaChange group_meta_change = 4;
+    GroupTableChange group_table_change = 5;
   }
 }
 
@@ -358,18 +366,25 @@ message CompactTaskProgress {
   uint32 num_ssts_uploaded = 3;
 }
 
-message ReportCompactionTaskProgressRequest {
-  uint32 context_id = 1;
-  repeated CompactTaskProgress progress = 2;
+// The measurement of the workload on a compactor to determine whether it is idle.
+message CompactorWorkload {
+  uint32 cpu = 1;
 }
 
-message ReportCompactionTaskProgressResponse {
+message CompactorHeartbeatRequest {
+  uint32 context_id = 1;
+  repeated CompactTaskProgress progress = 2;
+  CompactorWorkload workload = 3;
+}
+
+message CompactorHeartbeatResponse {
   common.Status status = 1;
 }
 
 message SubscribeCompactTasksRequest {
   uint32 context_id = 1;
   uint64 max_concurrent_task_number = 2;
+  uint32 cpu_core_num = 3;
 }
 
 message ValidationTask {
@@ -563,7 +578,7 @@ service HummockManagerService {
   rpc TriggerCompactionDeterministic(TriggerCompactionDeterministicRequest) returns (TriggerCompactionDeterministicResponse);
   rpc DisableCommitEpoch(DisableCommitEpochRequest) returns (DisableCommitEpochResponse);
   rpc ReportCompactionTasks(ReportCompactionTasksRequest) returns (ReportCompactionTasksResponse);
-  rpc ReportCompactionTaskProgress(ReportCompactionTaskProgressRequest) returns (ReportCompactionTaskProgressResponse);
+  rpc CompactorHeartbeat(CompactorHeartbeatRequest) returns (CompactorHeartbeatResponse);
   rpc PinSnapshot(PinSnapshotRequest) returns (PinSnapshotResponse);
   rpc PinSpecificSnapshot(PinSpecificSnapshotRequest) returns (PinSnapshotResponse);
   rpc GetEpoch(GetEpochRequest) returns (GetEpochResponse);
@@ -581,6 +596,7 @@ service HummockManagerService {
   rpc RiseCtlUpdateCompactionConfig(RiseCtlUpdateCompactionConfigRequest) returns (RiseCtlUpdateCompactionConfigResponse);
   rpc InitMetadataForReplay(InitMetadataForReplayRequest) returns (InitMetadataForReplayResponse);
   rpc SetCompactorRuntimeConfig(SetCompactorRuntimeConfigRequest) returns (SetCompactorRuntimeConfigResponse);
+  rpc GetScaleCompactor(GetScaleCompactorRequest) returns (GetScaleCompactorResponse);
   rpc PinVersion(PinVersionRequest) returns (PinVersionResponse);
   rpc SplitCompactionGroup(SplitCompactionGroupRequest) returns (SplitCompactionGroupResponse);
 }
@@ -605,6 +621,7 @@ message CompactionConfig {
   bool split_by_state_table = 14;
   // soft limit for max number of sub level number
   uint64 level0_stop_write_threshold_sub_level_number = 15;
+  uint64 level0_max_compact_file_number = 16;
 }
 
 message TableStats {
@@ -616,6 +633,15 @@ message TableStats {
 message HummockVersionStats {
   uint64 hummock_version_id = 1;
   map<uint32, TableStats> table_stats = 2;
+}
+
+message GetScaleCompactorRequest {}
+
+message GetScaleCompactorResponse {
+  uint64 suggest_cores = 1;
+  uint64 running_cores = 2;
+  uint64 total_cores = 3;
+  uint64 waiting_compaction_bytes = 4;
 }
 
 message WriteLimits {

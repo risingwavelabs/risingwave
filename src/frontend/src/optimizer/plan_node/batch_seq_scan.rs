@@ -22,9 +22,9 @@ use risingwave_common::util::scan_range::{is_full_range, ScanRange};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::row_seq_scan_node::ChunkSize;
 use risingwave_pb::batch_plan::{RowSeqScanNode, SysRowSeqScanNode};
-use risingwave_pb::plan_common::ColumnDesc as ProstColumnDesc;
+use risingwave_pb::plan_common::PbColumnDesc;
 
-use super::{ExprRewritable, PlanBase, PlanRef, ToBatchProst, ToDistributedBatch};
+use super::{ExprRewritable, PlanBase, PlanRef, ToBatchPb, ToDistributedBatch};
 use crate::catalog::ColumnId;
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalScan, ToLocalBatch};
@@ -214,13 +214,13 @@ impl ToDistributedBatch for BatchSeqScan {
     }
 }
 
-impl ToBatchProst for BatchSeqScan {
+impl ToBatchPb for BatchSeqScan {
     fn to_batch_prost_body(&self) -> NodeBody {
         let column_descs = self
             .logical
             .column_descs()
             .iter()
-            .map(ProstColumnDesc::from)
+            .map(PbColumnDesc::from)
             .collect();
 
         if self.logical.is_sys_table() {

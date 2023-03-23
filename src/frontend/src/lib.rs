@@ -62,6 +62,8 @@ mod user;
 pub mod health_service;
 mod monitor;
 
+mod telemetry;
+
 use std::ffi::OsString;
 use std::iter;
 use std::sync::Arc;
