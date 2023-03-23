@@ -6478,6 +6478,7 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "paste",
+ "pin-project",
  "pretty_assertions",
  "rand 0.8.5",
  "risingwave_common",
