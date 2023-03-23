@@ -947,7 +947,7 @@ impl BatchPlanFragmenter {
                 .get_fragment_mapping(&table_catalog.fragment_id)
                 .ok_or_else(|| {
                     anyhow!(
-                        "failed to get the vnode mapping for the `Materialize` of {}",
+                        "failed to get the vnode mapping for the `BatchLookupJoin` of {}",
                         table_catalog.name()
                     )
                 })?;

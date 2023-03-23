@@ -166,6 +166,7 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
+use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -1732,11 +1733,11 @@ where
         for table in table_catalogs {
             self.env
                 .notification_manager()
-                .notify_hummock(Operation::Add, Info::Table(table.clone()))
+                .notify_hummock_relation_info(Operation::Add, RelationInfo::Table(table.clone()))
                 .await;
             self.env
                 .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(table))
+                .notify_compactor_relation_info(Operation::Add, RelationInfo::Table(table))
                 .await;
         }
 
