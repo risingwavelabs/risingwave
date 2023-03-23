@@ -25,8 +25,8 @@ use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
 use risingwave_common::types::DataType;
 
 static SEED: u64 = 998244353u64;
-static CHUNK_SIZES: &'static [usize] = &[128, 1024];
-static NULL_RATIOS: &'static [f64] = &[0.001, 0.01, 0.5];
+static CHUNK_SIZES: &[usize] = &[128, 1024];
+static NULL_RATIOS: &[f64] = &[0.001, 0.01, 0.5];
 
 trait Case: Send + 'static {
     fn bench(&self, c: &mut Criterion);
@@ -77,10 +77,13 @@ struct HashKeyBenchCase<K: HashKey> {
     input_chunk: DataChunk,
     keys: Vec<K>,
     data_types: Vec<DataType>,
+    col_idxes: Vec<usize>,
 }
 
 impl<K: HashKey> HashKeyBenchCase<K> {
     pub fn new(id: String, input_chunk: DataChunk, data_types: Vec<DataType>) -> Self {
+        // please check the `bench_vec_dser` and `bench_deser` method when want to bench not full
+        // `col_idxes`
         let col_idxes = (0..input_chunk.columns().len()).collect_vec();
         let keys = HashKey::build(&col_idxes, &input_chunk).unwrap();
         Self {
@@ -88,17 +91,18 @@ impl<K: HashKey> HashKeyBenchCase<K> {
             input_chunk,
             keys,
             data_types,
+            col_idxes,
         }
     }
 
-    pub fn bench_vec_ser(&self, c: &mut Criterion, col_idxes: &[usize]) {
+    pub fn bench_vec_ser(&self, c: &mut Criterion) {
         let vectorize_serialize_id = "vec ser ".to_string() + &self.id;
         c.bench_function(&vectorize_serialize_id, |b| {
-            b.iter(|| K::build(&col_idxes, &self.input_chunk).unwrap())
+            b.iter(|| K::build(&self.col_idxes, &self.input_chunk).unwrap())
         });
     }
 
-    pub fn bench_vec_deser(&self, c: &mut Criterion, _: &[usize]) {
+    pub fn bench_vec_deser(&self, c: &mut Criterion) {
         let vectorize_deserialize_id = "vec deser ".to_string() + &self.id;
         c.bench_function(&vectorize_deserialize_id, |b| {
             let mut array_builders = self
@@ -116,7 +120,7 @@ impl<K: HashKey> HashKeyBenchCase<K> {
         });
     }
 
-    pub fn bench_deser(&self, c: &mut Criterion, _: &[usize]) {
+    pub fn bench_deser(&self, c: &mut Criterion) {
         let vectorize_deserialize_id = "row deser ".to_string() + &self.id;
         c.bench_function(&vectorize_deserialize_id, |b| {
             b.iter(|| {
@@ -129,10 +133,9 @@ impl<K: HashKey> HashKeyBenchCase<K> {
 }
 impl<K: HashKey> Case for HashKeyBenchCase<K> {
     fn bench(&self, c: &mut Criterion) {
-        let col_idxes = (0..self.input_chunk.columns().len()).collect_vec();
-        self.bench_vec_ser(c, &col_idxes);
-        self.bench_vec_deser(c, &col_idxes);
-        self.bench_deser(c, &col_idxes);
+        self.bench_vec_ser(c);
+        self.bench_vec_deser(c);
+        self.bench_deser(c);
     }
 }
 
@@ -216,7 +219,7 @@ fn bench_hash_key_encoding(c: &mut Criterion) {
     }
 }
 
-// cargo bench -- "KeySerialized[\s\S]*null ratio 0.001$" bench all the `KeySerialized` hash key
-// cases with data's null ratio is 0,001
+// cargo bench -- "vec ser[\s\S]*KeySerialized[\s\S]*null ratio 0.001$" bench all the
+// `KeySerialized` hash key vectorized serialize cases with data's null ratio is 0,001
 criterion_group!(benches, bench_hash_key_encoding);
 criterion_main!(benches);
