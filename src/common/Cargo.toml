@@ -111,3 +111,7 @@ harness = false
 [[bench]]
 name = "bitmap"
 harness = false
+
+[[bench]]
+name = "bench_hash_key_encoding"
+harness = false
