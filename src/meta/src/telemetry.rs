@@ -29,6 +29,74 @@ use crate::storage::{MetaStore, Snapshot};
 pub const TELEMETRY_CF: &str = "cf/telemetry";
 /// `telemetry` in bytes
 pub const TELEMETRY_KEY: &[u8] = &[74, 65, 0x6c, 65, 0x6d, 65, 74, 72, 79];
+#[derive(Clone, Debug)]
+pub(crate) struct TrackingId(String);
+
+impl TrackingId {
+    pub(crate) fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+
+    pub(crate) fn from_bytes(bytes: Vec<u8>) -> anyhow::Result<Self> {
+        Ok(Self(String::from_utf8(bytes)?))
+    }
+
+    pub(crate) async fn from_meta_store(meta_store: &Arc<impl MetaStore>) -> anyhow::Result<Self> {
+        match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
+            Ok(bytes) => Self::from_bytes(bytes)
+                .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
+            Err(e) => Err(anyhow::format_err!("tracking_id not exist, {}", e)),
+        }
+    }
+
+    pub(crate) async fn from_snapshot<S: MetaStore>(s: &S::Snapshot) -> MetadataModelResult<Self> {
+        let bytes = s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
+        Self::from_bytes(bytes).map_err(MetadataModelError::internal)
+    }
+
+    /// fetch or create a `tracking_id` from etcd
+    pub(crate) async fn get_or_create_meta_store(
+        meta_store: &Arc<impl MetaStore>,
+    ) -> Result<Self, anyhow::Error> {
+        match Self::from_meta_store(meta_store).await {
+            Ok(id) => Ok(id),
+            Err(_) => {
+                let tracking_id = Self::new();
+                tracking_id.clone().put_at_meta_store(meta_store).await?;
+                Ok(tracking_id)
+            }
+        }
+    }
+
+    pub(crate) async fn put_at_meta_store(
+        &self,
+        meta_store: &Arc<impl MetaStore>,
+    ) -> anyhow::Result<()> {
+        // put new uuid in meta store
+        match meta_store
+            .put_cf(
+                TELEMETRY_CF,
+                TELEMETRY_KEY.to_vec(),
+                self.0.clone().into_bytes(),
+            )
+            .await
+        {
+            Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
+            Ok(_) => Ok(()),
+        }
+    }
+}
+
+impl From<TrackingId> for String {
+    fn from(value: TrackingId) -> Self {
+        value.0
+    }
+}
+impl From<String> for TrackingId {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct MetaTelemetryReport {
@@ -71,72 +139,12 @@ impl<S: MetaStore> MetaTelemetryInfoFetcher<S> {
 #[async_trait::async_trait]
 impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
     async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
-        let tracking_id = get_or_create_tracking_id(&self.meta_store).await?;
+        let tracking_id = TrackingId::from_meta_store(&self.meta_store).await?;
 
-        Ok(tracking_id)
+        Ok(tracking_id.into())
     }
 }
 
-/// fetch or create a `tracking_id` from etcd
-pub(crate) async fn get_or_create_tracking_id(
-    meta_store: &Arc<impl MetaStore>,
-) -> Result<String, anyhow::Error> {
-    match get_tracking_id_meta_store(meta_store).await {
-        Ok(id) => Ok(id),
-        Err(_) => create_tracking_id_meta_store(meta_store).await,
-    }
-}
-
-pub(crate) async fn create_tracking_id_meta_store(
-    meta_store: &Arc<impl MetaStore>,
-) -> Result<String, anyhow::Error> {
-    let tracking_id = Uuid::new_v4().to_string();
-    match put_tracking_id(tracking_id.clone(), meta_store).await {
-        Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
-        Ok(_) => Ok(tracking_id),
-    }
-}
-
-pub(crate) async fn get_tracking_id_meta_store(
-    meta_store: &Arc<impl MetaStore>,
-) -> anyhow::Result<String> {
-    match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(bytes) => String::from_utf8(bytes)
-            .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
-        Err(e) => Err(anyhow::format_err!("tracking_id not exist, {}", e)),
-    }
-}
-
-pub(crate) async fn get_tracking_id_snapshot<S: MetaStore>(
-    s: &S::Snapshot,
-) -> MetadataModelResult<String> {
-    let bytes = s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
-    String::from_utf8(bytes).map_err(MetadataModelError::internal)
-    // match s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-    //     Ok(bytes) => String::from_utf8(bytes)
-    //         .map_err(MetadataModelError::internal)
-    //         .map(|id| Some(id)),
-    //     Err(e) => Err(MetadataModelError::internal(e)),
-    // }
-}
-
-pub(crate) async fn put_tracking_id(
-    tracking_id: String,
-    meta_store: &Arc<impl MetaStore>,
-) -> anyhow::Result<()> {
-    // put new uuid in meta store
-    match meta_store
-        .put_cf(
-            TELEMETRY_CF,
-            TELEMETRY_KEY.to_vec(),
-            tracking_id.clone().into_bytes(),
-        )
-        .await
-    {
-        Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
-        Ok(_) => Ok(()),
-    }
-}
 #[derive(Copy, Clone)]
 pub(crate) struct MetaReportCreator {}
 
@@ -168,43 +176,42 @@ mod tests {
     use super::*;
     use crate::storage::MemStore;
 
-    #[tokio::test]
-    async fn test_put_tracking_id() {
-        let meta_store = Arc::new(MemStore::default());
-        let tracking_id = Uuid::new_v4().to_string();
+    #[test]
+    fn test_tracking_id_new() {
+        let tracking_id = TrackingId::new();
+        assert!(!tracking_id.0.is_empty());
+    }
 
-        let result = put_tracking_id(tracking_id.clone(), &meta_store).await;
-        assert!(result.is_ok());
+    #[test]
+    fn test_tracking_id_from_bytes() {
+        let tracking_id = TrackingId::new();
+        let bytes = tracking_id.0.clone().into_bytes();
+        let new_tracking_id = TrackingId::from_bytes(bytes).unwrap();
+        assert_eq!(tracking_id.0, new_tracking_id.0);
     }
 
     #[tokio::test]
-    async fn test_get_tracking_id() {
-        let meta_store = Arc::new(MemStore::default());
-        let tracking_id = Uuid::new_v4().to_string();
+    async fn test_tracking_id_put_and_get_from_meta_store() {
+        let meta_store = Arc::new(MemStore::new());
+        let tracking_id = TrackingId::new();
 
-        put_tracking_id(tracking_id.clone(), &meta_store)
-            .await
-            .unwrap();
-        let result = get_tracking_id_meta_store(&meta_store).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), tracking_id);
+        tracking_id.put_at_meta_store(&meta_store).await.unwrap();
+        let fetched_tracking_id = TrackingId::from_meta_store(&meta_store).await.unwrap();
+        assert_eq!(tracking_id.0, fetched_tracking_id.0);
     }
 
     #[tokio::test]
-    async fn test_get_or_create_tracking_id() {
-        let meta_store = Arc::new(MemStore::default());
-        let tracking_id = Uuid::new_v4().to_string();
+    async fn test_tracking_id_get_or_create_meta_store() {
+        let meta_store = Arc::new(MemStore::new());
 
-        // Test when there is no existing tracking ID.
-        let result = get_or_create_tracking_id(&meta_store).await;
-        assert!(result.is_ok());
-
-        // Test when there is an existing tracking ID.
-        put_tracking_id(tracking_id.clone(), &meta_store)
+        let tracking_id = TrackingId::get_or_create_meta_store(&meta_store)
             .await
             .unwrap();
-        let result = get_or_create_tracking_id(&meta_store).await;
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), tracking_id);
+        assert!(!tracking_id.0.is_empty());
+
+        let fetched_tracking_id = TrackingId::get_or_create_meta_store(&meta_store)
+            .await
+            .unwrap();
+        assert_eq!(tracking_id.0, fetched_tracking_id.0);
     }
 }

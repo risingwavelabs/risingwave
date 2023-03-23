@@ -28,7 +28,7 @@ use risingwave_pb::user::UserInfo;
 use crate::manager::model::SystemParamsModel;
 use crate::model::MetadataModel;
 use crate::storage::{MetaStore, Snapshot, DEFAULT_COLUMN_FAMILY};
-use crate::telemetry::get_tracking_id_snapshot;
+use crate::telemetry::TrackingId;
 
 const VERSION: u32 = 1;
 
@@ -101,9 +101,10 @@ impl<S: MetaStore> MetaSnapshotBuilder<S> {
             .ok_or_else(|| anyhow!("system params not found in meta store"))?;
 
         // tracking_id is always created in meta store
-        let tracking_id = get_tracking_id_snapshot::<S>(&meta_store_snapshot)
+        let tracking_id = TrackingId::from_snapshot::<S>(&meta_store_snapshot)
             .await
-            .map_err(|_| anyhow!("tracking id not found in meta store"))?;
+            .map_err(|_| anyhow!("tracking id not found in meta store"))?
+            .into();
 
         self.snapshot.metadata = ClusterMetadata {
             default_cf,
@@ -159,7 +160,7 @@ mod tests {
     use crate::manager::model::SystemParamsModel;
     use crate::model::MetadataModel;
     use crate::storage::{MemStore, MetaStore, DEFAULT_COLUMN_FAMILY};
-    use crate::telemetry::create_tracking_id_meta_store;
+    use crate::telemetry::TrackingId;
 
     #[tokio::test]
     async fn test_snapshot_builder() {
@@ -207,7 +208,10 @@ mod tests {
         let err = assert_matches!(err, BackupError::Other(e) => e);
         assert_eq!("tracking id not found in meta store", err.to_error_str());
 
-        create_tracking_id_meta_store(&meta_store).await.unwrap();
+        TrackingId::new()
+            .put_at_meta_store(&meta_store)
+            .await
+            .unwrap();
 
         let mut builder = MetaSnapshotBuilder::new(meta_store.clone());
         builder.build(1).await.unwrap();
