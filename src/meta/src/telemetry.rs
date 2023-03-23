@@ -78,22 +78,28 @@ impl<S: MetaStore> TelemetryInfoFetcher for MetaTelemetryInfoFetcher<S> {
 }
 
 /// fetch or create a `tracking_id` from etcd
-async fn get_or_create_tracking_id(
+pub(crate) async fn get_or_create_tracking_id(
     meta_store: &Arc<impl MetaStore>,
 ) -> Result<String, anyhow::Error> {
-    match get_tracking_id(meta_store).await {
+    match get_tracking_id_meta_store(meta_store).await {
         Ok(id) => Ok(id),
-        Err(_) => {
-            let tracking_id = Uuid::new_v4().to_string();
-            match put_tracking_id(tracking_id.clone(), meta_store).await {
-                Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
-                Ok(_) => Ok(tracking_id),
-            }
-        }
+        Err(_) => create_tracking_id_meta_store(meta_store).await,
     }
 }
 
-pub(crate) async fn get_tracking_id(meta_store: &Arc<impl MetaStore>) -> anyhow::Result<String> {
+pub(crate) async fn create_tracking_id_meta_store(
+    meta_store: &Arc<impl MetaStore>,
+) -> Result<String, anyhow::Error> {
+    let tracking_id = Uuid::new_v4().to_string();
+    match put_tracking_id(tracking_id.clone(), meta_store).await {
+        Err(e) => Err(anyhow!("failed to create uuid, {}", e)),
+        Ok(_) => Ok(tracking_id),
+    }
+}
+
+pub(crate) async fn get_tracking_id_meta_store(
+    meta_store: &Arc<impl MetaStore>,
+) -> anyhow::Result<String> {
     match meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
         Ok(bytes) => String::from_utf8(bytes)
             .map_err(|e| anyhow::format_err!("failed to parse tracking_id {}", e)),
@@ -103,13 +109,15 @@ pub(crate) async fn get_tracking_id(meta_store: &Arc<impl MetaStore>) -> anyhow:
 
 pub(crate) async fn get_tracking_id_snapshot<S: MetaStore>(
     s: &S::Snapshot,
-) -> MetadataModelResult<Option<String>> {
-    match s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
-        Ok(bytes) => String::from_utf8(bytes)
-            .map_err(MetadataModelError::internal)
-            .map(|id| Some(id)),
-        Err(e) => Err(MetadataModelError::internal(e)),
-    }
+) -> MetadataModelResult<String> {
+    let bytes = s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await?;
+    String::from_utf8(bytes).map_err(MetadataModelError::internal)
+    // match s.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
+    //     Ok(bytes) => String::from_utf8(bytes)
+    //         .map_err(MetadataModelError::internal)
+    //         .map(|id| Some(id)),
+    //     Err(e) => Err(MetadataModelError::internal(e)),
+    // }
 }
 
 pub(crate) async fn put_tracking_id(
@@ -177,7 +185,7 @@ mod tests {
         put_tracking_id(tracking_id.clone(), &meta_store)
             .await
             .unwrap();
-        let result = get_tracking_id(&meta_store).await;
+        let result = get_tracking_id_meta_store(&meta_store).await;
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), tracking_id);
     }

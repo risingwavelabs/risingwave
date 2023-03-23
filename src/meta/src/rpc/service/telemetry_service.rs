@@ -20,7 +20,7 @@ use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
 
 use crate::storage::MetaStore;
-use crate::telemetry::get_tracking_id;
+use crate::telemetry::get_tracking_id_meta_store;
 
 pub struct TelemetryInfoServiceImpl<S: MetaStore> {
     meta_store: Arc<S>,
@@ -33,7 +33,7 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
 
     async fn get_tracking_id(&self) -> Option<String> {
         match self.meta_store.meta_store_type() {
-            MetaBackend::Etcd => get_tracking_id(&self.meta_store).await.ok(),
+            MetaBackend::Etcd => get_tracking_id_meta_store(&self.meta_store).await.ok(),
             MetaBackend::Mem => None,
         }
     }
