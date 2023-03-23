@@ -216,5 +216,7 @@ fn bench_hash_key_encoding(c: &mut Criterion) {
     }
 }
 
+// cargo bench -- "KeySerialized[\s\S]*null ratio 0.001$" bench all the `KeySerialized` hash key
+// cases with data's null ratio is 0,001
 criterion_group!(benches, bench_hash_key_encoding);
 criterion_main!(benches);
