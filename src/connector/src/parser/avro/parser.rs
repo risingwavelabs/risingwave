@@ -448,7 +448,6 @@ mod test {
 
     fn build_rw_columns() -> Vec<SourceColumnDesc> {
         vec![
-
             SourceColumnDesc::simple("id", DataType::Int32, ColumnId::from(0)),
             SourceColumnDesc::simple("sequence_id", DataType::Int64, ColumnId::from(1)),
             SourceColumnDesc::simple("name", DataType::Varchar, ColumnId::from(2)),
