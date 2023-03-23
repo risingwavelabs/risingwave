@@ -130,10 +130,16 @@ pub async fn rpc_serve(
                     .map_err(|e| anyhow::anyhow!("failed to connect etcd {}", e))?;
             let meta_store = Arc::new(EtcdMetaStore::new(client));
 
+            // `with_keep_alive` option will break the long connection in election client.
+            let mut election_options = ConnectOptions::default();
+            if let Some((username, password)) = &credentials {
+                election_options = election_options.with_user(username, password)
+            }
+
             let election_client = Arc::new(
                 EtcdElectionClient::new(
                     endpoints,
-                    Some(options),
+                    Some(election_options),
                     auth_enabled,
                     address_info.advertise_addr.clone(),
                 )

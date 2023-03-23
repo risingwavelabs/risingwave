@@ -21,7 +21,7 @@ impl From<Message<Vec<u8>>> for SourceMessage {
         let message_id = msg.message_id.id;
 
         SourceMessage {
-            payload: Some(msg.payload.data.into()),
+            payload: Some(msg.payload.data),
             offset: format!(
                 "{}:{}:{}:{}",
                 message_id.ledger_id,

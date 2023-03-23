@@ -5,3 +5,6 @@
 [system]
 barrier_interval_ms = 250
 checkpoint_frequency = 4
+
+[server]
+telemetry_enabled = false

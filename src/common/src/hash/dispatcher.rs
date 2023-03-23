@@ -19,7 +19,7 @@ use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum HashKeyKind {
+pub enum HashKeyKind {
     Key8,
     Key16,
     Key32,
@@ -120,7 +120,7 @@ const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
-fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
+pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }
