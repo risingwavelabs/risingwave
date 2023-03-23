@@ -17,7 +17,7 @@ use risingwave_expr_macro::build_function;
 
 use super::{BoxedExpression, Result};
 
-#[build_function("now() -> timestamp")]
+#[build_function("now(timestamptz) -> timestamptz")]
 fn build_now_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
     // there should be exact 1 child containing a timestamp literal
     Ok(children.into_iter().next().unwrap())
