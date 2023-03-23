@@ -85,9 +85,26 @@ pub fn infer_some_all(
     ];
     let sig = infer_type_name(&FUNC_SIG_MAP, final_type, &actuals)?;
     if DataTypeName::from(inputs[0].return_type()) != sig.inputs_type[0] {
+        if matches!(
+            sig.inputs_type[0],
+            DataTypeName::List | DataTypeName::Struct
+        ) {
+            return Err(ErrorCode::BindError(
+                "array of array/struct on right are not supported yet".into(),
+            )
+            .into());
+        }
         inputs[0] = inputs[0].clone().cast_implicit(sig.inputs_type[0].into())?;
     }
     if element_type != Some(sig.inputs_type[1]) {
+        if matches!(
+            sig.inputs_type[1],
+            DataTypeName::List | DataTypeName::Struct
+        ) {
+            return Err(
+                ErrorCode::BindError("array/struct on left are not supported yet".into()).into(),
+            );
+        }
         inputs[1] = inputs[1].clone().cast_implicit(DataType::List {
             datatype: Box::new(sig.inputs_type[1].into()),
         })?;
