@@ -46,7 +46,7 @@ use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 ///
 /// Our columns are v1, v2, v3.
 /// Then, if the Visibility Mask hides rows 2 and 4,
-/// We will only have these columns visible:
+/// We will only have these rows visible:
 /// | v1 | v2 | v3 |
 /// |----|----|----|
 /// | 1  | a  | t  |
