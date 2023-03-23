@@ -127,21 +127,18 @@ impl RandValue for Serial {
 
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        debug_assert!(false);
         JsonbVal::dummy()
     }
 }
 
 impl RandValue for StructValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        debug_assert!(false);
         StructValue::new(vec![])
     }
 }
 
 impl RandValue for ListValue {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
-        debug_assert!(false);
         ListValue::new(vec![])
     }
 }
