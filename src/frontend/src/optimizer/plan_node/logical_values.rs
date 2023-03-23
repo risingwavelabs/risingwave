@@ -15,20 +15,23 @@
 use std::sync::Arc;
 use std::{fmt, vec};
 
+use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::Result;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::util::iter_util::ZipEqFast;
+use tracing::debug;
 
 use super::{
-    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
-    StreamValues, ToBatch, ToStream, LogicalRowIdGen,
+    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
+    PredicatePushdown, StreamValues, ToBatch, ToStream,
 };
-use crate::expr::{Expr, ExprImpl, ExprRewriter};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{FunctionalDependencySet, RequiredDist, Order};
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
@@ -48,6 +51,26 @@ impl LogicalValues {
         }
         let functional_dependency = FunctionalDependencySet::new(schema.len());
         let base = PlanBase::new_logical(ctx, schema, vec![], functional_dependency);
+        Self {
+            rows: rows.into(),
+            base,
+        }
+    }
+
+    /// Used only by `LogicalValues.rewrite_logical_for_stream, set the `_row_id` column as pk
+    fn new_with_pk(
+        rows: Vec<Vec<ExprImpl>>,
+        schema: Schema,
+        ctx: OptimizerContextRef,
+        pk_index: usize,
+    ) -> Self {
+        for exprs in &rows {
+            for (i, expr) in exprs.iter().enumerate() {
+                assert_eq!(schema.fields()[i].data_type(), expr.return_type())
+            }
+        }
+        let functional_dependency = FunctionalDependencySet::new(schema.len());
+        let base = PlanBase::new_logical(ctx, schema, vec![pk_index], functional_dependency);
         Self {
             rows: rows.into(),
             base,
@@ -141,7 +164,7 @@ impl ToStream for LogicalValues {
         _ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let row_id_index = self.schema().len();
-        let col_index_mapping = ColIndexMapping::identity(row_id_index);
+        let col_index_mapping = ColIndexMapping::identity_or_none(row_id_index, row_id_index + 1);
         let ctx = self.ctx().clone();
         let mut schema = self.schema().clone();
         schema.fields.push(Field {
@@ -151,9 +174,16 @@ impl ToStream for LogicalValues {
             type_name: "int64".to_string(),
         });
         let rows = self.rows().clone().to_owned();
-        let logical_values = Self::create(rows, schema, ctx);
-        let logical_row_id_gen = LogicalRowIdGen::new(logical_values, row_id_index);
-        Ok((logical_row_id_gen.into(), col_index_mapping))
+        let row_with_id = (0..rows.len())
+            .into_iter()
+            .zip_eq_fast(rows.into_iter())
+            .map(|(i, mut r)| {
+                r.extend_one(Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into());
+                r
+            })
+            .collect_vec();
+        let logical_values = Self::new_with_pk(row_with_id, schema, ctx, row_id_index);
+        Ok((logical_values.into(), col_index_mapping))
     }
 }
 

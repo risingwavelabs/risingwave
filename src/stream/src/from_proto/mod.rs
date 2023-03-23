@@ -44,6 +44,7 @@ mod top_n;
 mod top_n_appendonly;
 mod union;
 mod watermark_filter;
+mod values;
 
 // import for submodules
 use itertools::Itertools;
@@ -82,6 +83,7 @@ use self::union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{BoxedExecutor, Executor, ExecutorInfo};
+use crate::from_proto::values::ValuesExecutorBuilder;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
 #[async_trait::async_trait]
@@ -105,7 +107,7 @@ macro_rules! build_executor {
                     <$data_type>::new_boxed_executor($source, node, $store, $stream).await
                 },
             )*
-            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) | NodeBody::Values(_) => unreachable!()
+            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
         }
     }
 }
@@ -152,5 +154,6 @@ pub async fn create_executor(
         NodeBody::RowIdGen => RowIdGenExecutorBuilder,
         NodeBody::Now => NowExecutorBuilder,
         NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
+        NodeBody::Values => ValuesExecutorBuilder,
     }
 }

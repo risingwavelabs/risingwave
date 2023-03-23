@@ -259,7 +259,10 @@ impl TableFragments {
     /// Returns barrier inject actor ids.
     pub fn barrier_inject_actor_ids(&self) -> Vec<ActorId> {
         Self::filter_actor_ids(self, |fragment_type_mask| {
-            (fragment_type_mask & (FragmentTypeFlag::Source as u32 | FragmentTypeFlag::Now as u32))
+            (fragment_type_mask
+                & (FragmentTypeFlag::Source as u32
+                    | FragmentTypeFlag::Now as u32
+                    | FragmentTypeFlag::Values as u32))
                 != 0
         })
     }

@@ -93,6 +93,7 @@ mod union;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
+pub mod values;
 
 mod backfill;
 #[cfg(test)]

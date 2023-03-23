@@ -40,7 +40,7 @@ impl StreamValues {
     pub fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.ctx();
         let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
-        watermark_columns.set(0, true);
+        (0..(logical.schema().len()-1)).into_iter().for_each(|i| watermark_columns.set(i, true));
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),
@@ -67,6 +67,7 @@ impl fmt::Display for StreamValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StreamValues")
             .field("rows", &self.logical.rows())
+            .field("schema", &self.logical.schema())
             .finish()
     }
 }

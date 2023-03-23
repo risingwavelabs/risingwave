@@ -641,6 +641,7 @@ enum FragmentTypeFlag {
   SINK = 4;
   NOW = 8;
   CHAIN_NODE = 16;
+  VALUES = 32;
 }
 
 // The environment associated with a stream plan
