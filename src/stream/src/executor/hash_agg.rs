@@ -109,11 +109,14 @@ struct ExecutorInner<K: HashKey, S: StateStore> {
     /// Watermark epoch.
     watermark_epoch: AtomicU64Ref,
 
+    /// State cache size for extreme agg.
+    extreme_cache_size: usize,
+
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
 
-    /// State cache size for extreme agg.
-    extreme_cache_size: usize,
+    /// Should emit on window close according to watermark?
+    emit_on_window_close: bool,
 
     metrics: Arc<StreamingMetrics>,
 }
@@ -214,8 +217,9 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 result_table: args.result_table,
                 distinct_dedup_tables: args.distinct_dedup_tables,
                 watermark_epoch: args.watermark_epoch,
-                chunk_size: extra_args.chunk_size,
                 extreme_cache_size: args.extreme_cache_size,
+                chunk_size: extra_args.chunk_size,
+                emit_on_window_close: false,
                 metrics: extra_args.metrics,
             },
         })
@@ -385,12 +389,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         vars: &'a mut ExecutionVars<K, S>,
         epoch: EpochPair,
     ) {
-        let state_clean_watermark = vars
-            .buffered_watermarks
-            .first()
-            .and_then(|opt_watermark| opt_watermark.as_ref())
-            .map(|watermark| watermark.val.clone());
-
+        // Update metrics.
         let actor_id_str = this.actor_ctx.id.to_string();
         this.metrics
             .agg_lookup_miss_count
@@ -416,6 +415,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .with_label_values(&[&actor_id_str])
             .inc_by(vars.stats.chunk_total_lookup_count);
         vars.stats.chunk_total_lookup_count = 0;
+
+        // Get current watermark of window column.
+        let window_watermark = vars
+            .buffered_watermarks
+            .first()
+            .and_then(|opt_watermark| opt_watermark.as_ref())
+            .map(|watermark| &watermark.val);
 
         let n_dirty_group = vars.group_change_set.len();
 
@@ -456,14 +462,51 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         while let Some(futs) = futs_batches.next() {
             let changes = futures::future::try_join_all(futs).await?;
             for change in changes.into_iter().flatten() {
-                    apply_change_to_result_table(&change, &mut this.result_table);
+                apply_change_to_result_table(&change, &mut this.result_table);
+                if !this.emit_on_window_close {
+                    // For emit-on-updates, directly yield the change.
                     if let Some(chunk) =
                         apply_change_to_chunk_builder(&change, &mut vars.chunk_builder)
                     {
                         yield chunk;
                     }
-                    }
+                }
             }
+        }
+
+        // Emit result rows under the watermark.
+        if this.emit_on_window_close && window_watermark.is_some() {
+            let pk_range = (
+                Bound::<row::Empty>::Unbounded,
+                Bound::Included([window_watermark.clone()]), // TODO(): include or exclude?
+            );
+
+            let streams = futures::future::try_join_all(
+                this.result_table.vnode_bitmap().iter_vnodes().map(|vnode| {
+                    this.result_table.iter_with_pk_range(
+                        &pk_range,
+                        vnode,
+                        PrefetchOptions::new_for_exhaust_iter(),
+                    )
+                }),
+            )
+            .await?
+            .into_iter()
+            .map(Box::pin);
+
+            #[for_await]
+            for row in stream::select_all(streams) {
+                let row = row?;
+                if let Some(chunk) = apply_change_to_chunk_builder(
+                    &AggChange::Insert { new_row: row },
+                    &mut vars.chunk_builder,
+                ) {
+                    yield chunk;
+                }
+            }
+
+            // State cleaning mechanism will clean these rows from result table later when
+            // committing state tables.
         }
 
         // Yield the remaining rows in chunk builder.
@@ -474,7 +517,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         if n_dirty_group > 0 {
             // Commit all state tables.
             futures::future::try_join_all(this.all_state_tables_mut().map(|table| async {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
+                if let Some(watermark) = window_watermark {
                     table.update_watermark(watermark.clone())
                 };
                 table.commit(epoch).await
@@ -484,7 +527,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             // Nothing is expected to be changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
-                if let Some(watermark) = state_clean_watermark.as_ref() {
+                if let Some(watermark) = window_watermark {
                     table.update_watermark(watermark.clone())
                 };
                 table.commit_no_data_expected(epoch);
@@ -543,14 +586,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(mut watermark) => {
+                Message::Watermark(watermark) => {
                     let group_key_seq = group_key_invert_idx[watermark.col_idx];
                     if let Some(group_key_seq) = group_key_seq {
-                        watermark.col_idx = group_key_seq;
-                        vars.buffered_watermarks[group_key_seq] = Some(watermark);
+                        vars.buffered_watermarks[group_key_seq] =
+                            Some(watermark.with_idx(group_key_seq));
                     }
                 }
-
                 Message::Chunk(chunk) => {
                     Self::apply_chunk(&mut this, &mut vars, chunk).await?;
                 }
