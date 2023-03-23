@@ -339,51 +339,49 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
             }
         })
     }
+}
 
-    pub fn apply_change_to_builders(
-        &self,
-        change: &AggChange,
-        builders: &mut [ArrayBuilderImpl],
-        ops: &mut Vec<Op>,
-    ) {
-        match change {
-            AggChange::Insert { new_row } => {
-                trace!("insert row: {:?}", new_row);
-                ops.push(Op::Insert);
-                for (builder, new_value) in builders.iter_mut().zip_eq_fast(new_row.iter()) {
-                    builder.append_datum(new_value);
-                }
+pub fn apply_change_to_builders(
+    change: &AggChange,
+    builders: &mut [ArrayBuilderImpl],
+    ops: &mut Vec<Op>,
+) {
+    match change {
+        AggChange::Insert { new_row } => {
+            trace!("insert row: {:?}", new_row);
+            ops.push(Op::Insert);
+            for (builder, new_value) in builders.iter_mut().zip_eq_fast(new_row.iter()) {
+                builder.append_datum(new_value);
             }
-            AggChange::Delete { old_row } => {
-                trace!("delete row: {:?}", old_row);
-                ops.push(Op::Delete);
-                for (builder, old_value) in builders.iter_mut().zip_eq_fast(old_row.iter()) {
-                    builder.append_datum(old_value);
-                }
+        }
+        AggChange::Delete { old_row } => {
+            trace!("delete row: {:?}", old_row);
+            ops.push(Op::Delete);
+            for (builder, old_value) in builders.iter_mut().zip_eq_fast(old_row.iter()) {
+                builder.append_datum(old_value);
             }
-            AggChange::Update { old_row, new_row } => {
-                trace!("update row: prev = {:?}, curr = {:?}", old_row, new_row);
-                ops.push(Op::UpdateDelete);
-                ops.push(Op::UpdateInsert);
-                for (builder, old_value, new_value) in
-                    itertools::multizip((builders.iter_mut(), old_row.iter(), new_row.iter()))
-                {
-                    builder.append_datum(old_value);
-                    builder.append_datum(new_value);
-                }
+        }
+        AggChange::Update { old_row, new_row } => {
+            trace!("update row: prev = {:?}, curr = {:?}", old_row, new_row);
+            ops.push(Op::UpdateDelete);
+            ops.push(Op::UpdateInsert);
+            for (builder, old_value, new_value) in
+                itertools::multizip((builders.iter_mut(), old_row.iter(), new_row.iter()))
+            {
+                builder.append_datum(old_value);
+                builder.append_datum(new_value);
             }
         }
     }
+}
 
-    pub fn apply_change_to_result_table(
-        &self,
-        change: &AggChange,
-        result_table: &mut StateTable<S>,
-    ) {
-        match change {
-            AggChange::Insert { new_row } => result_table.insert(new_row),
-            AggChange::Delete { old_row } => result_table.delete(old_row),
-            AggChange::Update { old_row, new_row } => result_table.update(old_row, new_row),
-        }
+pub fn apply_change_to_result_table<S: StateStore>(
+    change: &AggChange,
+    result_table: &mut StateTable<S>,
+) {
+    match change {
+        AggChange::Insert { new_row } => result_table.insert(new_row),
+        AggChange::Delete { old_row } => result_table.delete(old_row),
+        AggChange::Update { old_row, new_row } => result_table.update(old_row, new_row),
     }
 }
