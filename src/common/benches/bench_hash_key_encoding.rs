@@ -26,7 +26,7 @@ use risingwave_common::types::DataType;
 
 static SEED: u64 = 998244353u64;
 static CHUNK_SIZES: &[usize] = &[128, 1024];
-static NULL_RATIOS: &[f64] = &[0.001, 0.01, 0.5];
+static NULL_RATIOS: &[f64] = &[0.0, 0.01, 0.1];
 
 trait Case: Send + 'static {
     fn bench(&self, c: &mut Criterion);
@@ -172,7 +172,7 @@ fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -
     DataChunk::new(columns, size)
 }
 
-fn cases() -> Vec<HashKeyBenchCaseBuilder> {
+fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
     vec![
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Serial],
@@ -210,16 +210,15 @@ fn cases() -> Vec<HashKeyBenchCaseBuilder> {
 }
 
 fn bench_hash_key_encoding(c: &mut Criterion) {
-    let cases = cases();
-    for case in cases {
-        let cases = case.gen_cases();
+    for case_builder in case_builders() {
+        let cases = case_builder.gen_cases();
         for case in cases {
             case.bench(c);
         }
     }
 }
 
-// cargo bench -- "vec ser[\s\S]*KeySerialized[\s\S]*null ratio 0.001$" bench all the
+// `cargo bench -- "vec ser[\s\S]*KeySerialized[\s\S]*null ratio 0$"` bench all the
 // `KeySerialized` hash key vectorized serialize cases with data's null ratio is 0,001
 criterion_group!(benches, bench_hash_key_encoding);
 criterion_main!(benches);
