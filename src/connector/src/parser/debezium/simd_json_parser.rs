@@ -97,11 +97,11 @@ impl DebeziumJsonParser {
                 writer.update(|column| {
                     let before = simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        before.get(column.name_in_lower_case.as_str()),
                     )?;
                     let after = simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        after.get(column.name_in_lower_case.as_str()),
                     )?;
 
                     Ok((before, after))
@@ -120,7 +120,7 @@ impl DebeziumJsonParser {
                 writer.insert(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        after.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })
@@ -138,7 +138,7 @@ impl DebeziumJsonParser {
                 writer.delete(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        before.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })

@@ -50,8 +50,7 @@ def run_iceberg_demo():
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-sink")
 
-    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir,
-                   check=True)
+    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
     sleep(40)
 
     subprocess.run(["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "create-table"],

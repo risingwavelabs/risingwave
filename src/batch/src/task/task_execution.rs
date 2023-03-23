@@ -446,6 +446,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             ctx2,
         );
         self.runtime.spawn(alloc_stat_wrap_fut);
+
         Ok(())
     }
 
@@ -490,8 +491,18 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
                 // We prioritize abort signal over normal data chunks.
                 biased;
                 err_reason = &mut shutdown_rx => {
-                    state = TaskStatus::Aborted;
-                    error = Some(Aborted(err_reason.unwrap_or("".to_string())));
+                    match err_reason {
+                        Ok(reason_str) => {
+                            state = TaskStatus::Aborted;
+                            error = Some(Aborted(reason_str));
+                        }
+                        Err(_) => {
+                            // We use early close shutdown channel to cancel task.
+                            // Cancelling a task is different from aborting a task
+                            // in that it's not an error and should not be reported to user.
+                            state = TaskStatus::Cancelled;
+                        }
+                    }
                     break;
                 }
                 res = data_chunk_stream.next() => {
@@ -558,7 +569,7 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
         }
     }
 
-    pub fn abort_task(&self, err_msg: String) {
+    pub fn abort(&self, err_msg: String) {
         if let Some(sender) = self.shutdown_tx.lock().take() {
             // No need to set state to be Aborted here cuz it will be set by shutdown receiver.
             // Stop task execution.
@@ -567,6 +578,13 @@ impl<C: BatchTaskContext> BatchTaskExecution<C> {
             } else {
                 info!("Abort task {:?} done", self.task_id);
             }
+        };
+    }
+
+    pub fn cancel(&self) {
+        if let Some(sender) = self.shutdown_tx.lock().take() {
+            // Drop sender directly to mark cancel without error.
+            drop(sender);
         };
     }
 

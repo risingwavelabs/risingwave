@@ -108,16 +108,10 @@ pub async fn compute_node_serve(
     .unwrap();
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
 
-    let state_store_url = {
-        let from_local = opts
-            .state_store
-            .clone()
-            .unwrap_or_else(|| "hummock+memory".to_string());
-        system_params.state_store(from_local)
-    };
+    let state_store_url = system_params.state_store();
 
     let embedded_compactor_enabled =
-        embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
+        embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
     let storage_memory_bytes =
         total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
     let compute_memory_bytes =
@@ -152,7 +146,7 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &state_store_url,
+        state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
