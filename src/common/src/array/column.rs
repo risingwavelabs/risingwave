@@ -20,8 +20,16 @@ use risingwave_pb::data::PbColumn;
 use super::{Array, ArrayError, ArrayResult, I64Array};
 use crate::array::{ArrayImpl, ArrayRef};
 
-/// Column is owned by `DataChunk`. It consists of logic data type and physical array
-/// implementation.
+/// Column is owned by [`DataChunk`].
+/// It consists of logic data type and physical array implementation.
+/// It contains all datums bound to a [`Column`].
+/// For instance, given:
+/// | v1 | v2 |
+/// |----|----|
+/// | 1 |  a |
+/// | 1 |  b |
+/// | 1 |  c |
+/// [`ArrayRef`] will contain: [1,1,1]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Column {
     array: ArrayRef,

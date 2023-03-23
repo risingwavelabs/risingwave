@@ -34,7 +34,23 @@ use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 
-/// `DataChunk` is a collection of arrays with visibility mask.
+/// [`DataChunk`] is a collection of Columns,
+/// a with visibility mask for each row.
+/// For instance, we could have a [`DataChunk`] of this format.
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 2  | b  | f  |
+/// | 3  | c  | t  |
+/// | 4  | d  | f  |
+///
+/// Our columns are v1, v2, v3.
+/// Then, if the Visibility Mask hides rows 2 and 4,
+/// We will only have these columns visible:
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 3  | c  | t  |
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {
@@ -170,7 +186,18 @@ impl DataChunk {
     }
 
     /// `compact` will convert the chunk to compact format.
-    /// Compact format means that `visibility == None`.
+    /// Compacting removes the hidden rows, and returns a new visibility
+    /// mask which indicates this.
+    ///
+    /// `compact` has trade-offs:
+    ///
+    /// Cost:
+    /// It has to rebuild the each column, meaning it will incur cost
+    /// of copying over bytes from the original column array to the new one.
+    ///
+    /// Benefit:
+    /// The main benefit is that the data chunk is smaller, taking up less memory.
+    /// We can also save the cost of iterating over many hidden rows.
     pub fn compact(self) -> Self {
         match &self.vis2 {
             Vis::Compact(_) => self,
