@@ -52,6 +52,10 @@ use crate::task::AtomicU64Ref;
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 pub type JoinTypePrimitive = u8;
+
+/// Evict the cache every n messages.
+const EVICT_EVERY_N_MESSAGES: u32 = 1024;
+
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
     use super::JoinTypePrimitive;
@@ -242,6 +246,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
     chunk_size: usize,
+    /// Count the messages received, clear to 0 when counted to `EVICT_EVERY_N_MESSAGES`
+    cnt_messages_received: u32,
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
@@ -603,6 +609,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             metrics,
             chunk_size,
+            cnt_messages_received: 0,
             watermark_buffers,
         }
     }
@@ -672,6 +679,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, "left"])
                         .inc_by(left_time.as_nanos() as u64);
+                    self.evict_cache();
                 }
                 AlignedMessage::Right(chunk) => {
                     let mut right_time = Duration::from_nanos(0);
@@ -697,6 +705,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         .join_match_duration_ns
                         .with_label_values(&[&actor_id_str, "right"])
                         .inc_by(right_time.as_nanos() as u64);
+                    self.evict_cache();
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = minstant::Instant::now();
@@ -752,12 +761,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // `commit` them here.
         self.side_l.ht.flush(epoch).await?;
         self.side_r.ht.flush(epoch).await?;
-
-        // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict();
-        self.side_r.ht.evict();
-
         Ok(())
+    }
+
+    // We need to manually evict the cache.
+    fn evict_cache(&mut self) {
+        self.cnt_messages_received += 1;
+        if self.cnt_messages_received == EVICT_EVERY_N_MESSAGES {
+            self.side_l.ht.evict();
+            self.side_r.ht.evict();
+            self.cnt_messages_received = 0;
+        }
     }
 
     fn handle_watermark(
