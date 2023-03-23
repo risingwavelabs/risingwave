@@ -21,8 +21,8 @@ use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, apply_change_to_builders, apply_change_to_result_table,
-    iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
+    agg_call_filter_res, apply_change_to_result_table, iter_table_storage, AggStateStorage,
+    AlwaysOutput, DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -227,7 +227,7 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         vars: &mut ExecutionVars<S>,
         epoch: EpochPair,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        if vars.state_changed || vars.agg_group.is_uninitialized() {
+        let chunk = if vars.state_changed || vars.agg_group.is_uninitialized() {
             // Flush agg states.
             vars.agg_group
                 .flush_state_if_needed(&mut this.storages)
@@ -243,40 +243,31 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             )
             .await?;
 
-            // Create array builders.
-            // As the datatype is retrieved from schema, it contains both group key and aggregation
-            // state outputs.
-            let mut builders = this.info.schema.create_array_builders(2);
-            let mut ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            if let Some(change) = vars.agg_group.build_change(curr_outputs) {
-                apply_change_to_builders(&change, &mut builders, &mut ops);
-                apply_change_to_result_table(&change, &mut this.result_table);
-                this.result_table.commit(epoch).await?;
-            } else {
-                // Agg result is not changed.
-                this.result_table.commit_no_data_expected(epoch);
-                return Ok(None);
+            match vars.agg_group.build_change(curr_outputs) {
+                Some(change) => {
+                    apply_change_to_result_table(&change, &mut this.result_table);
+                    this.result_table.commit(epoch).await?;
+                    Some(change.to_stream_chunk(&this.info.schema.data_types()))
+                }
+                None => {
+                    // Agg result is not changed.
+                    this.result_table.commit_no_data_expected(epoch);
+                    None
+                }
             }
-
-            let columns = builders
-                .into_iter()
-                .map(|builder| builder.finish().into())
-                .collect();
-
-            let chunk = StreamChunk::new(ops, columns, None);
-
-            vars.state_changed = false;
-            Ok(Some(chunk))
         } else {
             // No state is changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
                 table.commit_no_data_expected(epoch);
             });
-            Ok(None)
-        }
+            None
+        };
+
+        vars.state_changed = false;
+        Ok(chunk)
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]

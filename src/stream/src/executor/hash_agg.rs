@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
+use std::ops::Bound;
 use std::ptr::NonNull;
 use std::sync::Arc;
 
@@ -24,14 +25,16 @@ use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
-use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
+use risingwave_common::hash::{HashKey, PrecomputedBuildHasher, VnodeBitmapExt};
+use risingwave_common::row;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChange, AggStateStorage, DistinctDeduplicater,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, ChunkBuilder, DistinctDeduplicater,
     OnlyOutputIfHasInput,
 };
 use super::{
@@ -42,7 +45,8 @@ use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::aggregation::{
-    apply_change_to_builders, apply_change_to_result_table, generate_agg_schema, AggCall, AggGroup,
+    apply_change_to_chunk_builder, apply_change_to_result_table, generate_agg_schema, AggCall,
+    AggGroup,
 };
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
@@ -136,6 +140,9 @@ struct ExecutionVars<K: HashKey, S: StateStore> {
 
     /// Buffer watermarks on group keys received since last barrier.
     buffered_watermarks: Vec<Option<Watermark>>,
+
+    /// Stream chunk builder.
+    chunk_builder: ChunkBuilder,
 }
 
 struct ExecutionStats {
@@ -372,22 +379,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         Ok(())
     }
 
-    fn construct_chunk(
-        this: &ExecutorInner<K, S>,
-        changes: impl IntoIterator<Item = AggChange>,
-    ) -> StreamChunk {
-        let mut builders = this.info.schema.create_array_builders(this.chunk_size * 2);
-        let mut ops = Vec::with_capacity(this.chunk_size * 2);
-        for change in changes {
-            apply_change_to_builders(&change, &mut builders, &mut ops);
-        }
-        let columns = builders
-            .into_iter()
-            .map(|builder| builder.finish().into())
-            .collect();
-        StreamChunk::new(ops, columns, None)
-    }
-
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn flush_data<'a>(
         this: &'a mut ExecutorInner<K, S>,
@@ -426,65 +417,61 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .inc_by(vars.stats.chunk_total_lookup_count);
         vars.stats.chunk_total_lookup_count = 0;
 
-        let dirty_cnt = vars.group_change_set.len();
-        if dirty_cnt > 0 {
-            // Flush agg states.
-            for key in &vars.group_change_set {
-                let agg_group = vars
+        let n_dirty_group = vars.group_change_set.len();
+
+        // Flush agg states if needed.
+        for key in &vars.group_change_set {
+            let agg_group = vars
+                .agg_group_cache
+                .get_mut(key)
+                .expect("changed group must have corresponding AggGroup")
+                .as_mut();
+            agg_group.flush_state_if_needed(&mut this.storages).await?;
+        }
+
+        let futs_of_all_groups = vars
+            .group_change_set
+            .drain()
+            .map(|key| {
+                // Get agg group of the key.
+                let mut ptr: NonNull<_> = vars
                     .agg_group_cache
-                    .get_mut(key)
+                    .get_mut(&key)
                     .expect("changed group must have corresponding AggGroup")
-                    .as_mut();
-                agg_group.flush_state_if_needed(&mut this.storages).await?;
-            }
+                    .into();
+                // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
+                // from `group_change_set` which is a set.
+                unsafe { ptr.as_mut() }
+            })
+            .map(|agg_group| async {
+                // Get agg outputs and build change.
+                let curr_outputs = agg_group.get_outputs(&this.storages).await?;
+                let change = agg_group.build_change(curr_outputs);
+                Ok::<_, StreamExecutorError>(change)
+            });
 
-            let mut chunk_of_changes = Vec::with_capacity(this.chunk_size);
-
-            let futs_of_all_groups = vars
-                .group_change_set
-                .drain()
-                .map(|key| {
-                    // Get agg group of the key.
-                    let mut ptr: NonNull<_> = vars
-                        .agg_group_cache
-                        .get_mut(&key)
-                        .expect("changed group must have corresponding AggGroup")
-                        .into();
-                    // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
-                    // from `group_change_set` which is a set.
-                    unsafe { ptr.as_mut() }
-                })
-                .map(|agg_group| async {
-                    // Get agg outputs and build change.
-                    let curr_outputs = agg_group.get_outputs(&this.storages).await?;
-                    let change = agg_group.build_change(curr_outputs);
-                    Ok::<_, StreamExecutorError>(change)
-                });
-
-            // TODO(rc): figure out a more reasonable concurrency limit.
-            const MAX_CONCURRENT_TASKS: usize = 100;
-            let mut futs_chunks = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
-            while let Some(futs) = futs_chunks.next() {
-                let changes = futures::future::try_join_all(futs).await?;
-                for change in changes.into_iter().flatten() {
+        // TODO(rc): figure out a more reasonable concurrency limit.
+        const MAX_CONCURRENT_TASKS: usize = 100;
+        let mut futs_batches = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
+        while let Some(futs) = futs_batches.next() {
+            let changes = futures::future::try_join_all(futs).await?;
+            for change in changes.into_iter().flatten() {
                     apply_change_to_result_table(&change, &mut this.result_table);
-
-                    chunk_of_changes.push(change);
-                    if chunk_of_changes.len() == this.chunk_size {
-                        // Yield a chunk.
-                        yield Self::construct_chunk(this, chunk_of_changes.drain(..));
+                    if let Some(chunk) =
+                        apply_change_to_chunk_builder(&change, &mut vars.chunk_builder)
+                    {
+                        yield chunk;
                     }
-                }
+                    }
             }
+        }
 
-            if !chunk_of_changes.is_empty() {
-                // Yield the remaining changes.
-                yield Self::construct_chunk(this, chunk_of_changes);
-            }
+        // Yield the remaining rows in chunk builder.
+        if let Some(chunk) = vars.chunk_builder.take() {
+            yield chunk;
+        }
 
-            // Flush distinct dedup state.
-            vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
-
+        if n_dirty_group > 0 {
             // Commit all state tables.
             futures::future::try_join_all(this.all_state_tables_mut().map(|table| async {
                 if let Some(watermark) = state_clean_watermark.as_ref() {
@@ -493,11 +480,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 table.commit(epoch).await
             }))
             .await?;
-
-            // Evict cache to target capacity.
-            vars.agg_group_cache.evict();
         } else {
-            // Nothing to flush.
+            // Nothing is expected to be changed.
             // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
                 if let Some(watermark) = state_clean_watermark.as_ref() {
@@ -505,8 +489,13 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 };
                 table.commit_no_data_expected(epoch);
             });
-            return Ok(());
         }
+
+        // Flush distinct dedup state.
+        vars.distinct_dedup.flush(&mut this.distinct_dedup_tables)?;
+
+        // Evict cache to target capacity.
+        vars.agg_group_cache.evict();
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -525,6 +514,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             group_change_set: HashSet::new(),
             distinct_dedup: DistinctDeduplicater::new(&this.agg_calls, &this.watermark_epoch),
             buffered_watermarks: vec![None; this.group_key_indices.len()],
+            chunk_builder: ChunkBuilder::new(this.chunk_size, &this.info.schema.data_types()),
         };
 
         // TODO(rc): use something like a `ColumnMapping` type

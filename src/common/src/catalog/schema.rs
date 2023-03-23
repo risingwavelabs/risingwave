@@ -139,6 +139,7 @@ impl Schema {
         self.fields().iter().map(|f| f.name.clone()).collect()
     }
 
+    // TODO(rc): why not return &[DataType], which is more flexible
     pub fn data_types(&self) -> Vec<DataType> {
         self.fields
             .iter()
