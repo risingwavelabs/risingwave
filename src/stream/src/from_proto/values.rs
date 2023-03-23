@@ -25,8 +25,8 @@ use crate::executor::values::ValuesExecutor;
 use crate::executor::BoxedExecutor;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
-/// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for this executor.
-/// May refractor with `BarrierRecvExecutor` in the near future.
+/// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for
+/// this executor. May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutorBuilder;
 
 #[async_trait::async_trait]
@@ -57,6 +57,7 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
             .collect_vec();
         let schema = Schema::new(node.get_fields().iter().map(Field::from).collect_vec());
         Ok(Box::new(ValuesExecutor::new(
+            params.actor_context,
             rows,
             schema,
             barrier_receiver,

@@ -43,8 +43,8 @@ mod temporal_join;
 mod top_n;
 mod top_n_appendonly;
 mod union;
-mod watermark_filter;
 mod values;
+mod watermark_filter;
 
 // import for submodules
 use itertools::Itertools;

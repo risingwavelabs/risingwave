@@ -60,9 +60,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(
-            self.logical.clone_with_input(input),
-        )
+        Self::new(self.logical.clone_with_input(input))
     }
 }
 

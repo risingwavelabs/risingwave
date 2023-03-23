@@ -90,10 +90,10 @@ pub mod subtask;
 mod temporal_join;
 mod top_n;
 mod union;
+pub mod values;
 mod watermark;
 mod watermark_filter;
 mod wrapper;
-pub mod values;
 
 mod backfill;
 #[cfg(test)]

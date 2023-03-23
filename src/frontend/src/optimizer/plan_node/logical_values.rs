@@ -22,15 +22,15 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 
 use super::{
-    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef,
-    PredicatePushdown, StreamValues, ToBatch, ToStream,
+    BatchValues, ColPrunable, ExprRewritable, LogicalFilter, PlanBase, PlanRef, PredicatePushdown,
+    StreamValues, ToBatch, ToStream,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{FunctionalDependencySet};
+use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalValues` builds rows according to a list of expressions
@@ -56,7 +56,7 @@ impl LogicalValues {
         }
     }
 
-    /// Used only by `LogicalValues.rewrite_logical_for_stream, set the `_row_id` column as pk
+    /// Used only by `LogicalValues.rewrite_logical_for_stream`, set the `_row_id` column as pk
     fn new_with_pk(
         rows: Vec<Vec<ExprImpl>>,
         schema: Schema,
@@ -163,7 +163,7 @@ impl ToStream for LogicalValues {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let row_id_index = self.schema().len();
         let col_index_mapping = ColIndexMapping::identity_or_none(row_id_index, row_id_index + 1);
-        let ctx = self.ctx().clone();
+        let ctx = self.ctx();
         let mut schema = self.schema().clone();
         schema.fields.push(Field {
             data_type: DataType::Int64,
@@ -171,12 +171,13 @@ impl ToStream for LogicalValues {
             sub_fields: vec![],
             type_name: "int64".to_string(),
         });
-        let rows = self.rows().clone().to_owned();
+        let rows = self.rows().to_vec();
         let row_with_id = (0..rows.len())
-            .into_iter()
             .zip_eq_fast(rows.into_iter())
             .map(|(i, mut r)| {
-                r.extend_one(Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into());
+                r.extend_one(
+                    Literal::new(Some(ScalarImpl::Int64(i as i64)), DataType::Int64).into(),
+                );
                 r
             })
             .collect_vec();

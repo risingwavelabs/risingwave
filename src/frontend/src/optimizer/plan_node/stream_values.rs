@@ -34,7 +34,7 @@ pub struct StreamValues {
 impl_plan_tree_node_for_leaf! { StreamValues }
 
 impl StreamValues {
-    /// StreamValues should enforce `Distribution::Single`
+    /// `StreamValues` should enforce `Distribution::Single`
     pub fn new(logical: LogicalValues) -> Self {
         Self::with_dist(logical, Distribution::Single)
     }
@@ -42,7 +42,7 @@ impl StreamValues {
     fn with_dist(logical: LogicalValues, dist: Distribution) -> Self {
         let ctx = logical.ctx();
         let mut watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
-        (0..(logical.schema().len()-1)).into_iter().for_each(|i| watermark_columns.set(i, true));
+        (0..(logical.schema().len() - 1)).for_each(|i| watermark_columns.set(i, true));
         let base = PlanBase::new_stream(
             ctx,
             logical.schema().clone(),

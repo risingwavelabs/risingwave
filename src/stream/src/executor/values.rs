@@ -25,12 +25,14 @@ use risingwave_expr::expr::BoxedExpression;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::{
-    Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef, StreamExecutorError,
+    ActorContextRef, Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef,
+    StreamExecutorError,
 };
 
 /// Execute `values` in stream. As is a leaf, current workaround holds a `barrier_executor`.
 /// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
+    ctx: ActorContextRef,
     // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
 
@@ -43,12 +45,14 @@ pub struct ValuesExecutor {
 impl ValuesExecutor {
     /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
+        ctx: ActorContextRef,
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,
         barrier_receiver: UnboundedReceiver<Barrier>,
         executor_id: u64,
     ) -> Self {
         Self {
+            ctx,
             barrier_receiver,
             rows: rows.into_iter(),
             pk_indices: vec![schema.len()],
@@ -88,7 +92,11 @@ impl ValuesExecutor {
                 let mut array_builders = schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
-                        let out = expr.eval(&one_row_chunk).await?;
+                        let out = expr
+                            .eval_infallible(&one_row_chunk, |err| {
+                                self.ctx.on_compute_error(err, self.identity.as_str())
+                            })
+                            .await;
                         builder.append_array(&out);
                     }
                 }
@@ -144,7 +152,7 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::ValuesExecutor;
-    use crate::executor::{Barrier, Executor, Message, Mutation};
+    use crate::executor::{ActorContext, Barrier, Executor, Message, Mutation};
 
     #[tokio::test]
     async fn test_values() {
@@ -179,8 +187,13 @@ mod tests {
             .iter() // for each column
             .map(|col| Field::unnamed(col.return_type()))
             .collect::<Vec<Field>>();
-        let values_executor_struct =
-            ValuesExecutor::new(vec![exprs], Schema { fields }, barrier_receiver, 10005);
+        let values_executor_struct = ValuesExecutor::new(
+            ActorContext::create(1),
+            vec![exprs],
+            Schema { fields },
+            barrier_receiver,
+            10005,
+        );
         let mut values_executor = Box::new(values_executor_struct).execute();
 
         // Init barrier
