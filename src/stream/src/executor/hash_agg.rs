@@ -452,8 +452,8 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                 });
 
             // TODO(rc): figure out a more reasonable concurrency limit.
-            const MAX_CONCURRENT_FUTURES: usize = 100;
-            let mut futs_chunks = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_FUTURES);
+            const MAX_CONCURRENT_TASKS: usize = 100;
+            let mut futs_chunks = IterChunks::chunks(futs_of_all_groups, MAX_CONCURRENT_TASKS);
             while let Some(futs) = futs_chunks.next() {
                 let changes = futures::future::try_join_all(futs).await?;
                 for change in changes.into_iter().flatten() {
