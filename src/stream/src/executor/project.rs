@@ -110,7 +110,11 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
+        let chunk = if chunk.cardinality() != chunk.capacity() {
+            chunk.compact()
+        } else {
+            chunk
+        };
 
         let (data_chunk, ops) = chunk.into_parts();
 
