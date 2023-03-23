@@ -110,6 +110,9 @@ pub struct MetaOpts {
 
     /// Schedule split_compaction_group for all compaction groups with this interval.
     pub periodic_split_compact_group_interval_sec: u64,
+
+    /// The size limit to split a large compaction group.
+    pub split_check_size_limit: u64,
 }
 
 impl MetaOpts {
@@ -135,6 +138,7 @@ impl MetaOpts {
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_split_compact_group_interval_sec: 60,
             max_compactor_task_multiplier: 2,
+            split_check_size_limit: 5 * 1024 * 1024 * 1024,
         }
     }
 }

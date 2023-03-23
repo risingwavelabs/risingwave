@@ -365,7 +365,6 @@ where
                                     compact_task::TaskType::Dynamic,
                                 )
                                 .await;
-                                continue;
                             }
                             SchedulerEvent::SpaceReclaimTrigger => {
                                 // Disable periodic trigger for compaction_deterministic_test.
@@ -378,7 +377,6 @@ where
                                     compact_task::TaskType::SpaceReclaim,
                                 )
                                 .await;
-                                continue;
                             }
                             SchedulerEvent::TtlReclaimTrigger => {
                                 // Disable periodic trigger for compaction_deterministic_test.
@@ -391,14 +389,13 @@ where
                                     compact_task::TaskType::Ttl,
                                 )
                                 .await;
-                                continue;
                             }
                             SchedulerEvent::GroupSplitTrigger => {
                                 // Disable periodic trigger for compaction_deterministic_test.
                                 if self.env.opts.compaction_deterministic_test {
                                     continue;
                                 }
-                                // TODO
+                                self.on_handle_check_split_multi_group().await;
                             }
                         }
                     }
@@ -476,6 +473,16 @@ where
             .await;
 
         true
+    }
+
+
+    async fn on_handle_check_split_multi_group(&self) {
+        let compact_groups = self.hummock_manager.get_compaction_group_map().await;
+        for (group_id, group) in compact_groups {
+            if let Some(table_id) = self.hummock_manager.check_split_compact_group(group_id).await {
+
+            }
+        }
     }
 }
 

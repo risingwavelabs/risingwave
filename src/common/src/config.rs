@@ -195,6 +195,9 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::max_compactor_task_multiplier")]
     pub max_compactor_task_multiplier: u32,
 
+    #[serde(default = "default::meta::split_check_size_limit")]
+    pub split_check_size_limit: u64,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -582,6 +585,10 @@ mod default {
 
         pub fn max_compactor_task_multiplier() -> u32 {
             2
+        }
+
+        pub fn split_check_size_limit() -> u64 {
+            64 * 1024 * 1024 * 1024 // 64GB
         }
     }
 

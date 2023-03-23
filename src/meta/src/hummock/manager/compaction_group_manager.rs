@@ -631,6 +631,18 @@ impl<S: MetaStore> HummockManager<S> {
         }
         Ok(target_compaction_group_id)
     }
+
+    #[named]
+    pub async fn check_split_compact_group(&self, group_id: CompactionGroupId) -> Option<StateTableId> {
+        let mut versioning_guard = read_lock!(self, versioning).await;
+        let versioning = &versioning_guard.current_version;
+        let group = versioning.levels.get(&group_id)?;
+        let group_size = group.levels.iter().map(|level|level.total_file_size).sum::<u64>();
+        if group_size < self.env.opts.split_check_size_limit {
+            return None;
+        }
+        None
+    }
 }
 
 #[derive(Default)]
