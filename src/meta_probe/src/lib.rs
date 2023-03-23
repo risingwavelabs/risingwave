@@ -45,9 +45,7 @@ pub struct MetaProbeOpts {
     listen_addr: String,
 }
 
-use std::future::Future;
 use std::net::SocketAddr;
-use std::pin::Pin;
 use std::time::Duration;
 
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
@@ -61,10 +59,11 @@ use tracing::info;
 
 // ,{ heartbeat_client, heartbeat, HeartbeatRequest, HeartbeatResponse }
 
-const CONN_RETRY_MAX_INTERVAL_MS: u64 = 500;
-const CONN_RETRY_BASE_INTERVAL_MS: u64 = 100;
+const CONN_RETRY_MAX_INTERVAL_MS: u64 = 100;
+const CONN_RETRY_BASE_INTERVAL_MS: u64 = 20;
 const ENDPOINT_KEEP_ALIVE_INTERVAL_SEC: u64 = 1;
 const ENDPOINT_KEEP_ALIVE_TIMEOUT_SEC: u64 = 1;
+const MAX_RETRIES: usize = 3;
 
 async fn connect_to_endpoint(endpoint: Endpoint) -> Result<Channel> {
     endpoint
@@ -87,7 +86,8 @@ async fn try_build_rpc_channel(addr: String) -> Result<Channel> {
 
     let retry_strategy = ExponentialBackoff::from_millis(CONN_RETRY_BASE_INTERVAL_MS)
         .max_delay(Duration::from_millis(CONN_RETRY_MAX_INTERVAL_MS))
-        .map(jitter);
+        .map(jitter)
+        .take(MAX_RETRIES);
 
     let channel_res = tokio_retry::Retry::spawn(retry_strategy, || async {
         let endpoint_clone = endpoint.clone();
@@ -123,17 +123,15 @@ async fn heartbeat_ok(request: HeartbeatRequest, addr: String) -> bool {
         }
     }
 }
-// TODO rewrite this to get request?
-/// Send heartbeat signal to meta service.
-async fn meta_up(info: Vec<extra_info::Info>, addr: String) -> bool {
-    let request = HeartbeatRequest {
+
+fn get_dummy_request() -> HeartbeatRequest {
+    HeartbeatRequest {
         node_id: u32::MAX,
-        info: info
+        info: vec![]
             .into_iter()
             .map(|info| ExtraInfo { info: Some(info) })
             .collect(),
-    };
-    heartbeat_ok(request, addr).await
+    }
 }
 
 /// True if meta node is up
@@ -148,6 +146,5 @@ pub async fn ok(opts: MetaProbeOpts) -> bool {
         .parse()
         .expect("Expected a valid listen address");
     info!("probing on {}", listen_addr);
-    let x_info: Vec<extra_info::Info> = vec![];
-    meta_up(x_info, listen_addr.to_string()).await
+    heartbeat_ok(get_dummy_request(), listen_addr.to_string()).await
 }

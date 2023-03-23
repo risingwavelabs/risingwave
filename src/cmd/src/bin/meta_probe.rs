@@ -27,5 +27,9 @@ async fn main() {
 
     risingwave_rt::init_risingwave_logger(risingwave_rt::LoggerSettings::new());
 
-    std::process::exit(risingwave_meta_probe::ok(opts).await.into())
+    let return_code: i32 = match risingwave_meta_probe::ok(opts).await {
+        true => 0,
+        false => 1,
+    };
+    std::process::exit(return_code);
 }
