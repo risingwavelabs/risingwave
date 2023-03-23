@@ -488,15 +488,14 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::AtomicU64;
+
     use std::time::Duration;
 
     use maplit::{convert_args, hashmap};
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnId, ConflictBehavior, Field, Schema, TableId};
+    use risingwave_common::catalog::{ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::plan_common::PbRowFormatType;
@@ -660,20 +659,7 @@ mod tests {
             u64::MAX,
             1,
         );
-
-        let mut materialize = MaterializeExecutor::for_test(
-            Box::new(executor),
-            mem_state_store.clone(),
-            TableId::from(0x2333),
-            vec![ColumnOrder::new(0, OrderType::ascending())],
-            column_ids,
-            2,
-            Arc::new(AtomicU64::new(0)),
-            ConflictBehavior::NoCheck,
-        )
-        .await
-        .boxed()
-        .execute();
+        let mut handler = Box::new(executor).execute();
 
         let init_barrier = Barrier::new_test_barrier(1).with_mutation(Mutation::Add {
             adds: HashMap::new(),
@@ -689,11 +675,11 @@ mod tests {
         });
         barrier_tx.send(init_barrier).unwrap();
 
-        (materialize.next().await.unwrap().unwrap())
+        (handler.next().await.unwrap().unwrap())
             .into_barrier()
             .unwrap();
 
-        let mut ready_chunks = materialize.ready_chunks(10);
+        let mut ready_chunks = handler.ready_chunks(10);
         let chunks = (ready_chunks.next().await.unwrap())
             .into_iter()
             .map(|msg| msg.unwrap().into_chunk().unwrap())
@@ -758,21 +744,22 @@ mod tests {
         let chunk_2 = StreamChunk::concat(chunks).sort_rows();
         assert_eq!(
             chunk_2,
-            // mixed from datagen split 0 and 1
+            // mixed from datagen split 0, 1 and 2
             StreamChunk::from_pretty(
                 " i
-                + 11
                 + 12
                 + 13
-                + 14
                 + 15
                 + 16
-                + 17
                 + 18
                 + 19
-                + 20",
+                + 23
+                + 26
+                + 29
+                + 32",
             )
         );
+        tracing::debug!("chunk_2: {:?}", chunk_2.to_pretty_string());
 
         let barrier = Barrier::new_test_barrier(3).with_mutation(Mutation::Pause);
         barrier_tx.send(barrier).unwrap();

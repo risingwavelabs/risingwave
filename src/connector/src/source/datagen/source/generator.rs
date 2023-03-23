@@ -242,6 +242,7 @@ mod tests {
                     Some(end.to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             ),
@@ -252,6 +253,7 @@ mod tests {
                     Some(end.to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             ),
