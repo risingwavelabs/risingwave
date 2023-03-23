@@ -822,7 +822,6 @@ where
             Some(task) => task,
         };
         compact_task.watermark = watermark;
-        // to get all relational table_id from sst_info
         compact_task.existing_table_ids = current_version
             .levels
             .get(&compaction_group_id)
@@ -1142,6 +1141,7 @@ where
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
+                // if member_table_ids changes, the data of sstable may stale.
                 let is_expired = current_version
                     .levels
                     .get(&compact_task.compaction_group_id)
