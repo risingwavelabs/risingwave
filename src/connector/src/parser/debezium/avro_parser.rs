@@ -189,10 +189,10 @@ impl DebeziumAvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let (schema_id, mut raw_payload) = extract_schema_id(payload)?;
+        let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
         let writer_schema = self.schema_resolver.get(schema_id).await?;
 
         let avro_value = from_avro_datum(writer_schema.as_ref(), &mut raw_payload, None)
@@ -296,7 +296,7 @@ mod tests {
     async fn parse_one(
         parser: DebeziumAvroParser,
         columns: Vec<SourceColumnDesc>,
-        payload: &[u8],
+        payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
         {
@@ -442,7 +442,7 @@ mod tests {
 
         let parser =
             DebeziumAvroParser::new(columns.clone(), config, Arc::new(Default::default()))?;
-        let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA)
+        let [(op, row)]: [_; 1] = parse_one(parser, columns, DEBEZIUM_AVRO_DATA.to_vec())
             .await
             .try_into()
             .unwrap();
