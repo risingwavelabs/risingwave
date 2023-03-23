@@ -30,7 +30,7 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -194,6 +194,7 @@ async fn test_lookup_this_epoch() {
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),
@@ -257,14 +258,13 @@ async fn test_lookup_this_epoch() {
 }
 
 #[tokio::test]
-#[ignore]
-// Deprecated because the ability to read from prev epoch has been deprecated.
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),

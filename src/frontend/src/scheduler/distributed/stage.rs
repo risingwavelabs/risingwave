@@ -41,7 +41,7 @@ use risingwave_pb::batch_plan::{
     PlanNode as PlanNodePb, PlanNode, TaskId as TaskIdPb, TaskOutputId,
 };
 use risingwave_pb::common::{BatchQueryEpoch, HostAddress, WorkerNode};
-use risingwave_pb::task_service::{AbortTaskRequest, TaskInfoResponse};
+use risingwave_pb::task_service::{CancelTaskRequest, TaskInfoResponse};
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::spawn;
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -536,7 +536,7 @@ impl StageRunner {
             self.stage.id,
             self.tasks.len()
         );
-        self.abort_all_scheduled_tasks().await?;
+        self.cancel_all_scheducancled_tasks().await?;
 
         tracing::trace!(
             "Stage runner [{:?}-{:?}] existed. ",
@@ -761,7 +761,7 @@ impl StageRunner {
     /// Abort all registered tasks. Note that here we do not care which part of tasks has already
     /// failed or completed, cuz the abort task will not fail if the task has already die.
     /// See PR (#4560).
-    async fn abort_all_scheduled_tasks(&self) -> SchedulerResult<()> {
+    async fn cancel_all_scheducancled_tasks(&self) -> SchedulerResult<()> {
         // Set state to failed.
         // {
         //     let mut state = self.state.write().await;
@@ -789,7 +789,7 @@ impl StageRunner {
             let task_id = *task;
             spawn(async move {
                 if let Err(e) = client
-                    .abort(AbortTaskRequest {
+                    .cancel(CancelTaskRequest {
                         task_id: Some(risingwave_pb::batch_plan::TaskId {
                             query_id: query_id.clone(),
                             stage_id,
