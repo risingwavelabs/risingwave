@@ -129,7 +129,7 @@ impl MetaNodeService {
             )?,
         };
 
-        if (provide_compute_node.len() > 1 || provide_compactor.len() > 0) && !is_shared_backend {
+        if (provide_compute_node.len() > 1 || !provide_compactor.is_empty()) && !is_shared_backend {
             if config.enable_in_memory_kv_state_backend {
                 // Using a non-shared backend with multiple compute nodes will be problematic for
                 // state sharing like scaling. However, for distributed end-to-end tests with
