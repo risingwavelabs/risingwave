@@ -181,6 +181,13 @@ impl DataChunk {
         &self.columns
     }
 
+    pub fn split_column_at(&self, idx: usize) -> (Self, Self) {
+        let (left, right) = self.columns.split_at(idx);
+        let left = DataChunk::new(left.to_vec(), self.vis2.clone());
+        let right = DataChunk::new(right.to_vec(), self.vis2.clone());
+        (left, right)
+    }
+
     pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
@@ -513,6 +520,7 @@ pub trait DataChunkTestExt {
     /// );
     ///
     /// // type chars:
+    /// //     B: bool
     /// //     I: i64
     /// //     i: i32
     /// //     F: f64
@@ -538,6 +546,7 @@ impl DataChunkTestExt for DataChunk {
         use crate::types::ScalarImpl;
         fn parse_type(s: &str) -> DataType {
             match s {
+                "B" => DataType::Boolean,
                 "I" => DataType::Int64,
                 "i" => DataType::Int32,
                 "F" => DataType::Float64,
@@ -579,6 +588,11 @@ impl DataChunkTestExt for DataChunk {
                         return None;
                     }
                     Some(match builder {
+                        ArrayBuilderImpl::Bool(_) => ScalarImpl::Bool(match s {
+                            "t" => true,
+                            "f" => false,
+                            _ => panic!("invalid bool: {s:?}"),
+                        }),
                         ArrayBuilderImpl::Int32(_) => ScalarImpl::Int32(
                             s.parse()
                                 .map_err(|_| panic!("invalid int32: {s:?}"))

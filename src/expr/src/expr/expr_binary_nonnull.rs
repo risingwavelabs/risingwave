@@ -148,15 +148,7 @@ mod tests {
         let col1 = NaiveDateArray::from_iter(&lhs).into();
         let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
-        let expr = build(
-            kind,
-            DataType::Timestamp,
-            vec![
-                InputRefExpression::new(DataType::Date, 0).boxed(),
-                InputRefExpression::new(DataType::Interval, 1).boxed(),
-            ],
-        )
-        .unwrap();
+        let expr = build_from_pretty(format!("({kind:?}:timestamp #0:date #1:interval)"));
         let res = expr.eval(&data_chunk).await.unwrap();
         let arr: &A = res.as_ref().into();
         for (idx, item) in arr.iter().enumerate() {

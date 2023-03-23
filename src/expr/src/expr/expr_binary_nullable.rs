@@ -132,214 +132,105 @@ fn build_or_expr(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExp
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{DataType, Scalar};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::test_prelude::DataChunkTestExt;
 
-    use crate::expr::{build, Expression, InputRefExpression};
+    use crate::expr::build_from_pretty;
 
     #[tokio::test]
     async fn test_and() {
-        let lhs = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            None,
-            None,
-        ];
-        let rhs = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-        ];
-        let target = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            Some(false),
-            None,
-        ];
-
-        let expr = build(
-            Type::And,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Boolean, 0).boxed(),
-                InputRefExpression::new(DataType::Boolean, 1).boxed(),
-            ],
+        let (input, target) = DataChunk::from_pretty(
+            "
+            B B B
+            t t t
+            t f f
+            t . .
+            f t f
+            f f f
+            f . f
+            . t .
+            . f f
+            . . .
+        ",
         )
-        .unwrap();
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+        .split_column_at(2);
+        let expr = build_from_pretty("(and:boolean #0:boolean #1:boolean)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
     #[tokio::test]
     async fn test_or() {
-        let lhs = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(false),
-            None,
-            None,
-            None,
-        ];
-        let rhs = vec![
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            Some(false),
-            None,
-        ];
-        let target = vec![
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(true),
-            Some(false),
-            None,
-            Some(true),
-            None,
-            None,
-        ];
-
-        let expr = build(
-            Type::Or,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Boolean, 0).boxed(),
-                InputRefExpression::new(DataType::Boolean, 1).boxed(),
-            ],
+        let (input, target) = DataChunk::from_pretty(
+            "
+            B B B
+            t t t
+            t f t
+            t . t
+            f t t
+            f f f
+            f . .
+            . t t
+            . f .
+            . . .
+        ",
         )
-        .unwrap();
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+        .split_column_at(2);
+        let expr = build_from_pretty("(or:boolean #0:boolean #1:boolean)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
     #[tokio::test]
     async fn test_is_distinct_from() {
-        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
-        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
-        let target = vec![Some(false), Some(true), Some(true), Some(false), Some(true)];
-
-        let expr = build(
-            Type::IsDistinctFrom,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Int32, 0).boxed(),
-                InputRefExpression::new(DataType::Int32, 1).boxed(),
-            ],
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i i B
+            . . f
+            . 1 t
+            1 . t
+            2 2 f
+            3 4 t
+        ",
         )
-        .unwrap();
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+        .split_column_at(2);
+        let expr = build_from_pretty("(is_distinct_from:boolean #0:int4 #1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
     #[tokio::test]
     async fn test_is_not_distinct_from() {
-        let lhs = vec![None, None, Some(1), Some(2), Some(3)];
-        let rhs = vec![None, Some(1), None, Some(2), Some(4)];
-        let target = vec![
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(true),
-            Some(false),
-        ];
-
-        let expr = build(
-            Type::IsNotDistinctFrom,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Int32, 0).boxed(),
-                InputRefExpression::new(DataType::Int32, 1).boxed(),
-            ],
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i i B
+            . . t
+            . 1 f
+            1 . f
+            2 2 t
+            3 4 f
+            ",
         )
-        .unwrap();
-
-        for i in 0..lhs.len() {
-            let row = OwnedRow::new(vec![
-                lhs[i].map(|x| x.to_scalar_value()),
-                rhs[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].map(|x| x.to_scalar_value());
-            assert_eq!(res, expected);
-        }
+        .split_column_at(2);
+        let expr = build_from_pretty("(is_not_distinct_from:boolean #0:int4 #1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 
     #[tokio::test]
     async fn test_format_type() {
-        let l = vec![Some(16), Some(21), Some(9527), None];
-        let r = vec![Some(0), None, Some(0), Some(0)];
-        let target: Vec<Option<String>> = vec![
-            Some("boolean".into()),
-            Some("smallint".into()),
-            Some("???".into()),
-            None,
-        ];
-        let expr = build(
-            Type::FormatType,
-            DataType::Varchar,
-            vec![
-                InputRefExpression::new(DataType::Int32, 0).boxed(),
-                InputRefExpression::new(DataType::Int32, 1).boxed(),
-            ],
+        let (input, target) = DataChunk::from_pretty(
+            "
+            i       i T
+            16      0 boolean
+            21      . smallint
+            9527    0 ???
+            .       0 .
+            ",
         )
-        .unwrap();
-
-        for i in 0..l.len() {
-            let row = OwnedRow::new(vec![
-                l[i].map(|x| x.to_scalar_value()),
-                r[i].map(|x| x.to_scalar_value()),
-            ]);
-            let res = expr.eval_row(&row).await.unwrap();
-            let expected = target[i].as_ref().map(|x| x.into());
-            assert_eq!(res, expected);
-        }
+        .split_column_at(2);
+        let expr = build_from_pretty("(format_type:varchar #0:int4 #1:int4)");
+        let result = expr.eval(&input).await.unwrap();
+        assert_eq!(result, target.column_at(0).array());
     }
 }

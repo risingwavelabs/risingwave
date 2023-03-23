@@ -114,10 +114,9 @@ mod tests {
     use std::sync::Arc;
 
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
-    use crate::expr::{build, Expression, InputRefExpression, LiteralExpression};
+    use crate::expr::{build_from_pretty, Expression, LiteralExpression};
 
     #[derive(Clone)]
     struct MockAgg {
@@ -185,16 +184,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_selective_agg() -> Result<()> {
-        // filter (where $1 > 5)
-        let expr = build(
-            PbType::GreaterThan,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(5))).boxed(),
-            ],
-        )
-        .unwrap();
+        let expr = build_from_pretty("(greater_than:boolean #0:int8 5:int8)");
         let condition = Arc::from(expr);
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
@@ -229,15 +219,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_selective_agg_null_condition() -> Result<()> {
-        let expr = build(
-            PbType::Equal,
-            DataType::Boolean,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                LiteralExpression::new(DataType::Int64, None).boxed(),
-            ],
-        )
-        .unwrap();
+        let expr = build_from_pretty("(equal:boolean #0:int8 null:int8)");
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
             Arc::from(expr),
