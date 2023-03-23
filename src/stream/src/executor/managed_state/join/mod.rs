@@ -36,7 +36,7 @@ use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
 
-use crate::cache::{cache_may_stale, new_with_hasher_in, ExecutorCache};
+use crate::cache::{new_with_hasher_in, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::executor::error::StreamExecutorResult;
 use crate::executor::monitor::StreamingMetrics;
@@ -318,16 +318,16 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
     }
 
     /// Update the vnode bitmap and manipulate the cache if necessary.
-    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
-        let _ = self
-            .degree_state
-            .table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+    pub fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) -> bool {
+        let (_previous_vnode_bitmap, cache_may_stale) =
+            self.state.table.update_vnode_bitmap(vnode_bitmap.clone());
+        let _ = self.degree_state.table.update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.inner.clear();
         }
+
+        cache_may_stale
     }
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {

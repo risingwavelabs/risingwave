@@ -144,6 +144,21 @@ impl MergeExecutor {
                     );
                     barrier.passed_actors.push(actor_id);
 
+                    if let Some(Mutation::Update { dispatchers, .. }) = barrier.mutation.as_deref()
+                    {
+                        if select_all
+                            .upstream_actor_ids()
+                            .iter()
+                            .any(|actor_id| dispatchers.contains_key(actor_id))
+                        {
+                            // `Watermark` of upstream may become stale after downstream scaling.
+                            select_all
+                                .buffered_watermarks
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
+                    }
+
                     if let Some(update) =
                         barrier.as_update_merge(self.actor_context.id, self.upstream_fragment_id)
                     {
