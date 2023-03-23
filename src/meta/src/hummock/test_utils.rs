@@ -89,6 +89,13 @@ where
             .add_compactor(context_id, u64::MAX, 16);
         temp_compactor = true;
     }
+    let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
+    register_sstable_infos_to_compaction_group(
+        hummock_manager,
+        &test_tables_2,
+        StaticCompactionGroupId::StateDefault.into(),
+    )
+    .await;
     let compactor = hummock_manager.get_idle_compactor().await.unwrap();
     let mut selector = default_level_selector();
     let mut compact_task = hummock_manager
@@ -104,19 +111,13 @@ where
     if temp_compactor {
         assert_eq!(compactor.context_id(), context_id);
     }
-    let test_tables_2 = generate_test_tables(epoch, get_sst_ids(hummock_manager, 1).await);
-    register_sstable_infos_to_compaction_group(
-        hummock_manager,
-        &test_tables_2,
-        StaticCompactionGroupId::StateDefault.into(),
-    )
-    .await;
     compact_task.sorted_output_ssts = test_tables_2.clone();
     compact_task.set_task_status(TaskStatus::Success);
-    hummock_manager
+    let ret = hummock_manager
         .report_compact_task(context_id, &mut compact_task, None)
         .await
         .unwrap();
+    assert!(ret);
     if temp_compactor {
         hummock_manager
             .compactor_manager_ref_for_test()

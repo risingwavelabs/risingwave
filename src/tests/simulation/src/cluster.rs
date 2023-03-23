@@ -210,6 +210,8 @@ impl Cluster {
                 "etcd",
                 "--etcd-endpoints",
                 "etcd:2388",
+                "--state-store",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -251,8 +253,6 @@ impl Cluster {
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
@@ -275,8 +275,6 @@ impl Cluster {
                 "0.0.0.0:6660",
                 "--advertise-addr",
                 &format!("192.168.4.{i}:6660"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()

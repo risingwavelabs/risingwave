@@ -71,7 +71,7 @@ impl MaxwellParser {
                 writer.insert(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        after.get(column.name.to_ascii_lowercase().as_str()),
+                        after.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })
@@ -90,13 +90,10 @@ impl MaxwellParser {
 
                 writer.update(|column| {
                     // old only contains the changed columns but data contains all columns.
-                    let col_name_lc = column.name.to_ascii_lowercase();
-                    let before_value = before
-                        .get(col_name_lc.as_str())
-                        .or_else(|| after.get(col_name_lc.as_str()));
+                    let col_name_lc = column.name_in_lower_case.as_str();
+                    let before_value = before.get(col_name_lc).or_else(|| after.get(col_name_lc));
                     let before = simd_json_parse_value(&column.data_type, before_value)?;
-                    let after =
-                        simd_json_parse_value(&column.data_type, after.get(col_name_lc.as_str()))?;
+                    let after = simd_json_parse_value(&column.data_type, after.get(col_name_lc))?;
                     Ok((before, after))
                 })
             }
@@ -107,7 +104,7 @@ impl MaxwellParser {
                 writer.delete(|column| {
                     simd_json_parse_value(
                         &column.data_type,
-                        before.get(column.name.to_ascii_lowercase().as_str()),
+                        before.get(column.name_in_lower_case.as_str()),
                     )
                     .map_err(Into::into)
                 })

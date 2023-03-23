@@ -1378,11 +1378,7 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{actor_id}} {{side}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
-                            "may_exist true when insert {{actor_id}} {{side}}",
+                            "cache miss when insert{{actor_id}} {{side}}",
                         ),
                     ],
                 ),

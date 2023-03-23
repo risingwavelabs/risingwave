@@ -4,7 +4,10 @@ on:
   schedule:
   # Currently we build docker images at 12:00 (UTC), so run this at 13:00
   - cron: '0 13 * * *'
-push:
+  push:
+    branches: [main]
+    paths: [integration_tests/**]
+  pull_request:
     branches: [main]
     paths: [integration_tests/**]
 
