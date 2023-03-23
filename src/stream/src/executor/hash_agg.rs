@@ -506,7 +506,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let HashAggExecutor {
             input,
             inner: mut this,
-            ..
         } = self;
 
         let mut vars = ExecutionVars {
@@ -520,6 +519,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             buffered_watermarks: vec![None; this.group_key_indices.len()],
         };
 
+        // TODO(rc): use something like a `ColumnMapping` type
         let group_key_invert_idx = {
             let mut group_key_invert_idx = vec![None; input.info().schema.len()];
             for (group_key_seq, group_key_idx) in this.group_key_indices.iter().enumerate() {
