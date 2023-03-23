@@ -24,8 +24,7 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::buffer::BitmapBuilder;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{self, OwnedRow, Row, RowExt};
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::sort_util::{compare_datum, OrderType};
+use risingwave_common::util::sort_util::{compare_rows, OrderType};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -370,13 +369,7 @@ where
         let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
         // Use project to avoid allocation.
         for v in data.rows().map(|row| {
-            match row
-                .project(pk_in_output_indices)
-                .iter()
-                .zip_eq_fast(pk_order.iter().copied())
-                .cmp_by(current_pos.iter(), |(x, order), y| {
-                    compare_datum(x, y, order)
-                }) {
+            match compare_rows(row.project(pk_in_output_indices), current_pos, pk_order) {
                 Ordering::Less | Ordering::Equal => true,
                 Ordering::Greater => false,
             }

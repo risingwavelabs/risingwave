@@ -21,6 +21,7 @@ use crate::types::{
     NaiveTimeWrapper, ScalarImpl, ToDatumRef,
 };
 use crate::util::iter_util::ZipEqDebug;
+use crate::util::sort_util::{compare_rows, partial_compare_rows, OrderType};
 use crate::util::value_encoding;
 use crate::util::value_encoding::deserialize_datum;
 
@@ -246,14 +247,13 @@ impl Row for AscentOwnedRow {
 
 impl PartialOrd for AscentOwnedRow {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.0.as_inner().partial_cmp(other.0.as_inner())
+        partial_compare_rows(self, other, &vec![OrderType::ascending(); self.len()])
     }
 }
 
 impl Ord for AscentOwnedRow {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.partial_cmp(other)
-            .unwrap_or_else(|| panic!("cannot compare rows with different types"))
+        compare_rows(self, other, &vec![OrderType::ascending(); self.len()])
     }
 }
 
