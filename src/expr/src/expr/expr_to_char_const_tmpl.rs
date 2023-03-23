@@ -106,6 +106,7 @@ fn build_to_char_expr(
             data_expr,
             tmpl_expr,
             return_type,
+            #[allow(clippy::unit_arg)]
             |a, b, w| Ok(to_char_timestamp(a, b, w)),
         )
         .boxed()
