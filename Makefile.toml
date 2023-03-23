@@ -757,7 +757,7 @@ else
 fi
 
 cd "${JAVA_DIR}"
-"${MAVEN_PATH}" spotless:check
+"${MAVEN_PATH}" spotless:check -q
 """
 
 [tasks.check-java-fix]
