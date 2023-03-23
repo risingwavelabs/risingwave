@@ -114,9 +114,9 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // For normal records.
             if !kill {
                 match tester
-                    .run_async(record)
+                    .run_async(record.clone())
                     .timed(|_res, elapsed| {
-                        println!("Record {:?} finished in {:?}", record, elasped)
+                        println!("Record {:?} finished in {:?}", record, elapsed)
                     })
                     .await
                 {
@@ -138,7 +138,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     if let Err(err) = tester
                         .run_async(record.clone())
                         .timed(|_res, elapsed| {
-                            println!("Record {:?} finished in {:?}", record, elasped)
+                            println!("Record {:?} finished in {:?}", record, elapsed)
                         })
                         .await
                     {
