@@ -1057,8 +1057,7 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::{build, InputRefExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -1111,15 +1110,7 @@ mod tests {
     }
 
     fn create_cond() -> BoxedExpression {
-        build(
-            PbType::LessThan,
-            DataType::Boolean,
-            vec![
-                Box::new(InputRefExpression::new(DataType::Int64, 1)),
-                Box::new(InputRefExpression::new(DataType::Int64, 3)),
-            ],
-        )
-        .unwrap()
+        build_from_pretty("(less_than:boolean #1:int8 #3:int8)")
     }
 
     async fn create_executor<const T: JoinTypePrimitive>(

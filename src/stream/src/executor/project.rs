@@ -197,8 +197,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::build_from_pretty;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -225,15 +224,7 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build(
-            PbType::Add,
-            DataType::Int64,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                InputRefExpression::new(DataType::Int64, 1).boxed(),
-            ],
-        )
-        .unwrap();
+        let test_expr = build_from_pretty("(add:int8 #0:int8 #1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),
@@ -279,28 +270,8 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_expr = build(
-            PbType::Add,
-            DataType::Int64,
-            vec![
-                InputRefExpression::new(DataType::Int64, 0).boxed(),
-                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1))).boxed(),
-            ],
-        )
-        .unwrap();
-
-        let b_expr = build(
-            PbType::Subtract,
-            DataType::Int64,
-            vec![
-                Box::new(InputRefExpression::new(DataType::Int64, 0)),
-                Box::new(LiteralExpression::new(
-                    DataType::Int64,
-                    Some(ScalarImpl::Int64(1)),
-                )),
-            ],
-        )
-        .unwrap();
+        let a_expr = build_from_pretty("(add:int8 #0:int8 1:int8)");
+        let b_expr = build_from_pretty("(subtract:int8 #0:int8 1:int8)");
 
         let project = Box::new(ProjectExecutor::new(
             ActorContext::create(123),

@@ -1799,8 +1799,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::DataType;
     use risingwave_common::util::iter_util::ZipEqDebug;
-    use risingwave_expr::expr::{build, BoxedExpression, Expression, InputRefExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::{build_from_pretty, BoxedExpression};
 
     use super::{
         ChunkedData, HashJoinExecutor, JoinType, LeftNonEquiJoinState, RightNonEquiJoinState, RowId,
@@ -1985,15 +1984,7 @@ mod tests {
         }
 
         fn create_cond() -> BoxedExpression {
-            build(
-                PbType::LessThan,
-                DataType::Boolean,
-                vec![
-                    InputRefExpression::new(DataType::Float32, 1).boxed(),
-                    InputRefExpression::new(DataType::Float64, 3).boxed(),
-                ],
-            )
-            .unwrap()
+            build_from_pretty("(less_than:boolean #1:float4 #3:float8)")
         }
 
         fn create_join_executor_with_chunk_size_and_executors(

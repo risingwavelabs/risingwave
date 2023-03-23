@@ -124,6 +124,7 @@ pub enum DataType {
     #[from_str(ignore)]
     Struct(Arc<StructType>),
     #[display("{datatype}[]")]
+    #[from_str(regex = r"(?i)^(?P<datatype>.+)\[\]$")]
     List { datatype: Box<DataType> },
     #[display("bytea")]
     #[from_str(regex = "(?i)^bytea$")]
@@ -907,7 +908,15 @@ impl ScalarImpl {
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Bytea | DataType::Struct(_) | DataType::List { .. } => {
+            DataType::List { datatype } => {
+                let str = str.trim_start_matches('{').trim_end_matches('}');
+                let mut values = vec![];
+                for s in str.split(',') {
+                    values.push(Some(Self::from_text(s.trim().as_bytes(), datatype)?));
+                }
+                Self::List(ListValue::new(values))
+            }
+            DataType::Bytea | DataType::Struct(_) => {
                 return Err(ErrorCode::NotSupported(
                     format!("param type: {}", data_type),
                     "".to_string(),

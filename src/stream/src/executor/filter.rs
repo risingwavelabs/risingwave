@@ -199,8 +199,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{build, InputRefExpression};
-    use risingwave_pb::expr::expr_node::PbType;
+    use risingwave_expr::expr::build_from_pretty;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -234,15 +233,7 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let test_expr = build(
-            PbType::GreaterThan,
-            DataType::Boolean,
-            vec![
-                Box::new(InputRefExpression::new(DataType::Int64, 0)),
-                Box::new(InputRefExpression::new(DataType::Int64, 1)),
-            ],
-        )
-        .unwrap();
+        let test_expr = build_from_pretty("(greater_than:boolean #0:int8 #1:int8)");
 
         let filter = Box::new(FilterExecutor::new(
             ActorContext::create(123),

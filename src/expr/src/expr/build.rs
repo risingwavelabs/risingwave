@@ -132,52 +132,69 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
 /// ```
 pub fn build_from_pretty(s: impl AsRef<str>) -> BoxedExpression {
     let tokens = lexer(s.as_ref());
-    parse_expression(&mut tokens.into_iter().peekable())
+    Parser::new(tokens.into_iter()).parse_expression()
 }
 
-fn parse_expression(tokens: &mut Peekable<impl Iterator<Item = Token>>) -> BoxedExpression {
-    match tokens.next().expect("Unexpected end of input") {
-        Token::Index(index) => {
-            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
-            let ty = match tokens.next().expect("Unexpected end of input") {
-                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
-                t => panic!("Expected a Literal, got {t:?}"),
-            };
-            InputRefExpression::new(ty, index).boxed()
-        }
-        Token::LParen => {
-            let func = match tokens.next().expect("Unexpected end of input") {
-                Token::Literal(name) => PbType::from_str_name(&name.to_uppercase())
-                    .expect_str("Invalid function", &name),
-                t => panic!("Expected a Literal, got {t:?}"),
-            };
-            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
-            let ty = match tokens.next().expect("Unexpected end of input") {
-                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
-                t => panic!("Expected a Literal, got {t:?}"),
-            };
+struct Parser<Iter: Iterator> {
+    tokens: Peekable<Iter>,
+}
 
-            let mut children = Vec::new();
-            while tokens.peek() != Some(&Token::RParen) {
-                children.push(parse_expression(tokens));
+impl<Iter: Iterator<Item = Token>> Parser<Iter> {
+    fn new(tokens: Iter) -> Self {
+        Self {
+            tokens: tokens.peekable(),
+        }
+    }
+
+    fn parse_expression(&mut self) -> BoxedExpression {
+        match self.tokens.next().expect("Unexpected end of input") {
+            Token::Index(index) => {
+                assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+                let ty = self.parse_type();
+                InputRefExpression::new(ty, index).boxed()
             }
-            tokens.next(); // Consume the RParen
+            Token::LParen => {
+                let func = self.parse_function();
+                assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+                let ty = self.parse_type();
 
-            build(func, ty, children).expect("Failed to build")
+                let mut children = Vec::new();
+                while self.tokens.peek() != Some(&Token::RParen) {
+                    children.push(self.parse_expression());
+                }
+                self.tokens.next(); // Consume the RParen
+
+                build(func, ty, children).expect("Failed to build")
+            }
+            Token::Literal(value) => {
+                assert_eq!(self.tokens.next(), Some(Token::Colon), "Expected a Colon");
+                let ty = self.parse_type();
+                let value = match value.as_str() {
+                    "null" => None,
+                    _ => Some(
+                        ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", &value),
+                    ),
+                };
+                LiteralExpression::new(ty, value).boxed()
+            }
+            _ => panic!("Unexpected token"),
         }
-        Token::Literal(value) => {
-            assert_eq!(tokens.next(), Some(Token::Colon), "Expected a Colon");
-            let ty = match tokens.next().expect("Unexpected end of input") {
-                Token::Literal(ty) => ty.parse::<DataType>().expect("Invalid type"),
-                t => panic!("Expected a Literal, got {t:?}"),
-            };
-            let value = match value.as_str() {
-                "null" => None,
-                _ => Some(ScalarImpl::from_text(value.as_bytes(), &ty).expect("Invalid value")),
-            };
-            LiteralExpression::new(ty, value).boxed()
+    }
+
+    fn parse_type(&mut self) -> DataType {
+        match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(name) => name.parse::<DataType>().expect_str("type", &name),
+            t => panic!("Expected a Literal, got {t:?}"),
         }
-        _ => panic!("Unexpected token"),
+    }
+
+    fn parse_function(&mut self) -> PbType {
+        match self.tokens.next().expect("Unexpected end of input") {
+            Token::Literal(name) => {
+                PbType::from_str_name(&name.to_uppercase()).expect_str("function", &name)
+            }
+            t => panic!("Expected a Literal, got {t:?}"),
+        }
     }
 }
 
@@ -230,7 +247,7 @@ impl<T> ExpectExt<T> for Option<T> {
     fn expect_str(self, what: &str, s: &str) -> T {
         match self {
             Some(x) => x,
-            None => panic!("expect {what:?} in {s:?}"),
+            None => panic!("expect {what} in {s:?}"),
         }
     }
 }
@@ -240,7 +257,7 @@ impl<T, E> ExpectExt<T> for std::result::Result<T, E> {
     fn expect_str(self, what: &str, s: &str) -> T {
         match self {
             Ok(x) => x,
-            Err(_) => panic!("expect {what:?} in {s:?}"),
+            Err(_) => panic!("expect {what} in {s:?}"),
         }
     }
 }
