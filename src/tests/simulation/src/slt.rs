@@ -178,7 +178,7 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 match tester
                     .run_async(record.clone())
                     .timed(|_res, elapsed| {
-                        println!("Record {:?} finished in {:?}", record, elasped)
+                        println!("Record {:?} finished in {:?}", record, elapsed)
                     })
                     .await
                 {
