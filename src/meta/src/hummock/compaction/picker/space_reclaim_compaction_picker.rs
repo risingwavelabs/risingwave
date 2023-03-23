@@ -37,7 +37,6 @@ pub struct SpaceReclaimCompactionPicker {
 
 // According to the execution model of SpaceReclaimCompactionPicker, SpaceReclaimPickerState is
 // designed to record the state of each round of scanning
-#[derive(Default)]
 pub struct SpaceReclaimPickerState {
     // Because of the right_exclusive, we use KeyRangeCommon to determine if the end_bounds
     // overlap instead of directly comparing Vec<u8>. We don't need to use the start_bound in the
@@ -50,6 +49,16 @@ pub struct SpaceReclaimPickerState {
     pub end_bound_in_round: KeyRange,
 
     pub select_level: usize,
+}
+
+impl Default for SpaceReclaimPickerState {
+    fn default() -> Self {
+        Self {
+            last_select_end_bound: KeyRange::default(),
+            end_bound_in_round: KeyRange::default(),
+            select_level: 1,
+        }
+    }
 }
 
 impl SpaceReclaimPickerState {
