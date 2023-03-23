@@ -27,9 +27,9 @@ public class Utils {
             throw new RuntimeException(
                     String.format("invalid long value: %s %s", row.getLong(2), rowIndex));
         }
-        if (row.getDecimal(3).equals(rowIndex)) {
+        if (row.getFloat(3) != (float) rowIndex) {
             throw new RuntimeException(
-                    String.format("invalid decimal value: %s %s", row.getDecimal(3), rowIndex));
+                    String.format("invalid float value: %s %s", row.getFloat(3), rowIndex));
         }
         if (row.getDouble(4) != (double) rowIndex) {
             throw new RuntimeException(
@@ -47,9 +47,18 @@ public class Utils {
                             row.getString(6),
                             ((Short) rowIndex).toString().repeat((rowIndex % 10) + 1)));
         }
-        System.err.format("var: %s\n", row.getDateTime(7));
 
-        if (row.isNull(8) != (rowIndex % 5 == 0)) {
+        if (row.getTimestamp(7).getTime() != rowIndex * 1000) {
+            throw new RuntimeException(
+                    String.format("invalid Timestamp value: %s %s", row.getTimestamp(7), rowIndex));
+        }
+
+        if (row.getDecimal(8).intValue() != rowIndex) {
+            throw new RuntimeException(
+                    String.format("invalid decimal value: %s %s", row.getDecimal(8), rowIndex));
+        }
+
+        if (row.isNull(9) != (rowIndex % 5 == 0)) {
             throw new RuntimeException(
                     String.format(
                             "invalid isNull value: %s %s", row.isNull(7), (rowIndex % 5 == 0)));

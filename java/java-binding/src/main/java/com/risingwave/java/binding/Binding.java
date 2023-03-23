@@ -53,7 +53,7 @@ public class Binding {
 
     static native String rowGetStringValue(long pointer, int index);
 
-    static native java.sql.Date rowGetDateTimeValue(long pointer, int index);
+    static native java.sql.Timestamp rowGetTimestampValue(long pointer, int index);
 
     static native java.math.BigDecimal rowGetDecimalValue(long pointer, int index);
 

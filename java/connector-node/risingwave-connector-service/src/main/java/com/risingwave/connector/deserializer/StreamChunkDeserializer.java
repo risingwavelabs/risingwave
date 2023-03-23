@@ -113,7 +113,7 @@ public class StreamChunkDeserializer implements Deserializer {
                                 if (row.isNull(index)) {
                                     return null;
                                 }
-                                return row.getDateTime(index);
+                                return row.getTimestamp(index);
                             };
                     break;
                 case DECIMAL:
