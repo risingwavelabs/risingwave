@@ -111,3 +111,7 @@ harness = false
 [[bench]]
 name = "bitmap"
 harness = false
+
+[[bin]]
+name = "example-config"
+path = "src/bin/default_config.rs"
