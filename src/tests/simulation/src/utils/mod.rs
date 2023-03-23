@@ -12,20 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! The entry point to combine all integration tests into a single binary.
-//!
-//! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
-//! for the rationale behind this approach.
+mod assert_result;
+pub use assert_result::*;
 
-#![feature(stmt_expr_attributes)]
-
-mod cascade_materialized_view;
-mod delta_join;
-mod dynamic_filter;
-mod hello;
-mod nexmark_chaos;
-mod nexmark_q4;
-mod nexmark_recovery;
-mod nexmark_source;
-mod singleton_migration;
-mod streaming_parallelism;
+mod timed_future;
+pub use timed_future::*;

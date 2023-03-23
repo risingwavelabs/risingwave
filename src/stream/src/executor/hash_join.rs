@@ -704,7 +704,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone());
+                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
+                            self.watermark_buffers
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
