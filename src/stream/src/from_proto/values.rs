@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Field, Schema};
-use risingwave_expr::expr::{build_from_prost};
+use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::stream_plan::ValuesNode;
 use risingwave_storage::StateStore;
 use tokio::sync::mpsc::unbounded_channel;
@@ -25,6 +25,8 @@ use crate::executor::values::ValuesExecutor;
 use crate::executor::BoxedExecutor;
 use crate::task::{ExecutorParams, LocalStreamManagerCore};
 
+/// Build a `ValuesExecutor` for stream. As is a leaf, current workaround registers a `sender` for this executor.
+/// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutorBuilder;
 
 #[async_trait::async_trait]
@@ -42,7 +44,6 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
             .context
             .lock_barrier_manager()
             .register_sender(params.actor_context.id, sender);
-        debug!("ValuesExecutor registers {} at lock barrier manager", params.actor_context.id);
         let rows = node
             .get_tuples()
             .iter()

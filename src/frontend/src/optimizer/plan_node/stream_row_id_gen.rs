@@ -20,6 +20,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use super::{ExprRewritable, LogicalRowIdGen, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
+/// `StreamRowIdGen` holds a stream `PlanBase` and a `LogicalRowIdGen`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamRowIdGen {
     pub base: PlanBase,
@@ -27,6 +28,7 @@ pub struct StreamRowIdGen {
 }
 
 impl StreamRowIdGen {
+    /// Create a `StreamRowIdGen` with intermediate `LogicalRowIdGen`
     pub fn new(logical: LogicalRowIdGen) -> Self {
         let watermark_columns = FixedBitSet::with_capacity(logical.schema().len());
         let base = PlanBase::new_stream(

@@ -28,8 +28,10 @@ use super::{
     Barrier, BoxedMessageStream, Executor, Message, PkIndices, PkIndicesRef, StreamExecutorError,
 };
 
+/// Execute `values` in stream. As is a leaf, current workaround holds a `barrier_executor`.
+/// May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
-    /// Receiver of barrier channel.
+    // Receiver of barrier channel.
     barrier_receiver: UnboundedReceiver<Barrier>,
 
     rows: vec::IntoIter<Vec<BoxedExpression>>,
@@ -39,6 +41,7 @@ pub struct ValuesExecutor {
 }
 
 impl ValuesExecutor {
+    /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         rows: Vec<Vec<BoxedExpression>>,
         schema: Schema,

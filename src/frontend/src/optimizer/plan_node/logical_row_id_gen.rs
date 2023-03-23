@@ -27,7 +27,7 @@ use crate::optimizer::plan_node::{
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalRowIdGen` builds rows according to a list of expressions
+/// `LogicalRowIdGen` generates `_row_id` at `row_id_index`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalRowIdGen {
     pub base: PlanBase,
@@ -36,6 +36,7 @@ pub struct LogicalRowIdGen {
 }
 
 impl LogicalRowIdGen {
+    /// Build a `LogicalRowIdGen` node given `input` and desired `row_id` index
     pub fn new(input: PlanRef, row_id: usize) -> Self {
         let schema = input.schema().clone();
         let functional_dependency = FunctionalDependencySet::new(schema.len());
@@ -47,10 +48,12 @@ impl LogicalRowIdGen {
         }
     }
 
+    /// Build a `LogicalRowIdGen` node given `input` and desired `row_id` index, shall be `Ok`
     pub fn create(input: PlanRef, row_id: usize) -> Result<Self> {
         Ok(Self::new(input, row_id))
     }
 
+    /// `row_id_index` for the node
     pub fn row_id_index(&self) -> usize {
         self.row_id_index
     }
