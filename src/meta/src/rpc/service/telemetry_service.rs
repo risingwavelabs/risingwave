@@ -38,8 +38,7 @@ impl<S: MetaStore> TelemetryInfoServiceImpl<S> {
             MetaBackend::Etcd => match self.meta_store.get_cf(TELEMETRY_CF, TELEMETRY_KEY).await {
                 Ok(bytes) => String::from_utf8(bytes)
                     .map_err(|e| anyhow!("failed to parse uuid, {}", e))
-                    .ok()
-                    .map(|uuid| uuid.to_string()),
+                    .ok(),
                 Err(_) => None,
             },
             MetaBackend::Mem => None,
