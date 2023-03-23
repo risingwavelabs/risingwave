@@ -12,11 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::min;
 use std::sync::Arc;
 
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{build_from_prost, BoxedExpression};
+use risingwave_expr::expr::{build, build_from_prost, BoxedExpression, InputRefExpression};
+pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
 use risingwave_pb::stream_plan::HashJoinNode;
 
@@ -82,6 +84,31 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
+        let mut inequality_pairs = Vec::with_capacity(node.get_inequality_pairs().len());
+        for inequality_pair in node.get_inequality_pairs() {
+            let key_required_larger = inequality_pair.get_key_required_larger() as usize;
+            let key_required_smaller = inequality_pair.get_key_required_smaller() as usize;
+            inequality_pairs.push((
+                key_required_larger,
+                key_required_smaller,
+                inequality_pair.get_generate_watermark(),
+                if let Some(delta_expression) = inequality_pair.delta_expression.as_ref() {
+                    let data_type = source_l.schema().fields
+                        [min(key_required_larger, key_required_smaller)]
+                    .data_type();
+                    Some(build(
+                        delta_expression.delta_type(),
+                        data_type.clone(),
+                        vec![
+                            Box::new(InputRefExpression::new(data_type, 0)),
+                            build_from_prost(delta_expression.delta.as_ref().unwrap())?,
+                        ],
+                    )?)
+                } else {
+                    None
+                },
+            ));
+        }
 
         let join_key_data_types = params_l
             .join_key_indices
@@ -111,6 +138,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             output_indices,
             executor_id: params.executor_id,
             cond: condition,
+            inequality_pairs,
             op_info: params.op_info,
             state_table_l,
             degree_state_table_l,
@@ -139,6 +167,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     output_indices: Vec<usize>,
     executor_id: u64,
     cond: Option<BoxedExpression>,
+    inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
     op_info: String,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
@@ -171,6 +200,7 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
                         self.output_indices,
                         self.executor_id,
                         self.cond,
+                        self.inequality_pairs,
                         self.op_info,
                         self.state_table_l,
                         self.degree_state_table_l,

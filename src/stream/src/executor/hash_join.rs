@@ -30,6 +30,7 @@ use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::BoxedExpression;
+use risingwave_expr::ExprError;
 use risingwave_storage::StateStore;
 
 use self::JoinType::{FullOuter, LeftOuter, LeftSemi, RightAnti, RightOuter, RightSemi};
@@ -172,6 +173,8 @@ struct JoinSide<K: HashKey, S: StateStore> {
     /// The mapping from input indices of a side to output columes.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
+    input2inequality_index: Vec<Vec<(usize, bool)>>,
+    state_clean_columns: Vec<(usize, usize)>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
 }
@@ -233,6 +236,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     side_r: JoinSide<K, S>,
     /// Optional non-equi join conditions
     cond: Option<BoxedExpression>,
+    inequality_pairs: Vec<(Vec<usize>, Option<BoxedExpression>)>,
+    inequality_watermarks: Vec<Option<Watermark>>,
     /// Identity string
     identity: String,
 
@@ -420,6 +425,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         output_indices: Vec<usize>,
         executor_id: u64,
         cond: Option<BoxedExpression>,
+        inequality_pairs: Vec<(usize, usize, bool, Option<BoxedExpression>)>,
         op_info: String,
         state_table_l: StateTable<S>,
         degree_state_table_l: StateTable<S>,
@@ -544,6 +550,63 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         let l2o_indexed = MultiMap::from_iter(left_to_output.iter().copied());
         let r2o_indexed = MultiMap::from_iter(right_to_output.iter().copied());
 
+        let left_input_len = input_l.schema().len();
+        let right_input_len = input_r.schema().len();
+        let mut l2inequality_index = vec![vec![]; left_input_len];
+        let mut r2inequality_index = vec![vec![]; right_input_len];
+        let mut l_state_clean_columns = vec![];
+        let mut r_state_clean_columns = vec![];
+        let inequality_pairs = inequality_pairs
+            .into_iter()
+            .enumerate()
+            .map(
+                |(
+                    index,
+                    (
+                        key_required_larger,
+                        key_required_smaller,
+                        generate_watermark,
+                        delta_expression,
+                    ),
+                )| {
+                    let output_indices = if key_required_larger < key_required_smaller {
+                        l_state_clean_columns.push((key_required_larger, index));
+                        l2inequality_index[key_required_larger].push((index, false));
+                        r2inequality_index[key_required_smaller - left_input_len]
+                            .push((index, true));
+                        if generate_watermark {
+                            l2o_indexed
+                                .get_vec(&key_required_larger)
+                                .cloned()
+                                .unwrap_or_default()
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        r_state_clean_columns.push((key_required_larger - left_input_len, index));
+                        l2inequality_index[key_required_smaller].push((index, true));
+                        r2inequality_index[key_required_larger - left_input_len]
+                            .push((index, false));
+                        if generate_watermark {
+                            r2o_indexed
+                                .get_vec(&(key_required_larger - left_input_len))
+                                .cloned()
+                                .unwrap_or_default()
+                        } else {
+                            vec![]
+                        }
+                    };
+                    (output_indices, delta_expression)
+                },
+            )
+            .collect_vec();
+
+        if append_only_optimize {
+            l_state_clean_columns.clear();
+            r_state_clean_columns.clear();
+        }
+
+        let inequality_watermarks = vec![None; inequality_pairs.len()];
         let watermark_buffers = BTreeMap::new();
 
         Self {
@@ -573,6 +636,8 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 all_data_types: state_all_data_types_l,
                 i2o_mapping: left_to_output,
                 i2o_mapping_indexed: l2o_indexed,
+                input2inequality_index: l2inequality_index,
+                state_clean_columns: l_state_clean_columns,
                 deduped_pk_indices: state_pk_indices_l,
                 start_pos: 0,
                 need_degree_table: need_degree_table_l,
@@ -600,10 +665,14 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 start_pos: side_l_column_n,
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
+                input2inequality_index: r2inequality_index,
+                state_clean_columns: r_state_clean_columns,
                 need_degree_table: need_degree_table_r,
             },
             pk_indices,
             cond,
+            inequality_pairs,
+            inequality_watermarks,
             identity: format!("HashJoinExecutor {:X}", executor_id),
             op_info,
             append_only_optimize,
@@ -646,12 +715,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 .inc_by(start_time.elapsed().as_nanos() as u64);
             match msg? {
                 AlignedMessage::WatermarkLeft(watermark) => {
-                    for watermark_to_emit in self.handle_watermark(SideType::Left, watermark)? {
+                    for watermark_to_emit in
+                        self.handle_watermark(SideType::Left, watermark).await?
+                    {
                         yield Message::Watermark(watermark_to_emit);
                     }
                 }
                 AlignedMessage::WatermarkRight(watermark) => {
-                    for watermark_to_emit in self.handle_watermark(SideType::Right, watermark)? {
+                    for watermark_to_emit in
+                        self.handle_watermark(SideType::Right, watermark).await?
+                    {
                         yield Message::Watermark(watermark_to_emit);
                     }
                 }
@@ -666,6 +739,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.side_r,
                         &self.actual_output_data_types,
                         &mut self.cond,
+                        &self.inequality_watermarks,
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
@@ -692,6 +766,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         &mut self.side_r,
                         &self.actual_output_data_types,
                         &mut self.cond,
+                        &self.inequality_watermarks,
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
@@ -717,6 +792,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             self.watermark_buffers
                                 .values_mut()
                                 .for_each(|buffers| buffers.clear());
+                            self.inequality_watermarks.fill(None);
                         }
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
@@ -778,7 +854,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         }
     }
 
-    fn handle_watermark(
+    async fn handle_watermark(
         &mut self,
         side: SideTypePrimitive,
         watermark: Watermark,
@@ -823,6 +899,37 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 }
             };
         }
+        for (inequality_index, need_offset) in
+            &side_update.input2inequality_index[watermark.col_idx]
+        {
+            let buffers = self
+                .watermark_buffers
+                .entry(side_update.join_key_indices.len() + inequality_index)
+                .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
+            let mut input_watermark = watermark.clone();
+            if *need_offset && let Some(delta_expression) = self.inequality_pairs[*inequality_index].1.as_ref() {
+                // allow since we will handle error manually.
+                #[allow(clippy::disallowed_methods)]
+                let eval_result = delta_expression
+                    .eval_row(&OwnedRow::new(vec![Some(input_watermark.val)]))
+                    .await;
+                match eval_result {
+                    Ok(value) => input_watermark.val = value.unwrap(),
+                    Err(err) => {
+                        if !matches!(err, ExprError::NumericOutOfRange) {
+                            self.ctx.on_compute_error(err, self.identity.as_str());
+                        }
+                        continue;
+                    },
+                }
+            };
+            if let Some(selected_watermark) = buffers.handle_watermark(side, input_watermark) {
+                for output_idx in &self.inequality_pairs[*inequality_index].0 {
+                    watermarks_to_emit.push(selected_watermark.clone().with_idx(*output_idx));
+                }
+                self.inequality_watermarks[*inequality_index] = Some(selected_watermark);
+            }
+        }
         Ok(watermarks_to_emit)
     }
 
@@ -865,6 +972,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         side_r: &'a mut JoinSide<K, S>,
         actual_output_data_types: &'a [DataType],
         cond: &'a mut Option<BoxedExpression>,
+        inequality_watermarks: &'a [Option<Watermark>],
         chunk: StreamChunk,
         append_only_optimize: bool,
         chunk_size: usize,
@@ -877,6 +985,16 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         } else {
             (side_r, side_l)
         };
+
+        let useful_state_clean_columns = side_match
+            .state_clean_columns
+            .iter()
+            .filter_map(|(column_idx, inequality_index)| {
+                inequality_watermarks[*inequality_index]
+                    .as_ref()
+                    .map(|watermark| (*column_idx, watermark))
+            })
+            .collect_vec();
 
         let mut hashjoin_chunk_builder = HashJoinChunkBuilder::<T, SIDE> {
             stream_chunk_builder: StreamChunkBuilder::new(
@@ -898,6 +1016,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                     let mut degree = 0;
                     let mut append_only_matched_row = None;
                     if let Some(mut matched_rows) = matched_rows {
+                        let mut matched_rows_to_clean = vec![];
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -922,6 +1041,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             } else {
                                 true
                             };
+                            let mut need_state_clean = false;
                             if check_join_condition {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
@@ -934,6 +1054,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 if side_match.need_degree_table {
                                     side_match.ht.inc_degree(matched_row_ref, &mut matched_row);
                                 }
+                            } else {
+                                for (column_idx, watermark) in &useful_state_clean_columns {
+                                    if matched_row
+                                        .row
+                                        .datum_at(*column_idx)
+                                        .map_or(false, |scalar| {
+                                            scalar < watermark.val.as_scalar_ref_impl()
+                                        })
+                                    {
+                                        need_state_clean = true;
+                                        break;
+                                    }
+                                }
                             }
                             // If the stream is append-only and the join key covers pk in both side,
                             // then we can remove matched rows since pk is unique and will not be
@@ -943,6 +1076,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                 // one row if matched.
                                 assert!(append_only_matched_row.is_none());
                                 append_only_matched_row = Some(matched_row);
+                            } else if need_state_clean {
+                                // `append_only_optimize` and `need_state_clean` won't both be true.
+                                // 'else' here is only to suppress compiler error.
+                                matched_rows_to_clean.push(matched_row);
                             }
                         }
                         if degree == 0 {
@@ -958,6 +1095,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
+                        for matched_row in matched_rows_to_clean {
+                            if side_match.need_degree_table {
+                                side_match.ht.delete(key, matched_row);
+                            } else {
+                                side_match.ht.delete_row(key, matched_row.row);
+                            }
+                        }
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                     {
@@ -975,6 +1119,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                 Op::Delete | Op::UpdateDelete => {
                     let mut degree = 0;
                     if let Some(mut matched_rows) = matched_rows {
+                        let mut matched_rows_to_clean = vec![];
                         for (matched_row_ref, matched_row) in
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
@@ -999,6 +1144,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             } else {
                                 true
                             };
+                            let mut need_state_clean = false;
                             if check_join_condition {
                                 degree += 1;
                                 if side_match.need_degree_table {
@@ -1011,6 +1157,22 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                                         yield chunk;
                                     }
                                 }
+                            } else {
+                                for (column_idx, watermark) in &useful_state_clean_columns {
+                                    if matched_row
+                                        .row
+                                        .datum_at(*column_idx)
+                                        .map_or(false, |scalar| {
+                                            scalar < watermark.val.as_scalar_ref_impl()
+                                        })
+                                    {
+                                        need_state_clean = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if need_state_clean {
+                                matched_rows_to_clean.push(matched_row);
                             }
                         }
                         if degree == 0 {
@@ -1026,6 +1188,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
+                        for matched_row in matched_rows_to_clean {
+                            if side_match.need_degree_table {
+                                side_match.ht.delete(key, matched_row);
+                            } else {
+                                side_match.ht.delete_row(key, matched_row.row);
+                            }
+                        }
                     } else if let Some(chunk) =
                         hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                     {
@@ -1166,6 +1335,7 @@ mod tests {
             (0..schema_len).collect_vec(),
             1,
             cond,
+            vec![],
             "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,
@@ -1239,6 +1409,7 @@ mod tests {
             (0..schema_len).collect_vec(),
             1,
             cond,
+            vec![],
             "HashJoinExecutor".to_string(),
             state_l,
             degree_state_l,

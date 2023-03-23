@@ -16,7 +16,9 @@ use std::fmt;
 
 use risingwave_common::catalog::Schema;
 
-use crate::expr::{ExprRewriter, ExprType, FunctionCall, InputRef, InputRefDisplay};
+use crate::expr::{
+    ExprRewriter, ExprType, FunctionCall, InequalityInputPair, InputRef, InputRefDisplay,
+};
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
 /// The join predicate used in optimizer
@@ -32,6 +34,7 @@ pub struct EqJoinPredicate {
     eq_keys: Vec<(InputRef, InputRef, bool)>,
 
     left_cols_num: usize,
+    right_cols_num: usize,
 }
 
 impl fmt::Display for EqJoinPredicate {
@@ -77,11 +80,13 @@ impl EqJoinPredicate {
         other_cond: Condition,
         eq_keys: Vec<(InputRef, InputRef, bool)>,
         left_cols_num: usize,
+        right_cols_num: usize,
     ) -> Self {
         Self {
             other_cond,
             eq_keys,
             left_cols_num,
+            right_cols_num,
         }
     }
 
@@ -102,7 +107,7 @@ impl EqJoinPredicate {
     /// ```
     pub fn create(left_cols_num: usize, right_cols_num: usize, on_clause: Condition) -> Self {
         let (eq_keys, other_cond) = on_clause.split_eq_keys(left_cols_num, right_cols_num);
-        Self::new(other_cond, eq_keys, left_cols_num)
+        Self::new(other_cond, eq_keys, left_cols_num, right_cols_num)
     }
 
     /// Get join predicate's eq conds.
@@ -170,6 +175,14 @@ impl EqJoinPredicate {
             .iter()
             .map(|(left, right, _)| (left.index(), right.index() - self.left_cols_num))
             .collect()
+    }
+
+    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<InequalityInputPair>) {
+        (
+            self.left_cols_num,
+            self.other_cond()
+                .extract_inequality_keys(self.left_cols_num, self.right_cols_num),
+        )
     }
 
     /// Note: `right_col_index` starts from `0`
@@ -249,7 +262,12 @@ impl EqJoinPredicate {
             }
         }
 
-        Self::new(self.other_cond, new_eq_keys, self.left_cols_num)
+        Self::new(
+            self.other_cond,
+            new_eq_keys,
+            self.left_cols_num,
+            self.right_cols_num,
+        )
     }
 
     pub fn rewrite_exprs(&self, rewriter: &mut (impl ExprRewriter + ?Sized)) -> Self {

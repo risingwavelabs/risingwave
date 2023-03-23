@@ -592,6 +592,7 @@ pub(crate) mod tests {
                     ),
                 ],
                 2,
+                2,
             ),
         )
         .into();

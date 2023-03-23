@@ -20,12 +20,12 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
 
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
-use crate::expr::{Expr, ExprRewriter};
+use crate::expr::{Expr, ExprRewriter, InequalityInputPair};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -44,6 +44,10 @@ pub struct StreamHashJoin {
     /// The join condition must be equivalent to `logical.on`, but separated into equal and
     /// non-equal parts to facilitate execution later
     eq_join_predicate: EqJoinPredicate,
+
+    /// `(generate_output, key_required_larger, key_required_smaller, delta_expression)`
+    /// View struct `InequalityInputPair` for details.
+    inequality_pairs: Vec<(bool, InequalityInputPair)>,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
@@ -65,6 +69,8 @@ impl StreamHashJoin {
             &logical,
         );
 
+        let mut inequality_pairs = vec![];
+
         let watermark_columns = {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
@@ -81,6 +87,56 @@ impl StreamHashJoin {
                         watermark_columns.insert(internal);
                     }
                 }
+            }
+            let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
+            for InequalityInputPair {
+                key_required_larger,
+                key_required_smaller,
+                delta_expression,
+            } in original_inequality_pairs
+            {
+                let both_upstream_has_watermark = if key_required_larger < key_required_smaller {
+                    logical
+                        .left()
+                        .watermark_columns()
+                        .contains(key_required_larger)
+                        && logical
+                            .right()
+                            .watermark_columns()
+                            .contains(key_required_smaller - left_cols_num)
+                } else {
+                    logical
+                        .left()
+                        .watermark_columns()
+                        .contains(key_required_smaller)
+                        && logical
+                            .right()
+                            .watermark_columns()
+                            .contains(key_required_larger - left_cols_num)
+                };
+                if !both_upstream_has_watermark {
+                    continue;
+                }
+
+                let internal = if key_required_larger < key_required_smaller {
+                    l2i.try_map(key_required_larger)
+                } else {
+                    r2i.try_map(key_required_larger - left_cols_num)
+                };
+                let generate_watermark = if let Some(internal) = internal && !watermark_columns.contains(internal) {
+                    watermark_columns.insert(internal);
+                    true
+                } else {
+                    false
+                };
+                inequality_pairs.push((
+                    generate_watermark,
+                    InequalityInputPair {
+                        key_required_larger,
+                        key_required_smaller,
+                        delta_expression,
+                    },
+                ));
             }
             logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
         };
@@ -100,6 +156,7 @@ impl StreamHashJoin {
             base,
             logical,
             eq_join_predicate,
+            inequality_pairs,
             is_append_only: append_only,
         }
     }
@@ -311,6 +368,32 @@ impl StreamNode for StreamHashJoin {
                 .other_cond()
                 .as_expr_unless_true()
                 .map(|x| x.to_expr_proto()),
+            inequality_pairs: self
+                .inequality_pairs
+                .iter()
+                .map(
+                    |(
+                        generate_watermark,
+                        InequalityInputPair {
+                            key_required_larger,
+                            key_required_smaller,
+                            delta_expression,
+                        },
+                    )| {
+                        PbInequalityPair {
+                            key_required_larger: *key_required_larger as u32,
+                            key_required_smaller: *key_required_smaller as u32,
+                            generate_watermark: *generate_watermark,
+                            delta_expression: delta_expression.as_ref().map(
+                                |(delta_type, delta)| DeltaExpression {
+                                    delta_type: *delta_type as i32,
+                                    delta: Some(delta.to_expr_proto()),
+                                },
+                            ),
+                        }
+                    },
+                )
+                .collect_vec(),
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),
