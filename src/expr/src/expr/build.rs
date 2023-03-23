@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use itertools::Itertools;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_pb::expr::expr_node::{PbType, RexNode};
 use risingwave_pb::expr::ExprNode;
 
@@ -115,5 +115,65 @@ pub(super) fn get_children_and_return_type(prost: &ExprNode) -> Result<(&[ExprNo
         Ok((func_call.get_children(), ret_type))
     } else {
         bail!("Expected RexNode::FuncCall");
+    }
+}
+
+/// Build an expression from a string.
+///
+/// # Example
+/// ```
+/// # use risingwave_expr::expr::build_from_pretty;
+/// build_from_pretty("42:int2");
+/// build_from_pretty("#0:int8");
+/// build_from_pretty("(add:int8 42:int2 #1:int8)");
+/// ```
+pub fn build_from_pretty(s: impl AsRef<str>) -> BoxedExpression {
+    let s = s.as_ref().trim();
+    if let Some(s) = s.strip_prefix('#') {
+        let (index, ty) = s.split_once(':').expect_str(":", s);
+        let index = index.parse::<usize>().expect_str("number", index);
+        let ty = ty.parse::<DataType>().expect_str("type", ty);
+        InputRefExpression::new(ty, index).boxed()
+    } else if let Some(s) = s.strip_prefix('(') {
+        let end = s.rfind(')').expect_str(")", s);
+        let mut tokens = s[..end].split_whitespace();
+        let name_type = tokens.next().unwrap();
+        let (name, ty) = name_type.split_once(':').expect_str(":", name_type);
+        let func = PbType::from_str_name(&name.to_uppercase()).expect_str("function", name);
+        let ty = ty.parse::<DataType>().expect_str("type", ty);
+        let children = tokens.map(build_from_pretty).collect();
+        build(func, ty, children).expect("failed to build")
+    } else {
+        let (value, ty) = s.split_once(':').expect_str(":", s);
+        let ty = ty.parse::<DataType>().expect_str("type", ty);
+        let value = match value {
+            "null" => None,
+            _ => Some(ScalarImpl::from_text(value.as_bytes(), &ty).expect_str("value", value)),
+        };
+        LiteralExpression::new(ty, value).boxed()
+    }
+}
+
+trait ExpectExt<T> {
+    fn expect_str(self, what: &str, s: &str) -> T;
+}
+
+impl<T> ExpectExt<T> for Option<T> {
+    #[track_caller]
+    fn expect_str(self, what: &str, s: &str) -> T {
+        match self {
+            Some(x) => x,
+            None => panic!("expect {what:?} in {s:?}"),
+        }
+    }
+}
+
+impl<T, E> ExpectExt<T> for std::result::Result<T, E> {
+    #[track_caller]
+    fn expect_str(self, what: &str, s: &str) -> T {
+        match self {
+            Ok(x) => x,
+            Err(_) => panic!("expect {what:?} in {s:?}"),
+        }
     }
 }

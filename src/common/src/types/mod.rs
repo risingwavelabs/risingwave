@@ -832,7 +832,7 @@ impl ScalarImpl {
         Ok(res)
     }
 
-    pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
+    pub fn cstr_to_str(b: &[u8]) -> Result<&str, Utf8Error> {
         let without_null = if b.last() == Some(&0) {
             &b[..b.len() - 1]
         } else {
@@ -841,7 +841,7 @@ impl ScalarImpl {
         std::str::from_utf8(without_null)
     }
 
-    pub fn from_text(bytes: &Bytes, data_type: &DataType) -> RwResult<Self> {
+    pub fn from_text(bytes: &[u8], data_type: &DataType) -> RwResult<Self> {
         let str = Self::cstr_to_str(bytes).map_err(|_| {
             ErrorCode::InvalidInputSyntax(format!("Invalid param string: {:?}", bytes))
         })?;
