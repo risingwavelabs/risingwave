@@ -69,7 +69,6 @@ impl fmt::Display for StreamValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("StreamValues")
             .field("rows", &self.logical.rows())
-            .field("schema", &self.logical.schema())
             .finish()
     }
 }

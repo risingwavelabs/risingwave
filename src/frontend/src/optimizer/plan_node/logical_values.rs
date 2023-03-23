@@ -94,7 +94,6 @@ impl fmt::Display for LogicalValues {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("LogicalValues")
             .field("rows", &self.rows)
-            .field("schema", &self.schema())
             .finish()
     }
 }

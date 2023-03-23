@@ -205,7 +205,7 @@
   logical_plan: |
     LogicalProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }
     └─LogicalInsert { table: t, returning: true }
-      └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]], schema: Schema { fields: [*VALUES*_0.column_0:Int32, *VALUES*_0.column_1:Int32] } }
+      └─LogicalValues { rows: [[0:Int32, 1:Int32], [1:Int32, 2:Int32]] }
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [*VALUES*_0.column_0, *VALUES*_0.column_1, *VALUES*_0.column_0, (*VALUES*_0.column_0 + *VALUES*_0.column_1) as $expr1] }

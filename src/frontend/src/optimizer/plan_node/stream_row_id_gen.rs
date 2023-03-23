@@ -36,8 +36,8 @@ impl StreamRowIdGen {
             logical.schema().clone(),
             logical.logical_pk().to_vec(),
             logical.functional_dependency().clone(),
-            logical.distribution().clone(),
-            logical.append_only(),
+            logical.input().distribution().clone(),
+            logical.input().append_only(),
             watermark_columns,
         );
         Self { base, logical }
