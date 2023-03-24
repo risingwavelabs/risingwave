@@ -50,6 +50,7 @@ use super::expr_unary::{
 };
 use super::expr_vnode::VnodeExpression;
 use crate::expr::expr_array_distinct::ArrayDistinctExpression;
+use crate::expr::expr_array_length::ArrayLengthExpression;
 use crate::expr::expr_array_to_string::ArrayToStringExpression;
 use crate::expr::expr_binary_nonnull::new_tumble_start;
 use crate::expr::expr_ternary::new_tumble_start_offset;
@@ -117,6 +118,7 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
         }
         ArrayToString => ArrayToStringExpression::try_from(prost).map(Expression::boxed),
         ArrayDistinct => ArrayDistinctExpression::try_from(prost).map(Expression::boxed),
+        ArrayLength => ArrayLengthExpression::try_from(prost).map(Expression::boxed),
         Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         Now => build_now_expr(prost),
         Udf => UdfExpression::try_from(prost).map(Expression::boxed),

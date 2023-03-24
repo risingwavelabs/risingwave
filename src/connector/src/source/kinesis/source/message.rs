@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use aws_sdk_kinesis::model::Record;
-use bytes::Bytes;
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
@@ -22,7 +21,7 @@ pub struct KinesisMessage {
     pub shard_id: SplitId,
     pub sequence_number: String,
     pub partition_key: String,
-    pub payload: Bytes,
+    pub payload: Vec<u8>,
 }
 
 impl From<KinesisMessage> for SourceMessage {
@@ -42,7 +41,7 @@ impl KinesisMessage {
             shard_id,
             sequence_number: message.sequence_number.unwrap(),
             partition_key: message.partition_key.unwrap(),
-            payload: message.data.unwrap().into_inner().into(),
+            payload: message.data.unwrap().into_inner(),
         }
     }
 }

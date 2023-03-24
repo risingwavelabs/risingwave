@@ -200,7 +200,7 @@ macro_rules! impl_common_parser_logic {
 
                             let old_op_num = builder.op_num();
 
-                            if let Err(e) = self.parse_inner(content.as_ref(), builder.row_writer())
+                            if let Err(e) = self.parse_inner(content, builder.row_writer())
                                 .await
                             {
                                 tracing::warn!("message parsing failed {}, skipping", e.to_string());

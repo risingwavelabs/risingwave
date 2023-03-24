@@ -28,16 +28,19 @@ use risingwave_storage::table::TableIter;
 use risingwave_storage::StateStore;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
+use crate::cache::cache_may_stale;
 use crate::common::StreamChunkBuilder;
 use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
 use crate::executor::lookup::LookupExecutor;
-use crate::executor::{Barrier, Executor, Message, PkIndices};
+use crate::executor::{ActorContextRef, Barrier, Executor, Message, PkIndices};
 use crate::task::AtomicU64Ref;
 
 /// Parameters for [`LookupExecutor`].
 pub struct LookupExecutorParams<S: StateStore> {
+    pub ctx: ActorContextRef,
+
     /// The side for arrangement. Currently, it should be a
     /// `MaterializeExecutor`.
     pub arrangement: Box<dyn Executor>,
@@ -116,6 +119,7 @@ pub struct LookupExecutorParams<S: StateStore> {
 impl<S: StateStore> LookupExecutor<S> {
     pub fn new(params: LookupExecutorParams<S>) -> Self {
         let LookupExecutorParams {
+            ctx,
             arrangement,
             stream,
             arrangement_col_descs,
@@ -202,6 +206,7 @@ impl<S: StateStore> LookupExecutor<S> {
         );
 
         Self {
+            ctx,
             chunk_data_types,
             schema: output_schema,
             pk_indices,
@@ -273,10 +278,8 @@ impl<S: StateStore> LookupExecutor<S> {
                         self.lookup_cache.flush();
                     }
 
-                    // Use the new stream barrier epoch as new cache epoch
-                    self.lookup_cache.update_epoch(barrier.epoch.curr);
+                    self.process_barrier(&barrier);
 
-                    self.process_barrier(barrier.clone()).await?;
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
                         // ready, so we can forward barrier now.
@@ -336,11 +339,23 @@ impl<S: StateStore> LookupExecutor<S> {
         }
     }
 
-    /// Store the barrier.
-    #[expect(clippy::unused_async)]
-    async fn process_barrier(&mut self, barrier: Barrier) -> StreamExecutorResult<()> {
-        self.last_barrier = Some(barrier);
-        Ok(())
+    /// Process the barrier and apply changes if necessary.
+    fn process_barrier(&mut self, barrier: &Barrier) {
+        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
+            let previous_vnode_bitmap = self
+                .arrangement
+                .storage_table
+                .update_vnode_bitmap(vnode_bitmap.clone());
+
+            // Manipulate the cache if necessary.
+            if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+                self.lookup_cache.clear();
+            }
+        }
+
+        // Use the new stream barrier epoch as new cache epoch
+        self.lookup_cache.update_epoch(barrier.epoch.curr);
+        self.last_barrier = Some(barrier.clone());
     }
 
     /// Lookup all rows corresponding to a join key in shared buffer.

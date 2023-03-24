@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -175,7 +176,7 @@ impl AvroParser {
 
     pub(crate) async fn parse_inner(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         enum Op {
@@ -184,7 +185,7 @@ impl AvroParser {
         }
 
         let (_payload, op) = if self.is_enable_upsert() {
-            let msg: UpsertMessage<'_> = bincode::deserialize(payload).map_err(|e| {
+            let msg: UpsertMessage<'_> = bincode::deserialize(&payload).map_err(|e| {
                 RwError::from(ProtocolError(format!(
                     "extract payload err {:?}, you may need to check the 'upsert' parameter",
                     e
@@ -196,7 +197,7 @@ impl AvroParser {
                 (msg.primary_key, Op::Delete)
             }
         } else {
-            (payload.into(), Op::Insert)
+            (Cow::from(&payload), Op::Insert)
         };
 
         // parse payload to avro value
@@ -212,7 +213,7 @@ impl AvroParser {
             from_avro_datum(writer_schema.as_ref(), &mut raw_payload, reader_schema)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?
         } else {
-            let mut reader = Reader::with_schema(&self.schema, payload as &[u8])
+            let mut reader = Reader::with_schema(&self.schema, &payload as &[u8])
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             match reader.next() {
                 Some(Ok(v)) => v,
@@ -237,7 +238,7 @@ impl AvroParser {
                 from_avro_value(tuple.1.clone(), field_schema).map_err(|e| {
                     tracing::error!(
                         "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
+                        String::from_utf8_lossy(&payload),
                         e
                     );
                     e
@@ -271,7 +272,7 @@ impl AvroParser {
                         .map_err(|e| {
                             tracing::error!(
                                 "failed to process value ({}): {}",
-                                String::from_utf8_lossy(payload),
+                                String::from_utf8_lossy(&payload),
                                 e
                             );
                             e
@@ -299,9 +300,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
-    };
+    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateWrapper, ScalarImpl};
     use url::Url;
 
     use super::{
@@ -388,10 +387,7 @@ mod test {
         let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 1);
         {
             let writer = builder.row_writer();
-            avro_parser
-                .parse_inner(&input_data[..], writer)
-                .await
-                .unwrap();
+            avro_parser.parse_inner(input_data, writer).await.unwrap();
         }
         let chunk = builder.finish();
         let (op, row) = chunk.rows().next().unwrap();
@@ -425,24 +421,12 @@ mod test {
                     assert_eq!(row[i], date);
                 }
                 Value::TimestampMillis(millis) => {
-                    let datetime = Some(ScalarImpl::NaiveDateTime(
-                        NaiveDateTimeWrapper::with_secs_nsecs(
-                            millis / 1000,
-                            (millis % 1000) as u32 * 1_000_000,
-                        )
-                        .unwrap(),
-                    ));
-                    assert_eq!(row[i], datetime);
+                    let millis = Some(ScalarImpl::Int64(millis * 1000));
+                    assert_eq!(row[i], millis);
                 }
                 Value::TimestampMicros(micros) => {
-                    let datetime = Some(ScalarImpl::NaiveDateTime(
-                        NaiveDateTimeWrapper::with_secs_nsecs(
-                            micros / 1_000_000,
-                            (micros % 1_000_000) as u32 * 1_000,
-                        )
-                        .unwrap(),
-                    ));
-                    assert_eq!(row[i], datetime);
+                    let micros = Some(ScalarImpl::Int64(micros));
+                    assert_eq!(row[i], micros);
                 }
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
@@ -462,86 +446,16 @@ mod test {
 
     fn build_rw_columns() -> Vec<SourceColumnDesc> {
         vec![
-            SourceColumnDesc {
-                name: "id".to_string(),
-                data_type: DataType::Int32,
-                column_id: ColumnId::from(0),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "sequence_id".to_string(),
-                data_type: DataType::Int64,
-                column_id: ColumnId::from(1),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "name".to_string(),
-                data_type: DataType::Varchar,
-                column_id: ColumnId::from(2),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "score".to_string(),
-                data_type: DataType::Float32,
-                column_id: ColumnId::from(3),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "avg_score".to_string(),
-                data_type: DataType::Float64,
-                column_id: ColumnId::from(4),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "is_lasted".to_string(),
-                data_type: DataType::Boolean,
-                column_id: ColumnId::from(5),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "entrance_date".to_string(),
-                data_type: DataType::Date,
-                column_id: ColumnId::from(6),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "birthday".to_string(),
-                data_type: DataType::Timestamp,
-                column_id: ColumnId::from(7),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "anniversary".to_string(),
-                data_type: DataType::Timestamp,
-                column_id: ColumnId::from(8),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
-            SourceColumnDesc {
-                name: "passed".to_string(),
-                data_type: DataType::Interval,
-                column_id: ColumnId::from(9),
-                is_row_id: false,
-                is_meta: false,
-                fields: vec![],
-            },
+            SourceColumnDesc::simple("id", DataType::Int32, ColumnId::from(0)),
+            SourceColumnDesc::simple("sequence_id", DataType::Int64, ColumnId::from(1)),
+            SourceColumnDesc::simple("name", DataType::Varchar, ColumnId::from(2)),
+            SourceColumnDesc::simple("score", DataType::Float32, ColumnId::from(3)),
+            SourceColumnDesc::simple("avg_score", DataType::Float64, ColumnId::from(4)),
+            SourceColumnDesc::simple("is_lasted", DataType::Boolean, ColumnId::from(5)),
+            SourceColumnDesc::simple("entrance_date", DataType::Date, ColumnId::from(6)),
+            SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
+            SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
+            SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
         ]
     }
 

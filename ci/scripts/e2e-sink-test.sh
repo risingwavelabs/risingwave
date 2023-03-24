@@ -31,7 +31,8 @@ mv target/debug/risedev-dev-"$profile" target/debug/risedev-dev
 mv target/debug/librisingwave_java_binding.so-"$profile" target/debug/librisingwave_java_binding.so
 
 export RW_JAVA_BINDING_LIB_PATH=${PWD}/target/debug
-export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=stream_chunk
+# TODO: Switch to stream_chunk encoding once it's completed, and then remove json encoding as well as this env var.
+export RW_CONNECTOR_RPC_SINK_PAYLOAD_FORMAT=json
 
 echo "--- Download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
@@ -55,7 +56,7 @@ mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXIST
 # grant access to `test` for ci test user
 mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test.* TO 'mysqluser'@'%';"
 # create a table named t_remote
-mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE TABLE IF NOT EXISTS test.t_remote (id INT, name VARCHAR(255), PRIMARY KEY (id));"
+mysql --host=mysql --port=3306 -u root -p123456 test < ./e2e_test/sink/remote/mysql_create_table.sql
 
 echo "--- preparing postgresql"
 
@@ -65,7 +66,7 @@ export PGPASSWORD=postgres
 psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
 createdb -h db -U postgres test
 psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
-psql -h db -U postgres -d test -c "CREATE TABLE t_remote (id serial PRIMARY KEY, name VARCHAR (50) NOT NULL);"
+psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
 
 node_port=50051
 node_timeout=10
@@ -106,13 +107,9 @@ sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
 sleep 1
 
 # check sink destination mysql using shell
-if mysql  --host=mysql --port=3306 -u root -p123456 -sN -e "SELECT * FROM test.t_remote ORDER BY id;" | awk '{
-if ($1 == 1 && $2 == "Alex") c1++;
- if ($1 == 3 && $2 == "Carl") c2++;
-  if ($1 == 4 && $2 == "Doris") c3++;
-   if ($1 == 5 && $2 == "Eve") c4++;
-    if ($1 == 6 && $2 == "Frank") c5++; }
-     END { exit !(c1 == 1 && c2 == 1 && c3 == 1 && c4 == 1 && c5 == 1); }'; then
+diff -u ./e2e_test/sink/remote/mysql_expected_result.tsv \
+<(mysql --host=mysql --port=3306 -u root -p123456 -s -N -r test -e "SELECT * FROM test.t_remote ORDER BY id")
+if [ $? -eq 0 ]; then
   echo "mysql sink check passed"
 else
   echo "The output is not as expected."
