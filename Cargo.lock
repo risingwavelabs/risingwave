@@ -6160,6 +6160,7 @@ dependencies = [
  "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "serde_json",
  "speedate",
  "static_assertions",
  "thiserror",

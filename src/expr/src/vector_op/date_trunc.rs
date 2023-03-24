@@ -38,7 +38,7 @@ pub fn date_trunc_timestamp(field: &str, ts: NaiveDateTimeWrapper) -> Result<Nai
     })
 }
 
-#[function("date_trunc(varchar, timestamptz) -> timestamptz")]
+// #[function("date_trunc(varchar, timestamptz) -> timestamptz")]
 pub fn date_trunc_timestamptz(_field: &str, _ts: i64) -> Result<i64> {
     todo!("date_trunc_timestamptz")
 }

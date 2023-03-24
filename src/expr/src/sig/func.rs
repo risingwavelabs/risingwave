@@ -77,29 +77,14 @@ pub struct FuncSign {
 
 impl fmt::Debug for FuncSign {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{:?}({}) -> {:?}",
-            self.func,
-            self.inputs_type.iter().map(|t| format!("{t:?}")).join(", "),
+        let s = format!(
+            "{}({})->{:?}",
+            self.func.as_str_name(),
+            self.inputs_type.iter().map(|t| format!("{t:?}")).join(","),
             self.ret_type
         )
-    }
-}
-
-impl FuncSign {
-    /// Returns a string describing the function without return type.
-    pub fn to_string_no_return(&self) -> String {
-        format!(
-            "{}({})",
-            self.func.as_str_name(),
-            self.inputs_type
-                .iter()
-                .map(|t| format!("{t:?}"))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-        .to_lowercase()
+        .to_lowercase();
+        f.write_str(&s)
     }
 }
 

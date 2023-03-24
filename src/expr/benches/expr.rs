@@ -31,7 +31,6 @@ use risingwave_common::types::{
 };
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
-use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
@@ -156,6 +155,13 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
+            // 25: serial array
+            SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into(),
+            // 26: jsonb array
+            JsonbArray::from_iter(
+                (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
+            )
+            .into(),
         ],
         CHUNK_SIZE,
     );
@@ -164,6 +170,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Int16, 1),
         InputRefExpression::new(DataType::Int32, 2),
         InputRefExpression::new(DataType::Int64, 3),
+        InputRefExpression::new(DataType::Serial, 25),
         InputRefExpression::new(DataType::Float32, 4),
         InputRefExpression::new(DataType::Float64, 5),
         InputRefExpression::new(DataType::Decimal, 6),
@@ -174,12 +181,13 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Interval, 11),
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
+        InputRefExpression::new(DataType::Jsonb, 26),
     ];
     let input_index_for_type = |ty: DataType| {
         inputrefs
             .iter()
             .find(|r| r.return_type() == ty)
-            .expect("expression not found")
+            .expect(&format!("expression not found for {ty:?}"))
             .index()
     };
     const TIMEZONE: usize = 14;
@@ -210,58 +218,69 @@ fn bench_expr(c: &mut Criterion) {
     });
 
     let sigs = func_sigs();
-    let sigs = sigs.sorted_by_cached_key(|sig| sig.to_string_no_return());
-    for sig in sigs {
+    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    'sig: for sig in sigs {
         if sig
             .inputs_type
             .iter()
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
             // TODO: support struct and list
-            println!("todo: {}", sig.to_string_no_return());
+            println!("todo: {sig:?}");
             continue;
         }
 
-        let expr = build(
-            sig.func,
-            sig.ret_type.into(),
-            sig.inputs_type
-                .iter()
-                .enumerate()
-                .map(|(i, t)| {
-                    if sig.func == PbType::ToChar && i == 1 {
-                        return LiteralExpression::new(
+        let mut children = vec![];
+        for (i, t) in sig.inputs_type.iter().enumerate() {
+            use DataTypeName::*;
+            let idx = match (sig.func, i) {
+                (PbType::ToChar, 1) => {
+                    children.push(
+                        LiteralExpression::new(
                             DataType::Varchar,
                             Some("YYYY/MM/DD HH:MM:SS".into()),
                         )
-                        .boxed();
+                        .boxed(),
+                    );
+                    continue;
+                }
+                (PbType::Cast, 0) if *t == DataTypeName::Varchar => match sig.ret_type {
+                    Boolean => BOOL_STRING,
+                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
+                    Date => DATE_STRING,
+                    Time => TIME_STRING,
+                    Timestamp => TIMESTAMP_STRING,
+                    Timestamptz => TIMESTAMPTZ_STRING,
+                    Interval => INTERVAL_STRING,
+                    Bytea => NUMBER_STRING, // any
+                    _ => {
+                        println!("todo: {sig:?}");
+                        continue 'sig;
                     }
-                    let idx = match (sig.func, i) {
-                        (PbType::AtTimeZone, 1) => TIMEZONE,
-                        (PbType::DateTrunc, 0) => TIME_FIELD,
-                        (PbType::DateTrunc, 2) => TIMEZONE,
-                        (PbType::Extract, 0) => match sig.inputs_type[1] {
-                            DataTypeName::Date => EXTRACT_FIELD_DATE,
-                            DataTypeName::Time => EXTRACT_FIELD_TIME,
-                            DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
-                            DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
-                            t => panic!("unexpected type: {t:?}"),
-                        },
-                        _ => input_index_for_type((*t).into()),
-                    };
-                    InputRefExpression::new(DataType::from(*t), idx).boxed()
-                })
-                .collect_vec(),
-        )
-        .unwrap();
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
+                },
+                (PbType::AtTimeZone, 1) => TIMEZONE,
+                (PbType::DateTrunc, 0) => TIME_FIELD,
+                (PbType::DateTrunc, 2) => TIMEZONE,
+                (PbType::Extract, 0) => match sig.inputs_type[1] {
+                    Date => EXTRACT_FIELD_DATE,
+                    Time => EXTRACT_FIELD_TIME,
+                    Timestamp => EXTRACT_FIELD_TIMESTAMP,
+                    Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                    t => panic!("unexpected type: {t:?}"),
+                },
+                _ => input_index_for_type((*t).into()),
+            };
+            children.push(InputRefExpression::new(DataType::from(*t), idx).boxed());
+        }
+        let expr = build(sig.func, sig.ret_type.into(), children).unwrap();
+        c.bench_function(&format!("{sig:?}"), |bencher| {
             bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 
     for sig in agg_func_sigs() {
         if sig.inputs_type.len() != 1 {
-            println!("todo: {}", sig.to_string_no_return());
+            println!("todo: {sig:?}");
             continue;
         }
         let agg = match create_agg_state_unary(
@@ -287,35 +306,6 @@ fn bench_expr(c: &mut Criterion) {
                     .await
                     .unwrap()
             })
-        });
-    }
-
-    for sig in cast_sigs() {
-        let expr = build(PbType::Cast, sig.to_type.into(), {
-            let idx = if matches!(sig.from_type, DataTypeName::Varchar) {
-                use DataTypeName::*;
-                match sig.to_type {
-                    Boolean => BOOL_STRING,
-                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
-                    Date => DATE_STRING,
-                    Time => TIME_STRING,
-                    Timestamp => TIMESTAMP_STRING,
-                    Timestamptz => TIMESTAMPTZ_STRING,
-                    Interval => INTERVAL_STRING,
-                    Bytea => NUMBER_STRING, // any
-                    _ => {
-                        println!("todo: {}", sig.to_string_no_return());
-                        continue;
-                    }
-                }
-            } else {
-                input_index_for_type(sig.from_type.into())
-            };
-            vec![InputRefExpression::new(sig.from_type.into(), idx).boxed()]
-        })
-        .unwrap();
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 }

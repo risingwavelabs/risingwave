@@ -48,6 +48,7 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 criterion = "0.4"
+serde_json = "1"
 
 [[bench]]
 name = "expr"
