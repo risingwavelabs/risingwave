@@ -815,6 +815,9 @@ where
             )
         });
         if let Some(watermark_suffix) = watermark_suffix {
+            // We either serialize null into `0u8`, data into `(1u8 || scalar)`, or serialize null
+            // into `1u8`, data into `(0u8 || scalar)`. We do not want to delete null
+            // here, so `range_begin_suffix` cannot be `vec![]` when null is represented as `0u8`.
             let range_begin_suffix = watermark_suffix
                 .first()
                 .map(|bit| vec![*bit])
