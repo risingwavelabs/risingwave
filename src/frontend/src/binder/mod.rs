@@ -227,6 +227,10 @@ impl Binder {
         self.param_types.export()
     }
 
+    pub fn shared_views(&self) -> Vec<ViewId> {
+        self.shared_views.keys().cloned().collect()
+    }
+
     fn push_context(&mut self) {
         let new_context = std::mem::take(&mut self.context);
         self.context.cte_to_relation = new_context.cte_to_relation.clone();

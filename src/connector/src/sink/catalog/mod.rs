@@ -17,9 +17,7 @@ pub mod desc;
 use std::collections::HashMap;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{
-    ColumnCatalog, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
-};
+use risingwave_common::catalog::{ColumnCatalog, DatabaseId, Field, Schema, SchemaId, UserId};
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{PbSink, PbSinkType};
 
@@ -132,7 +130,7 @@ pub struct SinkCatalog {
     pub owner: UserId,
 
     // Relations on which the sink depends.
-    pub dependent_relations: Vec<TableId>,
+    pub dependent_relations: Vec<u32>,
 
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
@@ -155,11 +153,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|idx| *idx as i32)
                 .collect_vec(),
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|id| id.table_id)
-                .collect_vec(),
+            dependent_relations: self.dependent_relations.clone(),
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -190,10 +184,10 @@ impl From<PbSink> for SinkCatalog {
         let sink_type = pb.get_sink_type().unwrap();
         SinkCatalog {
             id: pb.id.into(),
-            name: pb.name.clone(),
+            name: pb.name,
             schema_id: pb.schema_id.into(),
             database_id: pb.database_id.into(),
-            definition: pb.definition.clone(),
+            definition: pb.definition,
             columns: pb
                 .columns
                 .into_iter()
@@ -204,15 +198,15 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.iter().map(|k| *k as _).collect_vec(),
-            distribution_key: pb.distribution_key.iter().map(|k| *k as _).collect_vec(),
-            properties: pb.properties.clone(),
-            owner: pb.owner.into(),
-            dependent_relations: pb
-                .dependent_relations
+            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            distribution_key: pb
+                .distribution_key
                 .into_iter()
-                .map(TableId::from)
+                .map(|k| k as _)
                 .collect_vec(),
+            properties: pb.properties,
+            owner: pb.owner.into(),
+            dependent_relations: pb.dependent_relations,
             sink_type: SinkType::from_proto(sink_type),
         }
     }

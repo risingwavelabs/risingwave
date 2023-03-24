@@ -469,7 +469,7 @@ fn gen_table_plan_inner(
 
     if append_only && row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
-            "PRIMARY KEY constraint can not be appiled on a append only table.".to_owned(),
+            "PRIMARY KEY constraint can not be applied on a append only table.".to_owned(),
         )
         .into());
     }

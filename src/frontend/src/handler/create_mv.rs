@@ -22,6 +22,7 @@ use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
@@ -85,10 +86,14 @@ pub fn gen_create_mv_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_views, bound) = {
         let mut binder = Binder::new_for_stream(session);
-        binder.bind_query(query)?
+        let bound = binder.bind_query(query)?;
+        (binder.shared_views(), bound)
     };
+
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
 
     let col_names = get_column_names(&bound, session, columns)?;
 
@@ -106,6 +111,9 @@ pub fn gen_create_mv_plan(
     }
     let plan: PlanRef = materialize.into();
     table.owner = session.user_id();
+
+    // record dependent views.
+    table.dependent_relations.extend(dependent_views);
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();

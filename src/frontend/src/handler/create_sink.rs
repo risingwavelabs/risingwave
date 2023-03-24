@@ -25,6 +25,7 @@ use risingwave_sqlparser::ast::{
 use super::create_mv::get_column_names;
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::Explain;
 use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef};
@@ -78,12 +79,16 @@ pub fn gen_sink_plan(
 
     let definition = context.normalized_sql().to_owned();
 
-    let bound = {
+    let (dependent_views, bound) = {
         let mut binder = Binder::new(session);
-        binder.bind_query(*query)?
+        let bound = binder.bind_query(*query)?;
+        (binder.shared_views(), bound)
     };
 
-    // If colume names not specified, use the name in materialized view.
+    let check_items = resolve_query_privileges(&bound);
+    session.check_privileges(&check_items)?;
+
+    // If column names not specified, use the name in materialized view.
     let col_names = get_column_names(&bound, session, stmt.columns)?;
 
     let properties = context.with_options().clone();
@@ -100,7 +105,7 @@ pub fn gen_sink_plan(
         SchemaId::new(sink_schema_id),
         DatabaseId::new(sink_database_id),
         UserId::new(session.user_id()),
-        vec![],
+        dependent_views,
     );
 
     let sink_plan: PlanRef = sink_plan.into();
