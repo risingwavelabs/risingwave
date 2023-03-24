@@ -1006,7 +1006,7 @@ where
             !to_update_tables.is_empty()
                 || !to_update_views.is_empty()
                 || !to_update_sinks.is_empty()
-                || !to_update_source.is_none()
+                || to_update_source.is_some()
         );
         for table in to_update_tables {
             version = self
