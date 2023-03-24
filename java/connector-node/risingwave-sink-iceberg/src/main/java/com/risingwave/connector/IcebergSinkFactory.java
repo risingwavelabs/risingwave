@@ -198,7 +198,7 @@ public class IcebergSinkFactory implements SinkFactory {
                 Configuration hadoopConf = new Configuration();
                 hadoopConf.set(confIoImpl, s3FileIOImpl);
                 hadoopConf.setBoolean(confPathStyleAccess, true);
-                if (config.hasS3Endpoint()) {
+                if (!config.hasS3Endpoint()) {
                     throw INVALID_ARGUMENT
                             .withDescription(
                                     String.format(
