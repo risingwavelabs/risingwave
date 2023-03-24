@@ -122,7 +122,6 @@ impl Inner {
             chunk
         };
         let (data_chunk, ops) = chunk.into_parts();
-
         let mut projected_columns = Vec::new();
 
         for expr in &self.exprs {
@@ -134,8 +133,9 @@ impl Inner {
             let new_column = Column::new(evaluated_expr);
             projected_columns.push(new_column);
         }
-
-        let new_chunk = StreamChunk::new(ops, projected_columns, None);
+        let (_, vis) = data_chunk.into_parts();
+        let vis = vis.into_visibility();
+        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
