@@ -242,16 +242,16 @@ fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
         ScalarRefImpl::Float32(_) => 4,
         ScalarRefImpl::Float64(_) => 8,
         ScalarRefImpl::Utf8(v) => v.as_bytes().len(),
-        ScalarRefImpl::Bytea(v) => estimate_encoded_str_size(v),
+        ScalarRefImpl::Bytea(v) => estimate_serialize_str_size(v),
         ScalarRefImpl::Bool(_) => 1,
-        ScalarRefImpl::Decimal(_) => estimate_encoded_decimal_size(),
-        ScalarRefImpl::Interval(_) => estimate_encoded_interval_size(),
-        ScalarRefImpl::NaiveDate(_) => estimate_encoded_naivedate_size(),
-        ScalarRefImpl::NaiveDateTime(_) => estimate_encoded_naivedatetime_size(),
-        ScalarRefImpl::NaiveTime(_) => estimate_encoded_naivetime_size(),
+        ScalarRefImpl::Decimal(_) => estimate_serialize_decimal_size(),
+        ScalarRefImpl::Interval(_) => estimate_serialize_interval_size(),
+        ScalarRefImpl::NaiveDate(_) => estimate_serialize_naivedate_size(),
+        ScalarRefImpl::NaiveDateTime(_) => estimate_serialize_naivedatetime_size(),
+        ScalarRefImpl::NaiveTime(_) => estimate_serialize_naivetime_size(),
         ScalarRefImpl::Jsonb(_) => 8,
-        ScalarRefImpl::Struct(s) => estimate_encoded_struct_size(s),
-        ScalarRefImpl::List(v) => estimate_encoded_list_size(v),
+        ScalarRefImpl::Struct(s) => estimate_serialize_struct_size(s),
+        ScalarRefImpl::List(v) => estimate_serialize_list_size(v),
     }
 }
 
@@ -265,8 +265,8 @@ fn serialize_struct(value: StructRef<'_>, buf: &mut impl BufMut) {
         .collect_vec();
 }
 
-fn estimate_encoded_struct_size(s: StructRef<'_>) -> usize {
-    4 + s.estimate_value_encoding_size_inner()
+fn estimate_serialize_struct_size(s: StructRef<'_>) -> usize {
+    4 + s.estimate_serialize_size_inner()
 }
 fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
     let values_ref = value.values_ref();
@@ -279,8 +279,8 @@ fn serialize_list(value: ListRef<'_>, buf: &mut impl BufMut) {
         })
         .collect_vec();
 }
-fn estimate_encoded_list_size(list: ListRef<'_>) -> usize {
-    4 + list.estimate_value_encoding_size_inner()
+fn estimate_serialize_list_size(list: ListRef<'_>) -> usize {
+    4 + list.estimate_serialize_size_inner()
 }
 
 fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
@@ -288,7 +288,7 @@ fn serialize_str(bytes: &[u8], buf: &mut impl BufMut) {
     buf.put_slice(bytes);
 }
 
-fn estimate_encoded_str_size(bytes: &[u8]) -> usize {
+fn estimate_serialize_str_size(bytes: &[u8]) -> usize {
     4 + bytes.len()
 }
 
@@ -298,7 +298,7 @@ fn serialize_interval(interval: &IntervalUnit, buf: &mut impl BufMut) {
     buf.put_i64_le(interval.get_usecs());
 }
 
-fn estimate_encoded_interval_size() -> usize {
+fn estimate_serialize_interval_size() -> usize {
     4 + 4 + 8
 }
 
@@ -306,7 +306,7 @@ fn serialize_naivedate(days: i32, buf: &mut impl BufMut) {
     buf.put_i32_le(days);
 }
 
-fn estimate_encoded_naivedate_size() -> usize {
+fn estimate_serialize_naivedate_size() -> usize {
     4
 }
 
@@ -315,7 +315,7 @@ fn serialize_naivedatetime(secs: i64, nsecs: u32, buf: &mut impl BufMut) {
     buf.put_u32_le(nsecs);
 }
 
-fn estimate_encoded_naivedatetime_size() -> usize {
+fn estimate_serialize_naivedatetime_size() -> usize {
     8 + 4
 }
 
@@ -324,7 +324,7 @@ fn serialize_naivetime(secs: u32, nano: u32, buf: &mut impl BufMut) {
     buf.put_u32_le(nano);
 }
 
-fn estimate_encoded_naivetime_size() -> usize {
+fn estimate_serialize_naivetime_size() -> usize {
     4 + 4
 }
 
@@ -332,7 +332,7 @@ fn serialize_decimal(decimal: &Decimal, buf: &mut impl BufMut) {
     buf.put_slice(&decimal.unordered_serialize());
 }
 
-fn estimate_encoded_decimal_size() -> usize {
+fn estimate_serialize_decimal_size() -> usize {
     16
 }
 

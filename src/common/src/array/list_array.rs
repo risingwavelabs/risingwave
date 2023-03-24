@@ -447,7 +447,8 @@ impl<'a> ListRef<'a> {
         })
     }
 
-    pub fn estimate_value_encoding_size_inner(&self) -> usize {
+    /// estimate the serialized size with value encoding
+    pub fn estimate_serialize_size_inner(&self) -> usize {
         iter_elems_ref!(self, it, {
             it.fold(0, |acc, datum_ref| {
                 acc + estimate_serialize_datum_size(datum_ref)
