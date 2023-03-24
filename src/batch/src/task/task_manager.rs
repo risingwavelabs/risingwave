@@ -145,12 +145,14 @@ impl BatchManager {
             .get_task_output(output_id)
     }
 
-    pub fn abort_task(&self, sid: &PbTaskId, msg: String) {
+    pub fn cancel_task(&self, sid: &PbTaskId) {
         let sid = TaskId::from(sid);
         match self.tasks.lock().remove(&sid) {
             Some(task) => {
                 tracing::trace!("Removed task: {:?}", task.get_task_id());
-                task.abort_task(msg);
+                // Use `cancel` rather than `abort` here since this is not an error which should be
+                // propagated to upstream.
+                task.cancel();
                 self.metrics.task_num.dec()
             }
             None => {
@@ -232,7 +234,7 @@ impl BatchManager {
             let t = guard.get(&id).unwrap();
             // FIXME: `Abort` will not report error but truncated results to user. We should
             // consider throw error.
-            t.abort_task(reason);
+            t.abort(reason);
         }
     }
 
@@ -386,7 +388,7 @@ mod tests {
             )
             .await
             .unwrap();
-        manager.abort_task(&task_id, "".to_string());
+        manager.cancel_task(&task_id);
         let task_id = TaskId::from(&task_id);
         assert!(!manager.tasks.lock().contains_key(&task_id));
     }

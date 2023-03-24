@@ -30,7 +30,7 @@ use risingwave_pb::monitor_service::{
 use risingwave_pb::task_service::exchange_service_client::ExchangeServiceClient;
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
-    AbortTaskRequest, AbortTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
+    CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, GetDataRequest,
     GetDataResponse, GetStreamRequest, GetStreamResponse, TaskInfoResponse,
 };
 use tokio::sync::mpsc;
@@ -157,11 +157,11 @@ impl ComputeClient {
         Ok(self.task_client.to_owned().execute(req).await?.into_inner())
     }
 
-    pub async fn abort(&self, req: AbortTaskRequest) -> Result<AbortTaskResponse> {
+    pub async fn cancel(&self, req: CancelTaskRequest) -> Result<CancelTaskResponse> {
         Ok(self
             .task_client
             .to_owned()
-            .abort_task(req)
+            .cancel_task(req)
             .await?
             .into_inner())
     }

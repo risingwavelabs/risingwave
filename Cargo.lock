@@ -6118,6 +6118,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "risingwave_e2e_extended_mode_test"
+version = "0.2.0-alpha"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap 4.1.11",
+ "pg_interval",
+ "rust_decimal",
+ "tokio",
+ "tokio-postgres",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "risingwave_expr"
 version = "0.2.0-alpha"
 dependencies = [
@@ -6478,6 +6493,7 @@ dependencies = [
  "madsim-rdkafka",
  "madsim-tokio",
  "paste",
+ "pin-project",
  "pretty_assertions",
  "rand 0.8.5",
  "risingwave_common",
@@ -6611,6 +6627,7 @@ dependencies = [
  "fiemap",
  "futures",
  "futures-async-stream",
+ "hex",
  "itertools",
  "libc",
  "lz4",
@@ -6704,6 +6721,7 @@ dependencies = [
  "tokio-metrics",
  "tokio-stream",
  "tracing",
+ "tracing-test",
  "workspace-hack",
 ]
 
@@ -8211,6 +8229,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-test"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a2c0ff408fe918a94c428a3f2ad04e4afd5c95bbc08fcf868eff750c15728a4"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "258bc1c4f8e2e73a977812ab339d503e6feeb92700f6d07a6de4d321522d5c08"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "trackable"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8836,6 +8877,7 @@ dependencies = [
  "regex-syntax",
  "reqwest",
  "ring",
+ "rust_decimal",
  "scopeguard",
  "serde",
  "serde_json",
@@ -8847,6 +8889,7 @@ dependencies = [
  "syn",
  "time 0.3.17",
  "tokio",
+ "tokio-postgres",
  "tokio-stream",
  "tokio-util",
  "tonic",

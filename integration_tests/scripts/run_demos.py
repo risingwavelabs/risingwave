@@ -25,8 +25,7 @@ def run_demo(demo: str, format: str):
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: {}".format(demo))
 
-    subprocess.run(["docker", "compose", "up", "-d", "-e",
-    "ENABLE_TELEMETRY=false"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
     sleep(40)
 
     sql_files = ['create_source.sql', 'create_mv.sql', 'query.sql']
@@ -43,6 +42,7 @@ def run_demo(demo: str, format: str):
         run_sql_file(sql_file, demo_dir)
         sleep(10)
 
+
 def run_iceberg_demo():
     demo = "iceberg-sink"
     file_dir = dirname(abspath(__file__))
@@ -50,7 +50,7 @@ def run_iceberg_demo():
     demo_dir = os.path.join(project_dir, demo)
     print("Running demo: iceberg-sink")
 
-    subprocess.run(["docker", "compose", "up", "-d", "-e", "ENABLE_TELEMETRY=false"], cwd=demo_dir, check=True)
+    subprocess.run(["docker", "compose", "up", "-d"], cwd=demo_dir, check=True)
     sleep(40)
 
     subprocess.run(["docker", "compose", "exec", "spark", "bash", "/spark-script/run-sql-file.sh", "create-table"],
@@ -70,7 +70,7 @@ def run_iceberg_demo():
 
     query_sql = open(os.path.join(demo_dir, "iceberg-query.sql")).read()
 
-    print("querying iceberg with presto sql: %s"%query_sql)
+    print("querying iceberg with presto sql: %s" % query_sql)
 
     query_output_file_name = "query_outout.txt"
 
@@ -87,8 +87,6 @@ def run_iceberg_demo():
     assert len(output_content.strip()) > 0
 
 
-
-
 arg_parser = argparse.ArgumentParser(description='Run the demo')
 arg_parser.add_argument('--format',
                         metavar='format',
@@ -100,6 +98,9 @@ arg_parser.add_argument('--case',
                         type=str,
                         help='the test case')
 args = arg_parser.parse_args()
+
+# disable telemetry in env
+os.environ['ENABLE_TELEMETRY'] = "false"
 
 if args.case == "iceberg-sink":
     if args.format == "protobuf":
