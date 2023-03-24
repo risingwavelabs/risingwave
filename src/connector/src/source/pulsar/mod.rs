@@ -93,13 +93,15 @@ impl PulsarProperties {
                 credentials_url: if temp_file.is_none() {
                     oauth.credentials_url.clone()
                 } else {
-                    temp_file
+                    let mut raw_path = temp_file
                         .as_ref()
                         .unwrap()
                         .path()
                         .to_str()
                         .unwrap()
-                        .to_string()
+                        .to_string();
+                    raw_path.insert_str(0, "file:");
+                    raw_path
                 },
                 audience: Some(oauth.audience.clone()),
                 scope: oauth.scope.clone(),
