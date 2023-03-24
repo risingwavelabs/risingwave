@@ -14,14 +14,13 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn lower(s: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("lower(varchar) -> varchar")]
+pub fn lower(s: &str, writer: &mut dyn Write) {
     for c in s.chars() {
         writer.write_char(c.to_ascii_lowercase()).unwrap();
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -29,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_lower() -> Result<()> {
+    fn test_lower() {
         let cases = [
             ("HELLO WORLD", "hello world"),
             ("hello RUST", "hello rust"),
@@ -38,9 +37,8 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            lower(s, &mut writer)?;
+            lower(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

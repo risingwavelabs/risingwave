@@ -14,9 +14,11 @@
 
 use num_traits::{Float, Zero};
 use risingwave_common::types::OrderedF64;
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
+#[function("exp(float64) -> float64")]
 pub fn exp_f64(input: OrderedF64) -> Result<OrderedF64> {
     // The cases where the exponent value is Inf or NaN can be handled explicitly and without
     // evaluating the `exp` operation.

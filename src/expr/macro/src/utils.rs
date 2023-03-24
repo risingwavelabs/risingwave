@@ -12,22 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr_macro::function;
-
-#[function("ascii(varchar) -> int32")]
-pub fn ascii(s: &str) -> i32 {
-    s.as_bytes().first().map(|x| *x as i32).unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ascii() {
-        let cases = [("hello", 104), ("你好", 228), ("", 0)];
-        for (s, expected) in cases {
-            assert_eq!(ascii(s), expected)
-        }
-    }
+/// Convert a string from `snake_case` to `CamelCase`.
+pub fn to_camel_case(input: &str) -> String {
+    input
+        .split('_')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first_char) => {
+                    format!("{}{}", first_char.to_uppercase(), chars.as_str())
+                }
+            }
+        })
+        .collect()
 }
