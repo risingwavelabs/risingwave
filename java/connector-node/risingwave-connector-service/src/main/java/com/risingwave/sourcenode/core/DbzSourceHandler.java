@@ -58,7 +58,10 @@ public class DbzSourceHandler implements SourceHandler {
                             // wait a bit to avoid OOM
                             Thread.sleep(500);
                         }
-                        ConnectorNodeMetrics.incSourceRowsReceived(resp.getEventsCount());
+                        ConnectorNodeMetrics.incSourceRowsReceived(
+                                config.getSourceType().toString(),
+                                String.valueOf(config.getSourceId()),
+                                resp.getEventsCount());
                         LOG.debug(
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),

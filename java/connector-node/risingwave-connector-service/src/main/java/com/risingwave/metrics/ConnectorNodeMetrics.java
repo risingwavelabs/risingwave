@@ -62,6 +62,7 @@ public class ConnectorNodeMetrics {
     private static final Counter sourceRowsReceived =
             Counter.build()
                     .name("connector_source_rows_received")
+                    .labelNames("source_type", "source_id")
                     .help("Number of rows received by source")
                     .register();
     private static final Counter sinkRowsReceived =
@@ -120,7 +121,6 @@ public class ConnectorNodeMetrics {
         registry.register(ramUsage);
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
-
         try {
             new HTTPServer(new InetSocketAddress("localhost", port), registry);
         } catch (IOException e) {
@@ -146,8 +146,8 @@ public class ConnectorNodeMetrics {
         activeSinkConnections.remove(sinkType, ip);
     }
 
-    public static void incSourceRowsReceived(double amt) {
-        sourceRowsReceived.inc(amt);
+    public static void incSourceRowsReceived(String sourceType, String sourceId, double amt) {
+        sourceRowsReceived.labels(sourceType, sourceId).inc(amt);
     }
 
     public static void incSinkRowsReceived() {

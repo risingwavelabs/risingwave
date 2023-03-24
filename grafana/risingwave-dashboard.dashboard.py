@@ -2620,8 +2620,8 @@ def section_connector_node(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"rate({metric('connector_source_rows_received')}[$__interval])",
-                            "connector-node source throughput",
+                            f"rate({metric('connector_source_rows_received')}[$__interval]) by (source_type, source_id)",
+                            "{{{source_type}}} - {{{source_id}}}",
                         ),
                     ],
                 ),
