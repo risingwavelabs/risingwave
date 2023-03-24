@@ -134,8 +134,6 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         &listen_addr,
         "--backend",
         "mem",
-        "--checkpoint-frequency",
-        &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
         "--state-store",
         &state_store,
         "--config-path",
