@@ -204,11 +204,12 @@ impl FrontendObserverNode {
                                 let old_table =
                                     catalog_guard.get_table_by_id(&table.id.into()).unwrap();
                                 catalog_guard.update_table(table);
-                                assert!(old_table.fragment_id != table.fragment_id);
-                                // FIXME: the frontend node delete its fragment for the update
-                                // operation by itself.
-                                self.worker_node_manager
-                                    .remove_fragment_mapping(&old_table.fragment_id);
+                                if old_table.fragment_id != table.fragment_id {
+                                    // FIXME: the frontend node delete its fragment for the update
+                                    // operation by itself.
+                                    self.worker_node_manager
+                                        .remove_fragment_mapping(&old_table.fragment_id);
+                                }
                             }
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
@@ -245,6 +246,7 @@ impl FrontendObserverNode {
                             Operation::Delete => {
                                 catalog_guard.drop_view(view.database_id, view.schema_id, view.id)
                             }
+                            Operation::Update => catalog_guard.update_view(view),
                             _ => panic!("receive an unsupported notify {:?}", resp),
                         },
                         RelationInfo::Function(function) => match resp.operation() {
