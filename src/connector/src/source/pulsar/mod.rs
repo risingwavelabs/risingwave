@@ -25,6 +25,8 @@ use anyhow::{anyhow, Result};
 pub use enumerator::*;
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
+use risingwave_common::error::ErrorCode::InvalidParameterValue;
+use risingwave_common::error::RwError;
 use serde::Deserialize;
 pub use split::*;
 use tempfile::{tempfile, NamedTempFile, TempPath};
@@ -86,6 +88,11 @@ impl PulsarProperties {
                 f.write_all(&credentials)?;
                 f.as_file().sync_all()?;
                 temp_file = Some(f);
+            } else if url.scheme() != "file" {
+                return Err(RwError::from(InvalidParameterValue(String::from(
+                    "invalid credentials_url, only file url and s3 url are supported",
+                )))
+                .into());
             }
 
             let auth_params = OAuth2Params {
