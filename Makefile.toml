@@ -22,6 +22,8 @@ env_scripts = [
   '''
 #!@duckscript
 
+set_env ENABLE_TELEMETRY "false"
+
 is_sanitizer_enabled = get_env ENABLE_SANITIZER
 is_all_in_one_enabled = get_env ENABLE_ALL_IN_ONE
 is_hdfs_backend = get_env ENABLE_HDFS
@@ -164,7 +166,7 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
-if [[ -z "$1" ]]; then 
+if [[ -z "$1" ]]; then
   echo "Please pass a parameter to this script, defining which logs you want to follow"
   echo "Available logs are..."
   ls ${PREFIX_LOG}
@@ -176,7 +178,7 @@ if [[ ! -f ${PREFIX_LOG}/$1 ]]; then
   echo "Available logs are..."
   ls ${PREFIX_LOG}
   exit 1
-fi 
+fi
 
 tail -f -n 5 ${PREFIX_LOG}/$1
 '''

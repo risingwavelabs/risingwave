@@ -186,6 +186,12 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
 
+    /// Compute compactor_task_limit for machines with different hardware.Currently cpu is used as
+    /// the main consideration,and is adjusted by max_compactor_task_multiplier, calculated as
+    /// compactor_task_limit = core_num * max_compactor_task_multiplier;
+    #[serde(default = "default::meta::max_compactor_task_multiplier")]
+    pub max_compactor_task_multiplier: u32,
+
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
 }
@@ -215,6 +221,9 @@ pub struct ServerConfig {
     /// 0 = close metrics
     /// >0 = open metrics
     pub metrics_level: u32,
+
+    #[serde(default = "default::server::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 
     #[serde(flatten)]
     pub unrecognized: HashMap<String, Value>,
@@ -492,6 +501,9 @@ pub struct SystemConfig {
     /// Remote directory for storing snapshots.
     #[serde(default = "default::system::backup_storage_directory")]
     pub backup_storage_directory: String,
+
+    #[serde(default = "default::system::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 }
 
 impl Default for SystemConfig {
@@ -512,6 +524,7 @@ impl SystemConfig {
             data_directory: Some(self.data_directory),
             backup_storage_url: Some(self.backup_storage_url),
             backup_storage_directory: Some(self.backup_storage_directory),
+            telemetry_enabled: Some(self.telemetry_enabled),
         }
     }
 }
@@ -559,6 +572,10 @@ mod default {
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
             1800 // 30mi
         }
+
+        pub fn max_compactor_task_multiplier() -> u32 {
+            2
+        }
     }
 
     pub mod server {
@@ -577,6 +594,10 @@ mod default {
 
         pub fn metrics_level() -> u32 {
             0
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            true
         }
     }
 
@@ -765,6 +786,10 @@ mod default {
 
         pub fn backup_storage_directory() -> String {
             system_param::default::backup_storage_directory()
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            system_param::default::telemetry_enabled()
         }
     }
 }
