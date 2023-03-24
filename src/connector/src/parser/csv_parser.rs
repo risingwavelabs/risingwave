@@ -113,10 +113,10 @@ impl CsvParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &mut self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut fields = self.read_row(payload)?;
+        let mut fields = self.read_row(&payload)?;
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
                 *headers = fields;
@@ -161,7 +161,7 @@ mod tests {
     use crate::parser::SourceStreamChunkBuilder;
     #[tokio::test]
     async fn test_csv_without_headers() {
-        let data = [
+        let data = vec![
             r#"1,a,2"#,
             r#""15541","a,1,1,",4"#,
             r#"0,"""0",0"#,
@@ -185,7 +185,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in data {
             parser
-                .parse_inner(item.as_bytes(), builder.row_writer())
+                .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await
                 .unwrap();
         }
@@ -292,7 +292,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in data {
             let _ = parser
-                .parse_inner(item.as_bytes(), builder.row_writer())
+                .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await;
         }
         let chunk = builder.finish();

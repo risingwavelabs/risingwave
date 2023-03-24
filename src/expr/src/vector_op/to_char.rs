@@ -20,8 +20,6 @@ use chrono::format::StrftimeItems;
 use ouroboros::self_referencing;
 use risingwave_common::types::NaiveDateTimeWrapper;
 
-use crate::Result;
-
 #[self_referencing]
 pub struct ChronoPattern {
     pub(crate) tmpl: String,
@@ -70,18 +68,9 @@ pub fn compile_pattern_to_chrono(tmpl: &str) -> ChronoPattern {
     .build()
 }
 
-#[inline(always)]
-pub fn to_char_timestamp(
-    data: NaiveDateTimeWrapper,
-    tmpl: &str,
-    writer: &mut dyn Write,
-) -> Result<()> {
+// #[function("to_char(timestamp, varchar) -> varchar")]
+pub fn to_char_timestamp(data: NaiveDateTimeWrapper, tmpl: &str, writer: &mut dyn Write) {
     let pattern = compile_pattern_to_chrono(tmpl);
-    write!(
-        writer,
-        "{}",
-        data.0.format_with_items(pattern.borrow_items().iter())
-    )
-    .unwrap();
-    Ok(())
+    let format = data.0.format_with_items(pattern.borrow_items().iter());
+    write!(writer, "{}", format).unwrap();
 }

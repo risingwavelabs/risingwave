@@ -377,14 +377,12 @@
   sql: |
     select array[1] < SOME(null);
   binder_error: |-
-    Feature is not yet implemented: LessThan[List, unknown]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Bind error: array/struct on left are not supported yet
 - name: array of array/struct on right not supported yet 5808
   sql: |
     select null < SOME(array[array[1]]);
   binder_error: |-
-    Feature is not yet implemented: LessThan[unknown, List]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Bind error: array of array/struct on right are not supported yet
 - sql: |
     select 1 < SOME(array[null]::integer[]);
   logical_plan: |
