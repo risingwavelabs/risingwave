@@ -253,6 +253,8 @@ impl Cluster {
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
+                "--total-memory-bytes",
+                "7516192768",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
