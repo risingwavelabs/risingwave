@@ -40,6 +40,10 @@ struct Inner {
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
+
+    /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
+    /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
+    materialize_selectivity_threshold: f64,
 }
 
 impl ProjectExecutor {
@@ -50,6 +54,7 @@ impl ProjectExecutor {
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
+        materialize_selectivity_threshold: f64,
     ) -> Self {
         let info = ExecutorInfo {
             schema: input.schema().to_owned(),
@@ -74,6 +79,7 @@ impl ProjectExecutor {
                 },
                 exprs,
                 watermark_derivations,
+                materialize_selectivity_threshold,
             },
         }
     }
@@ -110,8 +116,11 @@ impl Inner {
         &self,
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
-
+        let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
+            chunk.compact()
+        } else {
+            chunk
+        };
         let (data_chunk, ops) = chunk.into_parts();
 
         let mut projected_columns = Vec::new();
@@ -233,6 +242,7 @@ mod tests {
             vec![test_expr],
             1,
             MultiMap::new(),
+            0.0,
         ));
         let mut project = project.execute();
 
@@ -296,6 +306,7 @@ mod tests {
             vec![a_expr, b_expr],
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+            0.0,
         ));
         let mut project = project.execute();
 

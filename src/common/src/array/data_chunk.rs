@@ -141,7 +141,7 @@ impl DataChunk {
     pub fn selectivity(&self) -> f64 {
         match &self.vis2 {
             Vis::Bitmap(b) => {
-                if b.len() == 0 {
+                if b.is_empty() {
                     0.0
                 } else {
                     b.count_ones() as f64 / b.len() as f64
