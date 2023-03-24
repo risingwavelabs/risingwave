@@ -19,7 +19,6 @@ use risingwave_common::config::MetaBackend;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use tonic::{Request, Response, Status};
-use uuid::Uuid;
 
 use crate::storage::MetaStore;
 use crate::telemetry::{TELEMETRY_CF, TELEMETRY_KEY};
