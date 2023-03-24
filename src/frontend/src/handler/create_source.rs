@@ -34,7 +34,7 @@ use risingwave_connector::source::{
     GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NEXMARK_CONNECTOR,
     PULSAR_CONNECTOR,
 };
-use risingwave_pb::catalog::{Source as ProstSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
 use risingwave_pb::plan_common::RowFormatType;
 use risingwave_sqlparser::ast::{
     AvroSchema, CreateSourceStatement, DebeziumAvroSchema, ProtobufSchema, SourceSchema,
@@ -185,7 +185,7 @@ pub(crate) fn is_kafka_source(with_properties: &HashMap<String, String>) -> bool
 pub(crate) async fn resolve_source_schema(
     source_schema: SourceSchema,
     columns: &mut Vec<ColumnCatalog>,
-    with_properties: &HashMap<String, String>,
+    with_properties: &mut HashMap<String, String>,
     row_id_index: &mut Option<usize>,
     pk_column_ids: &mut Vec<ColumnId>,
     is_materialized: bool,
@@ -213,11 +213,7 @@ pub(crate) async fn resolve_source_schema(
 
             columns_extend(
                 columns,
-                extract_protobuf_table_schema(
-                    protobuf_schema,
-                    with_properties.clone().into_iter().collect(),
-                )
-                .await?,
+                extract_protobuf_table_schema(protobuf_schema, with_properties.clone()).await?,
             );
 
             StreamSourceInfo {
@@ -525,7 +521,7 @@ fn source_shema_to_row_format(source_schema: &SourceSchema) -> RowFormatType {
 
 fn validate_compatibility(
     source_schema: &SourceSchema,
-    props: &HashMap<String, String>,
+    props: &mut HashMap<String, String>,
 ) -> Result<()> {
     let connector = get_connector(props);
     let row_format = source_shema_to_row_format(source_schema);
@@ -561,6 +557,19 @@ fn validate_compatibility(
             connector, row_format
         ))));
     }
+
+    if connector == POSTGRES_CDC_CONNECTOR {
+        if !props.contains_key("slot.name") {
+            // Build a random slot name with UUID
+            // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+            let uuid = uuid::Uuid::new_v4().to_string().replace('-', "");
+            props.insert("slot.name".into(), format!("rw_cdc_{}", uuid));
+        }
+        if !props.contains_key("schema.name") {
+            // Default schema name is "public"
+            props.insert("schema.name".into(), "public".into());
+        }
+    }
     Ok(())
 }
 
@@ -576,7 +585,7 @@ pub async fn handle_create_source(
     let (schema_name, name) = Binder::resolve_schema_qualified_name(db_name, stmt.source_name)?;
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
-    let with_properties = handler_args
+    let mut with_properties = handler_args
         .with_options
         .inner()
         .clone()
@@ -606,7 +615,7 @@ pub async fn handle_create_source(
     let source_info = resolve_source_schema(
         stmt.source_schema,
         &mut columns,
-        &with_properties,
+        &mut with_properties,
         &mut row_id_index,
         &mut pk_column_ids,
         false,
@@ -625,7 +634,7 @@ pub async fn handle_create_source(
 
     let columns = columns.into_iter().map(|c| c.to_protobuf()).collect_vec();
 
-    let source = ProstSource {
+    let source = PbSource {
         id: TableId::placeholder().table_id,
         schema_id,
         database_id,
@@ -691,7 +700,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

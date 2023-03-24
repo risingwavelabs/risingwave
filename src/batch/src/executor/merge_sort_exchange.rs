@@ -20,9 +20,9 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::ToOwnedDatum;
-use risingwave_common::util::sort_util::{HeapElem, OrderPair};
+use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExchangeSource as ProstExchangeSource;
+use risingwave_pb::batch_plan::PbExchangeSource;
 
 use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{
@@ -39,9 +39,9 @@ pub struct MergeSortExchangeExecutorImpl<CS, C> {
     context: C,
     /// keeps one data chunk of each source if any
     source_inputs: Vec<Option<DataChunk>>,
-    order_pairs: Arc<Vec<OrderPair>>,
+    column_orders: Arc<Vec<ColumnOrder>>,
     min_heap: BinaryHeap<HeapElem>,
-    proto_sources: Vec<ProstExchangeSource>,
+    proto_sources: Vec<PbExchangeSource>,
     sources: Vec<ExchangeSourceImpl>, // impl
     /// Mock-able CreateSource.
     source_creators: Vec<CS>,
@@ -76,7 +76,7 @@ impl<CS: 'static + Send + CreateSource, C: BatchTaskContext> MergeSortExchangeEx
         assert!(source_idx < self.source_inputs.len());
         let chunk_ref = self.source_inputs[source_idx].as_ref().unwrap();
         self.min_heap.push(HeapElem {
-            order_pairs: self.order_pairs.clone(),
+            column_orders: self.column_orders.clone(),
             chunk: chunk_ref.clone(),
             chunk_idx: source_idx,
             elem_idx: row_idx,
@@ -191,15 +191,15 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
             NodeBody::MergeSortExchange
         )?;
 
-        let order_pairs = sort_merge_node
+        let column_orders = sort_merge_node
             .column_orders
             .iter()
-            .map(OrderPair::from_prost)
+            .map(ColumnOrder::from_protobuf)
             .collect();
-        let order_pairs = Arc::new(order_pairs);
+        let column_orders = Arc::new(column_orders);
 
         let exchange_node = sort_merge_node.get_exchange()?;
-        let proto_sources: Vec<ProstExchangeSource> = exchange_node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = exchange_node.get_sources().to_vec();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
         ensure!(!exchange_node.get_sources().is_empty());
@@ -213,7 +213,7 @@ impl BoxedExecutorBuilder for MergeSortExchangeExecutorBuilder {
         Ok(Box::new(MergeSortExchangeExecutor::<C> {
             context: source.context().clone(),
             source_inputs: vec![None; num_sources],
-            order_pairs,
+            column_orders,
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],
@@ -253,16 +253,16 @@ mod tests {
         let fake_exchange_source = FakeExchangeSource::new(vec![Some(chunk)]);
         let fake_create_source = FakeCreateSource::new(fake_exchange_source);
 
-        let mut proto_sources: Vec<ProstExchangeSource> = vec![];
+        let mut proto_sources: Vec<PbExchangeSource> = vec![];
         let mut source_creators = vec![];
         let num_sources = 2;
         for _ in 0..num_sources {
-            proto_sources.push(ProstExchangeSource::default());
+            proto_sources.push(PbExchangeSource::default());
             source_creators.push(fake_create_source.clone());
         }
-        let order_pairs = Arc::new(vec![OrderPair {
-            column_idx: 0,
-            order_type: OrderType::Ascending,
+        let column_orders = Arc::new(vec![ColumnOrder {
+            column_index: 0,
+            order_type: OrderType::ascending(),
         }]);
 
         let executor = Box::new(MergeSortExchangeExecutorImpl::<
@@ -271,7 +271,7 @@ mod tests {
         > {
             context: ComputeNodeContext::for_test(),
             source_inputs: vec![None; proto_sources.len()],
-            order_pairs,
+            column_orders,
             min_heap: BinaryHeap::new(),
             proto_sources,
             sources: vec![],

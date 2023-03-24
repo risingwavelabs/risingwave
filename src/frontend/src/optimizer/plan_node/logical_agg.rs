@@ -19,12 +19,10 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::{ErrorCode, Result, TrackingIssue};
 use risingwave_common::types::{DataType, Datum, OrderedF64, ScalarImpl};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::AggKind;
 
-use super::generic::{
-    self, AggCallState, GenericPlanNode, GenericPlanRef, PlanAggCall, PlanAggOrderByField,
-    ProjectBuilder,
-};
+use super::generic::{self, AggCallState, GenericPlanRef, PlanAggCall, ProjectBuilder};
 use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, PlanBase, PlanRef,
     PlanTreeNodeUnary, PredicatePushdown, StreamGlobalSimpleAgg, StreamHashAgg,
@@ -39,10 +37,7 @@ use crate::optimizer::plan_node::{
     gen_filter_and_pushdown, BatchSortAgg, ColumnPruningContext, LogicalProject,
     PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::Direction::{Asc, Desc};
-use crate::optimizer::property::{
-    Distribution, FieldOrder, FunctionalDependencySet, Order, RequiredDist,
-};
+use crate::optimizer::property::{Distribution, Order, RequiredDist};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition, Substitute};
 
 /// `LogicalAgg` groups input data by their group key and computes aggregation functions.
@@ -324,8 +319,6 @@ impl LogicalAgg {
                     call.agg_kind,
                     AggKind::Min | AggKind::Max | AggKind::Sum | AggKind::Count
                 ) && !call.distinct
-                // QUESTION: why do we need `&& call.order_by_fields.is_empty()` ?
-                //    && call.order_by_fields.is_empty()
             })
             && !self.is_agg_result_affected_by_order()
             && self.two_phase_agg_enabled()
@@ -336,29 +329,21 @@ impl LogicalAgg {
     // aggregation and use sort aggregation. The data type of the columns need to be int32
     fn output_requires_order_on_group_keys(&self, required_order: &Order) -> (bool, Order) {
         let group_key_order = Order {
-            field_order: self
+            column_orders: self
                 .group_key()
                 .iter()
                 .map(|group_by_idx| {
-                    let direct = if required_order.field_order.contains(&FieldOrder {
-                        index: *group_by_idx,
-                        direct: Desc,
-                    }) {
-                        // If output requires descending order, use descending order
-                        Desc
-                    } else {
-                        // In all other cases use ascending order
-                        Asc
-                    };
-                    FieldOrder {
-                        index: *group_by_idx,
-                        direct,
-                    }
+                    required_order
+                        .column_orders
+                        .iter()
+                        .find(|o| o.column_index == *group_by_idx)
+                        .cloned()
+                        .unwrap_or_else(|| ColumnOrder::new(*group_by_idx, OrderType::ascending()))
                 })
                 .collect(),
         };
         return (
-            !required_order.field_order.is_empty()
+            !required_order.column_orders.is_empty()
                 && group_key_order.satisfies(required_order)
                 && self.group_key().iter().all(|group_by_idx| {
                     self.schema().fields().get(*group_by_idx).unwrap().data_type == DataType::Int32
@@ -375,9 +360,9 @@ impl LogicalAgg {
             new_logical
                 .input()
                 .order()
-                .field_order
+                .column_orders
                 .iter()
-                .any(|field_order| field_order.index == *group_by_idx)
+                .any(|order| order.column_index == *group_by_idx)
                 && new_logical
                     .input()
                     .schema()
@@ -480,7 +465,7 @@ impl LogicalAggBuilder {
             if agg_call.distinct {
                 has_distinct = true;
             }
-            if !agg_call.order_by_fields.is_empty() {
+            if !agg_call.order_by.is_empty() {
                 has_order_by = true;
             }
             if !agg_call.distinct && agg_call.agg_kind == AggKind::StringAgg {
@@ -591,16 +576,12 @@ impl LogicalAggBuilder {
                 ErrorCode::NotImplemented(format!("{err} inside aggregation calls"), None.into())
             })?;
 
-        let order_by_fields: Vec<_> = order_by
+        let order_by: Vec<_> = order_by
             .sort_exprs
             .iter()
             .map(|e| {
                 let index = self.input_proj_builder.add_expr(&e.expr)?;
-                Ok(PlanAggOrderByField {
-                    input: InputRef::new(index, e.expr.return_type()),
-                    direction: e.direction,
-                    nulls_first: e.nulls_first,
-                })
+                Ok(ColumnOrder::new(index, e.order_type))
             })
             .try_collect()
             .map_err(|err: &'static str| {
@@ -622,7 +603,7 @@ impl LogicalAggBuilder {
                     return_type: left_return_type,
                     inputs: inputs.clone(),
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 });
                 let left = ExprImpl::from(left_ref).cast_implicit(return_type).unwrap();
@@ -635,7 +616,7 @@ impl LogicalAggBuilder {
                     return_type: right_return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 });
 
@@ -681,7 +662,7 @@ impl LogicalAggBuilder {
                         squared_input_expr.return_type(),
                     )],
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
                 .cast_implicit(return_type.clone())
@@ -696,7 +677,7 @@ impl LogicalAggBuilder {
                     return_type: sum_return_type,
                     inputs: inputs.clone(),
                     distinct,
-                    order_by_fields: order_by_fields.clone(),
+                    order_by: order_by.clone(),
                     filter: filter.clone(),
                 }))
                 .cast_implicit(return_type.clone())
@@ -711,7 +692,7 @@ impl LogicalAggBuilder {
                     return_type: count_return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 }));
 
@@ -822,7 +803,7 @@ impl LogicalAggBuilder {
                     return_type,
                     inputs,
                     distinct,
-                    order_by_fields,
+                    order_by,
                     filter,
                 })
                 .into()),
@@ -891,27 +872,12 @@ impl ExprRewriter for LogicalAggBuilder {
 
 impl LogicalAgg {
     pub fn new(agg_calls: Vec<PlanAggCall>, group_key: Vec<usize>, input: PlanRef) -> Self {
-        let ctx = input.ctx();
         let core = generic::Agg {
             agg_calls,
             group_key,
             input,
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let functional_dependency = Self::derive_fd(
-            schema.len(),
-            core.input.schema().len(),
-            core.input.functional_dependency(),
-            &core.group_key,
-        );
-
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         Self { base, core }
     }
 
@@ -924,26 +890,6 @@ impl LogicalAgg {
     /// get the Mapping of columnIndex from input column index to out column index
     pub fn i2o_col_mapping(&self) -> ColIndexMapping {
         self.core.i2o_col_mapping()
-    }
-
-    fn derive_fd(
-        column_cnt: usize,
-        input_len: usize,
-        input_fd_set: &FunctionalDependencySet,
-        group_key: &[usize],
-    ) -> FunctionalDependencySet {
-        let mut fd_set =
-            FunctionalDependencySet::with_key(column_cnt, &(0..group_key.len()).collect_vec());
-        // take group keys from input_columns, then grow the target size to column_cnt
-        let i2o = ColIndexMapping::with_remaining_columns(group_key, input_len).composite(
-            &ColIndexMapping::identity_or_none(group_key.len(), column_cnt),
-        );
-        for fd in input_fd_set.as_dependencies() {
-            if let Some(fd) = i2o.rewrite_functional_dependency(fd) {
-                fd_set.add_functional_dependency(fd);
-            }
-        }
-        fd_set
     }
 
     /// `create` will analyze select exprs, group exprs and having, and construct a plan like
@@ -1007,9 +953,8 @@ impl LogicalAgg {
                 agg_call.inputs.iter_mut().for_each(|i| {
                     *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
                 });
-                agg_call.order_by_fields.iter_mut().for_each(|field| {
-                    let i = &mut field.input;
-                    *i = InputRef::new(input_col_change.map(i.index()), i.return_type())
+                agg_call.order_by.iter_mut().for_each(|o| {
+                    o.column_index = input_col_change.map(o.column_index);
                 });
                 agg_call.filter = agg_call.filter.rewrite_expr(&mut input_col_change);
                 agg_call
@@ -1026,6 +971,10 @@ impl LogicalAgg {
 
     pub fn fmt_with_name(&self, f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
         self.core.fmt_with_name(f, name)
+    }
+
+    pub fn fmt_fields_with_builder(&self, builder: &mut fmt::DebugStruct<'_, '_>) {
+        self.core.fmt_fields_with_builder(builder)
     }
 
     fn to_batch_simple_agg(&self) -> Result<PlanRef> {
@@ -1095,7 +1044,7 @@ impl ColPrunable for LogicalAgg {
                     let index = index - self.group_key().len();
                     let agg_call = self.agg_calls()[index].clone();
                     tmp.extend(agg_call.inputs.iter().map(|x| x.index()));
-                    tmp.extend(agg_call.order_by_fields.iter().map(|x| x.input.index()));
+                    tmp.extend(agg_call.order_by.iter().map(|x| x.column_index));
                     // collect columns used in aggregate filter expressions
                     for i in &agg_call.filter.conjunctions {
                         tmp.union_with(&i.collect_input_refs(input_cnt));
@@ -1464,7 +1413,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         };
         LogicalAgg::new(vec![agg_call], vec![1], values.into())
@@ -1583,7 +1532,7 @@ mod tests {
             return_type: ty.clone(),
             inputs: vec![InputRef::new(2, ty.clone())],
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: Condition::true_cond(),
         };
         let agg: PlanRef = LogicalAgg::new(vec![agg_call], vec![1], values.into()).into();
@@ -1648,7 +1597,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(2, ty.clone())],
                 distinct: false,
-                order_by_fields: vec![],
+                order_by: vec![],
                 filter: Condition::true_cond(),
             },
             PlanAggCall {
@@ -1656,7 +1605,7 @@ mod tests {
                 return_type: ty.clone(),
                 inputs: vec![InputRef::new(1, ty.clone())],
                 distinct: false,
-                order_by_fields: vec![],
+                order_by: vec![],
                 filter: Condition::true_cond(),
             },
         ];

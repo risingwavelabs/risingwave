@@ -87,6 +87,12 @@ pub struct MetaOpts {
     /// The prometheus endpoint for dashboard service.
     pub prometheus_endpoint: Option<String>,
 
+    /// The VPC id of the cluster.
+    pub vpc_id: Option<String>,
+
+    /// A usable security group id to assign to a vpc endpoint
+    pub security_group_id: Option<String>,
+
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     pub connector_rpc_endpoint: Option<String>,
@@ -94,8 +100,13 @@ pub struct MetaOpts {
     /// Schedule space_reclaim_compaction for all compaction groups with this interval.
     pub periodic_space_reclaim_compaction_interval_sec: u64,
 
+    /// telemetry enabled in config file or not
+    pub telemetry_enabled: bool,
     /// Schedule ttl_reclaim_compaction for all compaction groups with this interval.
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    ///  compactor task limit = max_compactor_task_multiplier * cpu_core_num
+    pub max_compactor_task_multiplier: u32,
 }
 
 impl MetaOpts {
@@ -113,9 +124,13 @@ impl MetaOpts {
             periodic_compaction_interval_sec: 60,
             node_num_monitor_interval_sec: 10,
             prometheus_endpoint: None,
+            vpc_id: None,
+            security_group_id: None,
             connector_rpc_endpoint: None,
             periodic_space_reclaim_compaction_interval_sec: 60,
+            telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
+            max_compactor_task_multiplier: 2,
         }
     }
 }

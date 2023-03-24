@@ -19,20 +19,22 @@
 // `zip_eq` is a source of poor performance.
 #![allow(clippy::disallowed_methods)]
 
+use std::cell::RefCell;
+
+use criterion::async_executor::FuturesExecutor;
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_common::array::*;
+use risingwave_common::types::test_utils::IntervalUnitTestExt;
 use risingwave_common::types::{
     DataType, DataTypeName, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, OrderedF32, OrderedF64,
 };
-use risingwave_expr::expr::test_utils::{make_expression, make_string_literal};
 use risingwave_expr::expr::*;
 use risingwave_expr::sig::agg::agg_func_sigs;
-use risingwave_expr::sig::cast::cast_sigs;
 use risingwave_expr::sig::func::func_sigs;
 use risingwave_expr::vector_op::agg::create_agg_state_unary;
 use risingwave_expr::ExprError;
-use risingwave_pb::expr::expr_node::{RexNode, Type as ExprType};
+use risingwave_pb::expr::expr_node::PbType;
 
 criterion_group!(benches, bench_expr, bench_raw);
 criterion_main!(benches);
@@ -153,6 +155,13 @@ fn bench_expr(c: &mut Criterion) {
                     .take(CHUNK_SIZE),
             )
             .into(),
+            // 25: serial array
+            SerialArray::from_iter((1..=CHUNK_SIZE).map(|i| Serial::from(i as i64))).into(),
+            // 26: jsonb array
+            JsonbArray::from_iter(
+                (1..=CHUNK_SIZE).map(|i| JsonbVal::from_serde(serde_json::Value::Number(i.into()))),
+            )
+            .into(),
         ],
         CHUNK_SIZE,
     );
@@ -161,6 +170,7 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Int16, 1),
         InputRefExpression::new(DataType::Int32, 2),
         InputRefExpression::new(DataType::Int64, 3),
+        InputRefExpression::new(DataType::Serial, 25),
         InputRefExpression::new(DataType::Float32, 4),
         InputRefExpression::new(DataType::Float64, 5),
         InputRefExpression::new(DataType::Decimal, 6),
@@ -171,12 +181,14 @@ fn bench_expr(c: &mut Criterion) {
         InputRefExpression::new(DataType::Interval, 11),
         InputRefExpression::new(DataType::Varchar, 12),
         InputRefExpression::new(DataType::Bytea, 13),
+        InputRefExpression::new(DataType::Jsonb, 26),
     ];
-    let inputref_for_type = |ty: DataType| {
+    let input_index_for_type = |ty: DataType| {
         inputrefs
             .iter()
             .find(|r| r.return_type() == ty)
-            .expect("expression not found")
+            .unwrap_or_else(|| panic!("expression not found for {ty:?}"))
+            .index()
     };
     const TIMEZONE: usize = 14;
     const TIME_FIELD: usize = 15;
@@ -194,74 +206,86 @@ fn bench_expr(c: &mut Criterion) {
 
     c.bench_function("inputref", |bencher| {
         let inputref = inputrefs[0].clone().boxed();
-        bencher.iter(|| inputref.eval(&input).unwrap())
+        bencher
+            .to_async(FuturesExecutor)
+            .iter(|| inputref.eval(&input))
     });
     c.bench_function("constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        bencher.iter(|| constant.eval(&input).unwrap())
+        bencher
+            .to_async(FuturesExecutor)
+            .iter(|| constant.eval(&input))
     });
 
     let sigs = func_sigs();
-    let sigs = sigs.sorted_by_cached_key(|sig| sig.to_string_no_return());
-    for sig in sigs {
+    let sigs = sigs.sorted_by_cached_key(|sig| format!("{sig:?}"));
+    'sig: for sig in sigs {
         if sig
             .inputs_type
             .iter()
             .any(|t| matches!(t, DataTypeName::Struct | DataTypeName::List))
         {
             // TODO: support struct and list
-            println!("todo: {}", sig.to_string_no_return());
+            println!("todo: {sig:?}");
             continue;
         }
 
-        let mut prost = make_expression(
-            sig.func,
-            &sig.inputs_type
-                .iter()
-                .map(|t| DataType::from(*t).prost_type_name())
-                .collect_vec(),
-            &sig.inputs_type
-                .iter()
-                .enumerate()
-                .map(|(idx, t)| match (sig.func, idx) {
-                    (ExprType::AtTimeZone, 1) => TIMEZONE,
-                    (ExprType::DateTrunc, 0) => TIME_FIELD,
-                    (ExprType::DateTrunc, 2) => TIMEZONE,
-                    (ExprType::Extract, 0) => match sig.inputs_type[1] {
-                        DataTypeName::Date => EXTRACT_FIELD_DATE,
-                        DataTypeName::Time => EXTRACT_FIELD_TIME,
-                        DataTypeName::Timestamp => EXTRACT_FIELD_TIMESTAMP,
-                        DataTypeName::Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
-                        t => panic!("unexpected type: {t:?}"),
-                    },
-                    _ => inputref_for_type((*t).into()).index(),
-                })
-                .collect_vec(),
-        );
-        if sig.func == ExprType::ToChar {
-            let RexNode::FuncCall(f) = prost.rex_node.as_mut().unwrap() else { unreachable!() };
-            f.children[1] = make_string_literal("YYYY/MM/DD HH:MM:SS");
+        let mut children = vec![];
+        for (i, t) in sig.inputs_type.iter().enumerate() {
+            use DataTypeName::*;
+            let idx = match (sig.func, i) {
+                (PbType::ToChar, 1) => {
+                    children.push(
+                        LiteralExpression::new(
+                            DataType::Varchar,
+                            Some("YYYY/MM/DD HH:MM:SS".into()),
+                        )
+                        .boxed(),
+                    );
+                    continue;
+                }
+                (PbType::Cast, 0) if *t == DataTypeName::Varchar => match sig.ret_type {
+                    Boolean => BOOL_STRING,
+                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
+                    Date => DATE_STRING,
+                    Time => TIME_STRING,
+                    Timestamp => TIMESTAMP_STRING,
+                    Timestamptz => TIMESTAMPTZ_STRING,
+                    Interval => INTERVAL_STRING,
+                    Bytea => NUMBER_STRING, // any
+                    _ => {
+                        println!("todo: {sig:?}");
+                        continue 'sig;
+                    }
+                },
+                (PbType::AtTimeZone, 1) => TIMEZONE,
+                (PbType::DateTrunc, 0) => TIME_FIELD,
+                (PbType::DateTrunc, 2) => TIMEZONE,
+                (PbType::Extract, 0) => match sig.inputs_type[1] {
+                    Date => EXTRACT_FIELD_DATE,
+                    Time => EXTRACT_FIELD_TIME,
+                    Timestamp => EXTRACT_FIELD_TIMESTAMP,
+                    Timestamptz => EXTRACT_FIELD_TIMESTAMPTZ,
+                    t => panic!("unexpected type: {t:?}"),
+                },
+                _ => input_index_for_type((*t).into()),
+            };
+            children.push(InputRefExpression::new(DataType::from(*t), idx).boxed());
         }
-        let expr = match build_from_prost(&prost) {
-            Ok(expr) => expr,
-            Err(e) => {
-                println!("error: {e}");
-                continue;
-            }
-        };
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| expr.eval(&input).unwrap())
+        let expr = build(sig.func, sig.ret_type.into(), children).unwrap();
+        c.bench_function(&format!("{sig:?}"), |bencher| {
+            bencher.to_async(FuturesExecutor).iter(|| expr.eval(&input))
         });
     }
 
     for sig in agg_func_sigs() {
         if sig.inputs_type.len() != 1 {
-            println!("todo: {}", sig.to_string_no_return());
+            println!("todo: {sig:?}");
             continue;
         }
-        let mut agg = match create_agg_state_unary(
+        let agg = match create_agg_state_unary(
             sig.inputs_type[0].into(),
-            inputref_for_type(sig.inputs_type[0].into()).index(),
+            input_index_for_type(sig.inputs_type[0].into()),
             sig.func,
             sig.ret_type.into(),
             false,
@@ -272,69 +296,18 @@ fn bench_expr(c: &mut Criterion) {
                 continue;
             }
         };
+        // to workaround the lifetime issue
+        let agg = RefCell::new(agg);
         c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| agg.update_multi(&input, 0, CHUNK_SIZE).unwrap())
+            #[allow(clippy::await_holding_refcell_ref)]
+            bencher.to_async(FuturesExecutor).iter(|| async {
+                agg.borrow_mut()
+                    .update_multi(&input, 0, CHUNK_SIZE)
+                    .await
+                    .unwrap()
+            })
         });
     }
-
-    for sig in cast_sigs() {
-        let expr = match new_unary_expr(
-            ExprType::Cast,
-            sig.to_type.into(),
-            if matches!(sig.from_type, DataTypeName::Varchar) {
-                use DataTypeName::*;
-                let idx = match sig.to_type {
-                    Boolean => BOOL_STRING,
-                    Int16 | Int32 | Int64 | Float32 | Float64 | Decimal => NUMBER_STRING,
-                    Date => DATE_STRING,
-                    Time => TIME_STRING,
-                    Timestamp => TIMESTAMP_STRING,
-                    Timestamptz => TIMESTAMPTZ_STRING,
-                    Interval => INTERVAL_STRING,
-                    Bytea => NUMBER_STRING, // any
-                    _ => {
-                        println!("todo: {}", sig.to_string_no_return());
-                        continue;
-                    }
-                };
-                InputRefExpression::new(DataType::Varchar, idx).boxed()
-            } else {
-                inputref_for_type(sig.from_type.into()).clone().boxed()
-            },
-        ) {
-            Ok(expr) => expr,
-            Err(e) => {
-                println!("error: {e}");
-                continue;
-            }
-        };
-        c.bench_function(&sig.to_string_no_return(), |bencher| {
-            bencher.iter(|| expr.eval(&input).unwrap())
-        });
-    }
-
-    // ~360ns
-    // This should be the optimization goal for our add expression.
-    c.bench_function("TBD/add(int32,int32)", |bencher| {
-        bencher.iter(|| {
-            let a = input.column_at(2).array_ref().as_int32();
-            let b = input.column_at(2).array_ref().as_int32();
-            assert_eq!(a.len(), b.len());
-            let mut c = (a.raw_iter())
-                .zip(b.raw_iter())
-                .map(|(a, b)| a + b)
-                .collect::<I32Array>();
-            let mut overflow = false;
-            for ((a, b), c) in a.raw_iter().zip(b.raw_iter()).zip(c.raw_iter()) {
-                overflow |= (c ^ a) & (c ^ b) < 0;
-            }
-            if overflow {
-                return Err(ExprError::NumericOverflow);
-            }
-            c.set_bitmap(a.null_bitmap() & b.null_bitmap());
-            Ok(c)
-        })
-    });
 }
 
 /// Evaluate on raw Rust array.
@@ -441,4 +414,27 @@ fn bench_raw(c: &mut Criterion) {
             })
         },
     );
+
+    // ~360ns
+    // This should be the optimization goal for our add expression.
+    c.bench_function("TBD/add(int32,int32)", |bencher| {
+        bencher.iter(|| {
+            let a = (0..CHUNK_SIZE as i32).collect::<I32Array>();
+            let b = (0..CHUNK_SIZE as i32).collect::<I32Array>();
+            assert_eq!(a.len(), b.len());
+            let mut c = (a.raw_iter())
+                .zip(b.raw_iter())
+                .map(|(a, b)| a + b)
+                .collect::<I32Array>();
+            let mut overflow = false;
+            for ((a, b), c) in a.raw_iter().zip(b.raw_iter()).zip(c.raw_iter()) {
+                overflow |= (c ^ a) & (c ^ b) < 0;
+            }
+            if overflow {
+                return Err(ExprError::NumericOverflow);
+            }
+            c.set_bitmap(a.null_bitmap() & b.null_bitmap());
+            Ok(c)
+        })
+    });
 }

@@ -19,10 +19,7 @@ use std::sync::Arc;
 use risingwave_common::catalog::{valid_table_name, FunctionId, IndexId, TableId};
 use risingwave_common::types::DataType;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_pb::catalog::{
-    Function as ProstFunction, Index as ProstIndex, Schema as ProstSchema, Sink as ProstSink,
-    Source as ProstSource, Table as ProstTable, View as ProstView,
-};
+use risingwave_pb::catalog::{PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView};
 
 use super::source_catalog::SourceCatalog;
 use super::ViewId;
@@ -60,7 +57,7 @@ pub struct SchemaCatalog {
 }
 
 impl SchemaCatalog {
-    pub fn create_table(&mut self, prost: &ProstTable) {
+    pub fn create_table(&mut self, prost: &PbTable) {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -78,7 +75,7 @@ impl SchemaCatalog {
             .unwrap();
     }
 
-    pub fn update_table(&mut self, prost: &ProstTable) {
+    pub fn update_table(&mut self, prost: &PbTable) {
         let name = prost.name.clone();
         let id = prost.id.into();
         let table: TableCatalog = prost.into();
@@ -88,13 +85,41 @@ impl SchemaCatalog {
         self.table_by_id.insert(id, table_ref);
     }
 
+    pub fn update_index(&mut self, prost: &PbIndex) {
+        let name = prost.name.clone();
+        let id = prost.id.into();
+        let index_table = self.get_table_by_id(&prost.index_table_id.into()).unwrap();
+        let primary_table = self
+            .get_table_by_id(&prost.primary_table_id.into())
+            .unwrap();
+        let index: IndexCatalog = IndexCatalog::build_from(prost, index_table, primary_table);
+        let index_ref = Arc::new(index);
+
+        self.index_by_name.insert(name, index_ref.clone());
+        self.index_by_id.insert(id, index_ref.clone());
+
+        match self.indexes_by_table_id.entry(index_ref.primary_table.id) {
+            Occupied(mut entry) => {
+                let pos = entry
+                    .get()
+                    .iter()
+                    .position(|x| x.id == index_ref.id)
+                    .unwrap();
+                *entry.get_mut().get_mut(pos).unwrap() = index_ref;
+            }
+            Vacant(_entry) => {
+                unreachable!()
+            }
+        };
+    }
+
     pub fn drop_table(&mut self, id: TableId) {
         let table_ref = self.table_by_id.remove(&id).unwrap();
         self.table_by_name.remove(&table_ref.name).unwrap();
         self.indexes_by_table_id.remove(&table_ref.id);
     }
 
-    pub fn create_index(&mut self, prost: &ProstIndex) {
+    pub fn create_index(&mut self, prost: &PbIndex) {
         let name = prost.name.clone();
         let id = prost.id.into();
 
@@ -135,7 +160,7 @@ impl SchemaCatalog {
         };
     }
 
-    pub fn create_source(&mut self, prost: &ProstSource) {
+    pub fn create_source(&mut self, prost: &PbSource) {
         let name = prost.name.clone();
         let id = prost.id;
         let source = SourceCatalog::from(prost);
@@ -152,7 +177,7 @@ impl SchemaCatalog {
         self.source_by_name.remove(&source_ref.name).unwrap();
     }
 
-    pub fn create_sink(&mut self, prost: &ProstSink) {
+    pub fn create_sink(&mut self, prost: &PbSink) {
         let name = prost.name.clone();
         let id = prost.id;
         let sink = SinkCatalog::from(prost);
@@ -169,7 +194,7 @@ impl SchemaCatalog {
         self.sink_by_name.remove(&sink_ref.name).unwrap();
     }
 
-    pub fn create_view(&mut self, prost: &ProstView) {
+    pub fn create_view(&mut self, prost: &PbView) {
         let name = prost.name.clone();
         let id = prost.id;
         let view = ViewCatalog::from(prost);
@@ -186,7 +211,7 @@ impl SchemaCatalog {
         self.view_by_name.remove(&view_ref.name).unwrap();
     }
 
-    pub fn create_function(&mut self, prost: &ProstFunction) {
+    pub fn create_function(&mut self, prost: &PbFunction) {
         let name = prost.name.clone();
         let id = prost.id;
         let function = FunctionCatalog::from(prost);
@@ -331,8 +356,8 @@ impl SchemaCatalog {
     }
 }
 
-impl From<&ProstSchema> for SchemaCatalog {
-    fn from(schema: &ProstSchema) -> Self {
+impl From<&PbSchema> for SchemaCatalog {
+    fn from(schema: &PbSchema) -> Self {
         Self {
             id: schema.id,
             owner: schema.owner,

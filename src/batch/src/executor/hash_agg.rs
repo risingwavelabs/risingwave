@@ -213,7 +213,7 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
 
                 // TODO: currently not a vectorized implementation
                 for state in states {
-                    state.update_single(&chunk, row_id)?
+                    state.update_single(&chunk, row_id).await?
                 }
             }
         }
@@ -270,7 +270,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::agg_call::Type;
     use risingwave_pb::expr::{AggCall, InputRef};
 
@@ -309,17 +309,17 @@ mod tests {
             r#type: Type::Sum as i32,
             args: vec![InputRef {
                 index: 2,
-                r#type: Some(ProstDataType {
+                r#type: Some(PbDataType {
                     type_name: TypeName::Int32 as i32,
                     ..Default::default()
                 }),
             }],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 
@@ -382,12 +382,12 @@ mod tests {
         let agg_call = AggCall {
             r#type: Type::Count as i32,
             args: vec![],
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
             distinct: false,
-            order_by_fields: vec![],
+            order_by: vec![],
             filter: None,
         };
 

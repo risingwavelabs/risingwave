@@ -14,14 +14,13 @@
 
 use std::fmt::Write;
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn upper(s: &str, writer: &mut dyn Write) -> Result<()> {
+#[function("upper(varchar) -> varchar")]
+pub fn upper(s: &str, writer: &mut dyn Write) {
     for c in s.chars() {
         writer.write_char(c.to_ascii_uppercase()).unwrap();
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -29,7 +28,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_upper() -> Result<()> {
+    fn test_upper() {
         let cases = [
             ("hello world", "HELLO WORLD"),
             ("hello RUST", "HELLO RUST"),
@@ -38,9 +37,8 @@ mod tests {
 
         for (s, expected) in cases {
             let mut writer = String::new();
-            upper(s, &mut writer)?;
+            upper(s, &mut writer);
             assert_eq!(writer, expected);
         }
-        Ok(())
     }
 }

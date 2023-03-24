@@ -15,7 +15,7 @@
 use std::backtrace::Backtrace;
 use std::sync::Arc;
 
-use risingwave_pb::ProstFieldNotFound;
+use risingwave_pb::PbFieldNotFound;
 use risingwave_rpc_client::error::RpcError;
 
 use crate::hummock::error::Error as HummockError;
@@ -172,6 +172,15 @@ impl From<anyhow::Error> for MetaError {
     }
 }
 
+impl<E> From<aws_sdk_ec2::types::SdkError<E>> for MetaError
+where
+    E: std::error::Error + Sync + Send + 'static,
+{
+    fn from(e: aws_sdk_ec2::types::SdkError<E>) -> Self {
+        MetaErrorInner::Internal(e.into()).into()
+    }
+}
+
 impl From<MetaError> for tonic::Status {
     fn from(err: MetaError) -> Self {
         match &*err.inner {
@@ -190,8 +199,8 @@ impl From<MetaError> for tonic::Status {
     }
 }
 
-impl From<ProstFieldNotFound> for MetaError {
-    fn from(e: ProstFieldNotFound) -> Self {
+impl From<PbFieldNotFound> for MetaError {
+    fn from(e: PbFieldNotFound) -> Self {
         MetadataModelError::from(e).into()
     }
 }

@@ -31,19 +31,20 @@ pub struct CoalesceExpression {
     children: Vec<BoxedExpression>,
 }
 
+#[async_trait::async_trait]
 impl Expression for CoalesceExpression {
     fn return_type(&self) -> DataType {
         self.return_type.clone()
     }
 
-    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
         let init_vis = input.vis();
         let mut input = input.clone();
         let len = input.capacity();
         let mut selection: Vec<Option<usize>> = vec![None; len];
         let mut children_array = Vec::with_capacity(self.children.len());
         for (child_idx, child) in self.children.iter().enumerate() {
-            let res = child.eval_checked(&input)?;
+            let res = child.eval_checked(&input).await?;
             let res_bitmap = res.null_bitmap();
             let orig_vis = input.vis();
             let res_bitmap_ref: VisRef<'_> = res_bitmap.into();
@@ -70,9 +71,9 @@ impl Expression for CoalesceExpression {
         Ok(Arc::new(builder.finish()))
     }
 
-    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for child in &self.children {
-            let datum = child.eval_row(input)?;
+            let datum = child.eval_row(input).await?;
             if datum.is_some() {
                 return Ok(datum);
             }
@@ -118,7 +119,7 @@ mod tests {
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{Scalar, ScalarImpl};
     use risingwave_pb::data::data_type::TypeName;
-    use risingwave_pb::data::DataType as ProstDataType;
+    use risingwave_pb::data::PbDataType;
     use risingwave_pb::expr::expr_node::RexNode;
     use risingwave_pb::expr::expr_node::Type::Coalesce;
     use risingwave_pb::expr::{ExprNode, FunctionCall};
@@ -130,7 +131,7 @@ mod tests {
     pub fn make_coalesce_function(children: Vec<ExprNode>, ret: TypeName) -> ExprNode {
         ExprNode {
             expr_type: Coalesce as i32,
-            return_type: Some(ProstDataType {
+            return_type: Some(PbDataType {
                 type_name: ret as i32,
                 ..Default::default()
             }),
@@ -138,8 +139,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_coalesce_expr() {
+    #[tokio::test]
+    async fn test_coalesce_expr() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(1, TypeName::Int32);
         let input_node3 = make_input_ref(2, TypeName::Int32);
@@ -157,15 +158,15 @@ mod tests {
             TypeName::Int32,
         ))
         .unwrap();
-        let res = nullif_expr.eval(&data_chunk).unwrap();
+        let res = nullif_expr.eval(&data_chunk).await.unwrap();
         assert_eq!(res.datum_at(0), Some(ScalarImpl::Int32(1)));
         assert_eq!(res.datum_at(1), Some(ScalarImpl::Int32(2)));
         assert_eq!(res.datum_at(2), Some(ScalarImpl::Int32(3)));
         assert_eq!(res.datum_at(3), None);
     }
 
-    #[test]
-    fn test_eval_row_coalesce_expr() {
+    #[tokio::test]
+    async fn test_eval_row_coalesce_expr() {
         let input_node1 = make_input_ref(0, TypeName::Int32);
         let input_node2 = make_input_ref(1, TypeName::Int32);
         let input_node3 = make_input_ref(2, TypeName::Int32);
@@ -197,7 +198,7 @@ mod tests {
                 .collect();
             let row = OwnedRow::new(datum_vec);
 
-            let result = nullif_expr.eval_row(&row).unwrap();
+            let result = nullif_expr.eval_row(&row).await.unwrap();
             assert_eq!(result, expected[i]);
         }
     }

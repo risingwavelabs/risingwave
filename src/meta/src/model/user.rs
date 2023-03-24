@@ -22,17 +22,17 @@ const USER_INFO_CF_NAME: &str = "cf/user_info";
 /// `UserInfo` stores the user information.
 impl MetadataModel for UserInfo {
     type KeyType = u32;
-    type ProstType = UserInfo;
+    type PbType = UserInfo;
 
     fn cf_name() -> String {
         USER_INFO_CF_NAME.to_string()
     }
 
-    fn to_protobuf(&self) -> Self::ProstType {
+    fn to_protobuf(&self) -> Self::PbType {
         self.clone()
     }
 
-    fn from_protobuf(prost: Self::ProstType) -> Self {
+    fn from_protobuf(prost: Self::PbType) -> Self {
         prost
     }
 

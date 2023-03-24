@@ -47,6 +47,7 @@ use risingwave_storage::StateStore;
 use tracing::trace;
 
 use super::watermark::{WatermarkBufferByEpoch, WatermarkBufferStrategy};
+use crate::cache::cache_may_stale;
 use crate::executor::{StreamExecutorError, StreamExecutorResult};
 
 /// This num is arbitrary and we may want to improve this choice in the future.
@@ -84,7 +85,7 @@ pub struct StateTableInner<
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the all columns of the table, instead of the output ones.
     // FIXME: revisit constructions and usages.
-    dist_key_indices: Vec<usize>,
+    // dist_key_indices: Vec<usize>,
 
     /// Indices of distribution key for computing vnode.
     /// Note that the index is based on the primary key columns by `pk_indices`.
@@ -158,11 +159,7 @@ where
         let order_types: Vec<OrderType> = table_catalog
             .pk
             .iter()
-            .map(|col_order| {
-                OrderType::from_prost(
-                    &risingwave_pb::plan_common::OrderType::from_i32(col_order.order_type).unwrap(),
-                )
-            })
+            .map(|col_order| OrderType::from_protobuf(col_order.get_order_type().unwrap()))
             .collect();
         let dist_key_indices: Vec<usize> = table_catalog
             .distribution_key
@@ -173,10 +170,20 @@ where
         let pk_indices = table_catalog
             .pk
             .iter()
-            .map(|col_order| col_order.index as usize)
+            .map(|col_order| col_order.column_index as usize)
             .collect_vec();
 
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
+        // FIXME(yuhao): only use `dist_key_in_pk` in the proto
+        let dist_key_in_pk_indices = if table_catalog.get_dist_key_in_pk().is_empty() {
+            get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices)
+        } else {
+            table_catalog
+                .get_dist_key_in_pk()
+                .iter()
+                .map(|idx| *idx as usize)
+                .collect()
+        };
+
         let table_option = TableOption::build_table_option(table_catalog.get_properties());
         let local_state_store = store
             .new_local(NewLocalOptions {
@@ -192,15 +199,10 @@ where
             .collect();
         let pk_serde = OrderedRowSerde::new(pk_data_types, order_types);
 
-        let Distribution {
-            dist_key_indices,
-            vnodes,
-        } = match vnodes {
-            Some(vnodes) => Distribution {
-                dist_key_indices,
-                vnodes,
-            },
-            None => Distribution::fallback(),
+        let vnodes = match vnodes {
+            Some(vnodes) => vnodes,
+
+            None => Distribution::fallback_vnodes(),
         };
         let vnode_col_idx_in_pk = table_catalog.vnode_col_index.as_ref().and_then(|idx| {
             let vnode_col_idx = *idx as usize;
@@ -232,13 +234,19 @@ where
             false => Some(input_value_indices),
         };
         let prefix_hint_len = table_catalog.read_prefix_len_hint as usize;
+
+        let row_serde = SD::new(&column_ids, Arc::from(data_types.into_boxed_slice()));
+        assert_eq!(
+            row_serde.kind().is_column_aware(),
+            table_catalog.version.is_some()
+        );
+
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
-            row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
+            row_serde,
             pk_indices: pk_indices.to_vec(),
-            dist_key_indices,
             dist_key_in_pk_indices,
             prefix_hint_len,
             vnodes,
@@ -308,31 +316,6 @@ where
             Distribution::fallback(),
             None,
             false,
-            0,
-        )
-        .await
-    }
-
-    /// Create a state table without distribution, with given `prefix_hint_len`, used for unit
-    /// tests.
-    pub async fn new_without_distribution_with_prefix_hint_len(
-        store: S,
-        table_id: TableId,
-        columns: Vec<ColumnDesc>,
-        order_types: Vec<OrderType>,
-        pk_indices: Vec<usize>,
-        prefix_hint_len: usize,
-    ) -> Self {
-        Self::new_with_distribution_inner(
-            store,
-            table_id,
-            columns,
-            order_types,
-            pk_indices,
-            Distribution::fallback(),
-            None,
-            true,
-            prefix_hint_len,
         )
         .await
     }
@@ -357,7 +340,6 @@ where
             distribution,
             value_indices,
             true,
-            0,
         )
         .await
     }
@@ -380,7 +362,6 @@ where
             distribution,
             value_indices,
             false,
-            0,
         )
         .await
     }
@@ -393,12 +374,11 @@ where
         order_types: Vec<OrderType>,
         pk_indices: Vec<usize>,
         Distribution {
-            dist_key_indices,
+            dist_key_in_pk_indices,
             vnodes,
         }: Distribution,
         value_indices: Option<Vec<usize>>,
         is_consistent_op: bool,
-        prefix_hint_len: usize,
     ) -> Self {
         let local_state_store = store
             .new_local(NewLocalOptions {
@@ -432,16 +412,14 @@ where
                 .collect_vec(),
             None => table_columns.iter().map(|c| c.column_id).collect_vec(),
         };
-        let dist_key_in_pk_indices = get_dist_key_in_pk_indices(&dist_key_indices, &pk_indices);
         Self {
             table_id,
             local_store: local_state_store,
             pk_serde,
             row_serde: SD::new(&column_ids, Arc::from(data_types.into_boxed_slice())),
             pk_indices,
-            dist_key_indices,
             dist_key_in_pk_indices,
-            prefix_hint_len,
+            prefix_hint_len: 0,
             vnodes,
             table_option: Default::default(),
             vnode_col_idx_in_pk: None,
@@ -462,7 +440,7 @@ where
         if self.vnode_col_idx_in_pk.is_some() {
             false
         } else {
-            self.dist_key_indices.is_empty()
+            self.dist_key_in_pk_indices.is_empty()
         }
     }
 
@@ -490,8 +468,13 @@ where
     }
 
     /// Get the vnode value of the given row
-    pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
-        compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // pub fn compute_vnode(&self, row: impl Row) -> VirtualNode {
+    //     compute_vnode(row, &self.dist_key_indices, &self.vnodes)
+    // }
+
+    /// Get the vnode value of the given row
+    pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
+        compute_vnode(pk, &self.dist_key_in_pk_indices, &self.vnodes)
     }
 
     // TODO: remove, should not be exposed to user
@@ -503,9 +486,9 @@ where
         &self.pk_serde
     }
 
-    pub fn dist_key_indices(&self) -> &[usize] {
-        &self.dist_key_indices
-    }
+    // pub fn dist_key_indices(&self) -> &[usize] {
+    //     &self.dist_key_indices
+    // }
 
     pub fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
@@ -532,21 +515,18 @@ where
 {
     /// Get a single row from state table.
     pub async fn get_row(&self, pk: impl Row) -> StreamExecutorResult<Option<OwnedRow>> {
-        let compacted_row: Option<CompactedRow> = self.get_compacted_row(pk).await?;
-        match compacted_row {
-            Some(compacted_row) => {
-                let row = self.row_serde.deserialize(compacted_row.row.as_ref())?;
+        let encoded_row: Option<Bytes> = self.get_encoded_row(pk).await?;
+        match encoded_row {
+            Some(encoded_row) => {
+                let row = self.row_serde.deserialize(&encoded_row)?;
                 Ok(Some(OwnedRow::new(row)))
             }
             None => Ok(None),
         }
     }
 
-    /// Get a compacted row from state table.
-    pub async fn get_compacted_row(
-        &self,
-        pk: impl Row,
-    ) -> StreamExecutorResult<Option<CompactedRow>> {
+    /// Get a raw encoded row from state table.
+    pub async fn get_encoded_row(&self, pk: impl Row) -> StreamExecutorResult<Option<Bytes>> {
         assert!(pk.len() <= self.pk_indices.len());
 
         if self.prefix_hint_len != 0 {
@@ -570,18 +550,35 @@ where
             read_version_from_backup: false,
             prefetch_options: Default::default(),
         };
-        if let Some(storage_row_bytes) = self.local_store.get(serialized_pk, read_options).await? {
-            Ok(Some(CompactedRow {
-                row: storage_row_bytes,
-            }))
+
+        self.local_store
+            .get(serialized_pk, read_options)
+            .await
+            .map_err(Into::into)
+    }
+
+    /// Get a row in value-encoding format from state table.
+    pub async fn get_compacted_row(
+        &self,
+        pk: impl Row,
+    ) -> StreamExecutorResult<Option<CompactedRow>> {
+        if self.row_serde.kind().is_basic() {
+            // Basic serde is in value-encoding format, which is compatible with the compacted row.
+            self.get_encoded_row(pk)
+                .await
+                .map(|bytes| bytes.map(CompactedRow::new))
         } else {
-            Ok(None)
+            // For other encodings, we must first deserialize it into a `Row` first, then serialize
+            // it back into value-encoding format.
+            self.get_row(pk)
+                .await
+                .map(|row| row.map(CompactedRow::from))
         }
     }
 
     /// Update the vnode bitmap of the state table, returns the previous vnode bitmap.
     #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
-    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> (Arc<Bitmap>, bool) {
         assert!(
             !self.is_dirty(),
             "vnode bitmap should only be updated when state table is clean"
@@ -594,9 +591,16 @@ where
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
-        self.cur_watermark = None;
+        let cache_may_stale = cache_may_stale(&self.vnodes, &new_vnodes);
 
-        std::mem::replace(&mut self.vnodes, new_vnodes)
+        if cache_may_stale {
+            self.cur_watermark = None;
+        }
+
+        (
+            std::mem::replace(&mut self.vnodes, new_vnodes),
+            cache_may_stale,
+        )
     }
 }
 
@@ -697,14 +701,19 @@ where
     pub fn write_chunk(&mut self, chunk: StreamChunk) {
         let (chunk, op) = chunk.into_parts();
 
-        let vnodes = compute_chunk_vnode(&chunk, &self.dist_key_indices, &self.vnodes);
+        let vnodes = compute_chunk_vnode(
+            &chunk,
+            &self.dist_key_in_pk_indices,
+            &self.pk_indices,
+            &self.vnodes,
+        );
 
         let value_chunk = if let Some(ref value_indices) = self.value_indices {
             chunk.clone().reorder_columns(value_indices)
         } else {
             chunk.clone()
         };
-        let values = value_chunk.serialize();
+        let values = value_chunk.serialize_with(&self.row_serde);
 
         let key_chunk = chunk.reorder_columns(self.pk_indices());
         let vnode_and_pks = key_chunk
@@ -957,7 +966,7 @@ where
         trace!(
             table_id = %self.table_id(),
             ?prefix_hint, ?encoded_key_range_with_vnode, ?pk_prefix,
-            dist_key_indices = ?self.dist_key_indices, ?pk_prefix_indices,
+             ?pk_prefix_indices,
             "storage_iter_with_prefix"
         );
 

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package twitter.schema;
+option go_package = "twitter/proto";
+
+message Event {
+  TweetData data = 1;
+  User author = 2;
+}
+
+message TweetData {
+  string id = 1;
+  string text = 2;
+  string lang = 3;
+  string created_at = 4;
+}
+
+message User {
+  string id = 1;
+  string name = 2;
+  string user_name = 3;
+  string created_at = 4;
+  int64 followers = 5;
+}

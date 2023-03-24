@@ -251,7 +251,7 @@ impl<S: StateStore> ManagedTopNState<S> {
 mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_common::util::sort_util::{OrderPair, OrderType};
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     // use std::collections::BTreeMap;
     use super::*;
@@ -264,11 +264,11 @@ mod tests {
         let data_types = vec![DataType::Varchar, DataType::Int64];
         let schema = Schema::new(data_types.into_iter().map(Field::unnamed).collect());
         let storage_key = vec![
-            OrderPair::new(0, OrderType::Ascending),
-            OrderPair::new(1, OrderType::Ascending),
+            ColumnOrder::new(0, OrderType::ascending()),
+            ColumnOrder::new(1, OrderType::ascending()),
         ];
         let pk = vec![0, 1];
-        let order_by = vec![OrderPair::new(0, OrderType::Ascending)];
+        let order_by = vec![ColumnOrder::new(0, OrderType::ascending())];
 
         create_cache_key_serde(&storage_key, &pk, &schema, &order_by, &[])
     }
@@ -278,7 +278,7 @@ mod tests {
         let state_table = {
             let mut tb = create_in_memory_state_table(
                 &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;
@@ -354,10 +354,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_managed_top_n_state_fill_cache() {
+        let data_types = vec![DataType::Varchar, DataType::Int64];
         let state_table = {
             let mut tb = create_in_memory_state_table(
-                &[DataType::Varchar, DataType::Int64],
-                &[OrderType::Ascending, OrderType::Ascending],
+                &data_types,
+                &[OrderType::ascending(), OrderType::ascending()],
                 &[0, 1],
             )
             .await;
@@ -382,7 +383,7 @@ mod tests {
         let rows = vec![row1, row2, row3, row4, row5];
         let ordered_rows = vec![row1_bytes, row2_bytes, row3_bytes, row4_bytes, row5_bytes];
 
-        let mut cache = TopNCache::<false>::new(1, 1);
+        let mut cache = TopNCache::<false>::new(1, 1, data_types);
 
         managed_state.insert(rows[3].clone());
         managed_state.insert(rows[1].clone());

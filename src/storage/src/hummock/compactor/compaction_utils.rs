@@ -36,12 +36,12 @@ use crate::hummock::multi_builder::TableBuilderFactory;
 use crate::hummock::sstable::DEFAULT_ENTRY_SIZE;
 use crate::hummock::{
     CachePolicy, FilterBuilder, HummockResult, MemoryLimiter, SstableBuilder,
-    SstableBuilderOptions, SstableIdManagerRef, SstableWriterFactory, SstableWriterOptions,
+    SstableBuilderOptions, SstableObjectIdManagerRef, SstableWriterFactory, SstableWriterOptions,
 };
 use crate::monitor::StoreLocalStatistic;
 
 pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
-    pub sstable_id_manager: SstableIdManagerRef,
+    pub sstable_object_id_manager: SstableObjectIdManagerRef,
     pub limiter: Arc<MemoryLimiter>,
     pub options: SstableBuilderOptions,
     pub policy: CachePolicy,
@@ -63,7 +63,10 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             .require_memory((self.options.capacity + self.options.block_capacity) as u64)
             .await;
         let timer = Instant::now();
-        let table_id = self.sstable_id_manager.get_new_sst_id().await?;
+        let table_id = self
+            .sstable_object_id_manager
+            .get_new_sst_object_id()
+            .await?;
         let cost = (timer.elapsed().as_secs_f64() * 1000000.0).round() as u64;
         self.remote_rpc_cost.fetch_add(cost, Ordering::Relaxed);
         let writer_options = SstableWriterOptions {
@@ -121,10 +124,12 @@ pub struct TaskConfig {
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
     pub stats_target_table_ids: Option<HashSet<u32>>,
     pub task_type: compact_task::TaskType,
+    pub split_by_table: bool,
 }
 
-pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
+pub fn estimate_state_for_compaction(task: &CompactTask) -> (u64, usize) {
     let mut total_memory_size = 0;
+    let mut total_file_count = 0;
     for level in &task.input_ssts {
         if level.level_type == LevelType::Nonoverlapping as i32 {
             if let Some(table) = level.table_infos.first() {
@@ -135,8 +140,11 @@ pub fn estimate_memory_use_for_compaction(task: &CompactTask) -> u64 {
                 total_memory_size += table.file_size;
             }
         }
+
+        total_file_count += level.table_infos.len();
     }
-    total_memory_size
+
+    (total_memory_size, total_file_count)
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

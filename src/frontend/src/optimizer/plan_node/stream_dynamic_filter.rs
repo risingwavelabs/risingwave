@@ -16,7 +16,7 @@ use std::fmt;
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{FieldDisplay, Schema};
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::DynamicFilterNode;
@@ -44,7 +44,7 @@ impl StreamDynamicFilter {
             let mut watermark_columns = FixedBitSet::with_capacity(left.schema().len());
             if right.watermark_columns()[0] {
                 match comparator {
-                    ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
+                    ExprType::Equal | ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
                         watermark_columns.set(left_index, true)
                     }
                     _ => {}
@@ -96,6 +96,18 @@ impl fmt::Display for StreamDynamicFilter {
                 input_schema: &concat_schema,
             },
         );
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
 
         if verbose {
             // For now, output all columns from the left side. Make it explicit here.

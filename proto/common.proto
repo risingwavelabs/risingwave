@@ -75,3 +75,26 @@ message BatchQueryEpoch {
     uint64 backup = 3;
   }
 }
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_ASCENDING = 1;
+  DIRECTION_DESCENDING = 2;
+}
+
+enum NullsAre {
+  NULLS_ARE_UNSPECIFIED = 0;
+  NULLS_ARE_LARGEST = 1;
+  NULLS_ARE_SMALLEST = 2;
+}
+
+message OrderType {
+  Direction direction = 1;
+  NullsAre nulls_are = 2;
+}
+
+// Column index with an order type (ASC or DESC). Used to represent a sort key (`repeated ColumnOrder`).
+message ColumnOrder {
+  uint32 column_index = 1;
+  OrderType order_type = 2;
+}

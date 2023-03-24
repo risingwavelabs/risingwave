@@ -8,6 +8,7 @@ license = { workspace = true }
 repository = { workspace = true }
 
 [dependencies]
+enum-as-inner = "0.5"
 pbjson = "0.5"
 prost = "0.11"
 prost-helpers = { path = "helpers" }

@@ -6,6 +6,9 @@
 # a relatively small number to make it easier to timeout
 max_heartbeat_interval_secs = 10
 
-[streaming]
+[system]
 barrier_interval_ms = 250
 checkpoint_frequency = 4
+
+[server]
+telemetry_enabled = false

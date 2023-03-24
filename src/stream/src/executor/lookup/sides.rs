@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::Context;
 use either::Either;
 use futures::stream::PollNext;
 use futures::StreamExt;
@@ -19,7 +20,7 @@ use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
 
@@ -61,7 +62,7 @@ pub(crate) struct ArrangeJoinSide<S: StateStore> {
 
     /// Order rules of the arrangement (only join key is needed, pk should not be included, used
     /// for lookup)
-    pub order_rules: Vec<OrderPair>,
+    pub order_rules: Vec<ColumnOrder>,
 
     /// Key indices for the join
     ///
@@ -247,7 +248,7 @@ pub async fn stream_lookup_arrange_prev_epoch(
             match input
                 .next()
                 .await
-                .expect("unexpected close of barrier aligner")?
+                .context("unexpected close of barrier aligner")??
             {
                 Either::Left(Message::Watermark(_)) => {
                     todo!("https://github.com/risingwavelabs/risingwave/issues/6042")
@@ -298,7 +299,7 @@ pub async fn stream_lookup_arrange_this_epoch(
             match input
                 .next()
                 .await
-                .expect("unexpected close of barrier aligner")?
+                .context("unexpected close of barrier aligner")??
             {
                 Either::Left(Message::Chunk(msg)) => {
                     // Should wait until arrangement from this epoch is available.
@@ -333,7 +334,7 @@ pub async fn stream_lookup_arrange_this_epoch(
                 match input
                     .next()
                     .await
-                    .expect("unexpected close of barrier aligner")?
+                    .context("unexpected close of barrier aligner")??
                 {
                     Either::Left(Message::Chunk(msg)) => yield ArrangeMessage::Stream(msg),
                     Either::Left(Message::Barrier(b)) => {
@@ -355,7 +356,7 @@ pub async fn stream_lookup_arrange_this_epoch(
                 match input
                     .next()
                     .await
-                    .expect("unexpected close of barrier aligner")?
+                    .context("unexpected close of barrier aligner")??
                 {
                     Either::Left(_) => unreachable!(),
                     Either::Right(Message::Chunk(chunk)) => {

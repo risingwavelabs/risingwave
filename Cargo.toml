@@ -11,6 +11,7 @@ members = [
   "src/connector",
   "src/ctl",
   "src/expr",
+  "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",
@@ -32,9 +33,11 @@ members = [
   "src/stream",
   "src/test_runner",
   "src/tests/compaction_test",
+  "src/tests/e2e_extended_mode",
   "src/tests/regress",
   "src/tests/simulation",
   "src/tests/sqlsmith",
+  "src/tests/state_cleaning_test",
   "src/tracing",
   "src/udf",
   "src/utils/local_stats_alloc",
@@ -57,6 +60,7 @@ repository = "https://github.com/risingwavelabs/risingwave"
 aws-config = { version = "0.51", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-kinesis = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-sdk-s3 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
+aws-sdk-ec2 = { version = "0.21", default-features = false, features = ["rt-tokio","native-tls"] }
 aws-sdk-sqs = { version = "0.21", default-features = false, features = ["rt-tokio", "native-tls"] }
 aws-smithy-http = "0.51"
 aws-smithy-types = "0.51"
@@ -121,3 +125,4 @@ tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "0c25710"
 tokio-retry = { git = "https://github.com/madsim-rs/rust-tokio-retry.git", rev = "95e2fd3" }
 tokio-postgres = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
 postgres-types = { git = "https://github.com/madsim-rs/rust-postgres.git", rev = "87ca1dc" }
+madsim-rdkafka = { git = "https://github.com/madsim-rs/madsim.git", rev = "43e025d" }

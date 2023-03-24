@@ -156,17 +156,13 @@ impl StreamNode for StreamDeltaJoin {
         let left = self.left();
         let right = self.right();
 
-        let left_table = if let Some(stream_index_scan) = left.as_stream_index_scan() {
-            stream_index_scan.logical()
-        } else if let Some(stream_table_scan) = left.as_stream_table_scan() {
+        let left_table = if let Some(stream_table_scan) = left.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();
         };
         let left_table_desc = left_table.table_desc();
-        let right_table = if let Some(stream_index_scan) = right.as_stream_index_scan() {
-            stream_index_scan.logical()
-        } else if let Some(stream_table_scan) = right.as_stream_table_scan() {
+        let right_table = if let Some(stream_table_scan) = right.as_stream_table_scan() {
             stream_table_scan.logical()
         } else {
             unreachable!();
@@ -198,7 +194,7 @@ impl StreamNode for StreamDeltaJoin {
             right_table_id: right_table_desc.table_id.table_id(),
             left_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: left_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: left_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: left_table
                     .column_descs()
@@ -209,7 +205,7 @@ impl StreamNode for StreamDeltaJoin {
             }),
             right_info: Some(ArrangementInfo {
                 // TODO: remove it
-                arrange_key_orders: right_table_desc.arrange_key_orders_prost(),
+                arrange_key_orders: right_table_desc.arrange_key_orders_protobuf(),
                 // TODO: remove it
                 column_descs: right_table
                     .column_descs()

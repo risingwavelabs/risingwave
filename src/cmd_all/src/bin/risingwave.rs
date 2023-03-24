@@ -21,10 +21,10 @@ use std::env;
 use anyhow::{bail, Result};
 use clap::Parser;
 use risingwave_cmd_all::playground;
-use risingwave_common::enable_task_local_jemalloc_on_linux;
+use risingwave_common::enable_task_local_jemalloc_on_unix;
 use tracing::Level;
 
-enable_task_local_jemalloc_on_linux!();
+enable_task_local_jemalloc_on_unix!();
 
 type RwFns = HashMap<&'static str, Box<dyn Fn(Vec<String>) -> Result<()>>>;
 
@@ -128,7 +128,7 @@ fn main() -> Result<()> {
             Box::new(move |_: Vec<String>| {
                 let settings = risingwave_rt::LoggerSettings::new()
                     .enable_tokio_console(false)
-                    .with_target("risingwave_storage", Level::INFO);
+                    .with_target("risingwave_storage", Level::WARN);
                 risingwave_rt::init_risingwave_logger(settings);
 
                 risingwave_rt::main_okk(playground())

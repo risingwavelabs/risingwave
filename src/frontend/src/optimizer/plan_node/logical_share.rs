@@ -18,10 +18,9 @@ use std::fmt;
 use risingwave_common::error::ErrorCode::NotImplemented;
 use risingwave_common::error::Result;
 
-use super::generic::{self, GenericPlanNode};
 use super::{
-    ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch,
-    ToStream,
+    generic, ColPrunable, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown,
+    ToBatch, ToStream,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
@@ -55,19 +54,12 @@ pub struct LogicalShare {
 
 impl LogicalShare {
     pub fn new(input: PlanRef) -> Self {
-        let ctx = input.ctx();
-        let functional_dependency = input.functional_dependency().clone();
+        let _ctx = input.ctx();
+        let _functional_dependency = input.functional_dependency().clone();
         let core = generic::Share {
             input: RefCell::new(input),
         };
-        let schema = core.schema();
-        let pk_indices = core.logical_pk();
-        let base = PlanBase::new_logical(
-            ctx,
-            schema,
-            pk_indices.unwrap_or_default(),
-            functional_dependency,
-        );
+        let base = PlanBase::new_logical_with_core(&core);
         LogicalShare { base, core }
     }
 

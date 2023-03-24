@@ -15,12 +15,12 @@ pub mod utils;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use risingwave_batch::executor::{BoxedExecutor, JoinType, NestedLoopJoinExecutor};
-use risingwave_common::enable_jemalloc_on_linux;
+use risingwave_common::enable_jemalloc_on_unix;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::value_encoding::serialize_datum;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::data::data_type::TypeName;
-use risingwave_pb::data::Datum as ProstDatum;
+use risingwave_pb::data::PbDatum;
 use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::expr::expr_node::Type::{
     ConstantValue as TConstValue, Equal, InputRef, Modulus,
@@ -28,7 +28,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::expr::{ExprNode, FunctionCall};
 use utils::{bench_join, create_input};
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_nested_loop_join_executor(
     join_type: JoinType,
@@ -68,7 +68,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(2)).as_ref()),
             })),
         };
@@ -79,7 +79,7 @@ fn create_nested_loop_join_executor(
                 type_name: TypeName::Int64 as i32,
                 ..Default::default()
             }),
-            rex_node: Some(RexNode::Constant(ProstDatum {
+            rex_node: Some(RexNode::Constant(PbDatum {
                 body: serialize_datum(Some(ScalarImpl::Int64(3)).as_ref()),
             })),
         };

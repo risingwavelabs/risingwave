@@ -15,7 +15,9 @@
 use std::fmt;
 
 use fixedbitset::FixedBitSet;
-use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
+use itertools::Itertools;
+use risingwave_common::catalog::FieldDisplay;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::{ExprRewritable, LogicalTopN, PlanBase, PlanTreeNodeUnary, StreamNode};
 use crate::optimizer::property::{Order, OrderDisplay};
@@ -88,7 +90,7 @@ impl StreamGroupTopN {
 }
 
 impl StreamNode for StreamGroupTopN {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> ProstStreamNode {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         let table = self
             .logical
@@ -104,9 +106,9 @@ impl StreamNode for StreamGroupTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            ProstStreamNode::AppendOnlyGroupTopN(group_topn_node)
+            PbNodeBody::AppendOnlyGroupTopN(group_topn_node)
         } else {
-            ProstStreamNode::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(group_topn_node)
         }
     }
 }
@@ -137,6 +139,19 @@ impl fmt::Display for StreamGroupTopN {
         if self.with_ties() {
             builder.field("with_ties", &format_args!("{}", "true"));
         }
+
+        let watermark_columns = &self.base.watermark_columns;
+        if self.base.watermark_columns.count_ones(..) > 0 {
+            let schema = self.schema();
+            builder.field(
+                "output_watermarks",
+                &watermark_columns
+                    .ones()
+                    .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                    .collect_vec(),
+            );
+        };
+
         builder.finish()
     }
 }

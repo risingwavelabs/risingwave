@@ -36,12 +36,12 @@ pub struct ComputeNodeConfig {
     pub provide_opendal: Option<Vec<OpendalConfig>>,
     pub provide_aws_s3: Option<Vec<AwsS3Config>>,
     pub provide_jaeger: Option<Vec<JaegerConfig>>,
-    pub provide_compactor: Option<Vec<CompactorConfig>>,
     pub user_managed: bool,
-    pub enable_in_memory_kv_state_backend: bool,
     pub connector_rpc_endpoint: String,
 
     pub total_memory_bytes: usize,
+    pub memory_control_policy: String,
+    pub streaming_memory_proportion: f64,
     pub parallelism: usize,
 }
 
@@ -65,6 +65,14 @@ pub struct MetaNodeConfig {
     pub connector_rpc_endpoint: String,
     pub provide_etcd_backend: Option<Vec<EtcdConfig>>,
     pub provide_prometheus: Option<Vec<PrometheusConfig>>,
+
+    pub provide_compute_node: Option<Vec<ComputeNodeConfig>>,
+    pub provide_compactor: Option<Vec<CompactorConfig>>,
+
+    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
+    pub provide_minio: Option<Vec<MinioConfig>>,
+    pub provide_opendal: Option<Vec<OpendalConfig>>,
+    pub enable_in_memory_kv_state_backend: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -101,8 +109,6 @@ pub struct CompactorConfig {
     pub exporter_port: u16,
 
     pub provide_minio: Option<Vec<MinioConfig>>,
-    pub provide_opendal: Option<Vec<OpendalConfig>>,
-    pub provide_aws_s3: Option<Vec<AwsS3Config>>,
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub user_managed: bool,

@@ -23,9 +23,7 @@ use risingwave_pb::hummock::*;
 use tonic::{Request, Response, Status};
 
 use crate::hummock::compaction::ManualCompactionOption;
-use crate::hummock::{
-    CompactionResumeTrigger, CompactorManagerRef, HummockManagerRef, VacuumManagerRef,
-};
+use crate::hummock::{CompactionResumeTrigger, HummockManagerRef, VacuumManagerRef};
 use crate::manager::FragmentManagerRef;
 use crate::rpc::service::RwReceiverStream;
 use crate::storage::MetaStore;
@@ -35,7 +33,6 @@ where
     S: MetaStore,
 {
     hummock_manager: HummockManagerRef<S>,
-    compactor_manager: CompactorManagerRef,
     vacuum_manager: VacuumManagerRef<S>,
     fragment_manager: FragmentManagerRef<S>,
 }
@@ -46,13 +43,11 @@ where
 {
     pub fn new(
         hummock_manager: HummockManagerRef<S>,
-        compactor_manager: CompactorManagerRef,
         vacuum_trigger: VacuumManagerRef<S>,
         fragment_manager: FragmentManagerRef<S>,
     ) -> Self {
         HummockServiceImpl {
             hummock_manager,
-            compactor_manager,
             vacuum_manager: vacuum_trigger,
             fragment_manager,
         }
@@ -156,6 +151,7 @@ where
                         Some(req.table_stats_change),
                     )
                     .await?;
+
                 Ok(Response::new(ReportCompactionTasksResponse {
                     status: None,
                 }))
@@ -239,9 +235,16 @@ where
                 format!("invalid hummock context {}", context_id),
             ));
         }
-        let rx = self
-            .compactor_manager
-            .add_compactor(context_id, req.max_concurrent_task_number);
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+        let max_compactor_task_multiplier =
+            self.hummock_manager.env.opts.max_compactor_task_multiplier;
+
+        let max_task_num = std::cmp::min(
+            req.max_concurrent_task_number,
+            (req.cpu_core_num * max_compactor_task_multiplier) as u64,
+        );
+        let rx = compactor_manager.add_compactor(context_id, max_task_num, req.cpu_core_num);
+
         // Trigger compaction on all compaction groups.
         for cg_id in self.hummock_manager.compaction_group_ids().await {
             self.hummock_manager
@@ -253,16 +256,17 @@ where
     }
 
     // TODO: convert this into a stream.
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
-        request: Request<ReportCompactionTaskProgressRequest>,
-    ) -> Result<Response<ReportCompactionTaskProgressResponse>, Status> {
+        request: Request<CompactorHeartbeatRequest>,
+    ) -> Result<Response<CompactorHeartbeatResponse>, Status> {
         let req = request.into_inner();
-        self.compactor_manager
-            .update_task_heartbeats(req.context_id, &req.progress);
-        Ok(Response::new(ReportCompactionTaskProgressResponse {
-            status: None,
-        }))
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.update_task_heartbeats(req.context_id, &req.progress);
+        compactor_manager.update_compactor_state(req.context_id, req.workload.unwrap());
+
+        Ok(Response::new(CompactorHeartbeatResponse { status: None }))
     }
 
     async fn report_vacuum_task(
@@ -354,7 +358,7 @@ where
         // RPC immediately.
         tokio::spawn(async move {
             match vacuum_manager
-                .complete_full_gc(request.into_inner().sst_ids)
+                .complete_full_gc(request.into_inner().object_ids)
                 .await
             {
                 Ok(number) => {
@@ -478,8 +482,9 @@ where
         request: Request<SetCompactorRuntimeConfigRequest>,
     ) -> Result<Response<SetCompactorRuntimeConfigResponse>, Status> {
         let request = request.into_inner();
-        self.compactor_manager
-            .set_compactor_config(request.context_id, request.config.unwrap().into());
+        let compactor_manager = self.hummock_manager.compactor_manager.clone();
+
+        compactor_manager.set_compactor_config(request.context_id, request.config.unwrap().into());
         Ok(Response::new(SetCompactorRuntimeConfigResponse {}))
     }
 
@@ -509,5 +514,16 @@ where
             .split_compaction_group(req.group_id, &req.table_ids)
             .await?;
         Ok(Response::new(SplitCompactionGroupResponse { new_group_id }))
+    }
+
+    async fn get_scale_compactor(
+        &self,
+        _: Request<GetScaleCompactorRequest>,
+    ) -> Result<Response<GetScaleCompactorResponse>, Status> {
+        let info = self.hummock_manager.get_scale_compactor_info().await;
+        let scale_out_cores = info.scale_out_cores();
+        let mut resp: GetScaleCompactorResponse = info.into();
+        resp.suggest_cores = scale_out_cores;
+        Ok(Response::new(resp))
     }
 }

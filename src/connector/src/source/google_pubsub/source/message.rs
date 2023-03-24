@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use bytes::Bytes;
 use chrono::{TimeZone, Utc};
 use google_cloud_pubsub::subscriber::ReceivedMessage;
 
@@ -47,7 +46,7 @@ impl From<TaggedReceivedMessage> for SourceMessage {
                 let payload = message.message.data;
                 match payload.len() {
                     0 => None,
-                    _ => Some(Bytes::from(payload)),
+                    _ => Some(payload),
                 }
             },
             offset: timestamp.timestamp_nanos().to_string(),

@@ -22,7 +22,7 @@ use risingwave_pb::batch_plan::ExpandNode;
 
 use super::ExprRewritable;
 use crate::optimizer::plan_node::{
-    LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchProst, ToDistributedBatch, ToLocalBatch,
+    LogicalExpand, PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
 use crate::optimizer::PlanRef;
@@ -77,7 +77,7 @@ impl ToDistributedBatch for BatchExpand {
     }
 }
 
-impl ToBatchProst for BatchExpand {
+impl ToBatchPb for BatchExpand {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::Expand(ExpandNode {
             column_subsets: self

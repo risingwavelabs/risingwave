@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static org.junit.Assert.*;
@@ -16,10 +30,9 @@ import org.apache.iceberg.types.Types;
 import org.junit.Test;
 
 public class IcebergSinkFactoryTest {
-    static String warehousePath = "/tmp/rw-sinknode/iceberg-sink/warehouse";
+    static String warehousePath = "file:///tmp/rw-sinknode/iceberg-sink/warehouse";
     static String databaseName = "demo_db";
     static String tableName = "demo_table";
-    static String locationType = "local";
     static String sinkMode = "append-only";
     static Schema icebergTableSchema =
             new Schema(
@@ -51,10 +64,8 @@ public class IcebergSinkFactoryTest {
                         sinkFactory.create(
                                 TableSchema.getMockTableSchema(),
                                 Map.of(
-                                        IcebergSinkFactory.SINK_MODE_PROP,
+                                        IcebergSinkFactory.SINK_TYPE_PROP,
                                         sinkMode,
-                                        IcebergSinkFactory.LOCATION_TYPE_PROP,
-                                        locationType,
                                         IcebergSinkFactory.WAREHOUSE_PATH_PROP,
                                         warehousePath,
                                         IcebergSinkFactory.DATABASE_NAME_PROP,

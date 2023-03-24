@@ -20,8 +20,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
-    ScalarImpl,
+    DataType, Datum, IntervalUnit, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -74,8 +73,8 @@ fn avro_type_mapping(schema: &Schema) -> Result<DataType> {
         Schema::Double => DataType::Float64,
         Schema::Decimal { .. } => DataType::Decimal,
         Schema::Date => DataType::Date,
-        Schema::TimestampMillis => DataType::Timestamp,
-        Schema::TimestampMicros => DataType::Timestamp,
+        Schema::TimestampMillis => DataType::Timestamptz,
+        Schema::TimestampMicros => DataType::Timestamptz,
         Schema::Duration => DataType::Interval,
         Schema::Enum { .. } => DataType::Varchar,
         Schema::Record { fields, .. } => {
@@ -281,37 +280,18 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
                 RwError::from(InternalError(err_msg))
             })?,
         ),
-        Value::TimestampMillis(millis) => ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
-                millis / 1_000,
-                (millis % 1_000) as u32 * 1_000_000,
-            )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp millis value {}, err {:?}",
-                    millis, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
-        ),
-        Value::TimestampMicros(micros) => ScalarImpl::NaiveDateTime(
-            NaiveDateTimeWrapper::with_secs_nsecs(
-                micros / 1_000_000,
-                (micros % 1_000_000) as u32 * 1_000,
-            )
-            .map_err(|e| {
-                let err_msg = format!(
-                    "avro parse error.wrong timestamp micros value {}, err {:?}",
-                    micros, e
-                );
-                RwError::from(InternalError(err_msg))
-            })?,
-        ),
+        Value::TimestampMicros(us) => ScalarImpl::Int64(us),
+        Value::TimestampMillis(ms) => ScalarImpl::Int64(ms.checked_mul(1000).ok_or_else(|| {
+            RwError::from(InternalError(format!(
+                "avro parse millis overflow, value: {}",
+                ms
+            )))
+        })?),
         Value::Duration(duration) => {
             let months = u32::from(duration.months()) as i32;
             let days = u32::from(duration.days()) as i32;
-            let millis = u32::from(duration.millis()) as i64;
-            ScalarImpl::Interval(IntervalUnit::new(months, days, millis))
+            let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
+            ScalarImpl::Interval(IntervalUnit::from_month_day_usec(months, days, usecs))
         }
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {
@@ -363,5 +343,17 @@ mod tests {
         let avro_decimal = AvroDecimal::from(v);
         let rust_decimal = avro_decimal_to_rust_decimal(avro_decimal, 28, 1).unwrap();
         assert_eq!(rust_decimal, rust_decimal::Decimal::from_f32(28.1).unwrap());
+    }
+
+    #[test]
+    fn test_avro_timestamp_micros() {
+        let v1 = Value::TimestampMicros(1620000000000);
+        let v2 = Value::TimestampMillis(1620000000);
+        let value_schema1 = Schema::TimestampMicros;
+        let value_schema2 = Schema::TimestampMillis;
+        let datum1 = from_avro_value(v1, &value_schema1).unwrap();
+        let datum2 = from_avro_value(v2, &value_schema2).unwrap();
+        assert_eq!(datum1, Some(ScalarImpl::Int64(1620000000000)));
+        assert_eq!(datum2, Some(ScalarImpl::Int64(1620000000000)));
     }
 }

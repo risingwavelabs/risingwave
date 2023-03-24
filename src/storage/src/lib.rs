@@ -43,6 +43,7 @@
 #![feature(let_chains)]
 #![feature(associated_type_bounds)]
 #![feature(local_key_cell_methods)]
+#![feature(exclusive_range_pattern)]
 
 pub mod hummock;
 pub mod memory;

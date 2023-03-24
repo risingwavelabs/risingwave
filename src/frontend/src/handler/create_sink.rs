@@ -37,6 +37,7 @@ pub fn gen_sink_query_from_name(from_name: ObjectName) -> Result<Query> {
     let table_factor = TableFactor::Table {
         name: from_name,
         alias: None,
+        for_system_time_as_of_now: false,
     };
     let from = vec![TableWithJoins {
         relation: table_factor,
@@ -176,7 +177,7 @@ pub mod tests {
         let sql = r#"CREATE SINK snk1 FROM mv1
                     WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table =
                         '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>',
-                        mysql.password = '<password>', format = 'append_only', force_append_only = 'true');"#.to_string();
+                        mysql.password = '<password>', type = 'append-only', force_append_only = 'true');"#.to_string();
         frontend.run_sql(sql).await.unwrap();
 
         let session = frontend.session_ref();

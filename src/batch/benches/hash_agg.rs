@@ -18,14 +18,14 @@ use itertools::Itertools;
 use risingwave_batch::executor::{BoxedExecutor, HashAggExecutor};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::{enable_jemalloc_on_linux, hash};
+use risingwave_common::{enable_jemalloc_on_unix, hash};
 use risingwave_expr::expr::AggKind;
 use risingwave_expr::vector_op::agg::AggStateFactory;
 use risingwave_pb::expr::{AggCall, InputRef};
 use tokio::runtime::Runtime;
 use utils::{create_input, execute_executor};
 
-enable_jemalloc_on_linux!();
+enable_jemalloc_on_unix!();
 
 fn create_agg_call(
     input_schema: &Schema,
@@ -44,7 +44,7 @@ fn create_agg_call(
             .collect(),
         return_type: Some(return_type.to_protobuf()),
         distinct: false,
-        order_by_fields: vec![],
+        order_by: vec![],
         filter: None,
     }
 }

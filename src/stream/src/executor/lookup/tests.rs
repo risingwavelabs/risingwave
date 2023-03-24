@@ -22,7 +22,7 @@ use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
 
@@ -30,7 +30,7 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::test_utils::*;
 use crate::executor::{
-    Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, BoxedMessageStream, Executor, MaterializeExecutor, Message, PkIndices,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -52,15 +52,15 @@ fn arrangement_col_descs() -> Vec<ColumnDesc> {
     ]
 }
 
-fn arrangement_col_arrange_rules() -> Vec<OrderPair> {
+fn arrangement_col_arrange_rules() -> Vec<ColumnOrder> {
     vec![
-        OrderPair::new(1, OrderType::Ascending),
-        OrderPair::new(0, OrderType::Ascending),
+        ColumnOrder::new(1, OrderType::ascending()),
+        ColumnOrder::new(0, OrderType::ascending()),
     ]
 }
 
-fn arrangement_col_arrange_rules_join_key() -> Vec<OrderPair> {
-    vec![OrderPair::new(1, OrderType::Ascending)]
+fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
+    vec![ColumnOrder::new(1, OrderType::ascending())]
 }
 
 /// Create a test arrangement.
@@ -218,6 +218,7 @@ async fn test_lookup_this_epoch() {
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),
@@ -281,14 +282,13 @@ async fn test_lookup_this_epoch() {
 }
 
 #[tokio::test]
-#[ignore]
-// Deprecated because the ability to read from prev epoch has been deprecated.
 async fn test_lookup_last_epoch() {
     let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let lookup_executor = Box::new(LookupExecutor::new(LookupExecutorParams {
+        ctx: ActorContext::create(0),
         arrangement,
         stream,
         arrangement_col_descs: arrangement_col_descs(),

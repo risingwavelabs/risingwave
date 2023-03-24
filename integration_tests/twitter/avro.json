@@ -1,0 +1,27 @@
+{
+  "type": "record",
+  "name": "Event",
+  "fields": [
+    {
+      "name": "data",
+      "type": "record",
+      "fields": [
+        { "name": "id", "type": "string" },
+        { "name": "text", "type": "string" },
+        { "name": "lang", "type": "string" },
+        { "name": "created_at", "type": "string" }
+      ]
+    },
+    {
+      "name": "author",
+      "type": "record",
+      "fields": [
+        { "name": "id", "type": "string" },
+        { "name": "name", "type": "string" },
+        { "name": "username", "type": "string" },
+        { "name": "created_at", "type": "string" },
+        { "name": "followers", "type": "long" }
+      ]
+    }
+  ]
+}

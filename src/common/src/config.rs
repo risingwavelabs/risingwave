@@ -17,10 +17,13 @@
 //! [`RwConfig`] corresponds to the whole config file and each other config struct corresponds to a
 //! section in `risingwave.toml`.
 
+use std::collections::HashMap;
 use std::fs;
 
 use clap::ValueEnum;
+use risingwave_pb::meta::SystemParams;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Use the maximum value for HTTP/2 connection window size to avoid deadlock among multiplexed
 /// streams on the same connection.
@@ -30,6 +33,36 @@ pub const MAX_CONNECTION_WINDOW_SIZE: u32 = (1 << 31) - 1;
 pub const STREAM_WINDOW_SIZE: u32 = 32 * 1024 * 1024; // 32 MB
 /// For non-user-facing components where the CLI arguments do not override the config file.
 pub const NO_OVERRIDE: Option<NoOverride> = None;
+
+macro_rules! for_all_config_sections {
+    ($macro:ident) => {
+        $macro! {
+            { server },
+            { meta },
+            { batch },
+            { streaming },
+            { storage },
+            { storage.file_cache },
+        }
+    };
+}
+
+macro_rules! impl_warn_unrecognized_fields {
+    ($({ $($field_path:ident).+ },)*) => {
+        fn warn_unrecognized_fields(config: &RwConfig) {
+            if !config.unrecognized.is_empty() {
+                tracing::warn!("unrecognized fields in config: {:?}", config.unrecognized.keys());
+            }
+            $(
+                if !config.$($field_path).+.unrecognized.is_empty() {
+                    tracing::warn!("unrecognized fields in config section [{}]: {:?}", stringify!($($field_path).+), config.$($field_path).+.unrecognized.keys());
+                }
+            )*
+        }
+    };
+}
+
+for_all_config_sections!(impl_warn_unrecognized_fields);
 
 pub fn load_config(path: &str, cli_override: Option<impl OverrideConfig>) -> RwConfig
 where
@@ -42,10 +75,10 @@ where
             .unwrap_or_else(|e| panic!("failed to open config file '{}': {}", path, e));
         toml::from_str(config_str.as_str()).unwrap_or_else(|e| panic!("parse error {}", e))
     };
-    // TODO(zhidong): warn deprecated config
     if let Some(cli_override) = cli_override {
         cli_override.r#override(&mut config);
     }
+    warn_unrecognized_fields(&config);
     config
 }
 
@@ -81,7 +114,10 @@ pub struct RwConfig {
     pub storage: StorageConfig,
 
     #[serde(default)]
-    pub backup: BackupConfig,
+    pub system: SystemConfig,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 #[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
@@ -93,7 +129,6 @@ pub enum MetaBackend {
 
 /// The section `[meta]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct MetaConfig {
     /// Threshold used by worker node to filter out new SSTs when scanning object store, during
     /// full SST GC.
@@ -150,6 +185,15 @@ pub struct MetaConfig {
     /// Schedule ttl_reclaim compaction for all compaction groups with this interval.
     #[serde(default = "default::meta::periodic_ttl_reclaim_compaction_interval_sec")]
     pub periodic_ttl_reclaim_compaction_interval_sec: u64,
+
+    /// Compute compactor_task_limit for machines with different hardware.Currently cpu is used as
+    /// the main consideration,and is adjusted by max_compactor_task_multiplier, calculated as
+    /// compactor_task_limit = core_num * max_compactor_task_multiplier;
+    #[serde(default = "default::meta::max_compactor_task_multiplier")]
+    pub max_compactor_task_multiplier: u32,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for MetaConfig {
@@ -160,7 +204,6 @@ impl Default for MetaConfig {
 
 /// The section `[server]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct ServerConfig {
     /// The interval for periodic heartbeat from worker to the meta service.
     #[serde(default = "default::server::heartbeat_interval_ms")]
@@ -178,6 +221,12 @@ pub struct ServerConfig {
     /// 0 = close metrics
     /// >0 = open metrics
     pub metrics_level: u32,
+
+    #[serde(default = "default::server::telemetry_enabled")]
+    pub telemetry_enabled: bool,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for ServerConfig {
@@ -188,7 +237,6 @@ impl Default for ServerConfig {
 
 /// The section `[batch]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -200,6 +248,9 @@ pub struct BatchConfig {
 
     #[serde(default)]
     pub distributed_query_limit: Option<u64>,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for BatchConfig {
@@ -210,19 +261,10 @@ impl Default for BatchConfig {
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StreamingConfig {
-    /// The interval of periodic barrier.
-    #[serde(default = "default::streaming::barrier_interval_ms")]
-    pub barrier_interval_ms: u32,
-
     /// The maximum number of barriers in-flight in the compute nodes.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
-
-    /// There will be a checkpoint for every n barriers
-    #[serde(default = "default::streaming::checkpoint_frequency")]
-    pub checkpoint_frequency: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -243,6 +285,9 @@ pub struct StreamingConfig {
     /// Max unique user stream errors per actor
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for StreamingConfig {
@@ -253,26 +298,7 @@ impl Default for StreamingConfig {
 
 /// The section `[storage]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct StorageConfig {
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Target size of the Sstable.
-    #[serde(default = "default::storage::sst_size_mb")]
-    pub sstable_size_mb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Size of each block in bytes in SST.
-    #[serde(default = "default::storage::block_size_kb")]
-    pub block_size_kb: u32,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// False positive probability of bloom filter.
-    #[serde(default = "default::storage::bloom_false_positive")]
-    pub bloom_false_positive: f64,
-
     /// parallelism while syncing share buffers into L0 SST. Should NOT be 0.
     #[serde(default = "default::storage::share_buffers_sync_parallelism")]
     pub share_buffers_sync_parallelism: u32,
@@ -286,12 +312,6 @@ pub struct StorageConfig {
     /// is enough space.
     #[serde(default = "default::storage::shared_buffer_capacity_mb")]
     pub shared_buffer_capacity_mb: usize,
-
-    // TODO(zhidong): Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
-    /// Remote directory for storing data and metadata objects.
-    #[serde(default = "default::storage::data_directory")]
-    pub data_directory: String,
 
     /// Whether to enable write conflict detection
     #[serde(default = "default::storage::write_conflict_detection_enabled")]
@@ -340,6 +360,9 @@ pub struct StorageConfig {
 
     #[serde(default = "default::storage::max_concurrent_compaction_task_number")]
     pub max_concurrent_compaction_task_number: u64,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for StorageConfig {
@@ -352,7 +375,6 @@ impl Default for StorageConfig {
 ///
 /// It's put at [`StorageConfig::file_cache`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
@@ -371,6 +393,9 @@ pub struct FileCacheConfig {
 
     #[serde(default = "default::file_cache::cache_file_max_write_size_mb")]
     pub cache_file_max_write_size_mb: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for FileCacheConfig {
@@ -391,7 +416,6 @@ pub enum AsyncStackTraceOption {
 ///
 /// It is put at [`BatchConfig::developer`] and [`StreamingConfig::developer`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct DeveloperConfig {
     /// The size of the channel used for output to exchange/shuffle.
     #[serde(default = "default::developer::batch_output_channel_size")]
@@ -429,6 +453,9 @@ pub struct DeveloperConfig {
     /// in remote exchange.
     #[serde(default = "default::developer::stream_exchange_batched_permits")]
     pub stream_exchange_batched_permits: usize,
+
+    #[serde(flatten)]
+    pub unrecognized: HashMap<String, Value>,
 }
 
 impl Default for DeveloperConfig {
@@ -437,25 +464,68 @@ impl Default for DeveloperConfig {
     }
 }
 
-/// Configs for meta node backup
+/// The section `[system]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct BackupConfig {
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
+pub struct SystemConfig {
+    /// The interval of periodic barrier.
+    #[serde(default = "default::system::barrier_interval_ms")]
+    pub barrier_interval_ms: u32,
+
+    /// There will be a checkpoint for every n barriers
+    #[serde(default = "default::system::checkpoint_frequency")]
+    pub checkpoint_frequency: u64,
+
+    /// Target size of the Sstable.
+    #[serde(default = "default::system::sstable_size_mb")]
+    pub sstable_size_mb: u32,
+
+    /// Size of each block in bytes in SST.
+    #[serde(default = "default::system::block_size_kb")]
+    pub block_size_kb: u32,
+
+    /// False positive probability of bloom filter.
+    #[serde(default = "default::system::bloom_false_positive")]
+    pub bloom_false_positive: f64,
+
+    #[serde(default = "default::system::state_store")]
+    pub state_store: String,
+
+    /// Remote directory for storing data and metadata objects.
+    #[serde(default = "default::system::data_directory")]
+    pub data_directory: String,
+
     /// Remote storage url for storing snapshots.
-    #[serde(default = "default::backup::storage_url")]
-    pub storage_url: String,
-    // TODO: Remove in 0.1.18 release
-    // NOTE: It is now a system parameter and should not be used directly.
+    #[serde(default = "default::system::backup_storage_url")]
+    pub backup_storage_url: String,
+
     /// Remote directory for storing snapshots.
-    #[serde(default = "default::backup::storage_directory")]
-    pub storage_directory: String,
+    #[serde(default = "default::system::backup_storage_directory")]
+    pub backup_storage_directory: String,
+
+    #[serde(default = "default::system::telemetry_enabled")]
+    pub telemetry_enabled: bool,
 }
 
-impl Default for BackupConfig {
+impl Default for SystemConfig {
     fn default() -> Self {
         toml::from_str("").unwrap()
+    }
+}
+
+impl SystemConfig {
+    pub fn into_init_system_params(self) -> SystemParams {
+        SystemParams {
+            barrier_interval_ms: Some(self.barrier_interval_ms),
+            checkpoint_frequency: Some(self.checkpoint_frequency),
+            sstable_size_mb: Some(self.sstable_size_mb),
+            block_size_kb: Some(self.block_size_kb),
+            bloom_false_positive: Some(self.bloom_false_positive),
+            state_store: Some(self.state_store),
+            data_directory: Some(self.data_directory),
+            backup_storage_url: Some(self.backup_storage_url),
+            backup_storage_directory: Some(self.backup_storage_directory),
+            telemetry_enabled: Some(self.telemetry_enabled),
+        }
     }
 }
 
@@ -502,6 +572,10 @@ mod default {
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
             1800 // 30mi
         }
+
+        pub fn max_compactor_task_multiplier() -> u32 {
+            2
+        }
     }
 
     pub mod server {
@@ -521,21 +595,13 @@ mod default {
         pub fn metrics_level() -> u32 {
             0
         }
+
+        pub fn telemetry_enabled() -> bool {
+            true
+        }
     }
 
     pub mod storage {
-
-        pub fn sst_size_mb() -> u32 {
-            256
-        }
-
-        pub fn block_size_kb() -> u32 {
-            64
-        }
-
-        pub fn bloom_false_positive() -> f64 {
-            0.001
-        }
 
         pub fn share_buffers_sync_parallelism() -> u32 {
             1
@@ -547,10 +613,6 @@ mod default {
 
         pub fn shared_buffer_capacity_mb() -> usize {
             1024
-        }
-
-        pub fn data_directory() -> String {
-            "hummock_001".to_string()
         }
 
         pub fn write_conflict_detection_enabled() -> bool {
@@ -606,18 +668,10 @@ mod default {
     pub mod streaming {
         use crate::config::AsyncStackTraceOption;
 
-        pub fn barrier_interval_ms() -> u32 {
-            1000
-        }
-
         pub fn in_flight_barrier_nums() -> usize {
             // quick fix
             // TODO: remove this limitation from code
             10000
-        }
-
-        pub fn checkpoint_frequency() -> usize {
-            10
         }
 
         pub fn enable_jaegar_tracing() -> bool {
@@ -695,13 +749,47 @@ mod default {
         }
     }
 
-    pub mod backup {
-        pub fn storage_url() -> String {
-            "memory".to_string()
+    pub mod system {
+        use crate::system_param;
+
+        pub fn barrier_interval_ms() -> u32 {
+            system_param::default::barrier_interval_ms()
         }
 
-        pub fn storage_directory() -> String {
-            "backup".to_string()
+        pub fn checkpoint_frequency() -> u64 {
+            system_param::default::checkpoint_frequency()
+        }
+
+        pub fn sstable_size_mb() -> u32 {
+            system_param::default::sstable_size_mb()
+        }
+
+        pub fn block_size_kb() -> u32 {
+            system_param::default::block_size_kb()
+        }
+
+        pub fn bloom_false_positive() -> f64 {
+            system_param::default::bloom_false_positive()
+        }
+
+        pub fn state_store() -> String {
+            system_param::default::state_store()
+        }
+
+        pub fn data_directory() -> String {
+            system_param::default::data_directory()
+        }
+
+        pub fn backup_storage_url() -> String {
+            system_param::default::backup_storage_url()
+        }
+
+        pub fn backup_storage_directory() -> String {
+            system_param::default::backup_storage_directory()
+        }
+
+        pub fn telemetry_enabled() -> bool {
+            system_param::default::telemetry_enabled()
         }
     }
 }

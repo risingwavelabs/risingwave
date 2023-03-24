@@ -114,7 +114,15 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
-            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
+            use crate::catalog::function_catalog::FunctionKind::*;
+            match &func.kind {
+                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                Table { .. } => {
+                    self.ensure_table_function_allowed()?;
+                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                }
+                Aggregate => todo!("support UDAF"),
+            }
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
@@ -304,6 +312,9 @@ impl Binder {
                 raw_call(ExprType::Now)(binder, inputs)
             })
         }
+        fn pi() -> Handle {
+            raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
+        }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
             [
@@ -376,6 +387,7 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_length", raw_call(ExprType::ArrayLength)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -383,6 +395,8 @@ impl Binder {
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                // Functions that return a constant value
+                ("pi", pi()),
                 // System information operations.
                 (
                     "pg_typeof",

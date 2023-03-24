@@ -21,6 +21,7 @@ use sqllogictest::ParallelTestError;
 
 use crate::client::RisingWave;
 use crate::cluster::{Cluster, KillOpts};
+use crate::utils::TimedExt;
 
 fn is_create_table_as(sql: &str) -> bool {
     let parts: Vec<String> = sql
@@ -112,7 +113,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
 
             // For normal records.
             if !kill {
-                match tester.run_async(record).await {
+                match tester
+                    .run_async(record.clone())
+                    .timed(|_res, elapsed| {
+                        println!("Record {:?} finished in {:?}", record, elapsed)
+                    })
+                    .await
+                {
                     Ok(_) => continue,
                     Err(e) => panic!("{}", e),
                 }
@@ -128,7 +135,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             if cmd.ignore_kill() {
                 for i in 0usize.. {
                     let delay = Duration::from_secs(1 << i);
-                    if let Err(err) = tester.run_async(record.clone()).await {
+                    if let Err(err) = tester
+                        .run_async(record.clone())
+                        .timed(|_res, elapsed| {
+                            println!("Record {:?} finished in {:?}", record, elapsed)
+                        })
+                        .await
+                    {
                         // cluster could be still under recovering if killed before, retry if
                         // meets `no reader for dml in table with id {}`.
                         let should_retry =
@@ -162,7 +175,13 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             // retry up to 5 times until it succeed
             for i in 0usize.. {
                 let delay = Duration::from_secs(1 << i);
-                match tester.run_async(record.clone()).await {
+                match tester
+                    .run_async(record.clone())
+                    .timed(|_res, elapsed| {
+                        println!("Record {:?} finished in {:?}", record, elapsed)
+                    })
+                    .await
+                {
                     Ok(_) => break,
                     // allow 'table exists' error when retry CREATE statement
                     Err(e)

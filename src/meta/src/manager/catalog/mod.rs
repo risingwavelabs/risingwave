@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod connection;
 mod database;
 mod fragment;
 mod user;
@@ -22,6 +23,7 @@ use std::option::Option::Some;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Context};
+pub use connection::*;
 pub use database::*;
 pub use fragment::*;
 use itertools::Itertools;
@@ -32,7 +34,9 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::{bail, ensure};
 use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
-use risingwave_pb::catalog::{Database, Function, Index, Schema, Sink, Source, Table, View};
+use risingwave_pb::catalog::{
+    Connection, Database, Function, Index, Schema, Sink, Source, Table, View,
+};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, Object};
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -57,6 +61,7 @@ pub type ViewId = u32;
 pub type FunctionId = u32;
 
 pub type UserId = u32;
+pub type ConnectionId = u32;
 
 /// `commit_meta` provides a wrapper for committing metadata changes to both in-memory and
 /// meta store.
@@ -83,6 +88,8 @@ macro_rules! commit_meta {
     };
 }
 pub(crate) use commit_meta;
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+use risingwave_pb::expr::expr_node::RexNode;
 use risingwave_pb::meta::CreatingJobInfo;
 
 pub type CatalogManagerRef<S> = Arc<CatalogManager<S>>;
@@ -101,13 +108,19 @@ pub struct CatalogManager<S: MetaStore> {
 pub struct CatalogManagerCore {
     pub database: DatabaseManager,
     pub user: UserManager,
+    pub connection: ConnectionManager,
 }
 
 impl CatalogManagerCore {
     async fn new<S: MetaStore>(env: MetaSrvEnv<S>) -> MetaResult<Self> {
         let database = DatabaseManager::new(env.clone()).await?;
-        let user = UserManager::new(env, &database).await?;
-        Ok(Self { database, user })
+        let user = UserManager::new(env.clone(), &database).await?;
+        let connection = ConnectionManager::new(env).await?;
+        Ok(Self {
+            database,
+            user,
+            connection,
+        })
     }
 }
 
@@ -323,6 +336,40 @@ where
         } else {
             Err(MetaError::catalog_id_not_found("database", database_id))
         }
+    }
+
+    /// Each connection is identified by a unique name
+    pub async fn create_connection(
+        &self,
+        connection: Connection,
+    ) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.connection;
+        core.check_connection_duplicated(&connection.name)?;
+
+        let conn_id = connection.id;
+        let conn_name = connection.name.clone();
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        connections.insert(conn_id, connection);
+        commit_meta!(self, connections)?;
+
+        core.connection_by_name.insert(conn_name, conn_id);
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
+    }
+
+    pub async fn drop_connection(&self, conn_name: &str) -> MetaResult<NotificationVersion> {
+        let core = &mut self.core.lock().await.connection;
+
+        let conn_id = core
+            .connection_by_name
+            .remove(conn_name)
+            .ok_or_else(|| anyhow!("connection {} not found", conn_name))?;
+
+        let mut connections = BTreeMapTransaction::new(&mut core.connections);
+        connections.remove(conn_id);
+        commit_meta!(self, connections)?;
+        // Currently we don't need to notify frontend, so just fill 0 here
+        Ok(0)
     }
 
     pub async fn create_schema(&self, schema: &Schema) -> MetaResult<NotificationVersion> {
@@ -869,6 +916,13 @@ where
             user_core.increase_ref(source.owner);
             Ok(())
         }
+    }
+
+    pub async fn get_connection_by_name(&self, name: &str) -> MetaResult<Connection> {
+        let core = &mut self.core.lock().await.connection;
+        core.get_connection_by_name(name)
+            .cloned()
+            .ok_or_else(|| anyhow!(format!("could not find connection by the given name")).into())
     }
 
     pub async fn finish_create_source_procedure(
@@ -1477,10 +1531,12 @@ where
     pub async fn finish_replace_table_procedure(
         &self,
         table: &Table,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let core = &mut *self.core.lock().await;
         let database_core = &mut core.database;
         let mut tables = BTreeMapTransaction::new(&mut database_core.tables);
+        let mut indexes = BTreeMapTransaction::new(&mut database_core.indexes);
         let key = (table.database_id, table.schema_id, table.name.clone());
         assert!(
             tables.contains_key(&table.id)
@@ -1488,15 +1544,56 @@ where
             "table must exist and be in altering procedure"
         );
 
+        let index_ids: Vec<_> = indexes
+            .tree_ref()
+            .iter()
+            .filter(|(_, index)| index.primary_table_id == table.id)
+            .map(|(index_id, _index)| *index_id)
+            .collect_vec();
+
+        let mut updated_indexes = vec![];
+
+        for index_id in &index_ids {
+            let mut index = indexes.get_mut(*index_id).unwrap();
+            index
+                .index_item
+                .iter_mut()
+                .for_each(|x| match x.rex_node.as_mut().unwrap() {
+                    RexNode::InputRef(input_col_idx) => {
+                        *input_col_idx =
+                            table_col_index_mapping.map(*input_col_idx as usize) as u32;
+                        assert_eq!(
+                            x.return_type,
+                            table.columns[*input_col_idx as usize]
+                                .column_desc
+                                .clone()
+                                .unwrap()
+                                .column_type
+                        );
+                    }
+                    RexNode::FuncCall(_) => unimplemented!(),
+                    _ => unreachable!(),
+                });
+
+            updated_indexes.push(indexes.get(index_id).cloned().unwrap());
+        }
+
         // TODO: Here we reuse the `creation` tracker for `alter` procedure, as an `alter` must
         database_core.in_progress_creation_tracker.remove(&key);
 
         tables.insert(table.id, table.clone());
-        commit_meta!(self, tables)?;
+        commit_meta!(self, tables, indexes)?;
 
-        let version = self
+        // TODO: support group notification.
+        let mut version = self
             .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
             .await;
+
+        for index in updated_indexes {
+            version = self
+                .notify_frontend(Operation::Update, Info::Index(index))
+                .await;
+        }
 
         Ok(version)
     }
@@ -1519,6 +1616,10 @@ where
         // occur after it's created. We may need to add a new tracker for `alter` procedure.s
         database_core.unmark_creating(&key);
         Ok(())
+    }
+
+    pub async fn list_connections(&self) -> Vec<Connection> {
+        self.core.lock().await.connection.list_connections()
     }
 
     pub async fn list_databases(&self) -> Vec<Database> {
