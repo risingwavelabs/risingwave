@@ -542,6 +542,24 @@ fn infer_type_for_special(
                 _ => Ok(None),
             }
         }
+        ExprType::ArrayLength => {
+            ensure_arity!("array_length", | inputs | == 1);
+            let return_type = inputs[0].return_type();
+
+            if inputs[0].is_unknown() {
+                return Err(ErrorCode::BindError(
+                    "Cannot find length for unknown type".to_string(),
+                )
+                .into());
+            }
+
+            match return_type {
+                DataType::List {
+                    datatype: _list_elem_type,
+                } => Ok(Some(DataType::Int64)),
+                _ => Ok(None),
+            }
+        }
         ExprType::Vnode => {
             ensure_arity!("vnode", 1 <= | inputs |);
             Ok(Some(DataType::Int16))

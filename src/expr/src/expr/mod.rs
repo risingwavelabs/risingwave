@@ -34,6 +34,7 @@
 // These modules define concrete expression structures.
 mod expr_array_concat;
 mod expr_array_distinct;
+mod expr_array_length;
 mod expr_array_to_string;
 mod expr_binary_bytes;
 mod expr_binary_nonnull;
