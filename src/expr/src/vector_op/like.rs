@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::Result;
+use risingwave_expr_macro::function;
 
-#[inline(always)]
-pub fn like_default(s: &str, p: &str) -> Result<bool> {
+#[function("like(varchar, varchar) -> boolean")]
+pub fn like_default(s: &str, p: &str) -> bool {
     let (mut px, mut sx) = (0, 0);
     let (mut next_px, mut next_sx) = (0, 0);
     let (pbytes, sbytes) = (p.as_bytes(), s.as_bytes());
@@ -50,9 +50,9 @@ pub fn like_default(s: &str, p: &str) -> Result<bool> {
             sx = next_sx;
             continue;
         }
-        return Ok(false);
+        return false;
     }
-    Ok(true)
+    true
 }
 
 #[cfg(test)]
@@ -84,7 +84,7 @@ mod tests {
     #[test]
     fn test_like() {
         for (target, pattern, expected) in CASES {
-            let output = like_default(target, pattern).unwrap();
+            let output = like_default(target, pattern);
             assert_eq!(
                 output,
                 expected.unwrap(),

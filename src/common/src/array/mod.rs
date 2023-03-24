@@ -59,13 +59,13 @@ pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
 use risingwave_pb::data::{PbArray, PbArrayType};
+pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
-use crate::array::serial_array::{Serial, SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -496,7 +496,8 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            /// Append a [`Datum`] or [`DatumRef`] multiple times,
+            /// panicking if the datum's type does not match the array builder's type.
             pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {

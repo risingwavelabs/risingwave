@@ -80,7 +80,7 @@ impl JsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
         enum Op {
@@ -88,19 +88,17 @@ impl JsonParser {
             Delete,
         }
 
-        let (_payload, op) = if self.enable_upsert {
-            let msg: UpsertMessage<'_> = bincode::deserialize(payload)
+        let (mut payload_mut, op) = if self.enable_upsert {
+            let msg: UpsertMessage<'_> = bincode::deserialize(&payload)
                 .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
             if !msg.record.is_empty() {
-                (msg.record, Op::Insert)
+                (msg.record.to_vec(), Op::Insert)
             } else {
-                (msg.primary_key, Op::Delete)
+                (msg.primary_key.to_vec(), Op::Delete)
             }
         } else {
-            (payload.into(), Op::Insert)
+            (payload, Op::Insert)
         };
-
-        let mut payload_mut = _payload.to_vec();
 
         let value: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
@@ -120,8 +118,7 @@ impl JsonParser {
                 )
                 .map_err(|e| {
                     tracing::error!(
-                        "failed to process value ({}): {}",
-                        String::from_utf8_lossy(payload),
+                        "failed to process value: {}",
                         e
                     );
                     e.into()
@@ -151,20 +148,20 @@ mod tests {
     use crate::common::UpsertMessage;
     use crate::parser::{JsonParser, SourceColumnDesc, SourceStreamChunkBuilder};
 
-    fn get_payload() -> Vec<&'static [u8]> {
+    fn get_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.as_slice(),
-            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.as_slice(),
+            br#"{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}"#.to_vec(),
+            br#"{"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}"#.to_vec(),
         ]
     }
 
-    fn get_array_top_level_payload() -> Vec<&'static [u8]> {
+    fn get_array_top_level_payload() -> Vec<Vec<u8>> {
         vec![
-            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.as_slice()
+            br#"[{"i32":1,"bool":true,"i16":1,"i64":12345678,"f32":1.23,"f64":1.2345,"varchar":"varchar","date":"2021-01-01","timestamp":"2021-01-01 16:06:12.269","decimal":12345.67890}, {"i32":1,"f32":12345e+10,"f64":12345,"decimal":12345}]"#.to_vec()
         ]
     }
 
-    async fn test_json_parser(get_payload: fn() -> Vec<&'static [u8]>) {
+    async fn test_json_parser(get_payload: fn() -> Vec<Vec<u8>>) {
         let descs = vec![
             SourceColumnDesc::simple("i32", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("bool", DataType::Boolean, 2.into()),
@@ -283,7 +280,7 @@ mod tests {
         // Parse a correct record.
         {
             let writer = builder.row_writer();
-            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap();
         }
 
@@ -291,14 +288,14 @@ mod tests {
         {
             let writer = builder.row_writer();
             // `v2` overflowed.
-            let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 65536, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap_err();
         }
 
         // Parse a correct record.
         {
             let writer = builder.row_writer();
-            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#;
+            let payload = br#"{"v1": 1, "v2": 2, "v3": "3"}"#.to_vec();
             parser.parse_inner(payload, writer).await.unwrap();
         }
 
@@ -354,7 +351,7 @@ mod tests {
                 "username": "Dooley5659"
             }
         }
-        "#;
+        "#.to_vec();
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
         {
             let writer = builder.row_writer();
@@ -387,7 +384,7 @@ mod tests {
     }
     #[tokio::test]
     async fn test_json_upsert_parser() {
-        let items = &[
+        let items = [
             (r#"{"a":1}"#, r#"{"a":1,"b":2}"#),
             (r#"{"a":1}"#, r#"{"a":1,"b":3}"#),
             (r#"{"a":2}"#, r#"{"a":2,"b":2}"#),
@@ -399,7 +396,8 @@ mod tests {
                 record: v.as_bytes().into(),
             })
             .unwrap()
-        });
+        })
+        .to_vec();
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
             SourceColumnDesc::simple("b", DataType::Int32, 1.into()),
