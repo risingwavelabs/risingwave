@@ -310,18 +310,19 @@ impl LocalStreamManager {
         Ok(())
     }
 
-    pub async fn drop_actor(&self, actors: &[ActorId]) -> StreamResult<()> {
+    /// Drop the resources of the given actors.
+    pub async fn drop_actors(&self, actors: &[ActorId]) -> StreamResult<()> {
         let mut core = self.core.lock().await;
-        for id in actors {
-            core.drop_actor(*id);
+        for &id in actors {
+            core.drop_actor(id);
         }
         tracing::debug!(actors = ?actors, "drop actors");
         Ok(())
     }
 
-    /// Force stop all actors on this worker.
+    /// Force stop all actors on this worker, and then drop their resources.
     pub async fn stop_all_actors(&self) -> StreamResult<()> {
-        self.core.lock().await.drop_all_actors().await;
+        self.core.lock().await.stop_all_actors().await;
         // Clear shared buffer in storage to release memory
         self.clear_storage_buffer().await;
         self.clear_all_senders_and_collect_rx();
@@ -557,7 +558,7 @@ impl LocalStreamManagerCore {
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
         let executor = if has_stateful && is_stateful {
-            let (subtask, executor) = subtask::wrap(executor);
+            let (subtask, executor) = subtask::wrap(executor, actor_context.id);
             subtasks.push(subtask);
             executor.boxed()
         } else {
@@ -781,14 +782,16 @@ impl LocalStreamManagerCore {
             .inspect(|handle| handle.abort());
         self.context.actor_infos.write().remove(&actor_id);
         self.actors.remove(&actor_id);
-        // Task should have already stopped when this method is invoked.
-        self.handles
-            .remove(&actor_id)
-            .inspect(|handle| handle.abort());
+
+        // Task should have already stopped when this method is invoked. There might be some
+        // clean-up work left (like dropping in-memory data structures), but we don't have to wait
+        // for them to finish, in order to make this request non-blocking.
+        self.handles.remove(&actor_id);
     }
 
-    /// `drop_all_actors` is invoked by meta node via RPC for recovery purpose.
-    async fn drop_all_actors(&mut self) {
+    /// `stop_all_actors` is invoked by meta node via RPC for recovery purpose. Different from the
+    /// `drop_actor`, the execution of the actors will be aborted.
+    async fn stop_all_actors(&mut self) {
         for (actor_id, handle) in &self.handles {
             tracing::debug!("force stopping actor {}", actor_id);
             handle.abort();
