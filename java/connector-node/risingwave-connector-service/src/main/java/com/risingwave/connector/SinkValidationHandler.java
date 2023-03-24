@@ -42,7 +42,8 @@ public class SinkValidationHandler {
 
         } catch (IllegalArgumentException e) {
             LOG.error("sink validation failed", e);
-            // TODO: comment
+            // Extract useful information from the error thrown by Jackson and convert it into a
+            // more concise message.
             String errorMessage = e.getLocalizedMessage();
             Pattern missingFieldPattern = Pattern.compile("Missing creator property '([^']*)'");
             Pattern unrecognizedFieldPattern = Pattern.compile("Unrecognized field \"([^\"]*)\"");
