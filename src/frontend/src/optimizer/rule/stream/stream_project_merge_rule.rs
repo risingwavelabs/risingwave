@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::{BoxedRule, PlanRef, Rule};
