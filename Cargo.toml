@@ -11,6 +11,7 @@ members = [
   "src/connector",
   "src/ctl",
   "src/expr",
+  "src/expr/macro",
   "src/frontend",
   "src/frontend/planner_test",
   "src/java_binding",

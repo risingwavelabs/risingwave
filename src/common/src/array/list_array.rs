@@ -156,7 +156,7 @@ pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
-    value_type: DataType,
+    pub(super) value_type: DataType,
 }
 
 impl Array for ListArray {
