@@ -115,13 +115,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
             if !kill {
                 match tester
                     .run_async(record.clone())
-<<<<<<< HEAD
                     .timed(|_res, elapsed| {
                         tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-=======
-                    .timed(|_res, elasped| {
-                        tracing::debug!("Record {:?} finished in {:?}", record, elasped)
->>>>>>> c57eef474 (Use debug)
                     })
                     .await
                 {
@@ -142,13 +137,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                     let delay = Duration::from_secs(1 << i);
                     if let Err(err) = tester
                         .run_async(record.clone())
-<<<<<<< HEAD
                         .timed(|_res, elapsed| {
                             tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-=======
-                        .timed(|_res, elasped| {
-                            tracing::debug!("Record {:?} finished in {:?}", record, elasped)
->>>>>>> c57eef474 (Use debug)
                         })
                         .await
                     {
@@ -187,13 +177,8 @@ pub async fn run_slt_task(cluster: Arc<Cluster>, glob: &str, opts: &KillOpts) {
                 let delay = Duration::from_secs(1 << i);
                 match tester
                     .run_async(record.clone())
-<<<<<<< HEAD
                     .timed(|_res, elapsed| {
                         tracing::debug!("Record {:?} finished in {:?}", record, elapsed)
-=======
-                    .timed(|_res, elasped| {
-                        tracing::debug!("Record {:?} finished in {:?}", record, elasped)
->>>>>>> c57eef474 (Use debug)
                     })
                     .await
                 {
