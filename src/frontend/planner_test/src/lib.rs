@@ -83,15 +83,15 @@ pub struct TestCase {
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
 
+    /// Create sink plan (assumes blackhole sink)
+    /// TODO: Other sinks
+    pub sink_plan: Option<String>,
+
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
     /// Create MV fragments plan
     pub stream_dist_plan: Option<String>,
-
-    /// Create sink plan (assumes blackhole sink)
-    /// TODO: Other sinks
-    pub sink_plan: Option<String>,
 
     // TODO: uncomment for Proto JSON of generated stream plan
     //  was: "stream_plan_proto": Option<String>
@@ -156,14 +156,14 @@ pub struct TestCaseResult {
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
 
+    /// Generate sink plan
+    pub sink_plan: Option<String>,
+
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
     /// Create MV fragments plan
     pub stream_dist_plan: Option<String>,
-
-    /// Generate sink plan
-    pub sink_plan: Option<String>,
 
     /// Error of binder
     pub binder_error: Option<String>,
@@ -731,7 +731,11 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.explain_output,
         &actual.explain_output,
     )?;
-
+    check_option_plan_eq(
+        "sink_plan",
+        &expected.sink_plan,
+        &actual.sink_plan,
+    )?;
     Ok(())
 }
 

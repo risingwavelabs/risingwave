@@ -42,6 +42,11 @@
   batch_plan: |
     BatchExchange { order: [], dist: Single }
     └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time], distribution: SomeShard }
+  sink_plan: |
+    StreamSink { type: append-only, columns: [auction, bidder, price, date_time] }
+    └─StreamProject { exprs: [bid.auction, bid.bidder, bid.price, bid.date_time] }
+      └─StreamExchange { dist: Single }
+        └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
   stream_plan: |
     StreamMaterialize { columns: [auction, bidder, price, date_time, bid._row_id(hidden)], pk_columns: [bid._row_id], pk_conflict: "no check" }
     └─StreamTableScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.date_time, bid._row_id], pk: [bid._row_id], dist: UpstreamHashShard(bid._row_id) }
