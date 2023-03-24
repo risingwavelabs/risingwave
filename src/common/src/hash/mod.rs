@@ -19,5 +19,5 @@ mod key;
 pub use consistent_hash::bitmap::*;
 pub use consistent_hash::mapping::*;
 pub use consistent_hash::vnode::*;
-pub use dispatcher::HashKeyDispatcher;
+pub use dispatcher::{calc_hash_key_kind, HashKeyDispatcher};
 pub use key::*;

@@ -258,18 +258,37 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         .await
         .unwrap();
 
-        let res = tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("receive ctrl+c");
-                shutdown_send.send(()).unwrap();
-                join_handle.await
+        match leader_lost_handle {
+            None => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("receive ctrl+c");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap()
+                    }
+                    res = &mut join_handle => res.unwrap(),
+                };
             }
-            res = &mut join_handle => res,
+            Some(mut handle) => {
+                tokio::select! {
+                    _ = &mut handle => {
+                        tracing::info!("receive leader lost signal");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap()
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("receive ctrl+c");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap();
+                        handle.abort();
+                    }
+                    res = &mut join_handle => {
+                        res.unwrap();
+                        handle.abort();
+                    },
+                };
+            }
         };
-        res.unwrap();
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            leader_lost_handle.abort();
-        }
     })
 }
 

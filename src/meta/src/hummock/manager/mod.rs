@@ -1141,6 +1141,7 @@ where
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
+                // if member_table_ids changes, the data of sstable may stale.
                 let is_expired = current_version
                     .levels
                     .get(&compact_task.compaction_group_id)
@@ -1986,7 +1987,7 @@ where
             .scale_compactor_core_num
             .set(suggest_scale_out_core as i64);
 
-        tracing::info!(
+        tracing::debug!(
             "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
             info,
             suggest_scale_out_core

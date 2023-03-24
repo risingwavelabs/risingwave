@@ -102,16 +102,7 @@ impl MetaNodeService {
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
 
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
-
-        // If compactors are provided, disable in-memory hummock (unshared).
-        let hummock_in_memory_strategy = if matches!(
-            hummock_in_memory_strategy,
-            HummockInMemoryStrategy::Isolated
-        ) {
-            HummockInMemoryStrategy::Disallowed
-        } else {
-            hummock_in_memory_strategy
-        };
+        let provide_compactor = config.provide_compactor.as_ref().unwrap();
 
         let is_shared_backend = match (
             config.enable_in_memory_kv_state_backend,
@@ -138,14 +129,14 @@ impl MetaNodeService {
             )?,
         };
 
-        if provide_compute_node.len() > 1 && !is_shared_backend {
+        if (provide_compute_node.len() > 1 || !provide_compactor.is_empty()) && !is_shared_backend {
             if config.enable_in_memory_kv_state_backend {
                 // Using a non-shared backend with multiple compute nodes will be problematic for
                 // state sharing like scaling. However, for distributed end-to-end tests with
                 // in-memory state store, this is acceptable.
             } else {
                 return Err(anyhow!(
-                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
+                    "Hummock storage may behave incorrectly with in-memory backend for multiple compute-node or compactor-enabled configuration. Should use a shared backend (e.g. MinIO) instead. Consider adding `use: minio` in risedev config."
                 ));
             }
         }

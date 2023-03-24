@@ -56,7 +56,6 @@ pub mod session_config;
 pub mod system_param;
 pub mod telemetry;
 
-#[cfg(test)]
 pub mod test_utils;
 pub mod types;
 
