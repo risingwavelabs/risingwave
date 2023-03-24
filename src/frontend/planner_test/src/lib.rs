@@ -731,11 +731,7 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.explain_output,
         &actual.explain_output,
     )?;
-    check_option_plan_eq(
-        "sink_plan",
-        &expected.sink_plan,
-        &actual.sink_plan,
-    )?;
+    check_option_plan_eq("sink_plan", &expected.sink_plan, &actual.sink_plan)?;
     Ok(())
 }
 
