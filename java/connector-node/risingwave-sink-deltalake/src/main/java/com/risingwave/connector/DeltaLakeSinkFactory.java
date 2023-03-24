@@ -40,7 +40,7 @@ public class DeltaLakeSinkFactory implements SinkFactory {
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
         ObjectMapper mapper = new ObjectMapper();
         DeltaLakeSinkConfig config =
-        mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
+                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
         Configuration hadoopConf = new Configuration();
         String location = getConfig(config.getLocation(), config.getLocationType(), hadoopConf);
