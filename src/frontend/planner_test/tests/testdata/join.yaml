@@ -22,6 +22,26 @@
       |   └─StreamTableScan { table: t2, columns: [t2.v3, t2.v4, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
       └─StreamExchange { dist: HashShard(t3.v5) }
         └─StreamTableScan { table: t3, columns: [t3.v5, t3.v6, t3._row_id], pk: [t3._row_id], dist: UpstreamHashShard(t3._row_id) }
+- sql: |
+    create table t1 (ts timestamp with time zone, v1 int, v2 int);
+    create table t2 (ts timestamp with time zone, v1 int, v2 int);
+    select t1.ts as t1_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.ts as t2_ts, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1, t2 where t1.v1 = t2.v1 and (t2.ts >= t1.ts + INTERVAL '1' SECOND);
+  logical_plan: |
+    LogicalProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2] }
+    └─LogicalFilter { predicate: (t1.v1 = t2.v1) AND (t2.ts >= (t1.ts + '00:00:01':Interval)) }
+      └─LogicalJoin { type: Inner, on: true, output: all }
+        ├─LogicalScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id] }
+        └─LogicalScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id] }
+  stream_plan: |
+    StreamMaterialize { columns: [t1_ts, t1_v1, t1_v2, t2_ts, t2_v1, t2_v2, t1._row_id(hidden), t2._row_id(hidden)], pk_columns: [t1._row_id, t2._row_id, t1_v1], pk_conflict: "no check" }
+    └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, t2.ts, t2.v1, t2.v2, t1._row_id, t2._row_id] }
+      └─StreamFilter { predicate: ($expr1 <= t2.ts) }
+        └─StreamHashJoin { type: Inner, predicate: t1.v1 = t2.v1, output: all }
+          ├─StreamExchange { dist: HashShard(t1.v1) }
+          | └─StreamProject { exprs: [t1.ts, t1.v1, t1.v2, (AtTimeZone((AtTimeZone(t1.ts, 'UTC':Varchar) + '00:00:00':Interval), 'UTC':Varchar) + '00:00:01':Interval) as $expr1, t1._row_id] }
+          |   └─StreamTableScan { table: t1, columns: [t1.ts, t1.v1, t1.v2, t1._row_id], pk: [t1._row_id], dist: UpstreamHashShard(t1._row_id) }
+          └─StreamExchange { dist: HashShard(t2.v1) }
+            └─StreamTableScan { table: t2, columns: [t2.ts, t2.v1, t2.v2, t2._row_id], pk: [t2._row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: self join
   sql: |
     create table t (v1 int, v2 int);
