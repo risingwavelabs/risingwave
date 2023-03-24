@@ -29,7 +29,7 @@ use crate::row::Row;
 use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::memcmp_encoding;
-use crate::util::value_encoding::estimate_encoded_size;
+use crate::util::value_encoding::estimate_serialize_datum_size;
 
 #[derive(Debug)]
 pub struct ListArrayBuilder {
@@ -449,7 +449,9 @@ impl<'a> ListRef<'a> {
 
     pub fn estimate_value_encoding_size_inner(&self) -> usize {
         iter_elems_ref!(self, it, {
-            it.fold(0, |acc, datum_ref| acc + estimate_encoded_size(datum_ref))
+            it.fold(0, |acc, datum_ref| {
+                acc + estimate_serialize_datum_size(datum_ref)
+            })
         })
     }
 }

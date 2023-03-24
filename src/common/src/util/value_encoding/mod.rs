@@ -183,9 +183,9 @@ pub fn serialize_datum_into(datum_ref: impl ToDatumRef, buf: &mut impl BufMut) {
     }
 }
 
-pub fn estimate_encoded_size(datum_ref: impl ToDatumRef) -> usize {
+pub fn estimate_serialize_datum_size(datum_ref: impl ToDatumRef) -> usize {
     if let Some(d) = datum_ref.to_datum_ref() {
-        1 + estimate_encoded_scalar_size(d)
+        1 + estimate_serialize_scalar_size(d)
     } else {
         1
     }
@@ -233,7 +233,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
     }
 }
 
-fn estimate_encoded_scalar_size(value: ScalarRefImpl<'_>) -> usize {
+fn estimate_serialize_scalar_size(value: ScalarRefImpl<'_>) -> usize {
     match value {
         ScalarRefImpl::Int16(_) => 2,
         ScalarRefImpl::Int32(_) => 4,
@@ -439,3 +439,6 @@ fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {
     data.copy_to_slice(&mut bytes);
     Ok(Decimal::unordered_deserialize(bytes))
 }
+
+#[cfg(test)]
+mod tests {}
