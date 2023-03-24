@@ -77,9 +77,9 @@ public class JDBCSink extends SinkBase {
         return pkColumnNames;
     }
 
-    public JDBCSink(Connection conn, TableSchema tableSchema, String tableName) {
+    public JDBCSink(Connection conn, TableSchema tableSchema, String tableName, String sinkType) {
         super(tableSchema);
-        this.config = new JDBCSinkConfig(null, tableName);
+        this.config = new JDBCSinkConfig(null, tableName, sinkType);
         this.conn = conn;
         this.pkColumnNames = getPkColumnNames(conn, tableName);
     }

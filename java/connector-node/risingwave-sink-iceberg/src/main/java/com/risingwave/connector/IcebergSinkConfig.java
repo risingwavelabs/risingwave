@@ -38,6 +38,9 @@ public class IcebergSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "s3.endpoint")
     private String s3Endpoint;
 
+    @JsonProperty(value = "force_append_only")
+    private Boolean forceAppendOnly;
+
     @JsonCreator
     public IcebergSinkConfig(
             @JsonProperty(value = "type") String sinkType,

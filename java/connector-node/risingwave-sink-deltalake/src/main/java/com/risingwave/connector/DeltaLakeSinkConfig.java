@@ -25,12 +25,19 @@ public class DeltaLakeSinkConfig extends CommonSinkConfig {
 
     private String locationType;
 
+    private String sinkType;
+
+    @JsonProperty(value = "force_append_only")
+    private Boolean forceAppendOnly;
+
     @JsonCreator
     public DeltaLakeSinkConfig(
             @JsonProperty(value = "location") String location,
-            @JsonProperty(value = "location.type") String locationType) {
+            @JsonProperty(value = "location.type") String locationType,
+            @JsonProperty(value = "type") String sinkType) {
         this.location = location;
         this.locationType = locationType;
+        this.sinkType = sinkType;
     }
 
     public String getLocation() {

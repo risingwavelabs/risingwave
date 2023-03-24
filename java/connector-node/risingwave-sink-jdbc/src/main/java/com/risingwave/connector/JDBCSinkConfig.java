@@ -25,12 +25,19 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     private String tableName;
 
+    private String sinkType;
+
+    @JsonProperty(value = "force_append_only")
+    private Boolean forceAppendOnly;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
-            @JsonProperty(value = "table.name") String tableName) {
+            @JsonProperty(value = "table.name") String tableName,
+            @JsonProperty(value = "type") String sinkType) {
         this.jdbcUrl = jdbcUrl;
         this.tableName = tableName;
+        this.sinkType = sinkType;
     }
 
     public String getJdbcUrl() {

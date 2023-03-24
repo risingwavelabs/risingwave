@@ -32,19 +32,18 @@ import org.apache.hadoop.conf.Configuration;
 
 public class DeltaLakeSinkFactory implements SinkFactory {
 
-    private static final String LOCATION_PROP = "location";
-    private static final String LOCATION_TYPE_PROP = "location.type";
     private static final String confEndpoint = "fs.s3a.endpoint";
     private static final String confKey = "fs.s3a.access.key";
     private static final String confSecret = "fs.s3a.secret.key";
 
     @Override
     public SinkBase create(TableSchema tableSchema, Map<String, String> tableProperties) {
-        String location = tableProperties.get(LOCATION_PROP);
-        String locationType = tableProperties.get(LOCATION_TYPE_PROP);
+        ObjectMapper mapper = new ObjectMapper();
+        DeltaLakeSinkConfig config =
+        mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
         Configuration hadoopConf = new Configuration();
-        location = getConfig(location, locationType, hadoopConf);
+        String location = getConfig(config.getLocation(), config.getLocationType(), hadoopConf);
 
         DeltaLog log = DeltaLog.forTable(hadoopConf, location);
         StructType schema = log.snapshot().getMetadata().getSchema();
