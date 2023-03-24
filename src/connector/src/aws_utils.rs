@@ -317,12 +317,6 @@ pub async fn load_file_descriptor_from_s3(
             location
         )))
     })?;
-    // if properties.get(PB_SCHEMA_LOCATION_S3_REGION).is_none() {
-    //     return Err(RwError::from(InvalidConfigValue {
-    //         config_entry: PB_SCHEMA_LOCATION_S3_REGION.to_string(),
-    //         config_value: "NONE".to_string(),
-    //     }));
-    // }
     let key = location.path().replace('/', "");
     let config = AwsConfigV2::from(properties.clone());
     let sdk_config = config.load_config(None).await;

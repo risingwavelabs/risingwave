@@ -82,17 +82,22 @@ impl PulsarProperties {
         let mut temp_file = None;
         if let Some(oauth) = &self.oauth {
             let url = Url::parse(&oauth.credentials_url)?;
-            if url.scheme() == "s3" {
-                let credentials = load_file_descriptor_from_s3(&url, &oauth.s3_credentials).await?;
-                let mut f = NamedTempFile::new()?;
-                f.write_all(&credentials)?;
-                f.as_file().sync_all()?;
-                temp_file = Some(f);
-            } else if url.scheme() != "file" {
-                return Err(RwError::from(InvalidParameterValue(String::from(
-                    "invalid credentials_url, only file url and s3 url are supported",
-                )))
-                .into());
+            match url.scheme() {
+                "s3" => {
+                    let credentials =
+                        load_file_descriptor_from_s3(&url, &oauth.s3_credentials).await?;
+                    let mut f = NamedTempFile::new()?;
+                    f.write_all(&credentials)?;
+                    f.as_file().sync_all()?;
+                    temp_file = Some(f);
+                }
+                "file" => {}
+                _ => {
+                    return Err(RwError::from(InvalidParameterValue(String::from(
+                        "invalid credentials_url, only file url and s3 url are supported",
+                    )))
+                    .into());
+                }
             }
 
             let auth_params = OAuth2Params {
