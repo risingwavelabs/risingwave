@@ -1051,16 +1051,16 @@ where
                     relations: to_update_tables
                         .into_iter()
                         .map(|table| Relation {
-                            relation_info: RelationInfo::Table(table.to_owned()).into(),
+                            relation_info: RelationInfo::Table(table).into(),
                         })
                         .chain(to_update_views.into_iter().map(|view| Relation {
-                            relation_info: RelationInfo::View(view.to_owned()).into(),
+                            relation_info: RelationInfo::View(view).into(),
                         }))
                         .chain(to_update_sinks.into_iter().map(|sink| Relation {
-                            relation_info: RelationInfo::Sink(sink.to_owned()).into(),
+                            relation_info: RelationInfo::Sink(sink).into(),
                         }))
                         .chain(to_update_source.into_iter().map(|source| Relation {
-                            relation_info: RelationInfo::Source(source.to_owned()).into(),
+                            relation_info: RelationInfo::Source(source).into(),
                         }))
                         .collect(),
                 }),
