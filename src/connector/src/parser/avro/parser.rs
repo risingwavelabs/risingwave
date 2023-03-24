@@ -300,9 +300,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, ScalarImpl,
-    };
+    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateWrapper, ScalarImpl};
     use url::Url;
 
     use super::{
@@ -423,24 +421,12 @@ mod test {
                     assert_eq!(row[i], date);
                 }
                 Value::TimestampMillis(millis) => {
-                    let datetime = Some(ScalarImpl::NaiveDateTime(
-                        NaiveDateTimeWrapper::with_secs_nsecs(
-                            millis / 1000,
-                            (millis % 1000) as u32 * 1_000_000,
-                        )
-                        .unwrap(),
-                    ));
-                    assert_eq!(row[i], datetime);
+                    let millis = Some(ScalarImpl::Int64(millis * 1000));
+                    assert_eq!(row[i], millis);
                 }
                 Value::TimestampMicros(micros) => {
-                    let datetime = Some(ScalarImpl::NaiveDateTime(
-                        NaiveDateTimeWrapper::with_secs_nsecs(
-                            micros / 1_000_000,
-                            (micros % 1_000_000) as u32 * 1_000,
-                        )
-                        .unwrap(),
-                    ));
-                    assert_eq!(row[i], datetime);
+                    let micros = Some(ScalarImpl::Int64(micros));
+                    assert_eq!(row[i], micros);
                 }
                 Value::Duration(duration) => {
                     let months = u32::from(duration.months()) as i32;
@@ -467,8 +453,8 @@ mod test {
             SourceColumnDesc::simple("avg_score", DataType::Float64, ColumnId::from(4)),
             SourceColumnDesc::simple("is_lasted", DataType::Boolean, ColumnId::from(5)),
             SourceColumnDesc::simple("entrance_date", DataType::Date, ColumnId::from(6)),
-            SourceColumnDesc::simple("birthday", DataType::Timestamp, ColumnId::from(7)),
-            SourceColumnDesc::simple("anniversary", DataType::Timestamp, ColumnId::from(8)),
+            SourceColumnDesc::simple("birthday", DataType::Timestamptz, ColumnId::from(7)),
+            SourceColumnDesc::simple("anniversary", DataType::Timestamptz, ColumnId::from(8)),
             SourceColumnDesc::simple("passed", DataType::Interval, ColumnId::from(9)),
         ]
     }
