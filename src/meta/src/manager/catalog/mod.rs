@@ -2193,7 +2193,7 @@ where
         grant_user.extend(user_ids);
 
         let mut version = 0;
-        assert!(!user_updated.is_empty());
+        // FIXME: user might not be updated.
         for user in user_updated {
             version = self
                 .notify_frontend(Operation::Update, Info::User(user))
@@ -2352,7 +2352,7 @@ where
         core.build_grant_relation_map();
 
         let mut version = 0;
-        assert!(!user_updated.is_empty());
+        // FIXME: user might not be updated.
         for (_, user_info) in user_updated {
             version = self
                 .notify_frontend(Operation::Update, Info::User(user_info))
