@@ -572,7 +572,7 @@ mod default {
         }
 
         pub fn periodic_space_reclaim_compaction_interval_sec() -> u64 {
-            300 // 5min
+            180 // 5min
         }
 
         pub fn periodic_ttl_reclaim_compaction_interval_sec() -> u64 {
@@ -580,7 +580,7 @@ mod default {
         }
 
         pub fn periodic_split_compact_group_interval_sec() -> u64 {
-            1800 // 30mi
+            180 // 5mi
         }
 
         pub fn max_compactor_task_multiplier() -> u32 {
@@ -588,7 +588,7 @@ mod default {
         }
 
         pub fn split_check_size_limit() -> u64 {
-            64 * 1024 * 1024 * 1024 // 64GB
+            2 * 1024 * 1024 * 1024 // 4GB
         }
     }
 

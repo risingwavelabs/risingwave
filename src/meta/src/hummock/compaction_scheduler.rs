@@ -35,6 +35,7 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::log::info;
+use tracing::warn;
 
 use super::Compactor;
 use crate::hummock::compaction::{
@@ -493,23 +494,24 @@ where
                 continue;
             }
             for (table_id, table_size) in &group.table_statistic {
-                table_infos.push((*table_id, group.group_id, *table_size));
+                table_infos.push((*table_id, group.group_id, *table_size, group.group_size));
             }
         }
         table_infos.sort_by(|a, b| b.2.cmp(&a.2));
         let default_group_id: CompactionGroupId = StaticCompactionGroupId::StateDefault.into();
         let mv_group_id: CompactionGroupId = StaticCompactionGroupId::MaterializedView.into();
-        for (table_id, parent_group_id, table_size) in table_infos {
+        for (table_id, parent_group_id, table_size, parent_group_size) in table_infos {
             let mut target_compact_group_id = None;
             if table_size < table_split_limit {
                 continue;
             }
             for group in &group_infos {
-                if group.group_id == mv_group_id || group.group_id == default_group_id {
-                    continue;
-                }
-                if group.group_id == parent_group_id
-                    || group.group_size + table_size > group_size_limit
+                if group.group_id == mv_group_id
+                    || group.group_id == default_group_id
+                    || group.group_id == parent_group_id
+                    || group.group_size + table_size > group_split_limit
+                    // do not move state-table to a large group
+                    || group.group_size + table_size * 2 > parent_group_size
                 {
                     continue;
                 }
@@ -525,7 +527,12 @@ where
                 )
                 .await;
             match ret {
-                Ok(_) => return,
+                Ok(_) => {
+                    info!(
+                        "move state table [{}] from group-{} to group-{:?} success",
+                        table_id, parent_group_id, target_compact_group_id
+                    );
+                }
                 Err(e) => info!(
                     "failed to move state table [{}] from group-{} to group-{:?} because {:?}",
                     table_id, parent_group_id, target_compact_group_id, e

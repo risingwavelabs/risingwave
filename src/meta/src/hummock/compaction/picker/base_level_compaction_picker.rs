@@ -115,7 +115,7 @@ impl LevelCompactionPicker {
             if level.level_type() != LevelType::Nonoverlapping {
                 break;
             }
-            if l0_total_file_size >= self.config.max_compaction_bytes {
+            if l0_total_file_size >= self.config.max_bytes_for_level_base {
                 break;
             }
 

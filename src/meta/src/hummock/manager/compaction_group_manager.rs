@@ -634,7 +634,7 @@ impl<S: MetaStore> HummockManager<S> {
 
     #[named]
     pub async fn calculate_compaction_group_statistic(&self) -> Vec<TableGroupInfo> {
-        let mut versioning_guard = read_lock!(self, versioning).await;
+        let versioning_guard = read_lock!(self, versioning).await;
         let versioning = &versioning_guard.current_version;
         let mut infos = vec![];
         for (group_id, group) in &versioning.levels {
@@ -642,12 +642,12 @@ impl<S: MetaStore> HummockManager<S> {
                 .levels
                 .iter()
                 .map(|level| level.total_file_size)
-                .sum::<u64>();
+                .sum::<u64>()
+                + group.l0.as_ref().unwrap().total_file_size;
             let max_level = group.levels.last().unwrap().level_idx;
             // only calculate the bottommost too level.
             let mut table_statistic: HashMap<StateTableId, u64> = HashMap::new();
-            let mut member_table_id: HashSet<u32> =
-                HashSet::from_iter(group.member_table_ids.clone());
+            let member_table_id: HashSet<u32> = HashSet::from_iter(group.member_table_ids.clone());
             for level in &group.levels {
                 if level.level_idx + 1 < max_level {
                     continue;
