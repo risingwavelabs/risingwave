@@ -97,7 +97,7 @@ pub async fn handle_create_as(
             context,
             table_name.clone(),
             column_descs,
-            None,
+            vec![],
             vec![],
             properties,
             "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`

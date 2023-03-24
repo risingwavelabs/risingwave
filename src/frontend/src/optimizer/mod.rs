@@ -41,8 +41,8 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -401,9 +401,21 @@ impl PlanRoot {
         stream_plan = StreamDml::new(
             stream_plan,
             append_only,
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
+            columns
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .collect(),
         )
         .into();
+
+        // Add generated columns.
+        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
+            columns.iter().map(|c| c.column_desc.clone()).collect(),
+        )?;
+        if let Some(exprs) = exprs {
+            let logical_project = LogicalProject::new(stream_plan, exprs);
+            stream_plan = StreamProject::new(logical_project).into();
+        }
 
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
