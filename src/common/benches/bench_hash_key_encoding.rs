@@ -50,7 +50,7 @@ impl HashKeyDispatcher for HashKeyBenchCaseBuilder {
         for null_ratio in NULL_RATIOS {
             for chunk_size in CHUNK_SIZES {
                 let id = format!(
-                    "{}, key type: {:?}, chunk size {}, null ratio {}",
+                    "{} {:?}, {} rows, Pr[null]={}",
                     self.describe,
                     calc_hash_key_kind(self.data_types()),
                     chunk_size,
@@ -176,35 +176,35 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
     vec![
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Serial],
-            describe: "single Serial".to_string(),
+            describe: "Serial".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32],
-            describe: "single int32".to_string(),
+            describe: "int32".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64],
-            describe: "single int64".to_string(),
+            describe: "int64".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Varchar],
-            describe: "single varchar".to_string(),
+            describe: "varchar".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            describe: "composite fixed size".to_string(),
+            describe: "composite fixed".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int64, DataType::Int32],
-            describe: "composite fixed size2".to_string(),
+            describe: "composite fixed".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "composite fixed and not fixed size".to_string(),
+            describe: "mix fixed and not1".to_string(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "composite fixed and not fixed size".to_string(),
+            describe: "mix fixed and not2".to_string(),
         },
     ]
 }
