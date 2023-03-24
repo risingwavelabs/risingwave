@@ -6144,6 +6144,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "criterion",
+ "ctor",
  "dyn-clone",
  "either",
  "futures-util",
@@ -6156,12 +6157,26 @@ dependencies = [
  "paste",
  "regex",
  "risingwave_common",
+ "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "serde_json",
  "speedate",
  "static_assertions",
  "thiserror",
+ "tracing",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_expr_macro"
+version = "0.1.0"
+dependencies = [
+ "itertools",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -6721,6 +6736,7 @@ dependencies = [
  "tokio-metrics",
  "tokio-stream",
  "tracing",
+ "tracing-test",
  "workspace-hack",
 ]
 
@@ -8225,6 +8241,29 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-test"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a2c0ff408fe918a94c428a3f2ad04e4afd5c95bbc08fcf868eff750c15728a4"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "258bc1c4f8e2e73a977812ab339d503e6feeb92700f6d07a6de4d321522d5c08"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
 ]
 
 [[package]]
