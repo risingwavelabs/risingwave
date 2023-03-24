@@ -28,7 +28,6 @@ use super::expr_regexp::RegexpMatchExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UdfExpression;
 use super::expr_vnode::VnodeExpression;
-use crate::expr::expr_array_length::ArrayLengthExpression;
 use crate::expr::{BoxedExpression, Expression, InputRefExpression, LiteralExpression};
 use crate::sig::func::FUNC_SIG_MAP;
 use crate::{bail, ExprError, Result};
@@ -78,7 +77,6 @@ pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
             // the implementation to improve performance.
             ArrayConcatExpression::try_from(prost).map(Expression::boxed)
         }
-        E::ArrayLength => ArrayLengthExpression::try_from(prost).map(Expression::boxed),
         E::Vnode => VnodeExpression::try_from(prost).map(Expression::boxed),
         E::Udf => UdfExpression::try_from(prost).map(Expression::boxed),
         _ => Err(ExprError::UnsupportedFunction(format!(
