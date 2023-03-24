@@ -27,7 +27,7 @@ message ColumnDesc {
   // For example, when the type is created from a protobuf schema file,
   // this field will store the message name.
   string type_name = 5;
-  // The the column is a generated column.
+  // Optional description for the generated column.
   GeneratedColumnDesc generated_column = 6;
 }
 
