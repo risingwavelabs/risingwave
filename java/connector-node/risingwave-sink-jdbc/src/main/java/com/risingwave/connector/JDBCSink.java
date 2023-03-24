@@ -34,9 +34,8 @@ public class JDBCSink extends SinkBase {
     private static final String UPDATE_TEMPLATE = "UPDATE %s SET %s WHERE %s";
     private static final String ERROR_REPORT_TEMPLATE = "Error when exec %s, message %s";
 
-    private final String tableName;
+    private final JDBCSinkConfig config;
     private final Connection conn;
-    private final String jdbcUrl;
     private final List<String> pkColumnNames;
     public static final String JDBC_COLUMN_NAME_KEY = "COLUMN_NAME";
 
@@ -45,15 +44,14 @@ public class JDBCSink extends SinkBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(JDBCSink.class);
 
-    public JDBCSink(String tableName, String jdbcUrl, TableSchema tableSchema) {
+    public JDBCSink(JDBCSinkConfig config, TableSchema tableSchema) {
         super(tableSchema);
 
-        this.tableName = tableName;
-        this.jdbcUrl = jdbcUrl;
+        this.config = config;
         try {
-            this.conn = DriverManager.getConnection(jdbcUrl);
+            this.conn = DriverManager.getConnection(config.getJdbcUrl());
             this.conn.setAutoCommit(false);
-            this.pkColumnNames = getPkColumnNames(conn, tableName);
+            this.pkColumnNames = getPkColumnNames(conn, config.getTableName());
         } catch (SQLException e) {
             throw Status.INTERNAL
                     .withDescription(
@@ -81,8 +79,7 @@ public class JDBCSink extends SinkBase {
 
     public JDBCSink(Connection conn, TableSchema tableSchema, String tableName) {
         super(tableSchema);
-        this.tableName = tableName;
-        this.jdbcUrl = null;
+        this.config = new JDBCSinkConfig(null, tableName);
         this.conn = conn;
         this.pkColumnNames = getPkColumnNames(conn, tableName);
     }
@@ -97,7 +94,8 @@ public class JDBCSink extends SinkBase {
                                 .map((Object o) -> "?")
                                 .collect(Collectors.joining(","));
                 String insertStmt =
-                        String.format(INSERT_TEMPLATE, tableName, columnsRepr, valuesRepr);
+                        String.format(
+                                INSERT_TEMPLATE, config.getTableName(), columnsRepr, valuesRepr);
                 try {
                     PreparedStatement stmt =
                             conn.prepareStatement(insertStmt, Statement.RETURN_GENERATED_KEYS);
@@ -128,7 +126,8 @@ public class JDBCSink extends SinkBase {
                                     .map(key -> key + " = ?")
                                     .collect(Collectors.joining(" AND "));
                 }
-                String deleteStmt = String.format(DELETE_TEMPLATE, tableName, deleteCondition);
+                String deleteStmt =
+                        String.format(DELETE_TEMPLATE, config.getTableName(), deleteCondition);
                 try {
                     int placeholderIdx = 1;
                     PreparedStatement stmt =
@@ -194,7 +193,7 @@ public class JDBCSink extends SinkBase {
                 String updateStmt =
                         String.format(
                                 UPDATE_TEMPLATE,
-                                tableName,
+                                config.getTableName(),
                                 updateColumns,
                                 updateDeleteConditionBuffer);
                 try {
@@ -287,6 +286,6 @@ public class JDBCSink extends SinkBase {
     }
 
     public String getTableName() {
-        return tableName;
+        return config.getTableName();
     }
 }

@@ -56,7 +56,11 @@ const fn _default_use_transaction() -> bool {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KafkaConfig {
+    #[serde(skip_serializing)]
+    pub connector: String, // Must be "kafka" here.
+
     #[serde(flatten)]
     pub common: KafkaCommon,
 

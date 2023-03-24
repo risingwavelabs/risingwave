@@ -16,6 +16,8 @@ package com.risingwave.connector;
 
 import static io.grpc.Status.*;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.risingwave.connector.api.TableSchema;
 import com.risingwave.connector.api.sink.SinkBase;
 import com.risingwave.connector.api.sink.SinkFactory;
@@ -59,17 +61,13 @@ public class DeltaLakeSinkFactory implements SinkFactory {
                     .asRuntimeException();
         }
 
-        if (!tableProperties.containsKey(LOCATION_PROP)
-                || !tableProperties.containsKey(LOCATION_TYPE_PROP)) {
-            throw INVALID_ARGUMENT
-                    .withDescription(
-                            String.format(
-                                    "%s or %s is not specified", LOCATION_PROP, LOCATION_TYPE_PROP))
-                    .asRuntimeException();
-        }
+        ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES, true);
+        DeltaLakeSinkConfig config =
+                mapper.convertValue(tableProperties, DeltaLakeSinkConfig.class);
 
-        String location = tableProperties.get(LOCATION_PROP);
-        String locationType = tableProperties.get(LOCATION_TYPE_PROP);
+        String location = config.getLocation();
+        String locationType = config.getLocationType();
 
         Configuration hadoopConf = new Configuration();
         location = getConfig(location, locationType, hadoopConf);
