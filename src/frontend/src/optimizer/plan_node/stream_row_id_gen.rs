@@ -16,9 +16,9 @@ use std::fmt;
 
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 
-use crate::{optimizer::property::Distribution, stream_fragmenter::BuildFragmentGraphState};
-
 use super::{ExprRewritable, LogicalRowIdGen, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use crate::optimizer::property::Distribution;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamRowIdGen` holds a stream `PlanBase` and a `LogicalRowIdGen`
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -72,7 +72,7 @@ impl PlanTreeNodeUnary for StreamRowIdGen {
 impl_plan_tree_node_for_unary! {StreamRowIdGen}
 
 impl StreamNode for StreamRowIdGen {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode{
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
         use risingwave_pb::stream_plan::*;
 
         ProstStreamNode::RowIdGen(RowIdGenNode {
