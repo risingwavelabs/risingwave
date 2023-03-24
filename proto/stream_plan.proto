@@ -640,14 +640,14 @@ message StreamActor {
 }
 
 enum FragmentTypeFlag {
-  FRAGMENT_UNSPECIFIED = 0;
-  SOURCE = 1;
-  MVIEW = 2;
-  SINK = 4;
-  NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
-  CHAIN_NODE = 16;
-  BARRIER_RECV = 32;
-  VALUES = 64;
+  FRAGMENT_TYPE_FLAG_FRAGMENT_UNSPECIFIED = 0;
+  FRAGMENT_TYPE_FLAG_SOURCE = 1;
+  FRAGMENT_TYPE_FLAG_MVIEW = 2;
+  FRAGMENT_TYPE_FLAG_SINK = 4;
+  FRAGMENT_TYPE_FLAG_NOW = 8; // TODO: Remove this and insert a `BarrierRecv` instead.
+  FRAGMENT_TYPE_FLAG_CHAIN_NODE = 16;
+  FRAGMENT_TYPE_FLAG_BARRIER_RECV = 32;
+  FRAGMENT_TYPE_FLAG_VALUES = 64;
 }
 
 // The environment associated with a stream plan
