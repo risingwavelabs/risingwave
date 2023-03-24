@@ -41,6 +41,9 @@ public class IcebergSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "force_append_only")
     private Boolean forceAppendOnly;
 
+    @JsonProperty(value = "primary_key")
+    private String primaryKey;
+
     @JsonCreator
     public IcebergSinkConfig(
             @JsonProperty(value = "type") String sinkType,
