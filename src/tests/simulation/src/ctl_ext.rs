@@ -96,9 +96,11 @@ pub mod predicate {
 
     /// The fragment is able to be rescheduled. Used for locating random fragment.
     pub fn can_reschedule() -> BoxedPredicate {
-        // The rescheduling of `Chain` must be derived from the upstream `Materialize`, not
-        // specified by the user.
-        no_identity_contains("StreamTableScan")
+        // The rescheduling of no-shuffle downstreams must be derived from the upstream
+        // `Materialize`, not specified by the user.
+        let p =
+            |f: &PbFragment| no_identity_contains("Chain")(f) && no_identity_contains("Lookup")(f);
+        Box::new(p)
     }
 
     /// The fragment with the given id.

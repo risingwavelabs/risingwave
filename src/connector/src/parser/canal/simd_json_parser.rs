@@ -54,11 +54,10 @@ impl CanalJsonParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        payload: &[u8],
+        mut payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut payload_mut = payload.to_vec();
-        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload_mut)
+        let event: BorrowedValue<'_> = simd_json::to_borrowed_value(&mut payload)
             .map_err(|e| RwError::from(ProtocolError(e.to_string())))?;
 
         let is_ddl = event.get(IS_DDL).and_then(|v| v.as_bool()).ok_or_else(|| {
@@ -263,7 +262,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 
@@ -340,7 +339,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
 
         let writer = builder.row_writer();
-        parser.parse_inner(payload, writer).await.unwrap();
+        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
 
         let chunk = builder.finish();
 

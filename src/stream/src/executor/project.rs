@@ -188,8 +188,8 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -216,13 +216,13 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
+        let test_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                InputRefExpression::new(DataType::Int64, 1).boxed(),
+            ],
         )
         .unwrap();
 
@@ -269,23 +269,26 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let a_expr = new_binary_expr(
-            Type::Add,
+        let a_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(a_left_expr),
-            Box::new(a_right_expr),
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1))).boxed(),
+            ],
         )
         .unwrap();
 
-        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let b_expr = new_binary_expr(
-            Type::Subtract,
+        let b_expr = build(
+            PbType::Subtract,
             DataType::Int64,
-            Box::new(b_left_expr),
-            Box::new(b_right_expr),
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(LiteralExpression::new(
+                    DataType::Int64,
+                    Some(ScalarImpl::Int64(1)),
+                )),
+            ],
         )
         .unwrap();
 

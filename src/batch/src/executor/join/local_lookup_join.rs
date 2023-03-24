@@ -462,9 +462,9 @@ mod tests {
     use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_expr::expr::{
-        new_binary_expr, BoxedExpression, InputRefExpression, LiteralExpression,
+        build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
     };
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::LocalLookupJoinExecutorArgs;
     use crate::executor::join::JoinType;
@@ -676,14 +676,13 @@ mod tests {
         );
 
         let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
+            build(
+                PbType::LessThan,
                 DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
             )
             .unwrap(),
         );
@@ -705,14 +704,13 @@ mod tests {
         );
 
         let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
+            build(
+                PbType::LessThan,
                 DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
             )
             .unwrap(),
         );
@@ -730,14 +728,13 @@ mod tests {
         );
 
         let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
+            build(
+                PbType::LessThan,
                 DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
             )
             .unwrap(),
         );
@@ -756,14 +753,13 @@ mod tests {
         );
 
         let condition = Some(
-            new_binary_expr(
-                Type::LessThan,
+            build(
+                PbType::LessThan,
                 DataType::Boolean,
-                Box::new(LiteralExpression::new(
-                    DataType::Int32,
-                    Some(ScalarImpl::Int32(5)),
-                )),
-                Box::new(InputRefExpression::new(DataType::Float32, 3)),
+                vec![
+                    LiteralExpression::new(DataType::Int32, Some(ScalarImpl::Int32(5))).boxed(),
+                    InputRefExpression::new(DataType::Float32, 3).boxed(),
+                ],
             )
             .unwrap(),
         );
