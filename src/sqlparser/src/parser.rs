@@ -2260,6 +2260,8 @@ impl Parser {
             let expr = self.parse_expr()?;
             self.expect_token(&Token::RParen)?;
             Ok(Some(ColumnOption::Check(expr)))
+        } else if self.parse_keyword(Keyword::AS) {
+            Ok(Some(ColumnOption::GeneratedColumns(self.parse_expr()?)))
         } else {
             Ok(None)
         }

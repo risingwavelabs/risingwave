@@ -91,7 +91,8 @@ macro_rules! commit_meta {
 pub(crate) use commit_meta;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::expr::expr_node::RexNode;
-use risingwave_pb::meta::CreatingJobInfo;
+use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::{CreatingJobInfo, Relation, RelationGroup};
 
 use crate::manager::catalog::utils::{alter_relation_rename, alter_relation_rename_refs};
 
@@ -455,7 +456,7 @@ where
         }
 
         let version = self
-            .notify_frontend(Operation::Add, Info::View(view.to_owned()))
+            .notify_frontend_relation_info(Operation::Add, RelationInfo::View(view.to_owned()))
             .await;
 
         Ok(version)
@@ -493,7 +494,7 @@ where
                         .await;
                 }
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::View(view))
+                    .notify_frontend_relation_info(Operation::Delete, RelationInfo::View(view))
                     .await;
 
                 Ok(version)
@@ -518,7 +519,10 @@ where
         user_core.increase_ref(function.owner);
 
         let version = self
-            .notify_frontend(Operation::Add, Info::Function(function.to_owned()))
+            .notify_frontend_relation_info(
+                Operation::Add,
+                RelationInfo::Function(function.to_owned()),
+            )
             .await;
 
         Ok(version)
@@ -548,7 +552,7 @@ where
         }
 
         let version = self
-            .notify_frontend(Operation::Delete, Info::Function(function))
+            .notify_frontend_relation_info(Operation::Delete, RelationInfo::Function(function))
             .await;
 
         Ok(version)
@@ -579,8 +583,11 @@ where
         let core = &mut self.core.lock().await.database;
         core.mark_creating_tables(creating_tables);
         for table in creating_tables {
-            self.notify_hummock_and_compactor(Operation::Add, Info::Table(table.to_owned()))
-                .await;
+            self.notify_hummock_and_compactor_relation_info(
+                Operation::Add,
+                RelationInfo::Table(table.to_owned()),
+            )
+            .await;
         }
     }
 
@@ -589,9 +596,10 @@ where
         core.unmark_creating_tables(creating_table_ids);
         if need_notify {
             for table_id in creating_table_ids {
-                self.notify_hummock_and_compactor(
+                // TODO: use group notification?
+                self.notify_hummock_and_compactor_relation_info(
                     Operation::Delete,
-                    Info::Table(Table {
+                    RelationInfo::Table(Table {
                         id: *table_id,
                         ..Default::default()
                     }),
@@ -601,15 +609,19 @@ where
         }
     }
 
-    async fn notify_hummock_and_compactor(&self, operation: Operation, info: Info) {
+    async fn notify_hummock_and_compactor_relation_info(
+        &self,
+        operation: Operation,
+        relation_info: RelationInfo,
+    ) {
         self.env
             .notification_manager()
-            .notify_hummock(operation, info.clone())
+            .notify_hummock_relation_info(operation, relation_info.clone())
             .await;
 
         self.env
             .notification_manager()
-            .notify_compactor(operation, info)
+            .notify_compactor_relation_info(operation, relation_info)
             .await;
     }
 
@@ -668,13 +680,20 @@ where
         }
         commit_meta!(self, tables)?;
 
-        for internal_table in internal_tables {
-            self.notify_frontend(Operation::Add, Info::Table(internal_table))
-                .await;
-        }
-
         let version = self
-            .notify_frontend(Operation::Add, Info::Table(table.to_owned()))
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
             .await;
 
         Ok(version)
@@ -780,22 +799,10 @@ where
             });
             user_core.decrease_ref(table.owner);
 
-            for index in indexes_removed {
-                self.notify_frontend(Operation::Delete, Info::Index(index))
-                    .await;
-            }
-
-            for index_table in index_tables {
+            for index_table in &index_tables {
                 for dependent_relation_id in &index_table.dependent_relations {
                     database_core.decrease_ref_count(*dependent_relation_id);
                 }
-                self.notify_frontend(Operation::Delete, Info::Table(index_table))
-                    .await;
-            }
-
-            for internal_table in internal_tables {
-                self.notify_frontend(Operation::Delete, Info::Table(internal_table))
-                    .await;
             }
 
             for user in users_need_update {
@@ -808,7 +815,28 @@ where
             }
 
             let version = self
-                .notify_frontend(Operation::Delete, Info::Table(table))
+                .notify_frontend(
+                    Operation::Delete,
+                    Info::RelationGroup(RelationGroup {
+                        relations: indexes_removed
+                            .into_iter()
+                            .map(|index| Relation {
+                                relation_info: RelationInfo::Index(index).into(),
+                            })
+                            .chain(
+                                internal_tables
+                                    .into_iter()
+                                    .chain(index_tables.into_iter())
+                                    .map(|internal_table| Relation {
+                                        relation_info: RelationInfo::Table(internal_table).into(),
+                                    }),
+                            )
+                            .chain(vec![Relation {
+                                relation_info: RelationInfo::Table(table.to_owned()).into(),
+                            }])
+                            .collect_vec(),
+                    }),
+                )
                 .await;
 
             let catalog_deleted_ids = index_table_ids
@@ -879,15 +907,24 @@ where
                             .await;
                     }
 
-                    self.notify_frontend(Operation::Delete, Info::Table(table))
-                        .await;
-
                     for dependent_relation_id in dependent_relations {
                         database_core.decrease_ref_count(dependent_relation_id);
                     }
 
                     let version = self
-                        .notify_frontend(Operation::Delete, Info::Index(index))
+                        .notify_frontend(
+                            Operation::Delete,
+                            Info::RelationGroup(RelationGroup {
+                                relations: vec![
+                                    Relation {
+                                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                                    },
+                                    Relation {
+                                        relation_info: RelationInfo::Index(index).into(),
+                                    },
+                                ],
+                            }),
+                        )
                         .await;
 
                     Ok(version)
@@ -1001,33 +1038,34 @@ where
         commit_meta!(self, tables, views, sinks, sources)?;
 
         // 5. notify frontend.
-        let mut version = 0;
         assert!(
             !to_update_tables.is_empty()
                 || !to_update_views.is_empty()
                 || !to_update_sinks.is_empty()
                 || to_update_source.is_some()
         );
-        for table in to_update_tables {
-            version = self
-                .notify_frontend(Operation::Update, Info::Table(table))
-                .await;
-        }
-        for view in to_update_views {
-            version = self
-                .notify_frontend(Operation::Update, Info::View(view))
-                .await;
-        }
-        for sink in to_update_sinks {
-            version = self
-                .notify_frontend(Operation::Update, Info::Sink(sink))
-                .await;
-        }
-        if let Some(source) = to_update_source {
-            version = self
-                .notify_frontend(Operation::Update, Info::Source(source))
-                .await;
-        }
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: to_update_tables
+                        .into_iter()
+                        .map(|table| Relation {
+                            relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        })
+                        .chain(to_update_views.into_iter().map(|view| Relation {
+                            relation_info: RelationInfo::View(view.to_owned()).into(),
+                        }))
+                        .chain(to_update_sinks.into_iter().map(|sink| Relation {
+                            relation_info: RelationInfo::Sink(sink.to_owned()).into(),
+                        }))
+                        .chain(to_update_source.into_iter().map(|source| Relation {
+                            relation_info: RelationInfo::Source(source.to_owned()).into(),
+                        }))
+                        .collect(),
+                }),
+            )
+            .await;
 
         Ok(version)
     }
@@ -1095,7 +1133,7 @@ where
         commit_meta!(self, sinks)?;
 
         let version = self
-            .notify_frontend(Operation::Update, Info::Sink(sink))
+            .notify_frontend_relation_info(Operation::Update, RelationInfo::Sink(sink))
             .await;
 
         Ok(version)
@@ -1132,10 +1170,20 @@ where
         tables.insert(index.index_table_id, index_table.clone());
         commit_meta!(self, indexes, tables)?;
 
-        self.notify_frontend(Operation::Update, Info::Index(index))
-            .await;
         let version = self
-            .notify_frontend(Operation::Update, Info::Table(index_table))
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![
+                        Relation {
+                            relation_info: RelationInfo::Table(index_table).into(),
+                        },
+                        Relation {
+                            relation_info: RelationInfo::Index(index).into(),
+                        },
+                    ],
+                }),
+            )
             .await;
 
         Ok(version)
@@ -1187,7 +1235,7 @@ where
         commit_meta!(self, sources)?;
 
         let version = self
-            .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+            .notify_frontend_relation_info(Operation::Add, RelationInfo::Source(source.to_owned()))
             .await;
 
         Ok(version)
@@ -1237,7 +1285,7 @@ where
                         .await;
                 }
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::Source(source))
+                    .notify_frontend_relation_info(Operation::Delete, RelationInfo::Source(source))
                     .await;
 
                 Ok(version)
@@ -1318,18 +1366,27 @@ where
         }
         commit_meta!(self, sources, tables)?;
 
-        for internal_table in internal_tables {
-            self.notify_frontend(Operation::Add, Info::Table(internal_table))
-                .await;
-        }
-
-        self.notify_frontend(Operation::Add, Info::Table(mview.to_owned()))
-            .await;
-
-        // Currently frontend uses source's version
         let version = self
-            .notify_frontend(Operation::Add, Info::Source(source.to_owned()))
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![
+                        Relation {
+                            relation_info: RelationInfo::Table(mview.to_owned()).into(),
+                        },
+                        Relation {
+                            relation_info: RelationInfo::Source(source.to_owned()).into(),
+                        },
+                    ]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
             .await;
+
         Ok(version)
     }
 
@@ -1449,17 +1506,10 @@ where
 
                 user_core.decrease_ref_count(mview.owner, 2); // source and mview.
 
-                for index in indexes_removed {
-                    self.notify_frontend(Operation::Delete, Info::Index(index))
-                        .await;
-                }
-
-                for index_table in index_tables {
+                for index_table in &index_tables {
                     for dependent_relation_id in &index_table.dependent_relations {
                         database_core.decrease_ref_count(*dependent_relation_id);
                     }
-                    self.notify_frontend(Operation::Delete, Info::Table(index_table))
-                        .await;
                 }
 
                 for &dependent_relation_id in &mview.dependent_relations {
@@ -1469,15 +1519,37 @@ where
                     self.notify_frontend(Operation::Update, Info::User(user))
                         .await;
                 }
-                self.notify_frontend(Operation::Delete, Info::Table(mview))
-                    .await;
-                for internal_table in internal_tables {
-                    self.notify_frontend(Operation::Delete, Info::Table(internal_table))
-                        .await;
-                }
 
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::Source(source))
+                    .notify_frontend(
+                        Operation::Delete,
+                        Info::RelationGroup(RelationGroup {
+                            relations: indexes_removed
+                                .into_iter()
+                                .map(|index| Relation {
+                                    relation_info: RelationInfo::Index(index).into(),
+                                })
+                                .chain(
+                                    internal_tables
+                                        .into_iter()
+                                        .chain(index_tables.into_iter())
+                                        .map(|internal_table| Relation {
+                                            relation_info: RelationInfo::Table(internal_table)
+                                                .into(),
+                                        }),
+                                )
+                                .chain(vec![
+                                    Relation {
+                                        relation_info: RelationInfo::Table(mview.to_owned()).into(),
+                                    },
+                                    Relation {
+                                        relation_info: RelationInfo::Source(source.to_owned())
+                                            .into(),
+                                    },
+                                ])
+                                .collect_vec(),
+                        }),
+                    )
                     .await;
 
                 let catalog_deleted_ids = index_table_ids
@@ -1574,11 +1646,20 @@ where
 
         commit_meta!(self, indexes, tables)?;
 
-        self.notify_frontend(Operation::Add, Info::Table(table.to_owned()))
-            .await;
-
         let version = self
-            .notify_frontend(Operation::Add, Info::Index(index.to_owned()))
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![
+                        Relation {
+                            relation_info: RelationInfo::Table(table.to_owned()).into(),
+                        },
+                        Relation {
+                            relation_info: RelationInfo::Index(index.to_owned()).into(),
+                        },
+                    ],
+                }),
+            )
             .await;
 
         Ok(version)
@@ -1639,13 +1720,20 @@ where
         }
         commit_meta!(self, sinks, tables)?;
 
-        for internal_table in internal_tables {
-            self.notify_frontend(Operation::Add, Info::Table(internal_table))
-                .await;
-        }
-
         let version = self
-            .notify_frontend(Operation::Add, Info::Sink(sink.to_owned()))
+            .notify_frontend(
+                Operation::Add,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Sink(sink.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                        relation_info: RelationInfo::Table(internal_table).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
             .await;
 
         Ok(version)
@@ -1723,13 +1811,20 @@ where
                     database_core.decrease_ref_count(dependent_relation_id);
                 }
 
-                for internal_table in internal_tables {
-                    self.notify_frontend(Operation::Delete, Info::Table(internal_table))
-                        .await;
-                }
-
                 let version = self
-                    .notify_frontend(Operation::Delete, Info::Sink(sink))
+                    .notify_frontend(
+                        Operation::Delete,
+                        Info::RelationGroup(RelationGroup {
+                            relations: vec![Relation {
+                                relation_info: RelationInfo::Sink(sink.to_owned()).into(),
+                            }]
+                            .into_iter()
+                            .chain(internal_tables.into_iter().map(|internal_table| Relation {
+                                relation_info: RelationInfo::Table(internal_table).into(),
+                            }))
+                            .collect_vec(),
+                        }),
+                    )
                     .await;
 
                 Ok(version)
@@ -1823,16 +1918,22 @@ where
         tables.insert(table.id, table.clone());
         commit_meta!(self, tables, indexes)?;
 
-        // TODO: support group notification.
-        let mut version = self
-            .notify_frontend(Operation::Update, Info::Table(table.to_owned()))
+        // Group notification
+        let version = self
+            .notify_frontend(
+                Operation::Update,
+                Info::RelationGroup(RelationGroup {
+                    relations: vec![Relation {
+                        relation_info: RelationInfo::Table(table.to_owned()).into(),
+                    }]
+                    .into_iter()
+                    .chain(updated_indexes.into_iter().map(|index| Relation {
+                        relation_info: RelationInfo::Index(index).into(),
+                    }))
+                    .collect_vec(),
+                }),
+            )
             .await;
-
-        for index in updated_indexes {
-            version = self
-                .notify_frontend(Operation::Update, Info::Index(index))
-                .await;
-        }
 
         Ok(version)
     }
@@ -1917,6 +2018,17 @@ where
         self.env
             .notification_manager()
             .notify_frontend(operation, info)
+            .await
+    }
+
+    async fn notify_frontend_relation_info(
+        &self,
+        operation: Operation,
+        relation_info: RelationInfo,
+    ) -> NotificationVersion {
+        self.env
+            .notification_manager()
+            .notify_frontend_relation_info(operation, relation_info)
             .await
     }
 }
