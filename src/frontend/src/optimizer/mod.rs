@@ -266,7 +266,7 @@ impl PlanRoot {
     /// Generate optimized stream plan
     fn gen_optimized_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
-        let explain_trace = ctx.is_explain_trace();
+        let _explain_trace = ctx.is_explain_trace();
 
         let mut plan = self.gen_stream_plan()?;
 
@@ -326,7 +326,7 @@ impl PlanRoot {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let mut plan = match self.plan.convention() {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 

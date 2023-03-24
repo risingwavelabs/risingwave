@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::super::super::plan_node::*;
+
 use crate::expr::ExprRewriter;
 use crate::optimizer::plan_node::{LogicalProject, PlanTreeNodeUnary, StreamProject};
 use crate::optimizer::{BoxedRule, PlanRef, Rule};
@@ -35,7 +35,7 @@ impl Rule for StreamProjectMergeRule {
             .cloned()
             .map(|expr| subst.rewrite_expr(expr))
             .collect();
-        let logical_project = LogicalProject::new(inner_project.input(), exprs).into();
+        let logical_project = LogicalProject::new(inner_project.input(), exprs);
         Some(StreamProject::new(logical_project).into())
     }
 }

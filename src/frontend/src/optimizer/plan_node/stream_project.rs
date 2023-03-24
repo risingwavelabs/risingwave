@@ -22,7 +22,7 @@ use risingwave_pb::stream_plan::ProjectNode;
 
 use super::{ExprRewritable, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
 use crate::expr::{try_derive_watermark, Expr, ExprImpl, ExprRewriter};
-use crate::optimizer::plan_node::PlanNode;
+
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
