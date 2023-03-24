@@ -1,6 +1,3 @@
-# the sink requires a primary index for efficient execution
-# which will be enforced by schema precheck in the future
-
 statement ok
 CREATE TABLE t4 (v1 int primary key, v2 int);
 
@@ -11,7 +8,8 @@ statement ok
 CREATE SINK s4 AS select mv4.v1 as v1, mv4.v2 as v2 from mv4 WITH (
     connector = 'jdbc',
     jdbc.url='jdbc:postgresql://db:5432/test?user=test&password=connector',
-    table.name = 't4'
+    table.name = 't4',
+    type = "upsert"
 );
 
 statement ok
