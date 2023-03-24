@@ -993,13 +993,19 @@ where
         to_update_sinks.iter().for_each(|sink| {
             sinks.insert(sink.id, sink.clone());
         });
-        if let Some(source) = to_update_source {
-            sources.insert(source.id, source);
+        if let Some(source) = &to_update_source {
+            sources.insert(source.id, source.clone());
         }
         commit_meta!(self, tables, views, sinks, sources)?;
 
         // 5. notify frontend.
         let mut version = 0;
+        assert!(
+            !to_update_tables.is_empty()
+                || !to_update_views.is_empty()
+                || !to_update_sinks.is_empty()
+                || !to_update_source.is_none()
+        );
         for table in to_update_tables {
             version = self
                 .notify_frontend(Operation::Update, Info::Table(table))
@@ -1013,6 +1019,11 @@ where
         for sink in to_update_sinks {
             version = self
                 .notify_frontend(Operation::Update, Info::Sink(sink))
+                .await;
+        }
+        if let Some(source) = to_update_source {
+            version = self
+                .notify_frontend(Operation::Update, Info::Source(source))
                 .await;
         }
 
@@ -1682,8 +1693,7 @@ where
                     .chain(
                         internal_table_ids
                             .iter()
-                            .map(|table_id| Object::TableId(*table_id))
-                            .collect_vec(),
+                            .map(|table_id| Object::TableId(*table_id)),
                     )
                     .collect_vec();
 
@@ -2138,6 +2148,7 @@ where
         grant_user.extend(user_ids);
 
         let mut version = 0;
+        assert!(!user_updated.is_empty());
         for user in user_updated {
             version = self
                 .notify_frontend(Operation::Update, Info::User(user))
@@ -2296,6 +2307,7 @@ where
         core.build_grant_relation_map();
 
         let mut version = 0;
+        assert!(!user_updated.is_empty());
         for (_, user_info) in user_updated {
             version = self
                 .notify_frontend(Operation::Update, Info::User(user_info))

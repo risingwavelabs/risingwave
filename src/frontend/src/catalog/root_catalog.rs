@@ -230,6 +230,14 @@ impl Catalog {
             .drop_source(source_id);
     }
 
+    pub fn update_source(&mut self, proto: &PbSource) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_source(proto);
+    }
+
     pub fn drop_sink(&mut self, db_id: DatabaseId, schema_id: SchemaId, sink_id: SinkId) {
         self.get_database_mut(db_id)
             .unwrap()
