@@ -47,6 +47,3 @@ pub mod trim;
 pub mod trim_characters;
 pub mod tumble;
 pub mod upper;
-
-#[cfg(test)]
-mod tests;

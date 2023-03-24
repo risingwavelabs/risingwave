@@ -1014,4 +1014,15 @@ mod tests {
         let timestamp2 = str_to_timestamp(str2).unwrap();
         assert_eq!(timestamp2.0.timestamp_micros(), -1);
     }
+
+    #[test]
+    fn test_timestamp() {
+        assert_eq!(
+            try_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
+                .unwrap(),
+            NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+            )
+        )
+    }
 }

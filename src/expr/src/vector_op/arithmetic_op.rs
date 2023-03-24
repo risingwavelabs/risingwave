@@ -351,9 +351,12 @@ where
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::Decimal;
+    use risingwave_common::types::test_utils::IntervalUnitTestExt;
+    use risingwave_common::types::{
+        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, OrderedF32, OrderedF64,
+    };
 
-    use crate::vector_op::arithmetic_op::general_add;
+    use super::*;
 
     #[test]
     fn test() {
@@ -361,5 +364,115 @@ mod tests {
             general_add::<_, _, Decimal>(Decimal::from_str("1").unwrap(), 1i32).unwrap(),
             Decimal::from_str("2").unwrap()
         );
+    }
+
+    #[test]
+    fn test_arithmetic() {
+        assert_eq!(
+            general_add::<Decimal, i32, Decimal>(dec("1.0"), 1).unwrap(),
+            dec("2.0")
+        );
+        assert_eq!(
+            general_sub::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap(),
+            dec("-1.0")
+        );
+        assert_eq!(
+            general_mul::<Decimal, i32, Decimal>(dec("1.0"), 2).unwrap(),
+            dec("2.0")
+        );
+        assert_eq!(
+            general_div::<Decimal, i32, Decimal>(dec("2.0"), 2).unwrap(),
+            dec("1.0")
+        );
+        assert_eq!(
+            general_mod::<Decimal, i32, Decimal>(dec("2.0"), 2).unwrap(),
+            dec("0")
+        );
+        assert_eq!(general_neg::<Decimal>(dec("1.0")).unwrap(), dec("-1.0"));
+        assert_eq!(general_add::<i16, i32, i32>(1i16, 1i32).unwrap(), 2i32);
+        assert_eq!(general_sub::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+        assert_eq!(general_mul::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
+        assert_eq!(general_div::<i16, i32, i32>(1i16, 1i32).unwrap(), 1i32);
+        assert_eq!(general_mod::<i16, i32, i32>(1i16, 1i32).unwrap(), 0i32);
+        assert_eq!(general_neg::<i16>(1i16).unwrap(), -1i16);
+
+        assert_eq!(
+            general_add::<Decimal, f32, Decimal>(dec("1.0"), -1f32).unwrap(),
+            dec("0.0")
+        );
+        assert_eq!(
+            general_sub::<Decimal, f32, Decimal>(dec("1.0"), 1f32).unwrap(),
+            dec("0.0")
+        );
+        assert_eq!(
+            general_div::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+            dec("0.0")
+        );
+        assert_eq!(
+            general_mul::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+            dec("0.0")
+        );
+        assert_eq!(
+            general_mod::<Decimal, f32, Decimal>(dec("0.0"), 1f32).unwrap(),
+            dec("0.0")
+        );
+        assert!(
+            general_add::<i32, OrderedF32, OrderedF64>(-1i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_sub::<i32, OrderedF32, OrderedF64>(1i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_mul::<i32, OrderedF32, OrderedF64>(0i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert!(
+            general_div::<i32, OrderedF32, OrderedF64>(0i32, 1f32.into())
+                .unwrap()
+                .is_zero()
+        );
+        assert_eq!(
+            general_neg::<OrderedF32>(1f32.into()).unwrap(),
+            OrderedF32::from(-1f32)
+        );
+        assert_eq!(
+            date_interval_add(
+                NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
+                IntervalUnit::from_month(12)
+            )
+            .unwrap(),
+            NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+            )
+        );
+        assert_eq!(
+            interval_date_add(
+                IntervalUnit::from_month(12),
+                NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1)
+            )
+            .unwrap(),
+            NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("1995-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+            )
+        );
+        assert_eq!(
+            date_interval_sub(
+                NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1),
+                IntervalUnit::from_month(12)
+            )
+            .unwrap(),
+            NaiveDateTimeWrapper::new(
+                NaiveDateTime::parse_from_str("1993-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
+            )
+        );
+    }
+
+    fn dec(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
     }
 }

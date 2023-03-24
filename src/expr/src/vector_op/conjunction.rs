@@ -47,7 +47,7 @@ pub fn not(v: bool) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use crate::vector_op::conjunction::{and, or};
+    use super::*;
 
     #[test]
     fn test_and() {
@@ -67,5 +67,11 @@ mod tests {
         assert_eq!(Some(true), or(Some(true), None));
         assert_eq!(None, or(Some(false), None));
         assert_eq!(None, or(None, None));
+    }
+
+    #[test]
+    fn test_not() {
+        assert!(!not(true));
+        assert!(not(false));
     }
 }
