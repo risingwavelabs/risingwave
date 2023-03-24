@@ -187,7 +187,7 @@ fn bench_expr(c: &mut Criterion) {
         inputrefs
             .iter()
             .find(|r| r.return_type() == ty)
-            .expect(&format!("expression not found for {ty:?}"))
+            .unwrap_or_else(|| panic!("expression not found for {ty:?}"))
             .index()
     };
     const TIMEZONE: usize = 14;
