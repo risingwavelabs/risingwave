@@ -755,6 +755,23 @@
             ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
             | └─LogicalScan { table: strings, columns: [strings.v1] }
             └─LogicalScan { table: strings, columns: [strings.v1] }
+- name: issue 7574 correlated input in agg filter in having
+  sql: |
+    CREATE TABLE strings(v1 VARCHAR);
+    SELECT (SELECT 1 FROM strings HAVING COUNT(v1) FILTER (WHERE t.v1 < 'b') > 2) FROM strings AS t;
+  optimized_logical_plan_for_batch: |
+    LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(strings.v1, strings.v1), output: [1:Int32] }
+    ├─LogicalScan { table: strings, columns: [strings.v1] }
+    └─LogicalProject { exprs: [strings.v1, 1:Int32] }
+      └─LogicalFilter { predicate: (count(strings.v1) filter((strings.v1 < 'b':Varchar)) > 2:Int32) }
+        └─LogicalAgg { group_key: [strings.v1], aggs: [count(strings.v1) filter((strings.v1 < 'b':Varchar))] }
+          └─LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(strings.v1, strings.v1), output: [strings.v1, strings.v1] }
+            ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
+            | └─LogicalScan { table: strings, columns: [strings.v1] }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalAgg { group_key: [strings.v1], aggs: [] }
+              | └─LogicalScan { table: strings, columns: [strings.v1] }
+              └─LogicalScan { table: strings, columns: [strings.v1] }
 - name: Existential join on outer join with correlated condition
   sql: |
     create table t1(x int, y int);
