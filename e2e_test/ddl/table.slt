@@ -1,2 +1,1 @@
 include ./table/*.slt.part
-include ./table/generated_columns.slt.part
