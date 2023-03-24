@@ -263,6 +263,64 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// Generate optimized stream plan
+    fn gen_optimized_stream_plan(&mut self) -> Result<PlanRef> {
+        let ctx = self.plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+
+        let mut plan = self.gen_stream_plan()?;
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Add identity project between exchange and share",
+            vec![AvoidExchangeShareRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge StreamProject",
+            vec![StreamProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
+        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+            // TODO: make it a logical optimization.
+            // Rewrite joins with index to delta join
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "To IndexDeltaJoin",
+                vec![IndexDeltaJoinRule::create()],
+                ApplyOrder::BottomUp,
+            ));
+        }
+
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline session timezone:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "exist dangling temporal scan".to_string(),
+                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
+
+        Ok(plan)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
@@ -322,49 +380,6 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
-
-        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
-            // TODO: make it a logical optimization.
-            // Rewrite joins with index to delta join
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "To IndexDeltaJoin",
-                vec![IndexDeltaJoinRule::create()],
-                ApplyOrder::BottomUp,
-            ));
-        }
-
-        // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Inline session timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
-
-        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
-            return Err(ErrorCode::NotSupported(
-                "exist dangling temporal scan".to_string(),
-                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
-            ).into());
-        }
-
         Ok(plan)
     }
 
@@ -380,7 +395,7 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
-        let mut stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan()?;
 
         // Add DML node.
         stream_plan = StreamDml::new(
@@ -423,7 +438,7 @@ impl PlanRoot {
         mv_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -443,7 +458,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -464,7 +479,7 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let mut stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan()?;
 
         // Add a project node if there is hidden column(s).
         let input_fields = stream_plan.schema().fields();
