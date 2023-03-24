@@ -35,7 +35,6 @@ use tokio::sync::oneshot::Receiver;
 use tokio::sync::Notify;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::log::info;
-use tracing::warn;
 
 use super::Compactor;
 use crate::hummock::compaction::{

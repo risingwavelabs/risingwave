@@ -13,14 +13,11 @@
 // limitations under the License.
 
 use std::collections::HashSet;
-use std::sync::Arc;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::HummockLevelsExt;
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_pb::hummock::hummock_version::Levels;
 use risingwave_pb::hummock::{InputLevel, KeyRange, SstableInfo};
 
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -32,11 +29,11 @@ pub struct SpaceReclaimCompactionPicker {
 
     // for filter
     pub all_table_ids: HashSet<u32>,
-    pub overlap_strategy: Arc<dyn OverlapStrategy>,
 }
 
 // According to the execution model of SpaceReclaimCompactionPicker, SpaceReclaimPickerState is
 // designed to record the state of each round of scanning
+#[derive(Default)]
 pub struct SpaceReclaimPickerState {
     // Because of the right_exclusive, we use KeyRangeCommon to determine if the end_bounds
     // overlap instead of directly comparing Vec<u8>. We don't need to use the start_bound in the
@@ -47,18 +44,6 @@ pub struct SpaceReclaimPickerState {
 
     // record the end_bound in the current round of scanning tasks
     pub end_bound_in_round: KeyRange,
-
-    pub select_level: usize,
-}
-
-impl Default for SpaceReclaimPickerState {
-    fn default() -> Self {
-        Self {
-            last_select_end_bound: KeyRange::default(),
-            end_bound_in_round: KeyRange::default(),
-            select_level: 1,
-        }
-    }
 }
 
 impl SpaceReclaimPickerState {
@@ -75,32 +60,17 @@ impl SpaceReclaimPickerState {
         self.end_bound_in_round = key_range;
     }
 
-    pub fn clear_bound(&mut self) {
+    pub fn clear(&mut self) {
         self.end_bound_in_round = KeyRange::default();
         self.last_select_end_bound = KeyRange::default();
-    }
-
-    pub fn move_to_next_level(&mut self) {
-        self.clear_bound();
-        self.select_level += 1;
-    }
-
-    pub fn clear(&mut self) {
-        self.clear_bound();
-        self.select_level = 1;
     }
 }
 
 impl SpaceReclaimCompactionPicker {
-    pub fn new(
-        max_space_reclaim_bytes: u64,
-        all_table_ids: HashSet<u32>,
-        overlap_strategy: Arc<dyn OverlapStrategy>,
-    ) -> Self {
+    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<u32>) -> Self {
         Self {
             max_space_reclaim_bytes,
             all_table_ids,
-            overlap_strategy,
         }
     }
 
@@ -121,11 +91,7 @@ impl SpaceReclaimCompactionPicker {
         state: &mut SpaceReclaimPickerState,
     ) -> Option<CompactionInput> {
         assert!(!levels.levels.is_empty());
-        if state.select_level > levels.levels.len() {
-            state.clear();
-            return None;
-        }
-        let reclaimed_level = levels.get_level(state.select_level);
+        let reclaimed_level = levels.levels.last().unwrap();
         let mut select_input_ssts = vec![];
         let level_handler = &level_handlers[reclaimed_level.level_idx as usize];
 
@@ -143,7 +109,7 @@ impl SpaceReclaimCompactionPicker {
         {
             // in round but end_key overflow
             // turn to next_round
-            state.move_to_next_level();
+            state.clear();
             return None;
         }
 
@@ -161,7 +127,6 @@ impl SpaceReclaimCompactionPicker {
         }
 
         let mut select_file_size = 0;
-        let mut overlap_info = self.overlap_strategy.create_overlap_info();
         for sst in &reclaimed_level.table_infos {
             let unmatched_sst = sst
                 .key_range
@@ -180,7 +145,6 @@ impl SpaceReclaimCompactionPicker {
                 continue;
             }
 
-            overlap_info.update(sst);
             select_input_ssts.push(sst.clone());
             select_file_size += sst.file_size;
             if select_file_size > self.max_space_reclaim_bytes {
@@ -190,54 +154,31 @@ impl SpaceReclaimCompactionPicker {
 
         // turn to next_round
         if select_input_ssts.is_empty() {
-            state.move_to_next_level();
+            state.clear();
             return None;
         }
-        let mut input_levels = vec![InputLevel {
-            level_idx: reclaimed_level.level_idx,
-            level_type: reclaimed_level.level_type,
-            table_infos: select_input_ssts,
-        }];
-        let target_level = if state.select_level >= levels.levels.len() {
-            state.select_level
-        } else {
-            let overlap_files = overlap_info
-                .check_multiple_overlap(&levels.get_level(state.select_level + 1).table_infos);
-            let mut pending_campct = false;
-            let mut target_overlap_file_size = 0;
-            for other in &overlap_files {
-                if level_handlers[state.select_level + 1].is_pending_compact(&other.sst_id) {
-                    pending_campct = true;
-                    break;
-                }
-                target_overlap_file_size += other.file_size;
-            }
-            if pending_campct || target_overlap_file_size > self.max_space_reclaim_bytes {
-                input_levels.push(InputLevel {
-                    level_idx: reclaimed_level.level_idx,
-                    level_type: reclaimed_level.level_type,
-                    table_infos: vec![],
-                });
-                state.select_level
-            } else {
-                input_levels.push(InputLevel {
-                    level_idx: reclaimed_level.level_idx + 1,
-                    level_type: reclaimed_level.level_type,
-                    table_infos: overlap_files,
-                });
-                state.select_level + 1
-            }
-        };
 
-        let select_last_sst = input_levels[0].table_infos.last().unwrap();
+        let select_last_sst = select_input_ssts.last().unwrap();
         state.last_select_end_bound.full_key_extend(&KeyRange {
             left: vec![],
             right: select_last_sst.key_range.as_ref().unwrap().right.clone(),
             right_exclusive: select_last_sst.key_range.as_ref().unwrap().right_exclusive,
         });
+
         Some(CompactionInput {
-            input_levels,
-            target_level,
+            input_levels: vec![
+                InputLevel {
+                    level_idx: reclaimed_level.level_idx,
+                    level_type: reclaimed_level.level_type,
+                    table_infos: select_input_ssts,
+                },
+                InputLevel {
+                    level_idx: reclaimed_level.level_idx,
+                    level_type: reclaimed_level.level_type,
+                    table_infos: vec![],
+                },
+            ],
+            target_level: reclaimed_level.level_idx as usize,
             target_sub_level_id: 0,
         })
     }

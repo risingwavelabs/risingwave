@@ -451,7 +451,6 @@ impl LevelSelector for SpaceReclaimCompactionSelector {
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
             levels.member_table_ids.iter().cloned().collect(),
-            create_overlap_strategy(group.compaction_config.compaction_mode()),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self
