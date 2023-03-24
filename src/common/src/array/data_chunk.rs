@@ -138,6 +138,19 @@ impl DataChunk {
         &self.vis2
     }
 
+    pub fn selectivity(&self) -> f64 {
+        match &self.vis2 {
+            Vis::Bitmap(b) => {
+                if b.len() == 0 {
+                    0.0
+                } else {
+                    b.count_ones() as f64 / b.len() as f64
+                }
+            }
+            Vis::Compact(_) => 1.0,
+        }
+    }
+
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), visibility)
     }
