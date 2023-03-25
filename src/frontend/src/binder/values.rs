@@ -84,12 +84,11 @@ fn values_column_name(values_id: usize, col_id: usize) -> String {
 impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
-    /// Returns true if null values were inserted
     pub(super) fn bind_values(
         &mut self,
         values: Values,
         expected_types: Option<Vec<DataType>>,
-    ) -> Result<(BoundValues, bool)> {
+    ) -> Result<BoundValues> {
         assert!(!values.0.is_empty());
 
         self.context.clause = Some(Clause::Values);
@@ -102,33 +101,24 @@ impl Binder {
 
         // Adding Null values in case user did not specify all columns. E.g.
         // create table t1 (v1 int, v2 int); insert into t1 (v2) values (5);
-        let vec_len = bound[0].len();
-        let nulls_to_insert = if let Some(expected_types) = &expected_types && expected_types.len() > vec_len {
-            let nulls_to_insert = expected_types.len() - vec_len;
-            for row in &mut bound {
-                if vec_len != row.len() {
-                    return Err(ErrorCode::BindError(
-                        "VALUES lists must all be the same length".into(),
-                    )
-                    .into());
-                }
-                for i in 0..nulls_to_insert {
-                    let t = expected_types[vec_len + i].clone();
-                    row.push(ExprImpl::literal_null(t));
-                }
-            }
-            nulls_to_insert
-        } else {
-            0
-        };
-
-        // only check for this condition again if we did not insert any nulls
-        let num_columns = bound[0].len();
-        if nulls_to_insert == 0 && bound.iter().any(|row| row.len() != num_columns) {
+        let mut num_columns = bound[0].len();
+        if bound.iter().any(|row| row.len() != num_columns) {
             return Err(
                 ErrorCode::BindError("VALUES lists must all be the same length".into()).into(),
             );
         }
+        if let Some(expected_types) = &expected_types && expected_types.len() > num_columns {
+            let nulls_to_insert = expected_types.len() - num_columns;
+            for row in &mut bound {
+                for i in 0..nulls_to_insert {
+                    let t = expected_types[num_columns + i].clone();
+                    row.push(ExprImpl::literal_null(t));
+                }
+            }
+            num_columns = expected_types.len();
+        }
+/* 
+        */
 
         // Calculate column types.
         let types = match expected_types {
@@ -173,13 +163,12 @@ impl Binder {
             )
             .into());
         }
-        Ok((bound_values, nulls_to_insert > 0))
+        Ok(bound_values)
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use risingwave_common::util::iter_util::zip_eq_fast;
     use risingwave_sqlparser::ast::{Expr, Value};
 
@@ -207,8 +196,8 @@ mod tests {
                 .collect(),
         );
 
-        assert_eq!(res.0.schema, schema);
-        for vec in res.0.rows {
+        assert_eq!(res.schema, schema);
+        for vec in res.rows {
             for (expr, ty) in zip_eq_fast(vec, schema.data_types()) {
                 assert_eq!(expr.return_type(), ty);
             }
