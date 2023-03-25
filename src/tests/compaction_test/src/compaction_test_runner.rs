@@ -93,7 +93,6 @@ pub async fn compaction_test_main(
     let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
         opts.meta_address.clone(),
         advertise_addr.to_string(),
-        opts.state_store.clone(),
         opts.config_path.clone(),
     );
 
@@ -134,8 +133,6 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
         &listen_addr,
         "--backend",
         "mem",
-        "--checkpoint-frequency",
-        &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
         "--state-store",
         &state_store,
         "--config-path",
@@ -162,7 +159,6 @@ pub async fn start_meta_node(listen_addr: String, state_store: String, config_pa
 async fn start_compactor_node(
     meta_rpc_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
@@ -173,8 +169,6 @@ async fn start_compactor_node(
         &advertise_addr,
         "--meta-address",
         &meta_rpc_endpoint,
-        "--state-store",
-        &state_store,
         "--config-path",
         &config_path,
     ]);
@@ -184,7 +178,6 @@ async fn start_compactor_node(
 pub fn start_compactor_thread(
     meta_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -196,7 +189,7 @@ pub fn start_compactor_thread(
         runtime.block_on(async {
             tokio::spawn(async {
                 tracing::info!("Starting compactor node");
-                start_compactor_node(meta_endpoint, advertise_addr, state_store, config_path).await
+                start_compactor_node(meta_endpoint, advertise_addr, config_path).await
             });
             rx.recv().unwrap();
         });

@@ -13,7 +13,6 @@
 // limitations under the License.
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
 use nexmark::event::Event;
 
 use crate::source::nexmark::source::combined_event::CombinedEvent;
@@ -26,7 +25,7 @@ pub struct NexmarkMeta {
 pub struct NexmarkMessage {
     pub split_id: SplitId,
     pub sequence_number: String,
-    pub payload: Bytes,
+    pub payload: Vec<u8>,
 }
 
 impl From<NexmarkMessage> for SourceMessage {
@@ -53,12 +52,11 @@ impl NexmarkMessage {
             split_id,
             sequence_number: offset.to_string(),
             payload: match &event {
-                Event::Person(p) => serde_json::to_string(p),
-                Event::Auction(a) => serde_json::to_string(a),
-                Event::Bid(b) => serde_json::to_string(b),
+                Event::Person(p) => serde_json::to_vec(p),
+                Event::Auction(a) => serde_json::to_vec(a),
+                Event::Bid(b) => serde_json::to_vec(b),
             }
-            .unwrap()
-            .into(),
+            .unwrap(),
         }
     }
 

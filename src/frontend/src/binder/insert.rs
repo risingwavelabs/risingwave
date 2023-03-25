@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
 use risingwave_common::catalog::{Schema, TableVersionId};
@@ -100,13 +100,35 @@ impl Binder {
         let table_id = table_catalog.id;
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
-        let columns_to_insert = table_catalog
-            .columns
-            .clone()
-            .into_iter()
-            .filter(|c| !c.is_hidden())
-            .collect_vec();
-        let row_id_index = table_catalog.row_id_index;
+        let columns_to_insert = table_catalog.columns_to_insert().cloned().collect_vec();
+
+        let generated_column_names: HashSet<_> = table_catalog.generated_column_names().collect();
+        for query_col in &columns {
+            let query_col_name = query_col.real_value();
+            if generated_column_names.contains(query_col_name.as_str()) {
+                return Err(RwError::from(ErrorCode::BindError(format!(
+                    "cannot insert a non-DEFAULT value into column \"{0}\".  Column \"{0}\" is a generated column.",
+                    &query_col_name
+                ))));
+            }
+        }
+
+        // TODO(yuhao): refine this if row_id is always the last column.
+        //
+        // `row_id_index` in bin insert operation should rule out generated column
+        let row_id_index = {
+            if let Some(row_id_index) = table_catalog.row_id_index {
+                let mut cnt = 0;
+                for col in table_catalog.columns().iter().take(row_id_index + 1) {
+                    if col.is_generated() {
+                        cnt += 1;
+                    }
+                }
+                Some(row_id_index - cnt)
+            } else {
+                None
+            }
+        };
 
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
@@ -119,10 +141,10 @@ impl Binder {
             let mut target_table_col_indices: Vec<usize> = vec![];
             let mut cols_to_insert_name_idx_map: HashMap<String, usize> = HashMap::new();
             for (col_idx, col) in columns_to_insert.iter().enumerate() {
-                cols_to_insert_name_idx_map.insert(col.name().to_string(), col_idx); 
+                cols_to_insert_name_idx_map.insert(col.name().to_string(), col_idx);
             }
             for target_col in &columns {
-                let target_col_name= &target_col.real_value();
+                let target_col_name = &target_col.real_value();
                 match cols_to_insert_name_idx_map.get_mut(target_col_name) {
                     Some(value_ref) => {
                         if *value_ref == usize::MAX {
@@ -158,14 +180,15 @@ impl Binder {
 
             let expected_types: Vec<DataType> = target_table_col_indices
                 .iter()
-                .map(|idx| columns_to_insert[*idx].data_type().clone()).collect();
+                .map(|idx| columns_to_insert[*idx].data_type().clone())
+                .collect();
 
             // When the column types of `source` query do not match `expected_types`, casting is
             // needed.
             //
-            // In PG, when the `source` is a `VALUES` without order / limit / offset, special treatment
-            // is given and it is NOT equivalent to assignment cast over potential implicit cast inside.
-            // For example, the following is valid:
+            // In PG, when the `source` is a `VALUES` without order / limit / offset, special
+            // treatment is given and it is NOT equivalent to assignment cast over
+            // potential implicit cast inside. For example, the following is valid:
             // ```
             //   create table t (v1 time);
             //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
@@ -175,8 +198,8 @@ impl Binder {
             //   values (timestamp '2020-01-01 01:02:03'), (time '03:04:05');
             //   insert into t values (timestamp '2020-01-01 01:02:03'), (time '03:04:05') limit 1;
             // ```
-            // Because `timestamp` can cast to `time` in assignment context, but no casting between them
-            // is allowed implicitly.
+            // Because `timestamp` can cast to `time` in assignment context, but no casting between
+            // them is allowed implicitly.
             //
             // In this case, assignment cast should be used directly in `VALUES`, suppressing its
             // internal implicit cast.
@@ -196,18 +219,20 @@ impl Binder {
                         std::cmp::Ordering::Equal => None,
                         // e.g. create table t (a int, b real)
                         //      insert into t (v1, v2) values (7)
-                        std::cmp::Ordering::Greater => Some("INSERT has more target columns than values"),
+                        std::cmp::Ordering::Greater => {
+                            Some("INSERT has more target columns than values")
+                        }
                         // e.g. create table t (a int, b real)
                         //      insert into t (v1) values (7, 13)
-                        std::cmp::Ordering::Less => Some("INSERT has less target columns than values"),
+                        std::cmp::Ordering::Less => {
+                            Some("INSERT has less target columns than values")
+                        }
                     };
 
                     if let Some(msg) = err_msg {
-                        return Err(RwError::from(ErrorCode::BindError(
-                            msg.to_string(),
-                        )));
+                        return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
-                    
+
                     let values = self.bind_values(values, Some(expected_types.clone()))?;
                     let body = BoundSetExpr::Values(values.into());
                     (
@@ -221,7 +246,7 @@ impl Binder {
                         },
                         vec![],
                     )
-                },
+                }
                 query => {
                     let bound = self.bind_query(query)?;
                     let actual_types = bound.data_types();
@@ -237,7 +262,7 @@ impl Binder {
                         )?,
                     };
                     (bound, cast_exprs)
-                }, 
+                }
             };
             let insert = BoundInsert {
                 table_id,
@@ -246,7 +271,7 @@ impl Binder {
                 owner,
                 row_id_index,
                 column_indices: target_table_col_indices,
-                source, 
+                source,
                 cast_exprs,
                 returning_list,
                 returning_schema: if is_returning {
@@ -255,9 +280,9 @@ impl Binder {
                     None
                 },
             };
-            return Ok(insert)
+            return Ok(insert);
         } else {
-           let expected_types :Vec<DataType> = columns_to_insert
+            let expected_types: Vec<DataType> = columns_to_insert
                 .iter()
                 .map(|c| c.data_type().clone())
                 .collect();
@@ -274,20 +299,20 @@ impl Binder {
                     let err_msg = match columns_to_insert.len().cmp(&values.0[0].len()) {
                         std::cmp::Ordering::Equal => None,
                         // e.g. create table t (a int, b real)
-                        //      insert into t values (7)        
+                        //      insert into t values (7)
                         // this kind of usage is fine, null values will be provided implicitly.
-                        std::cmp::Ordering::Greater => None, 
+                        std::cmp::Ordering::Greater => None,
                         // e.g. create table t (a int, b real)
-                        //      insert into t values (7, 13, 17)        
-                        std::cmp::Ordering::Less => Some("INSERT has more expressions than target columns"),
+                        //      insert into t values (7, 13, 17)
+                        std::cmp::Ordering::Less => {
+                            Some("INSERT has more expressions than target columns")
+                        }
                     };
 
                     if let Some(msg) = err_msg {
-                        return Err(RwError::from(ErrorCode::BindError(
-                            msg.to_string(),
-                        )));
+                        return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
-                    
+
                     let values = self.bind_values(values, Some(expected_types.clone()))?;
                     let body = BoundSetExpr::Values(values.into());
                     (
@@ -300,9 +325,8 @@ impl Binder {
                             extra_order_exprs: vec![],
                         },
                         vec![],
-
                     )
-                },
+                }
                 query => {
                     let bound = self.bind_query(query)?;
                     let actual_types = bound.data_types();
@@ -311,10 +335,10 @@ impl Binder {
                         false => Self::cast_on_insert(
                             &expected_types,
                             actual_types
-                            .into_iter()
-                            .enumerate()
-                            .map(|(i, t)| InputRef::new(i, t).into())
-                            .collect(),
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, t)| InputRef::new(i, t).into())
+                                .collect(),
                         )?,
                     };
                     (bound, cast_exprs)
@@ -327,7 +351,7 @@ impl Binder {
                 owner,
                 row_id_index,
                 column_indices: (0..columns_to_insert.len()).collect::<Vec<usize>>(),
-                source, 
+                source,
                 cast_exprs,
                 returning_list,
                 returning_schema: if is_returning {
@@ -336,7 +360,7 @@ impl Binder {
                     None
                 },
             };
-            return Ok(insert)
+            return Ok(insert);
         }
     }
 

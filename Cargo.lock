@@ -4284,9 +4284,9 @@ dependencies = [
 
 [[package]]
 name = "openssl"
-version = "0.10.47"
+version = "0.10.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8b277f87dacc05a6b709965d1cbafac4649d6ce9f3ce9ceb88508b5666dfec9"
+checksum = "518915b97df115dd36109bfa429a48b8f737bd05508cf9588977b599648926d2"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
@@ -4325,9 +4325,9 @@ dependencies = [
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.82"
+version = "0.9.83"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a95792af3c4e0153c3914df2261bedd30a98476f94dc892b67dfe1d89d433a04"
+checksum = "666416d899cf077260dac8698d60a60b435a46d57e82acb1be3d0dad87284e5b"
 dependencies = [
  "autocfg",
  "cc",
@@ -6144,6 +6144,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "criterion",
+ "ctor",
  "dyn-clone",
  "either",
  "futures-util",
@@ -6156,12 +6157,26 @@ dependencies = [
  "paste",
  "regex",
  "risingwave_common",
+ "risingwave_expr_macro",
  "risingwave_pb",
  "risingwave_udf",
+ "serde_json",
  "speedate",
  "static_assertions",
  "thiserror",
+ "tracing",
  "workspace-hack",
+]
+
+[[package]]
+name = "risingwave_expr_macro"
+version = "0.1.0"
+dependencies = [
+ "itertools",
+ "proc-macro-error",
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -6721,6 +6736,7 @@ dependencies = [
  "tokio-metrics",
  "tokio-stream",
  "tracing",
+ "tracing-test",
  "workspace-hack",
 ]
 
@@ -8225,6 +8241,29 @@ dependencies = [
  "tracing",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "tracing-test"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a2c0ff408fe918a94c428a3f2ad04e4afd5c95bbc08fcf868eff750c15728a4"
+dependencies = [
+ "lazy_static",
+ "tracing-core",
+ "tracing-subscriber",
+ "tracing-test-macro",
+]
+
+[[package]]
+name = "tracing-test-macro"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "258bc1c4f8e2e73a977812ab339d503e6feeb92700f6d07a6de4d321522d5c08"
+dependencies = [
+ "lazy_static",
+ "quote",
+ "syn",
 ]
 
 [[package]]

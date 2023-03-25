@@ -71,6 +71,10 @@ impl Expression for LiteralExpression {
     async fn eval_row(&self, _input: &OwnedRow) -> Result<Datum> {
         Ok(self.literal.as_ref().cloned())
     }
+
+    fn eval_const(&self) -> Result<Datum> {
+        Ok(self.literal.clone())
+    }
 }
 
 impl LiteralExpression {

@@ -21,6 +21,7 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload;
+use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
@@ -46,19 +47,25 @@ impl ObserverState for HummockObserverNode {
         };
 
         match info.to_owned() {
-            Info::Table(table_catalog) => {
-                assert!(
-                    resp.version > self.version,
-                    "resp version={:?}, current version={:?}",
-                    resp.version,
-                    self.version
-                );
+            Info::RelationGroup(relation_group) => {
+                for relation in relation_group.relations {
+                    match relation.relation_info.unwrap() {
+                        RelationInfo::Table(table_catalog) => {
+                            assert!(
+                                resp.version > self.version,
+                                "resp version={:?}, current version={:?}",
+                                resp.version,
+                                self.version
+                            );
 
-                self.handle_catalog_notification(resp.operation(), table_catalog);
+                            self.handle_catalog_notification(resp.operation(), table_catalog);
 
-                self.version = resp.version;
+                            self.version = resp.version;
+                        }
+                        _ => panic!("error type notification"),
+                    };
+                }
             }
-
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self
                     .version_update_sender

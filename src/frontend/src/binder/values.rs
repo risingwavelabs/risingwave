@@ -117,8 +117,6 @@ impl Binder {
             }
             num_columns = expected_types.len();
         }
-/* 
-        */
 
         // Calculate column types.
         let types = match expected_types {

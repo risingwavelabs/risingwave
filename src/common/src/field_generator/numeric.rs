@@ -107,6 +107,7 @@ where
         end_option: Option<String>,
         offset: u64,
         step: u64,
+        event_offset: u64,
     ) -> Result<Self>
     where
         Self: Sized,
@@ -127,7 +128,9 @@ where
             end,
             offset,
             step,
-            ..Default::default()
+            cur: T::from(event_offset).ok_or_else(|| {
+                anyhow::anyhow!("event offset is too big, offset: {}", event_offset,)
+            })?,
         })
     }
 
@@ -194,7 +197,7 @@ mod tests {
     #[test]
     fn test_sequence_field_generator() {
         let mut i16_field =
-            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1).unwrap();
+            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }
@@ -222,7 +225,8 @@ mod tests {
     #[test]
     fn test_sequence_datum_generator() {
         let mut f32_field =
-            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1).unwrap();
+            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1, 0)
+                .unwrap();
 
         for i in 5..=10 {
             assert_eq!(
@@ -247,13 +251,13 @@ mod tests {
     #[test]
     fn test_sequence_field_generator_float() {
         let mut f64_field =
-            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1).unwrap();
+            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
         for i in 0..=10 {
             assert_eq!(f64_field.generate(), json!(i as f64));
         }
 
         let mut f32_field =
-            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1).unwrap();
+            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1, 0).unwrap();
         for i in -5..=5 {
             assert_eq!(f32_field.generate(), json!(i as f32));
         }

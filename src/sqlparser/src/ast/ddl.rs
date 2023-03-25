@@ -371,6 +371,8 @@ pub enum ColumnOption {
     /// - MySQL's `AUTO_INCREMENT` or SQLite's `AUTOINCREMENT`
     /// - ...
     DialectSpecific(Vec<Token>),
+    /// AS ( <generation_expr> )`
+    GeneratedColumns(Expr),
 }
 
 impl fmt::Display for ColumnOption {
@@ -403,6 +405,7 @@ impl fmt::Display for ColumnOption {
             }
             Check(expr) => write!(f, "CHECK ({})", expr),
             DialectSpecific(val) => write!(f, "{}", display_separated(val, " ")),
+            GeneratedColumns(expr) => write!(f, "AS {}", expr),
         }
     }
 }

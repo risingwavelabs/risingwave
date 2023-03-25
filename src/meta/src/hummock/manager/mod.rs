@@ -166,6 +166,7 @@ use risingwave_hummock_sdk::table_stats::{
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload::Payload;
 use risingwave_pb::hummock::PbCompactionGroupInfo;
+use risingwave_pb::meta::relation::RelationInfo;
 
 /// Acquire write lock of the lock with `lock_name`.
 /// The macro will use macro `function_name` to get the name of the function of method that calls
@@ -822,6 +823,12 @@ where
             Some(task) => task,
         };
         compact_task.watermark = watermark;
+        compact_task.existing_table_ids = current_version
+            .levels
+            .get(&compaction_group_id)
+            .unwrap()
+            .member_table_ids
+            .clone();
 
         if CompactStatus::is_trivial_move_task(&compact_task) && can_trivial_move {
             compact_task.sorted_output_ssts = compact_task.input_ssts[0].table_infos.clone();
@@ -838,13 +845,6 @@ where
                 start_time.elapsed()
             );
         } else {
-            // to get all relational table_id from sst_info
-            compact_task.existing_table_ids = current_version
-                .levels
-                .get(&compaction_group_id)
-                .unwrap()
-                .member_table_ids
-                .clone();
             compact_task.table_options = table_id_to_option
                 .into_iter()
                 .filter_map(|(table_id, table_option)| {
@@ -1142,6 +1142,7 @@ where
                 }
             }
             let is_success = if let TaskStatus::Success = compact_task.task_status() {
+                // if member_table_ids changes, the data of sstable may stale.
                 let is_expired = current_version
                     .levels
                     .get(&compact_task.compaction_group_id)
@@ -1732,11 +1733,11 @@ where
         for table in table_catalogs {
             self.env
                 .notification_manager()
-                .notify_hummock(Operation::Add, Info::Table(table.clone()))
+                .notify_hummock_relation_info(Operation::Add, RelationInfo::Table(table.clone()))
                 .await;
             self.env
                 .notification_manager()
-                .notify_compactor(Operation::Add, Info::Table(table))
+                .notify_compactor_relation_info(Operation::Add, RelationInfo::Table(table))
                 .await;
         }
 
@@ -1987,7 +1988,7 @@ where
             .scale_compactor_core_num
             .set(suggest_scale_out_core as i64);
 
-        tracing::info!(
+        tracing::debug!(
             "report_scale_compactor_info {:?} suggest_scale_out_core {:?}",
             info,
             suggest_scale_out_core

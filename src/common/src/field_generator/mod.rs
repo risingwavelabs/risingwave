@@ -52,7 +52,13 @@ pub trait NumericFieldRandomGenerator {
 
 /// fields that can be continuously generated impl this trait
 pub trait NumericFieldSequenceGenerator {
-    fn new(start: Option<String>, end: Option<String>, offset: u64, step: u64) -> Result<Self>
+    fn new(
+        start: Option<String>,
+        end: Option<String>,
+        offset: u64,
+        step: u64,
+        event_offset: u64,
+    ) -> Result<Self>
     where
         Self: Sized;
 
@@ -93,6 +99,7 @@ impl FieldGeneratorImpl {
         end: Option<String>,
         split_index: u64,
         split_num: u64,
+        offset: u64,
     ) -> Result<Self> {
         match data_type {
             DataType::Int16 => Ok(FieldGeneratorImpl::I16Sequence(I16SequenceField::new(
@@ -100,30 +107,35 @@ impl FieldGeneratorImpl {
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int32 => Ok(FieldGeneratorImpl::I32Sequence(I32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Int64 => Ok(FieldGeneratorImpl::I64Sequence(I64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float32 => Ok(FieldGeneratorImpl::F32Sequence(F32SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             DataType::Float64 => Ok(FieldGeneratorImpl::F64Sequence(F64SequenceField::new(
                 start,
                 end,
                 split_index,
                 split_num,
+                offset,
             )?)),
             _ => unimplemented!(),
         }
@@ -265,6 +277,7 @@ mod tests {
                     Some("20".to_string()),
                     split_index,
                     split_num,
+                    0,
                 )
                 .unwrap(),
             );

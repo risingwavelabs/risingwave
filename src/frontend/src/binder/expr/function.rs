@@ -303,7 +303,7 @@ impl Binder {
         fn now() -> Handle {
             Box::new(move |binder, mut inputs| {
                 binder.ensure_now_function_allowed()?;
-                if !binder.in_create_mv {
+                if !binder.in_streaming {
                     inputs.push(ExprImpl::from(Literal::new(
                         Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
                         DataType::Timestamptz,
@@ -387,6 +387,7 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_length", raw_call(ExprType::ArrayLength)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -640,7 +641,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_create_mv
+        if self.in_streaming
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)

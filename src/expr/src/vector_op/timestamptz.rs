@@ -18,6 +18,7 @@ use chrono::{TimeZone, Utc};
 use chrono_tz::Tz;
 use num_traits::ToPrimitive;
 use risingwave_common::types::{NaiveDateTimeWrapper, OrderedF64};
+use risingwave_expr_macro::function;
 
 use crate::vector_op::cast::{str_to_timestamp, str_with_time_zone_to_timestamptz};
 use crate::{ExprError, Result};
@@ -31,7 +32,7 @@ fn lookup_time_zone(time_zone: &str) -> Result<Tz> {
     })
 }
 
-#[inline(always)]
+#[function("to_timestamp(float64) -> timestamptz")]
 pub fn f64_sec_to_timestamptz(elem: OrderedF64) -> Result<i64> {
     // TODO(#4515): handle +/- infinity
     (elem * 1e6)
@@ -40,7 +41,7 @@ pub fn f64_sec_to_timestamptz(elem: OrderedF64) -> Result<i64> {
         .ok_or(ExprError::NumericOutOfRange)
 }
 
-#[inline(always)]
+#[function("at_time_zone(timestamp, varchar) -> timestamptz")]
 pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> Result<i64> {
     let time_zone = lookup_time_zone(time_zone)?;
     // https://www.postgresql.org/docs/current/datetime-invalid-input.html
@@ -65,6 +66,7 @@ pub fn timestamp_at_time_zone(input: NaiveDateTimeWrapper, time_zone: &str) -> R
     Ok(usec)
 }
 
+#[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
 pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write) -> Result<()> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = elem.div_euclid(1_000_000);
@@ -82,12 +84,13 @@ pub fn timestamptz_to_string(elem: i64, time_zone: &str, writer: &mut dyn Write)
 
 // Tries to interpret the string with a timezone, and if failing, tries to interpret the string as a
 // timestamp and then adjusts it with the session timezone.
+#[function("cast_with_time_zone(varchar, varchar) -> timestamptz")]
 pub fn str_to_timestamptz(elem: &str, time_zone: &str) -> Result<i64> {
     str_with_time_zone_to_timestamptz(elem)
         .or_else(|_| timestamp_at_time_zone(str_to_timestamp(elem)?, time_zone))
 }
 
-#[inline(always)]
+#[function("at_time_zone(timestamptz, varchar) -> timestamp")]
 pub fn timestamptz_at_time_zone(input: i64, time_zone: &str) -> Result<NaiveDateTimeWrapper> {
     let time_zone = lookup_time_zone(time_zone)?;
     let secs = input.div_euclid(1_000_000);
