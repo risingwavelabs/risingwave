@@ -108,7 +108,7 @@
   sql: |
     create table t (v1 int, v2 int);
     insert into t (v1, v2, v2) values (5, 6);
-  binder_error: 'Bind error: INSERT has more target columns than values'
+  binder_error: 'Bind error: Column specified more than once'
 - name: Not enough target columns
   sql: |
     create table t (v1 int, v2 int);

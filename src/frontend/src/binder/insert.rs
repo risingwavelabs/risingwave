@@ -89,7 +89,7 @@ impl Binder {
     pub(super) fn bind_insert(
         &mut self,
         name: ObjectName,
-        columns: Vec<Ident>,
+        target_col_idents: Vec<Ident>,
         source: Query,
         returning_items: Vec<SelectItem>,
     ) -> Result<BoundInsert> {
@@ -103,8 +103,8 @@ impl Binder {
         let columns_to_insert = table_catalog.columns_to_insert().cloned().collect_vec();
 
         let generated_column_names: HashSet<_> = table_catalog.generated_column_names().collect();
-        for query_col in &columns {
-            let query_col_name = query_col.real_value();
+        for target_col_ident in &target_col_idents {
+            let query_col_name = target_col_ident.real_value();
             if generated_column_names.contains(query_col_name.as_str()) {
                 return Err(RwError::from(ErrorCode::BindError(format!(
                     "cannot insert a non-DEFAULT value into column \"{0}\".  Column \"{0}\" is a generated column.",
@@ -133,18 +133,14 @@ impl Binder {
         let (returning_list, fields) = self.bind_returning_list(returning_items)?;
         let is_returning = !returning_list.is_empty();
 
-        // create table t (a int, b real, c varchar)
-        // case 1: insert into t (target_columns) values (values)
-        // case 2: insert into t values (values)
-        let has_target_col = columns.len() > 0;
-        if has_target_col {
+        if !target_col_idents.is_empty() {
             let mut target_table_col_indices: Vec<usize> = vec![];
             let mut cols_to_insert_name_idx_map: HashMap<String, usize> = HashMap::new();
             for (col_idx, col) in columns_to_insert.iter().enumerate() {
                 cols_to_insert_name_idx_map.insert(col.name().to_string(), col_idx);
             }
-            for target_col in &columns {
-                let target_col_name = &target_col.real_value();
+            for target_col_ident in &target_col_idents {
+                let target_col_name = &target_col_ident.real_value();
                 match cols_to_insert_name_idx_map.get_mut(target_col_name) {
                     Some(value_ref) => {
                         if *value_ref == usize::MAX {
@@ -153,7 +149,7 @@ impl Binder {
                             )));
                         }
                         target_table_col_indices.push(*value_ref);
-                        *value_ref = usize::MAX;
+                        *value_ref = usize::MAX; // mark this column name, for duplicate detection
                     }
                     None => {
                         // Invalid column name found
@@ -215,7 +211,7 @@ impl Binder {
                     fetch: None,
                 } if order.is_empty() => {
                     assert!(!values.0.is_empty());
-                    let err_msg = match columns.len().cmp(&values.0[0].len()) {
+                    let err_msg = match target_col_idents.len().cmp(&values.0[0].len()) {
                         std::cmp::Ordering::Equal => None,
                         // e.g. create table t (a int, b real)
                         //      insert into t (v1, v2) values (7)
@@ -233,7 +229,7 @@ impl Binder {
                         return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
 
-                    let values = self.bind_values(values, Some(expected_types.clone()))?;
+                    let values = self.bind_values(values, Some(expected_types))?;
                     let body = BoundSetExpr::Values(values.into());
                     (
                         BoundQuery {
@@ -280,7 +276,7 @@ impl Binder {
                     None
                 },
             };
-            return Ok(insert);
+            Ok(insert)
         } else {
             let expected_types: Vec<DataType> = columns_to_insert
                 .iter()
@@ -313,7 +309,7 @@ impl Binder {
                         return Err(RwError::from(ErrorCode::BindError(msg.to_string())));
                     }
 
-                    let values = self.bind_values(values, Some(expected_types.clone()))?;
+                    let values = self.bind_values(values, Some(expected_types))?;
                     let body = BoundSetExpr::Values(values.into());
                     (
                         BoundQuery {
@@ -360,7 +356,7 @@ impl Binder {
                     None
                 },
             };
-            return Ok(insert);
+            Ok(insert)
         }
     }
 
