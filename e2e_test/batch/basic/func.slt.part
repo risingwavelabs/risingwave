@@ -284,6 +284,9 @@ select pg_typeof(array[array[1, 2], array[3, 4]]);
 ----
 integer[][]
 
+query error unexpected arguments number
+select pg_typeof();
+
 query I
 select count(current_database());
 ----

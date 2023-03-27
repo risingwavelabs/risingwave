@@ -409,14 +409,14 @@ impl Binder {
                 // System information operations.
                 (
                     "pg_typeof",
-                    raw(|_binder, inputs| {
+                    guard_by_len(1, raw(|_binder, inputs| {
                         let input = &inputs[0];
                         let v = match input.is_unknown() {
                             true => "unknown".into(),
                             false => input.return_type().to_string(),
                         };
                         Ok(ExprImpl::literal_varchar(v))
-                    }),
+                    })),
                 ),
                 ("current_database", guard_by_len(0, raw(|binder, _inputs| {
                     Ok(ExprImpl::literal_varchar(binder.db_name.clone()))
