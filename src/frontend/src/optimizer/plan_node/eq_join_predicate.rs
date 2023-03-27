@@ -177,7 +177,7 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<InequalityInputPair>) {
+    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<(usize, InequalityInputPair)>) {
         (
             self.left_cols_num,
             self.other_cond()

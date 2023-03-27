@@ -251,18 +251,20 @@ impl Condition {
         &self,
         left_col_num: usize,
         right_col_num: usize,
-    ) -> Vec<InequalityInputPair> {
+    ) -> Vec<(usize, InequalityInputPair)> {
         let left_bit_map = FixedBitSet::from_iter(0..left_col_num);
         let right_bit_map = FixedBitSet::from_iter(left_col_num..left_col_num + right_col_num);
 
         self.conjunctions
             .iter()
-            .filter_map(|expr| {
+            .enumerate()
+            .filter_map(|(conjunction_idx, expr)| {
                 let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
                 if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
                     None
                 } else {
                     expr.as_input_comparison_cond()
+                        .map(|inequality_pair| (conjunction_idx, inequality_pair))
                 }
             })
             .collect_vec()

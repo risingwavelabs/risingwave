@@ -25,7 +25,7 @@ use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbBandJoinCondit
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
 };
-use crate::expr::{Expr, ExprRewriter, InequalityInputPair};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, InequalityInputPair};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -54,6 +54,7 @@ pub struct StreamHashJoin {
     is_append_only: bool,
 
     is_interval_join: bool,
+    clean_state_conjunction_indices: Vec<usize>,
 }
 
 impl StreamHashJoin {
@@ -72,6 +73,7 @@ impl StreamHashJoin {
         );
 
         let mut inequality_pairs = vec![];
+        let mut clean_state_conjunction_indices = vec![];
 
         let (watermark_columns, is_interval_join) = {
             let l2i = logical.l2i_col_mapping();
@@ -95,11 +97,14 @@ impl StreamHashJoin {
             let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
             let mut band_condition_clean_left_state = false;
             let mut band_condition_clean_right_state = false;
-            for InequalityInputPair {
-                key_required_larger,
-                key_required_smaller,
-                delta_expression,
-            } in original_inequality_pairs
+            for (
+                conjunction_idx,
+                InequalityInputPair {
+                    key_required_larger,
+                    key_required_smaller,
+                    delta_expression,
+                },
+            ) in original_inequality_pairs
             {
                 let both_upstream_has_watermark = if key_required_larger < key_required_smaller {
                     logical
@@ -124,6 +129,7 @@ impl StreamHashJoin {
                     continue;
                 }
 
+                clean_state_conjunction_indices.push(conjunction_idx);
                 let internal = if key_required_larger < key_required_smaller {
                     band_condition_clean_left_state = true;
                     l2i.try_map(key_required_larger)
@@ -172,6 +178,7 @@ impl StreamHashJoin {
             inequality_pairs,
             is_append_only: append_only,
             is_interval_join,
+            clean_state_conjunction_indices,
         }
     }
 
@@ -274,6 +281,20 @@ impl fmt::Display for StreamHashJoin {
                 input_schema: &concat_schema,
             },
         );
+
+        if !self.clean_state_conjunction_indices.is_empty() {
+            builder.field(
+                "band_conditions_to_state_clean",
+                &self
+                    .clean_state_conjunction_indices
+                    .iter()
+                    .map(|conjunction_idx| ExprDisplay {
+                        expr: &self.eq_join_predicate().other_cond().conjunctions[*conjunction_idx],
+                        input_schema: &concat_schema,
+                    })
+                    .collect_vec(),
+            );
+        }
 
         let watermark_columns = &self.base.watermark_columns;
         if self.base.watermark_columns.count_ones(..) > 0 {
