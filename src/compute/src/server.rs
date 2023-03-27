@@ -124,6 +124,14 @@ pub async fn compute_node_serve(
         reserved_memory_bytes,
         storage_memory_bytes,
     );
+    print_memory_config(
+        opts.total_memory_bytes,
+        compute_memory_bytes,
+        storage_memory_bytes,
+        &storage_memory_config,
+        embedded_compactor_enabled,
+    );
+
     let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
 
     let storage_opts = Arc::new(StorageOpts::from((
@@ -467,4 +475,46 @@ fn embedded_compactor_enabled(state_store_url: &str, disable_remote_compactor: b
     state_store_url == "hummock+memory"
         || state_store_url.starts_with("hummock+disk")
         || disable_remote_compactor
+}
+
+// Print out the memory outline of the compute node.
+fn print_memory_config(
+    cn_total_memory_bytes: usize,
+    compute_memory_bytes: usize,
+    storage_memory_bytes: usize,
+    storage_memory_config: &StorageMemoryConfig,
+    embedded_compactor_enabled: bool,
+) {
+    info!("Memory outline: ");
+    info!("> total_memory: {}", convert(cn_total_memory_bytes as _));
+    info!(
+        ">     storage_memory: {}",
+        convert(storage_memory_bytes as _)
+    );
+    info!(
+        ">         block_cache_capacity: {}",
+        convert((storage_memory_config.block_cache_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         meta_cache_capacity: {}",
+        convert((storage_memory_config.meta_cache_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         shared_buffer_capacity: {}",
+        convert((storage_memory_config.shared_buffer_capacity_mb << 20) as _)
+    );
+    info!(
+        ">         file_cache_total_buffer_capacity: {}",
+        convert((storage_memory_config.file_cache_total_buffer_capacity_mb << 20) as _)
+    );
+    if embedded_compactor_enabled {
+        info!(
+            ">         compactor_memory_limit: {}",
+            convert((storage_memory_config.compactor_memory_limit_mb << 20) as _)
+        );
+    }
+    info!(
+        ">     compute_memory: {}",
+        convert(compute_memory_bytes as _)
+    );
 }
