@@ -50,6 +50,7 @@ fn select_all_vnode_stream(
 pub struct HummockJavaBindingIterator {
     row_serde: EitherSerde,
     stream: SelectAllIterStream,
+    pub class_cache: Arc<crate::JavaBindingRowCache>,
 }
 
 pub struct KeyedRow {
@@ -137,7 +138,11 @@ impl HummockJavaBindingIterator {
             BasicSerde::new(&column_ids, schema.into()).into()
         };
 
-        Ok(Self { row_serde, stream })
+        Ok(Self {
+            row_serde,
+            stream,
+            class_cache: Default::default(),
+        })
     }
 
     pub async fn next(&mut self) -> StorageResult<Option<KeyedRow>> {

@@ -6298,6 +6298,7 @@ dependencies = [
  "itertools",
  "jni",
  "madsim-tokio",
+ "once_cell",
  "prost 0.11.8",
  "risingwave_common",
  "risingwave_hummock_sdk",
