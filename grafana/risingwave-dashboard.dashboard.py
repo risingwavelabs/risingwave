@@ -692,7 +692,7 @@ def section_compaction(outer_panels):
                     "num of SSTs written into next level during history compactions to next level",
                     [
                         panels.target(
-                            f"sum({metric('storage_level_compact_write')}) / sum({metric('state_store_write_build_l0_bytes')})",
+                            f"sum({metric('storage_level_compact_write')}) / sum({metric('compactor_write_build_l0_bytes')})",
                             "write amplification",
                         ),
                     ],
@@ -718,7 +718,7 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
@@ -728,7 +728,7 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
@@ -738,7 +738,7 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
@@ -748,7 +748,7 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} write",
                         ),
                     ],
@@ -758,7 +758,7 @@ def section_compaction(outer_panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} write",
                         ),
                     ],
@@ -768,7 +768,7 @@ def section_compaction(outer_panels):
                     "num of SSTs read from next level during history compactions to next level",
                     [
                         panels.target(
-                            f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, level_index)",
+                            f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, group, level_index)",
                             "cg{{group}}-L{{level_index}} read",
                         ),
                     ],

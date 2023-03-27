@@ -115,6 +115,10 @@ pub fn trigger_sst_stat(
                     continue;
                 }
 
+                if idx != 0 && idx == task.target_level as usize {
+                    continue;
+                }
+
                 let key = (idx, task.target_level as usize);
                 let count = compacting_task_stat.entry(key).or_insert(0);
                 *count += 1;
@@ -124,8 +128,7 @@ pub fn trigger_sst_stat(
         }
     }
 
-    tracing::info!("LSM Compacting STAT {:?}", compacting_task_stat);
-
+    tracing::debug!("LSM Compacting STAT {:?}", compacting_task_stat);
     for ((select, target), compacting_task_count) in compacting_task_stat {
         let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
         metrics

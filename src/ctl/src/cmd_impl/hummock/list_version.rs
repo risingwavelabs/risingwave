@@ -20,18 +20,6 @@ use crate::CtlContext;
 pub async fn list_version(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
     let version = meta_client.get_current_version().await?;
-
-    // for (cg, levels) in &version.levels {
-
-    //     if let Some(l0) = levels.l0 {
-
-    //     } else {
-    //         for level in &levels.levels {
-
-    //         }
-    //     }
-    // }
-
     println!("{:#?}", version);
     Ok(())
 }
