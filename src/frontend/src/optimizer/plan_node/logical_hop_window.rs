@@ -17,7 +17,7 @@ use std::fmt;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::error::Result;
-use risingwave_common::types::IntervalUnit;
+use risingwave_common::types::Interval;
 
 use super::generic::GenericPlanNode;
 use super::{
@@ -44,9 +44,9 @@ impl LogicalHopWindow {
     fn new(
         input: PlanRef,
         time_col: InputRef,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        window_offset: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
+        window_offset: Interval,
         output_indices: Option<Vec<usize>>,
     ) -> Self {
         // if output_indices is not specified, use default output_indices
@@ -89,9 +89,9 @@ impl LogicalHopWindow {
     ) -> (
         PlanRef,
         InputRef,
-        IntervalUnit,
-        IntervalUnit,
-        IntervalUnit,
+        Interval,
+        Interval,
+        Interval,
         Vec<usize>,
     ) {
         self.core.into_parts()
@@ -102,9 +102,9 @@ impl LogicalHopWindow {
     pub fn create(
         input: PlanRef,
         time_col: InputRef,
-        window_slide: IntervalUnit,
-        window_size: IntervalUnit,
-        window_offset: IntervalUnit,
+        window_slide: Interval,
+        window_size: Interval,
+        window_offset: Interval,
     ) -> PlanRef {
         let input = LogicalFilter::create_with_expr(
             input,
@@ -434,9 +434,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::from_month_day_usec(0, 1, 0),
-            IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 0, 0),
+            Interval::from_month_day_usec(0, 1, 0),
+            Interval::from_month_day_usec(0, 3, 0),
+            Interval::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();
@@ -490,9 +490,9 @@ mod test {
         let hop_window: PlanRef = LogicalHopWindow::new(
             values.into(),
             InputRef::new(0, DataType::Date),
-            IntervalUnit::from_month_day_usec(0, 1, 0),
-            IntervalUnit::from_month_day_usec(0, 3, 0),
-            IntervalUnit::from_month_day_usec(0, 0, 0),
+            Interval::from_month_day_usec(0, 1, 0),
+            Interval::from_month_day_usec(0, 3, 0),
+            Interval::from_month_day_usec(0, 0, 0),
             None,
         )
         .into();

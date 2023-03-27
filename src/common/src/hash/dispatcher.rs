@@ -81,7 +81,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
     use std::mem::size_of;
 
     use crate::types::{
-        Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
         F32, F64,
     };
 
@@ -99,7 +99,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Time => HashKeySize::Fixed(size_of::<NaiveTimeWrapper>()),
         DataType::Timestamp => HashKeySize::Fixed(size_of::<NaiveDateTimeWrapper>()),
         DataType::Timestamptz => HashKeySize::Fixed(size_of::<i64>()),
-        DataType::Interval => HashKeySize::Fixed(size_of::<IntervalUnit>()),
+        DataType::Interval => HashKeySize::Fixed(size_of::<Interval>()),
 
         DataType::Varchar => HashKeySize::Variable,
         DataType::Bytea => HashKeySize::Variable,

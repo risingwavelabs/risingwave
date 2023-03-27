@@ -22,7 +22,7 @@ use thiserror::Error;
 
 use super::to_binary::ToBinary;
 use super::to_text::ToText;
-use super::{CheckedAdd, DataType, IntervalUnit};
+use super::{CheckedAdd, DataType, Interval};
 use crate::array::ArrayResult;
 
 /// The same as `NaiveDate::from_ymd(1970, 1, 1).num_days_from_ce()`.
@@ -528,10 +528,10 @@ fn is_leap_year(year: i32) -> bool {
     year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
 }
 
-impl CheckedAdd<IntervalUnit> for NaiveDateTimeWrapper {
+impl CheckedAdd<Interval> for NaiveDateTimeWrapper {
     type Output = NaiveDateTimeWrapper;
 
-    fn checked_add(self, rhs: IntervalUnit) -> Option<NaiveDateTimeWrapper> {
+    fn checked_add(self, rhs: Interval) -> Option<NaiveDateTimeWrapper> {
         let mut date = self.0.date();
         if rhs.get_months() != 0 {
             // NaiveDate don't support add months. We need calculate manually

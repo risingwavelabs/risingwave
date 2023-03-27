@@ -181,20 +181,20 @@ impl<'a> ScalarRef<'a> for Decimal {
     }
 }
 
-/// Implement `Scalar` for `IntervalUnit`.
-impl Scalar for IntervalUnit {
-    type ScalarRefType<'a> = IntervalUnit;
+/// Implement `Scalar` for `Interval`.
+impl Scalar for Interval {
+    type ScalarRefType<'a> = Interval;
 
-    fn as_scalar_ref(&self) -> IntervalUnit {
+    fn as_scalar_ref(&self) -> Interval {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `IntervalUnit`.
-impl<'a> ScalarRef<'a> for IntervalUnit {
-    type ScalarType = IntervalUnit;
+/// Implement `ScalarRef` for `Interval`.
+impl<'a> ScalarRef<'a> for Interval {
+    type ScalarType = Interval;
 
-    fn to_owned_scalar(&self) -> IntervalUnit {
+    fn to_owned_scalar(&self) -> Interval {
         *self
     }
 

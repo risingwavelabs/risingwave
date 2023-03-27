@@ -300,7 +300,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, Interval, NaiveDateWrapper, ScalarImpl};
     use url::Url;
 
     use super::{
@@ -432,7 +432,7 @@ mod test {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
                     let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                    let duration = Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                    let duration = Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                         months, days, usecs,
                     )));
                     assert_eq!(row[i], duration);

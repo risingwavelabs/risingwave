@@ -144,7 +144,7 @@ fn calculate_encoded_size_inner(
             DataType::Timestamp => size_of::<NaiveDateTimeWrapper>(),
             DataType::Timestamptz => size_of::<i64>(),
             DataType::Boolean => size_of::<u8>(),
-            // IntervalUnit is serialized as (i32, i32, i64)
+            // Interval is serialized as (i32, i32, i64)
             DataType::Interval => size_of::<(i32, i32, i64)>(),
             DataType::Decimal => {
                 deserializer.deserialize_decimal()?;

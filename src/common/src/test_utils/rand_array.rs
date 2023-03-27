@@ -28,7 +28,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
-    Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
+    Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
     Scalar,
 };
 
@@ -74,12 +74,12 @@ impl RandValue for Decimal {
     }
 }
 
-impl RandValue for IntervalUnit {
+impl RandValue for Interval {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let months = rand.gen_range(0..100);
         let days = rand.gen_range(0..200);
         let usecs = rand.gen_range(0..100_000);
-        IntervalUnit::from_month_day_usec(months, days, usecs)
+        Interval::from_month_day_usec(months, days, usecs)
     }
 }
 

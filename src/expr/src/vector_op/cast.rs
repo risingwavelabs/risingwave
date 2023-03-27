@@ -27,7 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
-    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     F32, F64, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -384,7 +384,7 @@ pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
 
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
-pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
+pub fn interval_to_time(elem: Interval) -> NaiveTimeWrapper {
     let usecs = elem.get_usecs_of_day();
     let secs = (usecs / 1_000_000) as u32;
     let nano = (usecs % 1_000_000 * 1000) as u32;
@@ -505,7 +505,7 @@ pub fn literal_parsing(
         // for later phase.
         DataType::Timestamptz => str_with_time_zone_to_timestamptz(s)?.into(),
         DataType::Time => str_to_time(s)?.into(),
-        DataType::Interval => str_parse::<IntervalUnit>(s)?.into(),
+        DataType::Interval => str_parse::<Interval>(s)?.into(),
         // Not processing list or struct literal right now. Leave it for later phase (normal backend
         // evaluation).
         DataType::List { .. } => return Err(None),
@@ -792,11 +792,11 @@ mod tests {
             str_to_time("04:02").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::from_month_day_usec(1, 2, 61000003)),
+            interval_to_time(Interval::from_month_day_usec(1, 2, 61000003)),
             str_to_time("00:01:01.000003").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::from_month_day_usec(0, 0, -61000003)),
+            interval_to_time(Interval::from_month_day_usec(0, 0, -61000003)),
             str_to_time("23:58:58.999997").unwrap(),
         );
     }

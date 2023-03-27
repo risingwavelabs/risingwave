@@ -180,8 +180,8 @@ pub fn new_generate_series<const STOP_INCLUSIVE: bool>(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateTimeWrapper, ScalarImpl};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{DataType, Interval, NaiveDateTimeWrapper, ScalarImpl};
 
     use super::*;
     use crate::expr::{Expression, LiteralExpression};
@@ -222,9 +222,9 @@ mod tests {
     async fn test_generate_time_series() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
-        let one_minute_step = IntervalUnit::from_minutes(1);
-        let one_hour_step = IntervalUnit::from_minutes(60);
-        let one_day_step = IntervalUnit::from_days(1);
+        let one_minute_step = Interval::from_minutes(1);
+        let one_hour_step = Interval::from_minutes(60);
+        let one_day_step = Interval::from_days(1);
         generate_time_series_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8 + 1)
             .await;
         generate_time_series_test_case(start_time, stop_time, one_hour_step, 24 * 8 + 1).await;
@@ -235,7 +235,7 @@ mod tests {
     async fn generate_time_series_test_case(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        step: Interval,
         expect_cnt: usize,
     ) {
         fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {
@@ -289,9 +289,9 @@ mod tests {
     async fn test_time_range() {
         let start_time = str_to_timestamp("2008-03-01 00:00:00").unwrap();
         let stop_time = str_to_timestamp("2008-03-09 00:00:00").unwrap();
-        let one_minute_step = IntervalUnit::from_minutes(1);
-        let one_hour_step = IntervalUnit::from_minutes(60);
-        let one_day_step = IntervalUnit::from_days(1);
+        let one_minute_step = Interval::from_minutes(1);
+        let one_hour_step = Interval::from_minutes(60);
+        let one_day_step = Interval::from_days(1);
         time_range_test_case(start_time, stop_time, one_minute_step, 60 * 24 * 8).await;
         time_range_test_case(start_time, stop_time, one_hour_step, 24 * 8).await;
         time_range_test_case(start_time, stop_time, one_day_step, 8).await;
@@ -301,7 +301,7 @@ mod tests {
     async fn time_range_test_case(
         start: NaiveDateTimeWrapper,
         stop: NaiveDateTimeWrapper,
-        step: IntervalUnit,
+        step: Interval,
         expect_cnt: usize,
     ) {
         fn to_lit_expr(ty: DataType, v: ScalarImpl) -> BoxedExpression {

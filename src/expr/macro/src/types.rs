@@ -168,7 +168,7 @@ pub fn to_data_type(ty: &str) -> &str {
         "time" => "NaiveTimeWrapper",
         "timestamp" => "NaiveDateTimeWrapper",
         "timestamptz" => "i64",
-        "interval" => "IntervalUnit",
+        "interval" => "Interval",
         "varchar" => "&str",
         "bytea" => "&[u8]",
         "jsonb" => "JsonbRef<'_>",

@@ -19,7 +19,7 @@ use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Datum, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
     ScalarImpl,
 };
 use risingwave_common::util::sort_util::OrderType;
@@ -92,7 +92,7 @@ fn bench_encoding(c: &mut Criterion) {
         Case::new(
             "Interval",
             DataType::Interval,
-            ScalarImpl::Interval(IntervalUnit::default()),
+            ScalarImpl::Interval(Interval::default()),
         ),
         Case::new(
             "NaiveDate",

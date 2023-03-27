@@ -17,7 +17,7 @@ use std::ops::{self, Deref};
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    DataType, Datum, DatumRef, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, ScalarImpl, ToDatumRef,
 };
 use crate::util::iter_util::ZipEqDebug;
@@ -81,7 +81,7 @@ impl OwnedRow {
                     DataType::Date => x.parse::<NaiveDateWrapper>().unwrap().into(),
                     DataType::Time => x.parse::<NaiveTimeWrapper>().unwrap().into(),
                     DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
-                    DataType::Interval => x.parse::<IntervalUnit>().unwrap().into(),
+                    DataType::Interval => x.parse::<Interval>().unwrap().into(),
                     DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
                     _ => todo!(),
                 };
@@ -269,7 +269,7 @@ mod tests {
 
     use super::*;
     use crate::row::RowExt;
-    use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
+    use crate::types::{DataType as Ty, Interval, ScalarImpl};
     use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]
@@ -283,7 +283,7 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 7, 8, 9,
             ))),
         ]);
@@ -318,12 +318,12 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 7, 8, 9,
             ))),
         ]);
         let row2 = OwnedRow::new(vec![
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 7, 8, 9,
             ))),
             Some(ScalarImpl::Utf8("string".into())),

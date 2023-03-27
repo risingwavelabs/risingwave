@@ -29,7 +29,7 @@ use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    DataType, Datum, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
+    DataType, Datum, Decimal, Interval, NaiveDateTimeWrapper, NaiveDateWrapper,
     NaiveTimeWrapper, F32, F64, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 
@@ -292,7 +292,7 @@ fn estimate_serialize_str_size(bytes: &[u8]) -> usize {
     4 + bytes.len()
 }
 
-fn serialize_interval(interval: &IntervalUnit, buf: &mut impl BufMut) {
+fn serialize_interval(interval: &Interval, buf: &mut impl BufMut) {
     buf.put_i32_le(interval.get_months());
     buf.put_i32_le(interval.get_days());
     buf.put_i64_le(interval.get_usecs());
@@ -407,11 +407,11 @@ fn deserialize_bool(data: &mut impl Buf) -> Result<bool> {
     }
 }
 
-fn deserialize_interval(data: &mut impl Buf) -> Result<IntervalUnit> {
+fn deserialize_interval(data: &mut impl Buf) -> Result<Interval> {
     let months = data.get_i32_le();
     let days = data.get_i32_le();
     let usecs = data.get_i64_le();
-    Ok(IntervalUnit::from_month_day_usec(months, days, usecs))
+    Ok(Interval::from_month_day_usec(months, days, usecs))
 }
 
 fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {

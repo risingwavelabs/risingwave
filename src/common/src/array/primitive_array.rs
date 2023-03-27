@@ -26,7 +26,7 @@ use crate::array::{ArrayBuilderImpl, ArrayImpl, ArrayMeta};
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
-use crate::types::interval::IntervalUnit;
+use crate::types::interval::Interval;
 use crate::types::{
     NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
 };
@@ -120,7 +120,7 @@ macro_rules! impl_primitive_for_others {
 
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
-    { IntervalUnit, Interval, Interval },
+    { Interval, Interval, Interval },
     { NaiveDateWrapper, Date, NaiveDate },
     { NaiveTimeWrapper, Time, NaiveTime },
     { NaiveDateTimeWrapper, Timestamp, NaiveDateTime }

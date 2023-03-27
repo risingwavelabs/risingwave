@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{IntervalUnit, NaiveDateTimeWrapper};
+use risingwave_common::types::{Interval, NaiveDateTimeWrapper};
 use risingwave_expr_macro::function;
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
@@ -51,7 +51,7 @@ pub fn date_trunc_timestamptz_at_timezone(field: &str, ts: i64, timezone: &str) 
 }
 
 #[function("date_trunc(varchar, interval) -> interval")]
-pub fn date_trunc_interval(field: &str, interval: IntervalUnit) -> Result<IntervalUnit> {
+pub fn date_trunc_interval(field: &str, interval: Interval) -> Result<Interval> {
     Ok(match field.to_ascii_lowercase().as_str() {
         "microseconds" => interval,
         "milliseconds" => interval.truncate_millis(),

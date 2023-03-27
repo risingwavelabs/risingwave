@@ -26,7 +26,7 @@ use crate::array::{
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
-use crate::types::interval::IntervalUnit;
+use crate::types::interval::Interval;
 use crate::types::{NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
@@ -97,18 +97,18 @@ fn read_naive_date_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateTime
         .map_err(Into::into)
 }
 
-pub fn read_interval_unit(cursor: &mut Cursor<&[u8]>) -> ArrayResult<IntervalUnit> {
+pub fn read_interval(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Interval> {
     let mut read = || {
         let months = cursor.read_i32::<BigEndian>()?;
         let days = cursor.read_i32::<BigEndian>()?;
         let usecs = cursor.read_i64::<BigEndian>()?;
 
-        Ok::<_, std::io::Error>(IntervalUnit::from_month_day_usec(months, days, usecs))
+        Ok::<_, std::io::Error>(Interval::from_month_day_usec(months, days, usecs))
     };
 
     match read() {
         Ok(iu) => Ok(iu),
-        Err(e) => bail!("Failed to read IntervalUnit from buffer: {}", e),
+        Err(e) => bail!("Failed to read Interval from buffer: {}", e),
     }
 }
 
@@ -145,7 +145,7 @@ macro_rules! read_one_value_array {
 }
 
 read_one_value_array! {
-    { IntervalUnit, IntervalArrayBuilder },
+    { Interval, IntervalArrayBuilder },
     { NaiveDate, NaiveDateArrayBuilder },
     { NaiveTime, NaiveTimeArrayBuilder },
     { NaiveDateTime, NaiveDateTimeArrayBuilder }

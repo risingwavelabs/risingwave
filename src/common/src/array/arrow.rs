@@ -343,12 +343,12 @@ impl FromIntoArrow for NaiveDateTimeWrapper {
     }
 }
 
-impl FromIntoArrow for IntervalUnit {
+impl FromIntoArrow for Interval {
     type ArrowType = i128;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
         let (months, days, ns) = arrow_array::types::IntervalMonthDayNanoType::to_parts(value);
-        IntervalUnit::from_month_day_usec(months, days, ns / 1000)
+        Interval::from_month_day_usec(months, days, ns / 1000)
     }
 
     fn into_arrow(self) -> Self::ArrowType {
@@ -514,7 +514,7 @@ impl From<&arrow_array::StructArray> for StructArray {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::interval::test_utils::IntervalUnitTestExt;
+    use crate::types::interval::test_utils::IntervalTestExt;
     use crate::{array, empty_array};
 
     #[test]
@@ -579,8 +579,8 @@ mod tests {
     fn interval() {
         let array = IntervalArray::from_iter([
             None,
-            Some(IntervalUnit::from_millis(123456789)),
-            Some(IntervalUnit::from_millis(-123456789)),
+            Some(Interval::from_millis(123456789)),
+            Some(Interval::from_millis(-123456789)),
         ]);
         let arrow = arrow_array::IntervalMonthDayNanoArray::from(&array);
         assert_eq!(IntervalArray::from(&arrow), array);

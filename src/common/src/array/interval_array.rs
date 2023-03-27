@@ -13,24 +13,24 @@
 // limitations under the License.
 
 use super::{PrimitiveArray, PrimitiveArrayBuilder};
-use crate::types::interval::IntervalUnit;
+use crate::types::interval::Interval;
 
-pub type IntervalArray = PrimitiveArray<IntervalUnit>;
-pub type IntervalArrayBuilder = PrimitiveArrayBuilder<IntervalUnit>;
+pub type IntervalArray = PrimitiveArray<Interval>;
+pub type IntervalArrayBuilder = PrimitiveArrayBuilder<Interval>;
 
 #[cfg(test)]
 mod tests {
     use super::IntervalArray;
-    use crate::array::interval_array::{IntervalArrayBuilder, IntervalUnit};
+    use crate::array::interval_array::{IntervalArrayBuilder, Interval};
     use crate::array::{Array, ArrayBuilder};
-    use crate::types::interval::test_utils::IntervalUnitTestExt;
+    use crate::types::interval::test_utils::IntervalTestExt;
 
     #[test]
     fn test_interval_array() {
         let cardinality = 5;
         let mut array_builder = IntervalArrayBuilder::new(cardinality);
         for _ in 0..cardinality {
-            let v = IntervalUnit::from_ymd(1, 0, 0);
+            let v = Interval::from_ymd(1, 0, 0);
             array_builder.append(Some(v));
         }
         let ret_arr = array_builder.finish();
@@ -38,7 +38,7 @@ mod tests {
             assert_eq!(v.get_months(), 12);
             assert_eq!(v.get_days(), 0);
         }
-        let ret_arr = IntervalArray::from_iter([Some(IntervalUnit::from_ymd(1, 0, 0)), None]);
+        let ret_arr = IntervalArray::from_iter([Some(Interval::from_ymd(1, 0, 0)), None]);
         let v = ret_arr.value_at(0).unwrap();
         assert_eq!(v.get_months(), 12);
         assert_eq!(v.get_days(), 0);

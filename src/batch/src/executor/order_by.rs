@@ -141,7 +141,7 @@ mod tests {
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
     use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
+        DataType, Interval, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
         F32, Scalar,
     };
     use risingwave_common::util::sort_util::OrderType;
@@ -464,9 +464,9 @@ mod tests {
                 None] },
                 column! { IntervalArray, [
                 None,
-                Some(IntervalUnit::from_month_day_usec(1, 2, 3)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
-                Some(IntervalUnit::from_month_day_usec(4, 5, 6)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
                 None] },
             ],
             5,
@@ -491,8 +491,8 @@ mod tests {
                 Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
                 Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
                 column! { IntervalArray, [
-                Some(IntervalUnit::from_month_day_usec(4, 5, 6)),
-                Some(IntervalUnit::from_month_day_usec(1, 2, 3)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
                 None,
                 None] },

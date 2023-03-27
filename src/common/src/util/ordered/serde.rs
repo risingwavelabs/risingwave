@@ -238,7 +238,7 @@ mod tests {
     fn test_encoding_data_size() {
         use std::mem::size_of;
 
-        use crate::types::interval::IntervalUnit;
+        use crate::types::interval::Interval;
         use crate::types::F64;
 
         let order_types = vec![OrderType::ascending()];
@@ -331,7 +331,7 @@ mod tests {
             {
                 // interval
                 let row = OwnedRow::new(vec![Some(ScalarImpl::Interval(
-                    interval::IntervalUnit::default(),
+                    interval::Interval::default(),
                 ))]);
                 let mut row_bytes = vec![];
                 serde.serialize(&row, &mut row_bytes);
@@ -341,7 +341,7 @@ mod tests {
                     &row_bytes[..],
                 )
                 .unwrap();
-                let data_size = size_of::<IntervalUnit>();
+                let data_size = size_of::<Interval>();
                 assert_eq!(16, data_size);
                 assert_eq!(1 + data_size, encoding_data_size);
             }

@@ -689,7 +689,7 @@ impl ArrayImpl {
             PbArrayType::Date => read_naive_date_array(array, cardinality)?,
             PbArrayType::Time => read_naive_time_array(array, cardinality)?,
             PbArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
-            PbArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
             }

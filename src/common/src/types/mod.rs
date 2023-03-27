@@ -410,7 +410,7 @@ impl DataType {
             // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
-            DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
+            DataType::Interval => ScalarImpl::Interval(Interval::MIN),
             DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
@@ -509,7 +509,7 @@ macro_rules! for_all_scalar_variants {
             { Utf8, utf8, Box<str>, &'scalar str },
             { Bool, bool, bool, bool },
             { Decimal, decimal, Decimal, Decimal  },
-            { Interval, interval, IntervalUnit, IntervalUnit },
+            { Interval, interval, Interval, Interval },
             { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
             { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
             { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
@@ -815,7 +815,7 @@ impl ScalarImpl {
                     .timestamp_micros(),
             ),
             DataType::Interval => Self::Interval(
-                IntervalUnit::from_sql(&Type::INTERVAL, bytes)
+                Interval::from_sql(&Type::INTERVAL, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
             DataType::Jsonb => {
@@ -903,7 +903,7 @@ impl ScalarImpl {
                     })?
                     .timestamp_micros(),
             ),
-            DataType::Interval => Self::Interval(IntervalUnit::from_str(str).map_err(|_| {
+            DataType::Interval => Self::Interval(Interval::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
@@ -1086,7 +1086,7 @@ impl ScalarImpl {
             Ty::Bytea => Self::Bytea(Box::<[u8]>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
-            Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
+            Ty::Interval => Self::Interval(Interval::deserialize(de)?),
             Ty::Time => Self::NaiveTime({
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
@@ -1288,7 +1288,7 @@ mod tests {
                 ),
                 DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
-                    ScalarImpl::Interval(IntervalUnit::from_month_day_usec(2, 3, 3333)),
+                    ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
                 DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
