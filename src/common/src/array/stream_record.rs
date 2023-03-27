@@ -146,9 +146,9 @@ mod tests {
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
-                " I
-                - 1
-                + 2"
+                "  I
+                U- 1
+                U+ 2"
             )
         );
     }
