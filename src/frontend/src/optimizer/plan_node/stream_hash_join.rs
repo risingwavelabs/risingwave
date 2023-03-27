@@ -20,7 +20,7 @@ use risingwave_common::catalog::{FieldDisplay, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
+use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbBandJoinCondition};
 
 use super::{
     ExprRewritable, LogicalJoin, PlanBase, PlanRef, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
@@ -52,6 +52,8 @@ pub struct StreamHashJoin {
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
     is_append_only: bool,
+
+    is_interval_join: bool,
 }
 
 impl StreamHashJoin {
@@ -71,15 +73,17 @@ impl StreamHashJoin {
 
         let mut inequality_pairs = vec![];
 
-        let watermark_columns = {
+        let (watermark_columns, is_interval_join) = {
             let l2i = logical.l2i_col_mapping();
             let r2i = logical.r2i_col_mapping();
 
+            let mut equal_condition_clean_state = false;
             let mut watermark_columns = FixedBitSet::with_capacity(logical.internal_column_num());
             for (left_key, right_key) in eq_join_predicate.eq_indexes() {
                 if logical.left().watermark_columns().contains(left_key)
                     && logical.right().watermark_columns().contains(right_key)
                 {
+                    equal_condition_clean_state = true;
                     if let Some(internal) = l2i.try_map(left_key) {
                         watermark_columns.insert(internal);
                     }
@@ -89,6 +93,8 @@ impl StreamHashJoin {
                 }
             }
             let (left_cols_num, original_inequality_pairs) = eq_join_predicate.inequality_pairs();
+            let mut band_condition_clean_left_state = false;
+            let mut band_condition_clean_right_state = false;
             for InequalityInputPair {
                 key_required_larger,
                 key_required_smaller,
@@ -119,8 +125,10 @@ impl StreamHashJoin {
                 }
 
                 let internal = if key_required_larger < key_required_smaller {
+                    band_condition_clean_left_state = true;
                     l2i.try_map(key_required_larger)
                 } else {
+                    band_condition_clean_right_state = true;
                     r2i.try_map(key_required_larger - left_cols_num)
                 };
                 let generate_watermark = if let Some(internal) = internal && !watermark_columns.contains(internal) {
@@ -138,7 +146,12 @@ impl StreamHashJoin {
                     },
                 ));
             }
-            logical.i2o_col_mapping().rewrite_bitset(&watermark_columns)
+            (
+                logical.i2o_col_mapping().rewrite_bitset(&watermark_columns),
+                !equal_condition_clean_state
+                    && band_condition_clean_left_state
+                    && band_condition_clean_right_state,
+            )
         };
 
         // TODO: derive from input
@@ -158,6 +171,7 @@ impl StreamHashJoin {
             eq_join_predicate,
             inequality_pairs,
             is_append_only: append_only,
+            is_interval_join,
         }
     }
 
@@ -241,6 +255,8 @@ impl fmt::Display for StreamHashJoin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = if self.is_append_only {
             f.debug_struct("StreamAppendOnlyHashJoin")
+        } else if self.is_interval_join {
+            f.debug_struct("StreamIntervalJoin")
         } else {
             f.debug_struct("StreamHashJoin")
         };
@@ -380,7 +396,7 @@ impl StreamNode for StreamHashJoin {
                             delta_expression,
                         },
                     )| {
-                        PbInequalityPair {
+                        PbBandJoinCondition {
                             key_required_larger: *key_required_larger as u32,
                             key_required_smaller: *key_required_smaller as u32,
                             generate_watermark: *generate_watermark,
