@@ -48,7 +48,6 @@ pub struct RemoteBuilderFactory<W: SstableWriterFactory, F: FilterBuilder> {
     pub remote_rpc_cost: Arc<AtomicU64>,
     pub filter_key_extractor: Arc<FilterKeyExtractorImpl>,
     pub sstable_writer_factory: W,
-    pub fill_high_priority_cache: bool,
     pub _phantom: PhantomData<F>,
 }
 
@@ -118,7 +117,6 @@ impl CompactionStatistics {
 pub struct TaskConfig {
     pub key_range: KeyRange,
     pub cache_policy: CachePolicy,
-    pub fill_high_priority_cache: bool,
     pub gc_delete_keys: bool,
     pub watermark: u64,
     /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats

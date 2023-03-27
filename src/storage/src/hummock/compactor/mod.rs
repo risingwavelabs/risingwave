@@ -778,7 +778,6 @@ impl Compactor {
             policy: self.task_config.cache_policy,
             remote_rpc_cost: self.get_id_time.clone(),
             filter_key_extractor,
-            fill_high_priority_cache: self.task_config.fill_high_priority_cache,
             sstable_writer_factory: writer_factory,
             _phantom: PhantomData,
         };

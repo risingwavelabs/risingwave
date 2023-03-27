@@ -54,7 +54,6 @@ public class SourceRequestHandler {
                                     startRequest.getSourceId(),
                                     startRequest.getStartOffset(),
                                     startRequest.getPropertiesMap());
-
                     ConnectorNodeMetrics.incActiveSourceConnections(
                             startRequest.getSourceType().toString(),
                             startRequest.getPropertiesMap().get(DbzConnectorConfig.HOST));

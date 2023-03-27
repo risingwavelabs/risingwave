@@ -58,7 +58,6 @@ public class DbzSourceHandler implements SourceHandler {
                             // wait a bit to avoid OOM
                             Thread.sleep(500);
                         }
-
                         ConnectorNodeMetrics.incSourceRowsReceived(
                                 config.getSourceType().toString(),
                                 String.valueOf(config.getSourceId()),

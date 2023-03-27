@@ -74,7 +74,7 @@ public class DbzConnectorConfig {
     public SourceTypeE getSourceType() {
         return sourceType;
     }
-    
+
     public Properties getResolvedDebeziumProps() {
         return resolvedDbzProps;
     }
@@ -122,9 +122,7 @@ public class DbzConnectorConfig {
         dbzProps.putAll(otherProps);
 
         this.sourceId = sourceId;
-
         this.sourceType = source;
-
         this.resolvedDbzProps = dbzProps;
     }
 
