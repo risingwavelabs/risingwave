@@ -15,6 +15,7 @@
 package com.risingwave.sourcenode;
 
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType;
 import com.risingwave.sourcenode.common.DbzConnectorConfig;
@@ -53,9 +54,16 @@ public class SourceRequestHandler {
                                     startRequest.getSourceId(),
                                     startRequest.getStartOffset(),
                                     startRequest.getPropertiesMap());
+
+                    ConnectorNodeMetrics.incActiveSourceConnections(
+                            startRequest.getSourceType().toString(),
+                            startRequest.getPropertiesMap().get(DbzConnectorConfig.HOST));
                     handler.startSource(
                             (ServerCallStreamObserver<ConnectorServiceProto.GetEventStreamResponse>)
                                     responseObserver);
+                    ConnectorNodeMetrics.decActiveSourceConnections(
+                            startRequest.getSourceType().toString(),
+                            startRequest.getPropertiesMap().get(DbzConnectorConfig.HOST));
                 } catch (Throwable t) {
                     LOG.error("failed to start source", t);
                     responseObserver.onError(t);

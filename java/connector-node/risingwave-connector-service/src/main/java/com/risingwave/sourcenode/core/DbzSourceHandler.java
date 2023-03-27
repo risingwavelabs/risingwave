@@ -15,6 +15,7 @@
 package com.risingwave.sourcenode.core;
 
 import com.risingwave.connector.api.source.SourceHandler;
+import com.risingwave.metrics.ConnectorNodeMetrics;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import com.risingwave.sourcenode.common.DbzConnectorConfig;
 import io.grpc.Context;
@@ -58,6 +59,10 @@ public class DbzSourceHandler implements SourceHandler {
                             Thread.sleep(500);
                         }
 
+                        ConnectorNodeMetrics.incSourceRowsReceived(
+                                config.getSourceType().toString(),
+                                String.valueOf(config.getSourceId()),
+                                resp.getEventsCount());
                         LOG.debug(
                                 "Engine#{}: emit one chunk {} events to network ",
                                 config.getSourceId(),
