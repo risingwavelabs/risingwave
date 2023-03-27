@@ -23,7 +23,7 @@ use byteorder::{BigEndian, NetworkEndian, ReadBytesExt, WriteBytesExt};
 use bytes::BytesMut;
 use num_traits::{CheckedAdd, CheckedNeg, CheckedSub, Zero};
 use postgres_types::{to_sql_checked, FromSql};
-use risingwave_pb::data::Interval as IntervalProto;
+use risingwave_pb::data::PbInterval;
 
 use super::ops::IsNegative;
 use super::to_binary::ToBinary;
@@ -701,9 +701,9 @@ impl crate::hash::HashKeySerDe<'_> for Interval {
 
 /// Duplicated logic only used by `HopWindow`. See #8452.
 #[expect(clippy::from_over_into)]
-impl Into<IntervalProto> for Interval {
-    fn into(self) -> IntervalProto {
-        IntervalProto {
+impl Into<PbInterval> for Interval {
+    fn into(self) -> PbInterval {
+        PbInterval {
             months: self.months,
             days: self.days,
             usecs: self.usecs,
@@ -711,8 +711,8 @@ impl Into<IntervalProto> for Interval {
     }
 }
 
-impl From<&'_ IntervalProto> for Interval {
-    fn from(p: &'_ IntervalProto) -> Self {
+impl From<&'_ PbInterval> for Interval {
+    fn from(p: &'_ PbInterval) -> Self {
         Self {
             months: p.months,
             days: p.days,
