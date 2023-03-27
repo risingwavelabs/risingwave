@@ -20,7 +20,7 @@ use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk::StreamChunkTestExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
+use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, TableId};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_storage::memory::MemoryStateStore;
@@ -35,20 +35,8 @@ use crate::executor::{
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
     vec![
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(0),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 0),
+        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
     ]
 }
 
@@ -152,20 +140,8 @@ async fn create_arrangement(
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Box<dyn Executor + Send> {
     let columns = vec![
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(1),
-            name: "join_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
-        ColumnDesc {
-            data_type: DataType::Int64,
-            column_id: ColumnId::new(2),
-            name: "rowid_column".to_string(),
-            field_descs: vec![],
-            type_name: "".to_string(),
-        },
+        ColumnDesc::new_atomic(DataType::Int64, "join_column", 1),
+        ColumnDesc::new_atomic(DataType::Int64, "rowid_column", 2),
     ];
 
     // Prepare source chunks.

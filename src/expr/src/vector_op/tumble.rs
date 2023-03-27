@@ -16,6 +16,7 @@ use num_traits::Zero;
 use risingwave_common::types::{
     IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
 };
+use risingwave_expr_macro::function;
 
 use crate::Result;
 
@@ -24,7 +25,7 @@ fn interval_unit_to_micro_second(t: IntervalUnit) -> i64 {
     t.get_months() as i64 * USECS_PER_MONTH + t.get_days() as i64 * USECS_PER_DAY + t.get_usecs()
 }
 
-#[inline(always)]
+#[function("tumble_start(date, interval) -> timestamp")]
 pub fn tumble_start_date(
     timestamp: NaiveDateWrapper,
     window_size: IntervalUnit,
@@ -32,7 +33,7 @@ pub fn tumble_start_date(
     tumble_start_date_time(timestamp.into(), window_size)
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamp, interval) -> timestamp")]
 pub fn tumble_start_date_time(
     timestamp: NaiveDateTimeWrapper,
     window_size: IntervalUnit,
@@ -45,7 +46,7 @@ pub fn tumble_start_date_time(
     ))
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamptz, interval) -> timestamptz")]
 pub fn tumble_start_timestamptz(
     timestamp_micro_second: i64,
     window_size: IntervalUnit,
@@ -61,7 +62,7 @@ fn get_window_start(timestamp_micro_second: i64, window_size: IntervalUnit) -> R
     get_window_start_with_offset(timestamp_micro_second, window_size, IntervalUnit::zero())
 }
 
-#[inline(always)]
+#[function("tumble_start(date, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date(
     timestamp_date: NaiveDateWrapper,
     window_size: IntervalUnit,
@@ -70,7 +71,7 @@ pub fn tumble_start_offset_date(
     tumble_start_offset_date_time(timestamp_date.into(), window_size, offset)
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamp, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date_time(
     time: NaiveDateTimeWrapper,
     window_size: IntervalUnit,
@@ -104,7 +105,7 @@ fn get_window_start_with_offset(
     }
 }
 
-#[inline(always)]
+#[function("tumble_start(timestamptz, interval, interval) -> timestamptz")]
 pub fn tumble_start_offset_timestamptz(
     timestamp_micro_second: i64,
     window_size: IntervalUnit,

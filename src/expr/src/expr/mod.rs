@@ -36,7 +36,6 @@ mod expr_array_concat;
 mod expr_array_distinct;
 mod expr_array_length;
 mod expr_array_to_string;
-mod expr_binary_bytes;
 mod expr_binary_nonnull;
 mod expr_binary_nullable;
 mod expr_case;
@@ -49,11 +48,9 @@ mod expr_is_null;
 mod expr_jsonb_access;
 mod expr_literal;
 mod expr_nested_construct;
-mod expr_quaternary_bytes;
+mod expr_now;
 pub mod expr_regexp;
 mod expr_some_all;
-mod expr_ternary;
-mod expr_ternary_bytes;
 mod expr_to_char_const_tmpl;
 mod expr_to_timestamp_const_tmpl;
 mod expr_udf;
@@ -63,8 +60,8 @@ mod expr_vnode;
 mod agg;
 mod build_expr_from_prost;
 pub(crate) mod data_types;
-mod template;
-mod template_fast;
+pub(crate) mod template;
+pub(crate) mod template_fast;
 pub mod test_utils;
 
 use std::sync::Arc;
@@ -75,11 +72,9 @@ use risingwave_common::types::{DataType, Datum};
 use static_assertions::const_assert;
 
 pub use self::agg::AggKind;
-pub use self::build_expr_from_prost::build_from_prost;
-pub use self::expr_binary_nonnull::new_binary_expr;
+pub use self::build_expr_from_prost::{build, build_from_prost};
 pub use self::expr_input_ref::InputRefExpression;
 pub use self::expr_literal::LiteralExpression;
-pub use self::expr_unary::new_unary_expr;
 use super::{ExprError, Result};
 
 /// Instance of an expression
@@ -107,6 +102,11 @@ pub trait Expression: std::fmt::Debug + Sync + Send {
 
     /// Evaluate the expression in row-based execution.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum>;
+
+    /// Evaluate if the expression is constant.
+    fn eval_const(&self) -> Result<Datum> {
+        Err(ExprError::NotConstant)
+    }
 
     /// Wrap the expression in a Box.
     fn boxed(self) -> BoxedExpression

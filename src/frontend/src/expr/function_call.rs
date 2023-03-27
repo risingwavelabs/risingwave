@@ -223,18 +223,15 @@ impl FunctionCall {
         let expr_type = func_types.remove(0);
         match expr_type {
             ExprType::Some | ExprType::All => {
-                let ensure_return_boolean = |return_type: &DataType| {
-                    if &DataType::Boolean == return_type {
-                        Ok(())
-                    } else {
-                        Err(ErrorCode::BindError(
-                            "op ANY/ALL (array) requires operator to yield boolean".to_string(),
-                        ))
-                    }
-                };
-
                 let return_type = infer_some_all(func_types, &mut inputs)?;
-                ensure_return_boolean(&return_type)?;
+
+                if return_type != DataType::Boolean {
+                    return Err(ErrorCode::BindError(format!(
+                        "op ANY/ALL (array) requires operator to yield boolean, but got {:?}",
+                        return_type
+                    ))
+                    .into());
+                }
 
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }

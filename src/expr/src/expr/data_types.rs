@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// We may remove the entire file once procedual macros are ready for aggregations.
+#![allow(unused_imports)]
+
 //! Macros containing all necessary information for a logical type.
 //!
 //! Each type macro will call the `$macro` with multiple parameters:

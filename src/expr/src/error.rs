@@ -66,6 +66,9 @@ pub enum ExprError {
 
     #[error("UDF error: {0}")]
     Udf(#[from] risingwave_udf::Error),
+
+    #[error("not a constant")]
+    NotConstant,
 }
 
 impl From<ExprError> for RwError {
