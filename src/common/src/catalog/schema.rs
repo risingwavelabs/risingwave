@@ -19,7 +19,9 @@ use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
+use crate::types::struct_type::StructType;
 use crate::types::DataType;
+use crate::util::iter_util::ZipEqFast;
 
 /// The field in the schema of the executor's return data
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -248,6 +250,18 @@ impl FromIterator<Field> for Schema {
         Schema {
             fields: iter.into_iter().collect::<Vec<_>>(),
         }
+    }
+}
+
+impl From<&StructType> for Schema {
+    fn from(t: &StructType) -> Self {
+        Schema::new(
+            t.fields
+                .iter()
+                .zip_eq_fast(t.field_names.iter())
+                .map(|(d, s)| Field::with_name(d.clone(), s))
+                .collect(),
+        )
     }
 }
 

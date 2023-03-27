@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
 use risingwave_pb::data::PbDataChunk;
 
-use super::{ArrayResult, Vis};
+use super::{Array, ArrayResult, StructArray, Vis};
 use crate::array::column::Column;
 use crate::array::data_chunk_iter::RowRef;
 use crate::array::ArrayBuilderImpl;
@@ -494,6 +494,16 @@ impl fmt::Debug for DataChunk {
             self.capacity(),
             self.to_pretty_string()
         )
+    }
+}
+
+impl From<StructArray> for DataChunk {
+    fn from(array: StructArray) -> Self {
+        let columns = array.fields().map(|array| array.clone().into()).collect();
+        Self {
+            columns,
+            vis2: Vis::Compact(array.len()),
+        }
     }
 }
 
