@@ -29,6 +29,7 @@ use crate::types::to_text::ToText;
 use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
 use crate::util::memcmp_encoding;
+use crate::util::value_encoding::estimate_serialize_datum_size;
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
@@ -393,6 +394,14 @@ impl<'a> StructRef<'a> {
             for datum_ref in it {
                 hash_datum(datum_ref, state);
             }
+        })
+    }
+
+    pub fn estimate_serialize_size_inner(&self) -> usize {
+        iter_fields_ref!(self, it, {
+            it.fold(0, |acc, datum_ref| {
+                acc + estimate_serialize_datum_size(datum_ref)
+            })
         })
     }
 }
