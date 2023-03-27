@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use risingwave_common::buffer::Bitmap;
+use itertools::Itertools;
+use risingwave_common::buffer::{Bitmap, BitmapIter};
 
 fn bench_bitmap(c: &mut Criterion) {
     const CHUNK_SIZE: usize = 1024;
@@ -28,5 +29,33 @@ fn bench_bitmap(c: &mut Criterion) {
     c.bench_function("not", |b| b.iter(|| !&x));
 }
 
-criterion_group!(benches, bench_bitmap);
+/// Bench ~10 million records
+fn bench_bitmap_iter(c: &mut Criterion) {
+    const CHUNK_SIZE: usize = 1024;
+    const N_CHUNKS: usize = 10_000;
+    fn make_iterators(bitmaps: &[Bitmap]) -> Vec<BitmapIter> {
+        bitmaps.iter().map(|bitmap| bitmap.iter()).collect_vec()
+    }
+    fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
+        let bitmaps = vec![bitmap; N_CHUNKS];
+        let iters = || make_iterators(&bitmaps);
+        let result= || vec![true; CHUNK_SIZE];
+        c.bench_function(bench_id, |b| b.iter(|| {
+            let mut result = result();
+            for iter in iters() {
+                for (i, bit_flag) in iter.enumerate() {
+                    result[i] = bit_flag;
+                }
+            }
+        }));
+    }
+    let zeros = Bitmap::zeros(CHUNK_SIZE);
+    bench_bitmap_iter("zeros_iter", zeros, c);
+    let ones = Bitmap::ones(CHUNK_SIZE);
+    bench_bitmap_iter("ones_iter", ones, c);
+
+
+}
+
+criterion_group!(benches, bench_bitmap, bench_bitmap_iter);
 criterion_main!(benches);
