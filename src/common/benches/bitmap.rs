@@ -39,22 +39,22 @@ fn bench_bitmap_iter(c: &mut Criterion) {
     fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
         let bitmaps = vec![bitmap; N_CHUNKS];
         let iters = || make_iterators(&bitmaps);
-        let result= || vec![true; CHUNK_SIZE];
-        c.bench_function(bench_id, |b| b.iter(|| {
-            let mut result = result();
-            for iter in iters() {
-                for (i, bit_flag) in iter.enumerate() {
-                    result[i] = bit_flag;
+        let result = || vec![true; CHUNK_SIZE];
+        c.bench_function(bench_id, |b| {
+            b.iter(|| {
+                let mut result = result();
+                for iter in iters() {
+                    for (i, bit_flag) in iter.enumerate() {
+                        result[i] = bit_flag;
+                    }
                 }
-            }
-        }));
+            })
+        });
     }
     let zeros = Bitmap::zeros(CHUNK_SIZE);
     bench_bitmap_iter("zeros_iter", zeros, c);
     let ones = Bitmap::ones(CHUNK_SIZE);
     bench_bitmap_iter("ones_iter", ones, c);
-
-
 }
 
 criterion_group!(benches, bench_bitmap, bench_bitmap_iter);
