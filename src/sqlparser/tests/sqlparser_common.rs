@@ -3514,7 +3514,7 @@ fn parse_rollback() {
 
 #[test]
 fn parse_create_index() {
-    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name,age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
+    let sql = "CREATE UNIQUE INDEX IF NOT EXISTS idx_name ON test(name, age DESC) INCLUDE(other) DISTRIBUTED BY(name)";
     let indexed_columns = vec![
         OrderByExpr {
             expr: Expr::Identifier(Ident::new_unchecked("name")),

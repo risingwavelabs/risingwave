@@ -77,6 +77,27 @@ pub enum AlterTableOperation {
     },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterIndexOperation {
+    RenameIndex { index_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterViewOperation {
+    RenameView { view_name: ObjectName },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "visitor", derive(Visit, VisitMut))]
+pub enum AlterSinkOperation {
+    RenameSink { sink_name: ObjectName },
+}
+
 impl fmt::Display for AlterTableOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -128,6 +149,36 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {}", new_owner_name)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterIndexOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterIndexOperation::RenameIndex { index_name } => {
+                write!(f, "RENAME TO {index_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterViewOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterViewOperation::RenameView { view_name } => {
+                write!(f, "RENAME TO {view_name}")
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterSinkOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterSinkOperation::RenameSink { sink_name } => {
+                write!(f, "RENAME TO {sink_name}")
             }
         }
     }
