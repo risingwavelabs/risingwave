@@ -285,7 +285,7 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::NaiveDateWrapper;
+    use risingwave_common::types::Date;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_expr::expr::build_from_pretty;
     use risingwave_storage::memory::MemoryStateStore;
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(
             watermark.into_watermark().unwrap(),
             watermark!(ScalarImpl::Timestamp(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
+                Date::from_ymd_uncheck(2022, 11, 7).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -443,7 +443,7 @@ mod tests {
         assert_eq!(
             watermark.into_watermark().unwrap(),
             watermark!(ScalarImpl::Timestamp(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -467,7 +467,7 @@ mod tests {
         assert_eq!(
             watermark.into_watermark().unwrap(),
             watermark!(ScalarImpl::Timestamp(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
+                Date::from_ymd_uncheck(2022, 11, 9).and_hms_uncheck(0, 0, 0)
             ))
         );
 
@@ -486,7 +486,7 @@ mod tests {
         assert_eq!(
             watermark.into_watermark().unwrap(),
             watermark!(ScalarImpl::Timestamp(
-                NaiveDateWrapper::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
+                Date::from_ymd_uncheck(2022, 11, 13).and_hms_uncheck(0, 0, 0)
             ))
         );
     }

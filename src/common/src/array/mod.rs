@@ -45,8 +45,8 @@ use std::sync::Arc;
 pub use bool_array::{BoolArray, BoolArrayBuilder};
 pub use bytes_array::*;
 pub use chrono_array::{
-    NaiveDateArray, NaiveDateArrayBuilder, TimestampArray, TimestampArrayBuilder,
-    NaiveTimeArray, NaiveTimeArrayBuilder,
+    DateArray, DateArrayBuilder, TimestampArray, TimestampArrayBuilder,
+    TimeArray, TimeArrayBuilder,
 };
 pub use column_proto_readers::*;
 pub use data_chunk::{DataChunk, DataChunkTestExt};
@@ -344,9 +344,9 @@ macro_rules! for_all_variants {
             { Bool, bool, BoolArray, BoolArrayBuilder },
             { Decimal, decimal, DecimalArray, DecimalArrayBuilder },
             { Interval, interval, IntervalArray, IntervalArrayBuilder },
-            { NaiveDate, naivedate, NaiveDateArray, NaiveDateArrayBuilder },
+            { Date, naivedate, DateArray, DateArrayBuilder },
             { Timestamp, timestamp, TimestampArray, TimestampArrayBuilder },
-            { NaiveTime, naivetime, NaiveTimeArray, NaiveTimeArrayBuilder },
+            { Time, naivetime, TimeArray, TimeArrayBuilder },
             { Jsonb, jsonb, JsonbArray, JsonbArrayBuilder },
             { Serial, serial, SerialArray, SerialArrayBuilder },
             { Struct, struct, StructArray, StructArrayBuilder },
@@ -686,8 +686,8 @@ impl ArrayImpl {
             PbArrayType::Decimal => {
                 read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
-            PbArrayType::Date => read_naive_date_array(array, cardinality)?,
-            PbArrayType::Time => read_naive_time_array(array, cardinality)?,
+            PbArrayType::Date => read_date_array(array, cardinality)?,
+            PbArrayType::Time => read_time_array(array, cardinality)?,
             PbArrayType::Timestamp => read_timestamp_array(array, cardinality)?,
             PbArrayType::Interval => read_interval_array(array, cardinality)?,
             PbArrayType::Jsonb => {

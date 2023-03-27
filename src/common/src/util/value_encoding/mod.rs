@@ -29,8 +29,8 @@ use crate::catalog::ColumnId;
 use crate::row::{Row, RowDeserializer as BasicDeserializer};
 use crate::types::struct_type::StructType;
 use crate::types::{
-    DataType, Datum, Decimal, Interval, Timestamp, NaiveDateWrapper,
-    NaiveTimeWrapper, F32, F64, ScalarImpl, ScalarRefImpl, ToDatumRef,
+    DataType, Datum, Decimal, Interval, Timestamp, Date,
+    Time, F32, F64, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
 
 pub mod error;
@@ -220,11 +220,11 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Bool(v) => buf.put_u8(v as u8),
         ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
-        ScalarRefImpl::NaiveDate(v) => serialize_naivedate(v.0.num_days_from_ce(), buf),
+        ScalarRefImpl::Date(v) => serialize_naivedate(v.0.num_days_from_ce(), buf),
         ScalarRefImpl::Timestamp(v) => {
             serialize_timestamp(v.0.timestamp(), v.0.timestamp_subsec_nanos(), buf)
         }
-        ScalarRefImpl::NaiveTime(v) => {
+        ScalarRefImpl::Time(v) => {
             serialize_naivetime(v.0.num_seconds_from_midnight(), v.0.nanosecond(), buf)
         }
         ScalarRefImpl::Jsonb(v) => serialize_str(&v.value_serialize(), buf),
@@ -348,10 +348,10 @@ fn deserialize_value(ty: &DataType, data: &mut impl Buf) -> Result<ScalarImpl> {
         DataType::Boolean => ScalarImpl::Bool(deserialize_bool(data)?),
         DataType::Decimal => ScalarImpl::Decimal(deserialize_decimal(data)?),
         DataType::Interval => ScalarImpl::Interval(deserialize_interval(data)?),
-        DataType::Time => ScalarImpl::NaiveTime(deserialize_naivetime(data)?),
+        DataType::Time => ScalarImpl::Time(deserialize_naivetime(data)?),
         DataType::Timestamp => ScalarImpl::Timestamp(deserialize_timestamp(data)?),
         DataType::Timestamptz => ScalarImpl::Int64(data.get_i64_le()),
-        DataType::Date => ScalarImpl::NaiveDate(deserialize_naivedate(data)?),
+        DataType::Date => ScalarImpl::Date(deserialize_naivedate(data)?),
         DataType::Jsonb => ScalarImpl::Jsonb(
             JsonbVal::value_deserialize(&deserialize_bytea(data))
                 .ok_or(ValueEncodingError::InvalidJsonbEncoding)?,
@@ -414,11 +414,11 @@ fn deserialize_interval(data: &mut impl Buf) -> Result<Interval> {
     Ok(Interval::from_month_day_usec(months, days, usecs))
 }
 
-fn deserialize_naivetime(data: &mut impl Buf) -> Result<NaiveTimeWrapper> {
+fn deserialize_naivetime(data: &mut impl Buf) -> Result<Time> {
     let secs = data.get_u32_le();
     let nano = data.get_u32_le();
-    NaiveTimeWrapper::with_secs_nano(secs, nano)
-        .map_err(|_e| ValueEncodingError::InvalidNaiveTimeEncoding(secs, nano))
+    Time::with_secs_nano(secs, nano)
+        .map_err(|_e| ValueEncodingError::InvalidTimeEncoding(secs, nano))
 }
 
 fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
@@ -428,10 +428,10 @@ fn deserialize_timestamp(data: &mut impl Buf) -> Result<Timestamp> {
         .map_err(|_e| ValueEncodingError::InvalidTimestampEncoding(secs, nsecs))
 }
 
-fn deserialize_naivedate(data: &mut impl Buf) -> Result<NaiveDateWrapper> {
+fn deserialize_naivedate(data: &mut impl Buf) -> Result<Date> {
     let days = data.get_i32_le();
-    NaiveDateWrapper::with_days(days)
-        .map_err(|_e| ValueEncodingError::InvalidNaiveDateEncoding(days))
+    Date::with_days(days)
+        .map_err(|_e| ValueEncodingError::InvalidDateEncoding(days))
 }
 
 fn deserialize_decimal(data: &mut impl Buf) -> Result<Decimal> {

@@ -14,7 +14,7 @@
 
 use num_traits::Zero;
 use risingwave_common::types::{
-    Interval, Timestamp, NaiveDateWrapper, USECS_PER_DAY, USECS_PER_MONTH,
+    Interval, Timestamp, Date, USECS_PER_DAY, USECS_PER_MONTH,
 };
 use risingwave_expr_macro::function;
 
@@ -27,7 +27,7 @@ fn interval_to_micro_second(t: Interval) -> i64 {
 
 #[function("tumble_start(date, interval) -> timestamp")]
 pub fn tumble_start_date(
-    timestamp: NaiveDateWrapper,
+    timestamp: Date,
     window_size: Interval,
 ) -> Result<Timestamp> {
     tumble_start_date_time(timestamp.into(), window_size)
@@ -64,7 +64,7 @@ fn get_window_start(timestamp_micro_second: i64, window_size: Interval) -> Resul
 
 #[function("tumble_start(date, interval, interval) -> timestamp")]
 pub fn tumble_start_offset_date(
-    timestamp_date: NaiveDateWrapper,
+    timestamp_date: Date,
     window_size: Interval,
     offset: Interval,
 ) -> Result<Timestamp> {
@@ -118,7 +118,7 @@ pub fn tumble_start_offset_timestamptz(
 mod tests {
     use chrono::{Datelike, Timelike};
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Interval, NaiveDateWrapper};
+    use risingwave_common::types::{Interval, Date};
 
     use super::tumble_start_offset_date_time;
     use crate::vector_op::tumble::{
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn test_tumble_start_date_time() {
-        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
+        let dt = Date::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let interval = Interval::from_minutes(30);
         let w = tumble_start_date_time(dt, interval).unwrap().0;
         assert_eq!(w.year(), 2022);
@@ -140,7 +140,7 @@ mod tests {
 
     #[test]
     fn test_tumble_start_offset_date_time() {
-        let dt = NaiveDateWrapper::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
+        let dt = Date::from_ymd_uncheck(2022, 2, 22).and_hms_uncheck(22, 22, 22);
         let window_size = 30;
         for offset in 0..window_size {
             for coefficient in 0..5 {

@@ -18,7 +18,7 @@ use risingwave_common::array::column::Column;
 use risingwave_common::array::serial_array::SerialArray;
 use risingwave_common::array::{
     ArrayBuilderImpl, BoolArray, DataChunk, DecimalArray, F32Array, F64Array, I16Array, I32Array,
-    I64Array, IntervalArray, NaiveDateArray, TimestampArray, NaiveTimeArray, Utf8Array,
+    I64Array, IntervalArray, DateArray, TimestampArray, TimeArray, Utf8Array,
 };
 use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
 use risingwave_common::test_utils::rand_array::seed_rand_array_ref;
@@ -151,9 +151,9 @@ fn gen_chunk(data_types: &[DataType], size: usize, seed: u64, null_ratio: f64) -
             DataType::Float32 => seed_rand_array_ref::<F32Array>(size, seed, null_ratio),
             DataType::Float64 => seed_rand_array_ref::<F64Array>(size, seed, null_ratio),
             DataType::Decimal => seed_rand_array_ref::<DecimalArray>(size, seed, null_ratio),
-            DataType::Date => seed_rand_array_ref::<NaiveDateArray>(size, seed, null_ratio),
+            DataType::Date => seed_rand_array_ref::<DateArray>(size, seed, null_ratio),
             DataType::Varchar => seed_rand_array_ref::<Utf8Array>(size, seed, null_ratio),
-            DataType::Time => seed_rand_array_ref::<NaiveTimeArray>(size, seed, null_ratio),
+            DataType::Time => seed_rand_array_ref::<TimeArray>(size, seed, null_ratio),
             DataType::Serial => seed_rand_array_ref::<SerialArray>(size, seed, null_ratio),
             DataType::Timestamp => {
                 seed_rand_array_ref::<TimestampArray>(size, seed, null_ratio)

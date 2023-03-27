@@ -25,8 +25,8 @@ pub use foldable::*;
 use risingwave_common::array::stream_chunk::Ops;
 use risingwave_common::array::{
     Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, BoolArray, BytesArray, DecimalArray,
-    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, NaiveDateArray,
-    TimestampArray, NaiveTimeArray, StructArray, Utf8Array,
+    F32Array, F64Array, I16Array, I32Array, I64Array, IntervalArray, ListArray, DateArray,
+    TimestampArray, TimeArray, StructArray, Utf8Array,
 };
 use risingwave_common::buffer::Bitmap;
 use risingwave_common::types::{DataType, Datum};
@@ -164,14 +164,14 @@ pub fn create_streaming_agg_impl(
                     (Count, boolean, int64, StreamingCountAgg::<BoolArray>),
                     (Count, varchar, int64, StreamingCountAgg::<Utf8Array>),
                     (Count, interval, int64, StreamingCountAgg::<IntervalArray>),
-                    (Count, date, int64, StreamingCountAgg::<NaiveDateArray>),
+                    (Count, date, int64, StreamingCountAgg::<DateArray>),
                     (
                         Count,
                         timestamp,
                         int64,
                         StreamingCountAgg::<TimestampArray>
                     ),
-                    (Count, time, int64, StreamingCountAgg::<NaiveTimeArray>),
+                    (Count, time, int64, StreamingCountAgg::<TimeArray>),
                     (Count, struct_type, int64, StreamingCountAgg::<StructArray>),
                     (Count, list, int64, StreamingCountAgg::<ListArray>),
                     // Sum0
@@ -211,8 +211,8 @@ pub fn create_streaming_agg_impl(
                     (Min, float32, float32, StreamingMinAgg::<F32Array>),
                     (Min, float64, float64, StreamingMinAgg::<F64Array>),
                     (Min, interval, interval, StreamingMinAgg::<IntervalArray>),
-                    (Min, time, time, StreamingMinAgg::<NaiveTimeArray>),
-                    (Min, date, date, StreamingMinAgg::<NaiveDateArray>),
+                    (Min, time, time, StreamingMinAgg::<TimeArray>),
+                    (Min, date, date, StreamingMinAgg::<DateArray>),
                     (
                         Min,
                         timestamp,
@@ -230,8 +230,8 @@ pub fn create_streaming_agg_impl(
                     (Max, float32, float32, StreamingMaxAgg::<F32Array>),
                     (Max, float64, float64, StreamingMaxAgg::<F64Array>),
                     (Max, interval, interval, StreamingMaxAgg::<IntervalArray>),
-                    (Max, time, time, StreamingMaxAgg::<NaiveTimeArray>),
-                    (Max, date, date, StreamingMaxAgg::<NaiveDateArray>),
+                    (Max, time, time, StreamingMaxAgg::<TimeArray>),
+                    (Max, date, date, StreamingMaxAgg::<DateArray>),
                     (
                         Max,
                         timestamp,

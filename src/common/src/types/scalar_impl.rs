@@ -203,20 +203,20 @@ impl<'a> ScalarRef<'a> for Interval {
     }
 }
 
-/// Implement `Scalar` for `NaiveDateWrapper`.
-impl Scalar for NaiveDateWrapper {
-    type ScalarRefType<'a> = NaiveDateWrapper;
+/// Implement `Scalar` for `Date`.
+impl Scalar for Date {
+    type ScalarRefType<'a> = Date;
 
-    fn as_scalar_ref(&self) -> NaiveDateWrapper {
+    fn as_scalar_ref(&self) -> Date {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `NaiveDateWrapper`.
-impl<'a> ScalarRef<'a> for NaiveDateWrapper {
-    type ScalarType = NaiveDateWrapper;
+/// Implement `ScalarRef` for `Date`.
+impl<'a> ScalarRef<'a> for Date {
+    type ScalarType = Date;
 
-    fn to_owned_scalar(&self) -> NaiveDateWrapper {
+    fn to_owned_scalar(&self) -> Date {
         *self
     }
 
@@ -247,20 +247,20 @@ impl<'a> ScalarRef<'a> for Timestamp {
     }
 }
 
-/// Implement `Scalar` for `NaiveTimeWrapper`.
-impl Scalar for NaiveTimeWrapper {
-    type ScalarRefType<'a> = NaiveTimeWrapper;
+/// Implement `Scalar` for `Time`.
+impl Scalar for Time {
+    type ScalarRefType<'a> = Time;
 
-    fn as_scalar_ref(&self) -> NaiveTimeWrapper {
+    fn as_scalar_ref(&self) -> Time {
         *self
     }
 }
 
-/// Implement `ScalarRef` for `NaiveTimeWrapper`.
-impl<'a> ScalarRef<'a> for NaiveTimeWrapper {
-    type ScalarType = NaiveTimeWrapper;
+/// Implement `ScalarRef` for `Time`.
+impl<'a> ScalarRef<'a> for Time {
+    type ScalarType = Time;
 
-    fn to_owned_scalar(&self) -> NaiveTimeWrapper {
+    fn to_owned_scalar(&self) -> Time {
         *self
     }
 

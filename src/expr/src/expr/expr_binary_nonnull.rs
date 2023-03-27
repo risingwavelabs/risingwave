@@ -17,7 +17,7 @@ mod tests {
     use risingwave_common::array::interval_array::IntervalArray;
     use risingwave_common::array::*;
     use risingwave_common::types::test_utils::IntervalTestExt;
-    use risingwave_common::types::{Decimal, Interval, NaiveDateWrapper, Scalar};
+    use risingwave_common::types::{Decimal, Interval, Date, Scalar};
     use risingwave_pb::expr::expr_node::Type;
 
     use super::super::*;
@@ -125,9 +125,9 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(NaiveDateWrapper, Interval) -> <A as Array>::OwnedItem,
+        F: Fn(Date, Interval) -> <A as Array>::OwnedItem,
     {
-        let mut lhs = Vec::<Option<NaiveDateWrapper>>::new();
+        let mut lhs = Vec::<Option<Date>>::new();
         let mut rhs = Vec::<Option<Interval>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
@@ -137,15 +137,15 @@ mod tests {
                 target.push(None);
             } else {
                 rhs.push(Some(Interval::from_ymd(0, i, i)));
-                lhs.push(Some(NaiveDateWrapper::from_num_days_from_ce_uncheck(i)));
+                lhs.push(Some(Date::from_num_days_from_ce_uncheck(i)));
                 target.push(Some(f(
-                    NaiveDateWrapper::from_num_days_from_ce_uncheck(i),
+                    Date::from_num_days_from_ce_uncheck(i),
                     Interval::from_ymd(0, i, i),
                 )));
             }
         }
 
-        let col1 = NaiveDateArray::from_iter(&lhs).into();
+        let col1 = DateArray::from_iter(&lhs).into();
         let col2 = IntervalArray::from_iter(&rhs).into();
         let data_chunk = DataChunk::new(vec![col1, col2], 100);
         let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date $1:interval)"));

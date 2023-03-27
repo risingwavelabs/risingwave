@@ -16,7 +16,7 @@ use anyhow::{anyhow, Result};
 use num_traits::FromPrimitive;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::types::{
-    DataType, Datum, Decimal, NaiveDateWrapper, NaiveTimeWrapper, ScalarImpl,
+    DataType, Datum, Decimal, Date, Time, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::vector_op::cast::{
@@ -65,14 +65,14 @@ fn do_parse_simd_json_value(dtype: &DataType, v: &BorrowedValue<'_>) -> Result<S
         DataType::Date => match v {
             BorrowedValue::String(s) => str_to_date(s)?.into(),
             BorrowedValue::Static(_) => {
-                NaiveDateWrapper::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
+                Date::with_days_since_unix_epoch(ensure_i32!(v, i32))?.into()
             }
             _ => anyhow::bail!("expect date, but found {v}"),
         },
         // debezium converts time to i64 for mysql and postgres
         DataType::Time => match v {
             BorrowedValue::String(s) => str_to_time(s)?.into(),
-            BorrowedValue::Static(_) => NaiveTimeWrapper::with_milli(
+            BorrowedValue::Static(_) => Time::with_milli(
                 ensure_i64!(v, i64)
                     .try_into()
                     .map_err(|_| anyhow!("cannot cast i64 to time, value out of range"))?,

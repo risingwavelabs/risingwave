@@ -300,7 +300,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, Interval, NaiveDateWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, Interval, Date, ScalarImpl};
     use url::Url;
 
     use super::{
@@ -415,8 +415,8 @@ mod test {
                     assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
                 }
                 Value::Date(days) => {
-                    let date = Some(ScalarImpl::NaiveDate(
-                        NaiveDateWrapper::with_days(days + unix_epoch_days()).unwrap(),
+                    let date = Some(ScalarImpl::Date(
+                        Date::with_days(days + unix_epoch_days()).unwrap(),
                     ));
                     assert_eq!(row[i], date);
                 }
@@ -470,21 +470,21 @@ mod test {
 
             Schema::Date => {
                 let original_date =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                    Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let naive_date =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                    Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
                 Some(Value::Date(num_days))
             }
             Schema::TimestampMillis => {
                 let datetime =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                    Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let timestamp_mills = Value::TimestampMillis(datetime.0.timestamp() * 1_000);
                 Some(timestamp_mills)
             }
             Schema::TimestampMicros => {
                 let datetime =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                    Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let timestamp_micros = Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
                 Some(timestamp_micros)
             }

@@ -27,7 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
-    DataType, Decimal, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper,
+    DataType, Decimal, Interval, Timestamp, Date, Time,
     F32, F64, ScalarImpl,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -58,13 +58,13 @@ const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected forma
 const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[function("cast(varchar) -> date")]
-pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
-    Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
+pub fn str_to_date(elem: &str) -> Result<Date> {
+    Ok(Date::new(parse_naive_date(elem)?))
 }
 
 #[function("cast(varchar) -> time")]
-pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
-    Ok(NaiveTimeWrapper::new(parse_naive_time(elem)?))
+pub fn str_to_time(elem: &str) -> Result<Time> {
+    Ok(Time::new(parse_naive_time(elem)?))
 }
 
 #[function("cast(varchar) -> timestamp")]
@@ -75,7 +75,7 @@ pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
 #[inline]
 fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     if let Ok(res) = SpeedDateTime::parse_str(s) {
-        Ok(NaiveDateWrapper::from_ymd_uncheck(
+        Ok(Date::from_ymd_uncheck(
             res.date.year as i32,
             res.date.month as u32,
             res.date.day as u32,
@@ -91,7 +91,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         let res = SpeedDate::parse_str(s)
             .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()))?;
         Ok(
-            NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+            Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
                 .0,
         )
@@ -145,14 +145,14 @@ pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
     let res =
         SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE.into()))?;
-    Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
+    Ok(Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
     let res =
         SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()))?;
-    Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
+    Ok(Time::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
@@ -372,23 +372,23 @@ define_jsonb_to_number! { f64, F64, "cast(jsonb) -> float64" }
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[function("cast(timestamp) -> date")]
-pub fn timestamp_to_date(elem: Timestamp) -> NaiveDateWrapper {
-    NaiveDateWrapper(elem.0.date())
+pub fn timestamp_to_date(elem: Timestamp) -> Date {
+    Date(elem.0.date())
 }
 
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 #[function("cast(timestamp) -> time")]
-pub fn timestamp_to_time(elem: Timestamp) -> NaiveTimeWrapper {
-    NaiveTimeWrapper(elem.0.time())
+pub fn timestamp_to_time(elem: Timestamp) -> Time {
+    Time(elem.0.time())
 }
 
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
-pub fn interval_to_time(elem: Interval) -> NaiveTimeWrapper {
+pub fn interval_to_time(elem: Interval) -> Time {
     let usecs = elem.get_usecs_of_day();
     let secs = (usecs / 1_000_000) as u32;
     let nano = (usecs % 1_000_000 * 1000) as u32;
-    NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(secs, nano)
+    Time::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
 #[function("cast(boolean) -> int32")]
@@ -1018,7 +1018,7 @@ mod tests {
     #[test]
     fn test_timestamp() {
         assert_eq!(
-            try_cast::<_, Timestamp>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
+            try_cast::<_, Timestamp>(Date::from_ymd_uncheck(1994, 1, 1))
                 .unwrap(),
             Timestamp::new(
                 NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()

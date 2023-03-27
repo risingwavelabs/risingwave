@@ -70,9 +70,9 @@ macro_rules! impl_chrono_wrapper {
     };
 }
 
-impl_chrono_wrapper!(NaiveDateWrapper, NaiveDate);
+impl_chrono_wrapper!(Date, NaiveDate);
 impl_chrono_wrapper!(Timestamp, NaiveDateTime);
-impl_chrono_wrapper!(NaiveTimeWrapper, NaiveTime);
+impl_chrono_wrapper!(Time, NaiveTime);
 
 #[derive(Copy, Clone, Debug, Error)]
 enum InvalidParamsErrorKind {
@@ -104,7 +104,7 @@ impl InvalidParamsError {
 
 type Result<T> = std::result::Result<T, InvalidParamsError>;
 
-impl ToText for NaiveDateWrapper {
+impl ToText for Date {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -117,7 +117,7 @@ impl ToText for NaiveDateWrapper {
     }
 }
 
-impl ToText for NaiveTimeWrapper {
+impl ToText for Time {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
@@ -143,7 +143,7 @@ impl ToText for Timestamp {
     }
 }
 
-impl ToBinary for NaiveDateWrapper {
+impl ToBinary for Date {
     fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Date => {
@@ -156,7 +156,7 @@ impl ToBinary for NaiveDateWrapper {
     }
 }
 
-impl ToBinary for NaiveTimeWrapper {
+impl ToBinary for Time {
     fn to_binary_with_type(&self, ty: &DataType) -> crate::error::Result<Option<Bytes>> {
         match ty {
             super::DataType::Time => {
@@ -182,16 +182,16 @@ impl ToBinary for Timestamp {
     }
 }
 
-impl NaiveDateWrapper {
+impl Date {
     pub fn with_days(days: i32) -> Result<Self> {
-        Ok(NaiveDateWrapper::new(
+        Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?,
         ))
     }
 
     pub fn with_days_since_unix_epoch(days: i32) -> Result<Self> {
-        Ok(NaiveDateWrapper::new(
+        Ok(Date::new(
             NaiveDate::from_num_days_from_ce_opt(days)
                 .ok_or_else(|| InvalidParamsError::date(days))?
                 .checked_add_days(Days::new(UNIX_EPOCH_DAYS as u64))
@@ -226,14 +226,14 @@ impl NaiveDateWrapper {
     ) -> Timestamp {
         Timestamp::new(
             self.0
-                .and_time(NaiveTimeWrapper::from_hms_micro_uncheck(hour, min, sec, micro).0),
+                .and_time(Time::from_hms_micro_uncheck(hour, min, sec, micro).0),
         )
     }
 }
 
-impl NaiveTimeWrapper {
+impl Time {
     pub fn with_secs_nano(secs: u32, nano: u32) -> Result<Self> {
-        Ok(NaiveTimeWrapper::new(
+        Ok(Time::new(
             NaiveTime::from_num_seconds_from_midnight_opt(secs, nano)
                 .ok_or_else(|| InvalidParamsError::time(secs, nano))?,
         ))
@@ -368,7 +368,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_minute(self) -> Self {
-        NaiveDateWrapper::new(self.0.date()).and_hms_uncheck(self.0.hour(), self.0.minute(), 0)
+        Date::new(self.0.date()).and_hms_uncheck(self.0.hour(), self.0.minute(), 0)
     }
 
     /// Truncate the timestamp to the precision of hours.
@@ -383,7 +383,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_hour(self) -> Self {
-        NaiveDateWrapper::new(self.0.date()).and_hms_uncheck(self.0.hour(), 0, 0)
+        Date::new(self.0.date()).and_hms_uncheck(self.0.hour(), 0, 0)
     }
 
     /// Truncate the timestamp to the precision of days.
@@ -398,7 +398,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_day(self) -> Self {
-        NaiveDateWrapper::new(self.0.date()).into()
+        Date::new(self.0.date()).into()
     }
 
     /// Truncate the timestamp to the precision of weeks.
@@ -413,7 +413,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_week(self) -> Self {
-        NaiveDateWrapper::new(self.0.date().week(Weekday::Mon).first_day()).into()
+        Date::new(self.0.date().week(Weekday::Mon).first_day()).into()
     }
 
     /// Truncate the timestamp to the precision of months.
@@ -428,7 +428,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_month(self) -> Self {
-        NaiveDateWrapper::new(self.0.date().with_day(1).unwrap()).into()
+        Date::new(self.0.date().with_day(1).unwrap()).into()
     }
 
     /// Truncate the timestamp to the precision of quarters.
@@ -443,7 +443,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_quarter(self) -> Self {
-        NaiveDateWrapper::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
+        Date::from_ymd_uncheck(self.0.year(), self.0.month0() / 3 * 3 + 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of years.
@@ -458,7 +458,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_year(self) -> Self {
-        NaiveDateWrapper::from_ymd_uncheck(self.0.year(), 1, 1).into()
+        Date::from_ymd_uncheck(self.0.year(), 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of decades.
@@ -473,7 +473,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_decade(self) -> Self {
-        NaiveDateWrapper::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
+        Date::from_ymd_uncheck(self.0.year() / 10 * 10, 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of centuries.
@@ -488,7 +488,7 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_century(self) -> Self {
-        NaiveDateWrapper::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
+        Date::from_ymd_uncheck((self.0.year() - 1) / 100 * 100 + 1, 1, 1).into()
     }
 
     /// Truncate the timestamp to the precision of millenniums.
@@ -505,12 +505,12 @@ impl Timestamp {
     /// );
     /// ```
     pub fn truncate_millennium(self) -> Self {
-        NaiveDateWrapper::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
+        Date::from_ymd_uncheck((self.0.year() - 1) / 1000 * 1000 + 1, 1, 1).into()
     }
 }
 
-impl From<NaiveDateWrapper> for Timestamp {
-    fn from(date: NaiveDateWrapper) -> Self {
+impl From<Date> for Timestamp {
+    fn from(date: Date) -> Self {
         date.and_hms_uncheck(0, 0, 0)
     }
 }

@@ -38,7 +38,7 @@ use crate::array::{
 use crate::collection::estimate_size::EstimateSize;
 use crate::row::{OwnedRow, RowDeserializer};
 use crate::types::{
-    DataType, Decimal, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, F32,
+    DataType, Decimal, Timestamp, Date, Time, F32,
     F64, ScalarRef,
 };
 use crate::util::hash_util::Crc32FastBuilder;
@@ -381,7 +381,7 @@ impl<'a> HashKeySerDe<'a> for &'a [u8] {
     }
 }
 
-impl HashKeySerDe<'_> for NaiveDateWrapper {
+impl HashKeySerDe<'_> for Date {
     type S = [u8; 4];
 
     fn serialize(self) -> Self::S {
@@ -394,7 +394,7 @@ impl HashKeySerDe<'_> for NaiveDateWrapper {
     fn deserialize<R: Read>(source: &mut R) -> Self {
         let value = Self::read_fixed_size_bytes::<R, 4>(source);
         let days = i32::from_ne_bytes(value[0..4].try_into().unwrap());
-        NaiveDateWrapper::with_days(days).unwrap()
+        Date::with_days(days).unwrap()
     }
 }
 
@@ -417,7 +417,7 @@ impl HashKeySerDe<'_> for Timestamp {
     }
 }
 
-impl HashKeySerDe<'_> for NaiveTimeWrapper {
+impl HashKeySerDe<'_> for Time {
     type S = [u8; 8];
 
     fn serialize(self) -> Self::S {
@@ -432,7 +432,7 @@ impl HashKeySerDe<'_> for NaiveTimeWrapper {
         let value = Self::read_fixed_size_bytes::<R, 8>(source);
         let secs = u32::from_ne_bytes(value[0..4].try_into().unwrap());
         let nano = u32::from_ne_bytes(value[4..8].try_into().unwrap());
-        NaiveTimeWrapper::with_secs_nano(secs, nano).unwrap()
+        Time::with_secs_nano(secs, nano).unwrap()
     }
 }
 
@@ -742,7 +742,7 @@ mod tests {
     use crate::array::column::Column;
     use crate::array::{
         BoolArray, DataChunk, DataChunkTestExt, DecimalArray, F32Array, F64Array, I16Array,
-        I32Array, I32ArrayBuilder, I64Array, NaiveDateArray, TimestampArray, NaiveTimeArray,
+        I32Array, I32ArrayBuilder, I64Array, DateArray, TimestampArray, TimeArray,
         Utf8Array,
     };
     use crate::hash::{
@@ -766,12 +766,12 @@ mod tests {
             Column::new(seed_rand_array_ref::<F64Array>(capacity, seed + 5, 0.5)),
             Column::new(seed_rand_array_ref::<DecimalArray>(capacity, seed + 6, 0.5)),
             Column::new(seed_rand_array_ref::<Utf8Array>(capacity, seed + 7, 0.5)),
-            Column::new(seed_rand_array_ref::<NaiveDateArray>(
+            Column::new(seed_rand_array_ref::<DateArray>(
                 capacity,
                 seed + 8,
                 0.5,
             )),
-            Column::new(seed_rand_array_ref::<NaiveTimeArray>(
+            Column::new(seed_rand_array_ref::<TimeArray>(
                 capacity,
                 seed + 9,
                 0.5,

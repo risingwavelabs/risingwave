@@ -626,7 +626,7 @@ mod tests {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
     use postgres_types::private::BytesMut;
     use risingwave_common::types::{
-        DataType, Timestamp, NaiveDateWrapper, NaiveTimeWrapper,
+        DataType, Timestamp, Date, Time,
     };
     use tokio_postgres::types::{ToSql, Type};
 
@@ -815,11 +815,11 @@ mod tests {
         );
 
         let raw_params = vec![
-            NaiveDateWrapper::from_ymd_uncheck(2021, 1, 1)
+            Date::from_ymd_uncheck(2021, 1, 1)
                 .0
                 .to_string()
                 .into(),
-            NaiveTimeWrapper::from_hms_uncheck(12, 0, 0)
+            Time::from_hms_uncheck(12, 0, 0)
                 .0
                 .to_string()
                 .into(),
@@ -922,11 +922,11 @@ mod tests {
 
         // Test DATE, TIME, TIMESTAMP type.
         let mut raw_params = vec![BytesMut::new(); 3];
-        NaiveDateWrapper::from_ymd_uncheck(2021, 1, 1)
+        Date::from_ymd_uncheck(2021, 1, 1)
             .0
             .to_sql(&place_hodler, &mut raw_params[0])
             .unwrap();
-        NaiveTimeWrapper::from_hms_uncheck(12, 0, 0)
+        Time::from_hms_uncheck(12, 0, 0)
             .0
             .to_sql(&place_hodler, &mut raw_params[1])
             .unwrap();

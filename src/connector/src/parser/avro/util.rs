@@ -20,7 +20,7 @@ use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
 use risingwave_common::types::{
-    DataType, Datum, Interval, NaiveDateWrapper, F32, F64, ScalarImpl,
+    DataType, Datum, Interval, Date, F32, F64, ScalarImpl,
 };
 use risingwave_pb::plan_common::ColumnDesc;
 
@@ -189,7 +189,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
 }
 
 pub(crate) fn unix_epoch_days() -> i32 {
-    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
+    Date::from_ymd_uncheck(1970, 1, 1)
         .0
         .num_days_from_ce()
 }
@@ -275,8 +275,8 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
             let decimal = avro_decimal_to_rust_decimal(avro_decimal, precision, scale)?;
             ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
         }
-        Value::Date(days) => ScalarImpl::NaiveDate(
-            NaiveDateWrapper::with_days(days + unix_epoch_days()).map_err(|e| {
+        Value::Date(days) => ScalarImpl::Date(
+            Date::with_days(days + unix_epoch_days()).map_err(|e| {
                 let err_msg = format!("avro parse error.wrong date value {}, err {:?}", days, e);
                 RwError::from(InternalError(err_msg))
             })?,

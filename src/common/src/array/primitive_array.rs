@@ -28,7 +28,7 @@ use crate::for_all_native_types;
 use crate::types::decimal::Decimal;
 use crate::types::interval::Interval;
 use crate::types::{
-    Timestamp, NaiveDateWrapper, NaiveTimeWrapper, NativeType, Scalar, ScalarRef,
+    Timestamp, Date, Time, NativeType, Scalar, ScalarRef,
 };
 
 /// Physical type of array items which have fixed size.
@@ -121,8 +121,8 @@ macro_rules! impl_primitive_for_others {
 impl_primitive_for_others! {
     { Decimal, Decimal, Decimal },
     { Interval, Interval, Interval },
-    { NaiveDateWrapper, Date, NaiveDate },
-    { NaiveTimeWrapper, Time, NaiveTime },
+    { Date, Date, Date },
+    { Time, Time, Time },
     { Timestamp, Timestamp, Timestamp }
 }
 

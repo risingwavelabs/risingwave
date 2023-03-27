@@ -18,7 +18,7 @@
 mod tests {
     use itertools::Itertools;
     use risingwave_common::array::*;
-    use risingwave_common::types::{NaiveDateWrapper, Scalar};
+    use risingwave_common::types::{Date, Scalar};
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::*;
@@ -179,13 +179,13 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        F: Fn(NaiveDateWrapper) -> <A as Array>::OwnedItem,
+        F: Fn(Date) -> <A as Array>::OwnedItem,
     {
-        let mut input = Vec::<Option<NaiveDateWrapper>>::new();
+        let mut input = Vec::<Option<Date>>::new();
         let mut target = Vec::<Option<<A as Array>::OwnedItem>>::new();
         for i in 0..100 {
             if i % 2 == 0 {
-                let date = NaiveDateWrapper::from_num_days_from_ce_uncheck(i);
+                let date = Date::from_num_days_from_ce_uncheck(i);
                 input.push(Some(date));
                 target.push(Some(f(date)));
             } else {
@@ -194,7 +194,7 @@ mod tests {
             }
         }
 
-        let col1 = NaiveDateArray::from_iter(&input).into();
+        let col1 = DateArray::from_iter(&input).into();
         let data_chunk = DataChunk::new(vec![col1], 100);
         let expr = build_from_pretty(format!("({kind:?}:timestamp $0:date)"));
         let res = expr.eval(&data_chunk).await.unwrap();

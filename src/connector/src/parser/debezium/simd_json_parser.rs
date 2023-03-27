@@ -160,7 +160,7 @@ mod tests {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{
-        DataType, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, Scalar, ScalarImpl,
+        DataType, Timestamp, Date, Time, Scalar, ScalarImpl,
     };
     use serde_json::Value;
 
@@ -250,10 +250,10 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
         assert!(
@@ -289,10 +289,10 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((-111.11111).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
         )))));
         assert!(
@@ -329,10 +329,10 @@ mod tests {
         assert!(row[5].eq(&Some(ScalarImpl::Float64((333.33333).into()))));
         assert!(row[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
         assert!(row[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
-        assert!(row[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+        assert!(row[8].eq(&Some(ScalarImpl::Date(Date::new(
             NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
         )))));
-        assert!(row[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+        assert!(row[9].eq(&Some(ScalarImpl::Time(Time::new(
             NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
         )))));
         assert!(
@@ -372,12 +372,12 @@ mod tests {
         assert!(row1[6].eq(&Some(ScalarImpl::Decimal("-111.11".parse().unwrap()))));
         assert!(row1[7].eq(&Some(ScalarImpl::Utf8("yes please".into()))));
         assert!(
-            row1[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            row1[8].eq(&Some(ScalarImpl::Date(Date::new(
                 NaiveDate::from_ymd_opt(1000, 1, 1).unwrap()
             ))))
         );
         assert!(
-            row1[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            row1[9].eq(&Some(ScalarImpl::Time(Time::new(
                 NaiveTime::from_hms_micro_opt(0, 0, 0, 0).unwrap()
             ))))
         );
@@ -402,12 +402,12 @@ mod tests {
         assert!(row2[6].eq(&Some(ScalarImpl::Decimal("333.33".parse().unwrap()))));
         assert!(row2[7].eq(&Some(ScalarImpl::Utf8("no thanks".into()))));
         assert!(
-            row2[8].eq(&Some(ScalarImpl::NaiveDate(NaiveDateWrapper::new(
+            row2[8].eq(&Some(ScalarImpl::Date(Date::new(
                 NaiveDate::from_ymd_opt(9999, 12, 31).unwrap()
             ))))
         );
         assert!(
-            row2[9].eq(&Some(ScalarImpl::NaiveTime(NaiveTimeWrapper::new(
+            row2[9].eq(&Some(ScalarImpl::Time(Time::new(
                 NaiveTime::from_hms_micro_opt(23, 59, 59, 0).unwrap()
             ))))
         );

@@ -20,12 +20,12 @@ pub enum ValueEncodingError {
     InvalidBoolEncoding(u8),
     #[error("Invalid UTF8 value encoding: {0}")]
     InvalidUtf8(#[from] std::string::FromUtf8Error),
-    #[error("Invalid NaiveDate value encoding: days: {0}")]
-    InvalidNaiveDateEncoding(i32),
+    #[error("Invalid Date value encoding: days: {0}")]
+    InvalidDateEncoding(i32),
     #[error("invalid Timestamp value encoding: secs: {0} nsecs: {1}")]
     InvalidTimestampEncoding(i64, u32),
-    #[error("invalid NaiveTime value encoding: secs: {0} nano: {1}")]
-    InvalidNaiveTimeEncoding(u32, u32),
+    #[error("invalid Time value encoding: secs: {0} nano: {1}")]
+    InvalidTimeEncoding(u32, u32),
     #[error("Invalid null tag value encoding: {0}")]
     InvalidTagEncoding(u8),
     #[error("Invalid jsonb encoding")]

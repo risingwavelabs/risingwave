@@ -28,7 +28,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::serial_array::Serial;
 use crate::array::{Array, ArrayBuilder, ArrayRef, JsonbVal, ListValue, StructValue};
 use crate::types::{
-    Decimal, Interval, Timestamp, NaiveDateWrapper, NaiveTimeWrapper, NativeType,
+    Decimal, Interval, Timestamp, Date, Time, NativeType,
     Scalar,
 };
 
@@ -83,31 +83,31 @@ impl RandValue for Interval {
     }
 }
 
-impl RandValue for NaiveDateWrapper {
+impl RandValue for Date {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let max_day = chrono::NaiveDate::MAX.num_days_from_ce();
         let min_day = chrono::NaiveDate::MIN.num_days_from_ce();
         let days = rand.gen_range(min_day..=max_day);
-        NaiveDateWrapper::with_days(days).unwrap()
+        Date::with_days(days).unwrap()
     }
 }
 
-impl RandValue for NaiveTimeWrapper {
+impl RandValue for Time {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         let hour = rand.gen_range(0..24);
         let min = rand.gen_range(0..60);
         let sec = rand.gen_range(0..60);
         let nano = rand.gen_range(0..1_000_000_000);
-        NaiveTimeWrapper::from_hms_nano_uncheck(hour, min, sec, nano)
+        Time::from_hms_nano_uncheck(hour, min, sec, nano)
     }
 }
 
 impl RandValue for Timestamp {
     fn rand_value<R: Rng>(rand: &mut R) -> Self {
         Timestamp::new(
-            NaiveDateWrapper::rand_value(rand)
+            Date::rand_value(rand)
                 .0
-                .and_time(NaiveTimeWrapper::rand_value(rand).0),
+                .and_time(Time::rand_value(rand).0),
         )
     }
 }

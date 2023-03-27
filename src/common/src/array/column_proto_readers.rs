@@ -22,12 +22,12 @@ use risingwave_pb::data::PbArray;
 use crate::array::value_reader::{PrimitiveValueReader, VarSizedValueReader};
 use crate::array::{
     Array, ArrayBuilder, ArrayImpl, ArrayMeta, ArrayResult, BoolArray, IntervalArrayBuilder,
-    NaiveDateArrayBuilder, TimestampArrayBuilder, NaiveTimeArrayBuilder, PrimitiveArrayBuilder,
+    DateArrayBuilder, TimestampArrayBuilder, TimeArrayBuilder, PrimitiveArrayBuilder,
     PrimitiveArrayItemType,
 };
 use crate::buffer::Bitmap;
 use crate::types::interval::Interval;
-use crate::types::{Timestamp, NaiveDateWrapper, NaiveTimeWrapper};
+use crate::types::{Timestamp, Date, Time};
 
 // TODO: Use techniques like apache arrow flight RPC to eliminate deserialization.
 // https://arrow.apache.org/docs/format/Flight.html
@@ -75,16 +75,16 @@ pub fn read_bool_array(array: &PbArray, cardinality: usize) -> ArrayResult<Array
     Ok(arr.into())
 }
 
-fn read_naive_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveDateWrapper> {
+fn read_date(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Date> {
     match cursor.read_i32::<BigEndian>() {
-        Ok(days) => NaiveDateWrapper::with_days(days).map_err(|e| anyhow!(e).into()),
-        Err(e) => bail!("Failed to read i32 from NaiveDate buffer: {}", e),
+        Ok(days) => Date::with_days(days).map_err(|e| anyhow!(e).into()),
+        Err(e) => bail!("Failed to read i32 from Date buffer: {}", e),
     }
 }
 
-fn read_naive_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<NaiveTimeWrapper> {
+fn read_time(cursor: &mut Cursor<&[u8]>) -> ArrayResult<Time> {
     match cursor.read_u64::<BigEndian>() {
-        Ok(t) => NaiveTimeWrapper::with_nano(t).map_err(|e| anyhow!(e).into()),
+        Ok(t) => Time::with_nano(t).map_err(|e| anyhow!(e).into()),
         Err(e) => bail!("Failed to read i64 from NaiveTime buffer: {}", e),
     }
 }
@@ -146,8 +146,8 @@ macro_rules! read_one_value_array {
 
 read_one_value_array! {
     { Interval, IntervalArrayBuilder },
-    { NaiveDate, NaiveDateArrayBuilder },
-    { NaiveTime, NaiveTimeArrayBuilder },
+    { Date, DateArrayBuilder },
+    { Time, TimeArrayBuilder },
     { Timestamp, TimestampArrayBuilder }
 }
 

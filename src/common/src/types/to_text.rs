@@ -51,8 +51,8 @@ pub trait ToText {
     /// - `ScalarRefImpl::Boolean` -> `DataType::Boolean`
     /// - `ScalarRefImpl::Utf8` -> `DataType::Varchar`
     /// - `ScalarRefImpl::Bytea` -> `DataType::Bytea`
-    /// - `ScalarRefImpl::NaiveDate` -> `DataType::Date`
-    /// - `ScalarRefImpl::NaiveTime` -> `DataType::Time`
+    /// - `ScalarRefImpl::Date` -> `DataType::Date`
+    /// - `ScalarRefImpl::Time` -> `DataType::Time`
     /// - `ScalarRefImpl::Timestamp` -> `DataType::Timestamp`
     /// - `ScalarRefImpl::Interval` -> `DataType::Interval`
     /// - `ScalarRefImpl::List` -> `DataType::List`

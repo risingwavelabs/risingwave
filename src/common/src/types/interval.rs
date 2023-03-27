@@ -721,8 +721,8 @@ impl From<&'_ IntervalProto> for Interval {
     }
 }
 
-impl From<NaiveTimeWrapper> for Interval {
-    fn from(time: NaiveTimeWrapper) -> Self {
+impl From<Time> for Interval {
+    fn from(time: Time) -> Self {
         let mut usecs: i64 = (time.0.num_seconds_from_midnight() as i64) * USECS_PER_SEC;
         usecs += (time.0.nanosecond() / 1000) as i64;
         Self {

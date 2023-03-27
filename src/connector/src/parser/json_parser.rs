@@ -218,7 +218,7 @@ mod tests {
             );
             assert_eq!(
                 row.datum_at(7).to_owned_datum(),
-                (Some(ScalarImpl::NaiveDate(str_to_date("2021-01-01").unwrap())))
+                (Some(ScalarImpl::Date(str_to_date("2021-01-01").unwrap())))
             );
             assert_eq!(
                 row.datum_at(8).to_owned_datum(),

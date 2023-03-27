@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use chrono::{Datelike, Timelike};
-use risingwave_common::types::{Decimal, Timestamp, NaiveDateWrapper, NaiveTimeWrapper};
+use risingwave_common::types::{Decimal, Timestamp, Date, Time};
 use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
@@ -53,7 +53,7 @@ fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
 }
 
 #[function("extract(varchar, date) -> decimal")]
-pub fn extract_from_date(unit: &str, date: NaiveDateWrapper) -> Result<Decimal> {
+pub fn extract_from_date(unit: &str, date: Date) -> Result<Decimal> {
     extract_date(date.0, unit).ok_or_else(|| invalid_unit("date unit", unit))
 }
 
@@ -76,7 +76,7 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
 }
 
 #[function("extract(varchar, time) -> decimal")]
-pub fn extract_from_time(unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
+pub fn extract_from_time(unit: &str, time: Time) -> Result<Decimal> {
     extract_time(time.0, unit).ok_or_else(|| invalid_unit("time unit", unit))
 }
 
@@ -89,7 +89,7 @@ mod tests {
     #[test]
     fn test_date() {
         let date =
-            NaiveDateWrapper::new(NaiveDate::parse_from_str("2021-11-22", "%Y-%m-%d").unwrap());
+            Date::new(NaiveDate::parse_from_str("2021-11-22", "%Y-%m-%d").unwrap());
         assert_eq!(extract_from_date("DAY", date).unwrap(), 22.into());
         assert_eq!(extract_from_date("MONTH", date).unwrap(), 11.into());
         assert_eq!(extract_from_date("YEAR", date).unwrap(), 2021.into());

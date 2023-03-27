@@ -175,7 +175,7 @@ macro_rules! date {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Date,
-            risingwave_common::array::NaiveDateArray
+            risingwave_common::array::DateArray
         }
     };
 }
@@ -211,7 +211,7 @@ macro_rules! time {
     ($macro:ident) => {
         $macro! {
             risingwave_common::types::DataType::Time,
-            risingwave_common::array::NaiveTimeArray
+            risingwave_common::array::TimeArray
         }
     };
 }

@@ -90,9 +90,9 @@ converts_generic! {
     { arrow_array::BooleanArray, Boolean, ArrayImpl::Bool },
     { arrow_array::Decimal128Array, Decimal128(_, _), ArrayImpl::Decimal },
     { arrow_array::IntervalMonthDayNanoArray, Interval(MonthDayNano), ArrayImpl::Interval },
-    { arrow_array::Date32Array, Date32, ArrayImpl::NaiveDate },
+    { arrow_array::Date32Array, Date32, ArrayImpl::Date },
     { arrow_array::TimestampNanosecondArray, Timestamp(Nanosecond, _), ArrayImpl::Timestamp },
-    { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::NaiveTime },
+    { arrow_array::Time64NanosecondArray, Time64(Nanosecond), ArrayImpl::Time },
     // { arrow_array::StructArray, Struct(_), ArrayImpl::Struct }, // TODO: convert struct
     { arrow_array::ListArray, List(_), ArrayImpl::List },
     { arrow_array::BinaryArray, Binary, ArrayImpl::Bytea }
@@ -229,8 +229,8 @@ converts!(F64Array, arrow_array::Float64Array, @map);
 converts!(DecimalArray, arrow_array::Decimal128Array, @map);
 converts!(BytesArray, arrow_array::BinaryArray);
 converts!(Utf8Array, arrow_array::StringArray);
-converts!(NaiveDateArray, arrow_array::Date32Array, @map);
-converts!(NaiveTimeArray, arrow_array::Time64NanosecondArray, @map);
+converts!(DateArray, arrow_array::Date32Array, @map);
+converts!(TimeArray, arrow_array::Time64NanosecondArray, @map);
 converts!(TimestampArray, arrow_array::TimestampNanosecondArray, @map);
 converts!(IntervalArray, arrow_array::IntervalMonthDayNanoArray, @map);
 
@@ -289,11 +289,11 @@ impl FromIntoArrow for Decimal {
     }
 }
 
-impl FromIntoArrow for NaiveDateWrapper {
+impl FromIntoArrow for Date {
     type ArrowType = i32;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveDateWrapper(arrow_array::types::Date32Type::to_naive_date(value))
+        Date(arrow_array::types::Date32Type::to_naive_date(value))
     }
 
     fn into_arrow(self) -> Self::ArrowType {
@@ -301,11 +301,11 @@ impl FromIntoArrow for NaiveDateWrapper {
     }
 }
 
-impl FromIntoArrow for NaiveTimeWrapper {
+impl FromIntoArrow for Time {
     type ArrowType = i64;
 
     fn from_arrow(value: Self::ArrowType) -> Self {
-        NaiveTimeWrapper(
+        Time(
             NaiveTime::from_num_seconds_from_midnight_opt(
                 (value / 1_000_000_000) as _,
                 (value % 1_000_000_000) as _,
@@ -427,7 +427,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 IntervalMonthDayNanoBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::NaiveDate(a) => {
+            ArrayImpl::Date(a) => {
                 build(array, a, Date32Builder::with_capacity(a.len()), |b, v| {
                     b.append_option(v.map(|d| d.into_arrow()))
                 })
@@ -438,7 +438,7 @@ impl From<&ListArray> for arrow_array::ListArray {
                 TimestampNanosecondBuilder::with_capacity(a.len()),
                 |b, v| b.append_option(v.map(|d| d.into_arrow())),
             ),
-            ArrayImpl::NaiveTime(a) => build(
+            ArrayImpl::Time(a) => build(
                 array,
                 a,
                 Time64NanosecondBuilder::with_capacity(a.len()),
@@ -544,24 +544,24 @@ mod tests {
 
     #[test]
     fn date() {
-        let array = NaiveDateArray::from_iter([
+        let array = DateArray::from_iter([
             None,
-            NaiveDateWrapper::with_days(12345).ok(),
-            NaiveDateWrapper::with_days(-12345).ok(),
+            Date::with_days(12345).ok(),
+            Date::with_days(-12345).ok(),
         ]);
         let arrow = arrow_array::Date32Array::from(&array);
-        assert_eq!(NaiveDateArray::from(&arrow), array);
+        assert_eq!(DateArray::from(&arrow), array);
     }
 
     #[test]
     fn time() {
-        let array = NaiveTimeArray::from_iter([
+        let array = TimeArray::from_iter([
             None,
-            NaiveTimeWrapper::with_secs_nano(12345, 123456789).ok(),
-            NaiveTimeWrapper::with_secs_nano(1, 0).ok(),
+            Time::with_secs_nano(12345, 123456789).ok(),
+            Time::with_secs_nano(1, 0).ok(),
         ]);
         let arrow = arrow_array::Time64NanosecondArray::from(&array);
-        assert_eq!(NaiveTimeArray::from(&arrow), array);
+        assert_eq!(TimeArray::from(&arrow), array);
     }
 
     #[test]
