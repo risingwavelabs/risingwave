@@ -398,10 +398,6 @@ impl<K: LruKey, T: LruValue> LruCacheShard<K, T> {
         }
     }
 
-    fn new(capacity: usize) -> Self {
-        Self::new_with_priority_pool(capacity, 0)
-    }
-
     unsafe fn lru_remove(&mut self, e: *mut LruHandle<K, T>) {
         debug_assert!(!e.is_null());
         #[cfg(debug_assertions)]
@@ -660,21 +656,28 @@ pub struct LruCache<K: LruKey, T: LruValue> {
 const DEFAULT_OBJECT_POOL_SIZE: usize = 1024;
 
 impl<K: LruKey, T: LruValue> LruCache<K, T> {
-    pub fn new(num_shard_bits: usize, capacity: usize) -> Self {
-        Self::new_inner(num_shard_bits, capacity, None)
+    pub fn new(num_shard_bits: usize, capacity: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(num_shard_bits, capacity, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
         num_shard_bits: usize,
         capacity: usize,
+        high_priority_ratio: usize,
         listener: Arc<dyn LruCacheEventListener<K = K, T = T>>,
     ) -> Self {
-        Self::new_inner(num_shard_bits, capacity, Some(listener))
+        Self::new_inner(
+            num_shard_bits,
+            capacity,
+            high_priority_ratio,
+            Some(listener),
+        )
     }
 
     fn new_inner(
         num_shard_bits: usize,
         capacity: usize,
+        high_priority_ratio: usize,
         listener: Option<Arc<dyn LruCacheEventListener<K = K, T = T>>>,
     ) -> Self {
         let num_shards = 1 << num_shard_bits;
@@ -683,7 +686,7 @@ impl<K: LruKey, T: LruValue> LruCache<K, T> {
         let mut shard_usages = Vec::with_capacity(num_shards);
         let mut shard_lru_usages = Vec::with_capacity(num_shards);
         for _ in 0..num_shards {
-            let shard = LruCacheShard::new(per_shard);
+            let shard = LruCacheShard::new_with_priority_pool(per_shard, high_priority_ratio);
             shard_usages.push(shard.usage.clone());
             shard_lru_usages.push(shard.lru_usage.clone());
             shards.push(Mutex::new(shard));
@@ -1029,7 +1032,7 @@ mod tests {
 
     #[test]
     fn test_cache_shard() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 0));
         assert_eq!(cache.shard(0), 0);
         assert_eq!(cache.shard(1), 1);
         assert_eq!(cache.shard(10), 2);
@@ -1037,7 +1040,7 @@ mod tests {
 
     #[test]
     fn test_cache_basic() {
-        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256));
+        let cache = Arc::new(LruCache::<(u64, u64), Block>::new(2, 256, 0));
         let seed = 10244021u64;
         let mut rng = SmallRng::seed_from_u64(seed);
         for _ in 0..100000 {
@@ -1083,7 +1086,7 @@ mod tests {
     }
 
     fn create_cache(capacity: usize) -> LruCacheShard<String, String> {
-        LruCacheShard::new(capacity)
+        LruCacheShard::new_with_priority_pool(capacity, 0)
     }
 
     fn lookup(cache: &mut LruCacheShard<String, String>, key: &str) -> bool {
@@ -1329,7 +1332,7 @@ mod tests {
 
     #[test]
     fn test_write_request_pending() {
-        let cache = Arc::new(LruCache::new(0, 5));
+        let cache = Arc::new(LruCache::new(0, 5, 0));
         {
             let mut shard = cache.shards[0].lock();
             insert(&mut shard, "a", "v1");
@@ -1374,7 +1377,7 @@ mod tests {
     #[test]
     fn test_event_listener() {
         let listener = Arc::new(TestLruCacheEventListener::default());
-        let cache = Arc::new(LruCache::with_event_listener(0, 2, listener.clone()));
+        let cache = Arc::new(LruCache::with_event_listener(0, 2, 0, listener.clone()));
 
         // full-fill cache
         let h = cache.insert("k1".to_string(), 0, 1, "v1".to_string(), false);
@@ -1451,7 +1454,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_future_cancel() {
-        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5));
+        let cache: Arc<LruCache<u64, u64>> = Arc::new(LruCache::new(0, 5, 0));
         // do not need sender because this receiver will be cancelled.
         let (_, recv) = channel::<()>();
         let polled = Arc::new(AtomicBool::new(false));

@@ -256,7 +256,7 @@ impl SharedBufferCompactRunner {
             options,
             super::TaskConfig {
                 key_range,
-                cache_policy: CachePolicy::Fill,
+                cache_policy: CachePolicy::Fill(true),
                 gc_delete_keys: GC_DELETE_KEYS_FOR_FLUSH,
                 watermark: GC_WATERMARK_FOR_FLUSH,
                 stats_target_table_ids: None,

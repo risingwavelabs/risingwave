@@ -105,7 +105,8 @@ pub enum CachePolicy {
     /// Disable read cache and not fill the cache afterwards.
     Disable,
     /// Try reading the cache and fill the cache afterwards.
-    Fill,
+    ///  true means it will fill a high priority block.
+    Fill(bool),
     /// Read the cache but not fill the cache afterwards.
     NotFill,
 }
@@ -124,6 +125,7 @@ impl SstableStore {
         path: String,
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
+        high_priority_ratio: usize,
         tiered_cache: TieredCache<(HummockSstableId, u64), Box<Block>>,
     ) -> Self {
         // TODO: We should validate path early. Otherwise object store won't report invalid path
@@ -132,7 +134,7 @@ impl SstableStore {
         while (meta_cache_capacity >> shard_bits) < MIN_BUFFER_SIZE_PER_SHARD && shard_bits > 0 {
             shard_bits -= 1;
         }
-        let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity));
+        let meta_cache = Arc::new(LruCache::new(shard_bits, meta_cache_capacity, 0));
         let listener = Arc::new(BlockCacheEventListener {
             tiered_cache: tiered_cache.clone(),
         });
@@ -143,6 +145,7 @@ impl SstableStore {
             block_cache: BlockCache::with_event_listener(
                 block_cache_capacity,
                 MAX_CACHE_SHARD_BITS,
+                high_priority_ratio,
                 listener,
             ),
             meta_cache,
@@ -158,12 +161,12 @@ impl SstableStore {
         block_cache_capacity: usize,
         meta_cache_capacity: usize,
     ) -> Self {
-        let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity));
+        let meta_cache = Arc::new(LruCache::new(0, meta_cache_capacity, 0));
         let tiered_cache = TieredCache::none();
         Self {
             path,
             store,
-            block_cache: BlockCache::new(block_cache_capacity, 0),
+            block_cache: BlockCache::new(block_cache_capacity, 0, 0),
             meta_cache,
             tiered_cache,
         }
@@ -252,10 +255,9 @@ impl SstableStore {
         } else {
             policy
         };
-        let high_priority = sst.is_high_priority();
 
         match policy {
-            CachePolicy::Fill => Ok(self.block_cache.get_or_insert_with(
+            CachePolicy::Fill(high_priority) => Ok(self.block_cache.get_or_insert_with(
                 sst_id,
                 block_index as u64,
                 high_priority,
@@ -340,7 +342,6 @@ impl SstableStore {
     pub async fn sstable_syncable(
         &self,
         sst: &SstableInfo,
-        high_priority: bool,
         stats: &StoreLocalStatistic,
     ) -> HummockResult<(TableHolder, u64)> {
         let mut local_cache_meta_block_miss = 0;
@@ -363,8 +364,7 @@ impl SstableStore {
                         .await
                         .map_err(HummockError::object_io_error)?;
                     let meta = SstableMeta::decode(&mut &buf[..])?;
-                    let mut sst = Sstable::new(sst_id, meta);
-                    sst.set_high_priority(high_priority);
+                    let sst = Sstable::new(sst_id, meta);
                     let charge = sst.estimate_size();
                     let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                     stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
@@ -381,7 +381,7 @@ impl SstableStore {
         sst: &SstableInfo,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<TableHolder> {
-        self.sstable_syncable(sst, false, stats).await.map(
+        self.sstable_syncable(sst, stats).await.map(
             |(table_holder, local_cache_meta_block_miss)| {
                 stats.apply_meta_fetch(local_cache_meta_block_miss);
                 table_holder
@@ -482,7 +482,6 @@ pub struct SstableWriterOptions {
     pub capacity_hint: Option<usize>,
     pub tracker: Option<MemoryTracker>,
     pub policy: CachePolicy,
-    pub fill_high_priority_cache: bool,
 }
 
 pub trait SstableWriterFactory: Send + Sync {
@@ -529,7 +528,6 @@ pub struct BatchUploadWriter {
     policy: CachePolicy,
     buf: Vec<u8>,
     block_info: Vec<Block>,
-    fill_cache_priority: bool,
     tracker: Option<MemoryTracker>,
 }
 
@@ -546,7 +544,6 @@ impl BatchUploadWriter {
             buf: Vec::with_capacity(options.capacity_hint.unwrap_or(0)),
             block_info: Vec::new(),
             tracker: options.tracker,
-            fill_cache_priority: options.fill_high_priority_cache,
         }
     }
 }
@@ -557,7 +554,7 @@ impl SstableWriter for BatchUploadWriter {
 
     async fn write_block(&mut self, block: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.buf.extend_from_slice(block);
-        if let CachePolicy::Fill = self.policy {
+        if let CachePolicy::Fill(_) = self.policy {
             self.block_info.push(Block::decode(
                 Bytes::from(block.to_vec()),
                 meta.uncompressed_size as usize,
@@ -587,7 +584,7 @@ impl SstableWriter for BatchUploadWriter {
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
-            if CachePolicy::Fill == self.policy {
+            if let CachePolicy::Fill(fill_cache_priority) = self.policy {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
@@ -595,7 +592,7 @@ impl SstableWriter for BatchUploadWriter {
                         self.sst_id,
                         block_idx as u64,
                         Box::new(block),
-                        self.fill_cache_priority,
+                        fill_cache_priority,
                     );
                 }
             }
@@ -613,7 +610,6 @@ pub struct StreamingUploadWriter {
     sst_id: HummockSstableId,
     sstable_store: SstableStoreRef,
     policy: CachePolicy,
-    fill_high_priority_cache: bool,
     /// Data are uploaded block by block, except for the size footer.
     object_uploader: ObjectStreamingUploader,
     /// Compressed blocks to refill block or meta cache. Keep the uncompressed capacity for decode.
@@ -637,7 +633,6 @@ impl StreamingUploadWriter {
             blocks: Vec::new(),
             data_len: 0,
             tracker: options.tracker,
-            fill_high_priority_cache: options.fill_high_priority_cache,
         }
     }
 }
@@ -649,7 +644,7 @@ impl SstableWriter for StreamingUploadWriter {
     async fn write_block(&mut self, block_data: &[u8], meta: &BlockMeta) -> HummockResult<()> {
         self.data_len += block_data.len();
         let block_data = Bytes::from(block_data.to_vec());
-        if let CachePolicy::Fill = self.policy {
+        if let CachePolicy::Fill(_) = self.policy {
             let block = Block::decode(block_data.clone(), meta.uncompressed_size as usize)?;
             self.blocks.push(block);
         }
@@ -684,14 +679,14 @@ impl SstableWriter for StreamingUploadWriter {
             self.sstable_store.insert_meta_cache(self.sst_id, meta);
 
             // Add block cache.
-            if let CachePolicy::Fill = self.policy {
+            if let CachePolicy::Fill(fill_high_priority_cache) = self.policy {
                 debug_assert!(!self.blocks.is_empty());
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
                     self.sstable_store.block_cache.insert(
                         self.sst_id,
                         block_idx as u64,
                         Box::new(block),
-                        self.fill_high_priority_cache,
+                        fill_high_priority_cache,
                     );
                 }
             }
@@ -922,7 +917,6 @@ mod tests {
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Disable,
-            fill_high_priority_cache: false,
         };
         let info = put_sst(
             SST_ID,
@@ -953,7 +947,6 @@ mod tests {
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Disable,
-            fill_high_priority_cache: false,
         };
         let info = put_sst(
             SST_ID,

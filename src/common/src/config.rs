@@ -343,6 +343,9 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::block_cache_capacity_mb")]
     pub block_cache_capacity_mb: usize,
 
+    #[serde(default = "default::storage::high_priority_ratio_in_percent")]
+    pub high_priority_ratio_in_percent: usize,
+
     /// Capacity of sstable meta cache.
     #[serde(default = "default::storage::meta_cache_capacity_mb")]
     pub meta_cache_capacity_mb: usize,
@@ -610,6 +613,10 @@ mod default {
 
         pub fn block_cache_capacity_mb() -> usize {
             512
+        }
+
+        pub fn high_priority_ratio_in_percent() -> usize {
+            70
         }
 
         pub fn meta_cache_capacity_mb() -> usize {

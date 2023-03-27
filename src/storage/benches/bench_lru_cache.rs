@@ -87,7 +87,7 @@ pub struct LruCacheImpl {
 impl LruCacheImpl {
     pub fn new(capacity: usize, fake_io_latency: Duration) -> Self {
         Self {
-            inner: Arc::new(LruCache::new(3, capacity)),
+            inner: Arc::new(LruCache::new(3, capacity, 0)),
             fake_io_latency,
         }
     }
@@ -104,7 +104,7 @@ impl CacheBase for LruCacheImpl {
         let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .lookup_with_request_dedup(h, key, || async move {
+            .lookup_with_request_dedup(h, key, true, || async move {
                 get_fake_block(sst_id, block_idx, latency)
                     .await
                     .map(|block| (Arc::new(block), 1))

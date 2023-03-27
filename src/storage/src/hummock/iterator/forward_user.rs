@@ -311,17 +311,17 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
                 sstable_store,
                 read_options.clone(),
             ),
@@ -378,17 +378,17 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
                 sstable_store,
                 read_options,
             ),
@@ -455,12 +455,12 @@ mod tests {
         let cache = create_small_table_cache();
         let iters = vec![
             SstableIterator::create(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store.clone(),
                 read_options.clone(),
             ),
             SstableIterator::create(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
                 read_options,
             ),
@@ -519,7 +519,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Box::new(table), true),
             sstable_store,
             read_options,
         )];
@@ -602,7 +602,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Box::new(table), true),
             sstable_store,
             read_options,
         )];
@@ -670,7 +670,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Box::new(table), true),
             sstable_store,
             read_options,
         )];
@@ -739,7 +739,7 @@ mod tests {
         let cache = create_small_table_cache();
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Box::new(table), true),
             sstable_store,
             read_options,
         )];
@@ -818,7 +818,7 @@ mod tests {
         .await;
         let cache = create_small_table_cache();
         let iters = vec![SstableIterator::create(
-            cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+            cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
             sstable_store.clone(),
             read_options.clone(),
         )];
@@ -856,7 +856,7 @@ mod tests {
         let read_options = Arc::new(SstableIteratorReadOptions::default());
         let table_id = table.id;
         let iters = vec![SstableIterator::create(
-            cache.insert(table.id, table.id, 1, Box::new(table)),
+            cache.insert(table.id, table.id, 1, Box::new(table), true),
             sstable_store.clone(),
             read_options.clone(),
         )];

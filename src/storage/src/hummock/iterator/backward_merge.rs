@@ -53,15 +53,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
                 sstable_store,
             ),
         ];
@@ -116,15 +116,15 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table2.id, table2.id, 1, Box::new(table2)),
+                cache.insert(table2.id, table2.id, 1, Box::new(table2), true),
                 sstable_store,
             ),
         ];
@@ -193,11 +193,11 @@ mod test {
         let cache = create_small_table_cache();
         let iters = vec![
             BackwardSstableIterator::new(
-                cache.insert(table1.id, table1.id, 1, Box::new(table1)),
+                cache.insert(table1.id, table1.id, 1, Box::new(table1), true),
                 sstable_store.clone(),
             ),
             BackwardSstableIterator::new(
-                cache.insert(table0.id, table0.id, 1, Box::new(table0)),
+                cache.insert(table0.id, table0.id, 1, Box::new(table0), true),
                 sstable_store,
             ),
         ];

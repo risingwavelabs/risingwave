@@ -50,6 +50,7 @@ pub fn mock_sstable_store() -> SstableStoreRef {
         path,
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ))
 }
@@ -58,8 +59,7 @@ pub fn default_writer_opts() -> SstableWriterOptions {
     SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        policy: CachePolicy::Fill,
-        fill_high_priority_cache: false,
+        policy: CachePolicy::Fill(true),
     }
 }
 
@@ -91,8 +91,7 @@ async fn build_table(
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
-            policy: CachePolicy::Fill,
-            fill_high_priority_cache: false,
+            policy: CachePolicy::Fill(true),
         },
     );
     let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);

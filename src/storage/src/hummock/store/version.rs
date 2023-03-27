@@ -617,7 +617,7 @@ impl HummockVersionReader {
                             .is_ok()
                     })
                     .collect_vec();
-                fetch_meta_reqs.push((level.level_type, level.level_idx, fetch_meta_req));
+                fetch_meta_reqs.push((level.level_type, fetch_meta_req));
             } else {
                 let table_infos = prune_overlapping_ssts(
                     &level.table_infos,
@@ -627,19 +627,19 @@ impl HummockVersionReader {
                 // Overlapping
                 let fetch_meta_req = table_infos.rev().collect_vec();
                 if !fetch_meta_req.is_empty() {
-                    fetch_meta_reqs.push((level.level_type, level.level_idx, fetch_meta_req));
+                    fetch_meta_reqs.push((level.level_type, fetch_meta_req));
                 }
             }
         }
         let mut flatten_reqs = vec![];
         let mut req_count = 0;
-        for (_, level_idx, fetch_meta_req) in &fetch_meta_reqs {
+        for (_, fetch_meta_req) in &fetch_meta_reqs {
             for sstable_info in fetch_meta_req {
                 let inner_req_count = req_count;
                 let capture_ref = async {
                     // We would fill block to high priority cache for level-0
                     self.sstable_store
-                        .sstable_syncable(sstable_info, *level_idx == 0, &local_stats)
+                        .sstable_syncable(sstable_info, &local_stats)
                         .in_span(Span::enter_with_local_parent("get_sstable"))
                         .await
                 };
@@ -670,7 +670,7 @@ impl HummockVersionReader {
         }
         let sst_read_options = Arc::new(sst_read_options);
 
-        for (level_type, _, fetch_meta_req) in fetch_meta_reqs {
+        for (level_type, fetch_meta_req) in fetch_meta_reqs {
             if level_type == LevelType::Nonoverlapping as i32 {
                 let mut sstables = vec![];
                 for sstable_info in fetch_meta_req {

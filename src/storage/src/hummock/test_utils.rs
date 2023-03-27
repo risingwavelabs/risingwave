@@ -50,6 +50,7 @@ pub fn default_opts_for_test() -> StorageOpts {
         write_conflict_detection_enabled: true,
         block_cache_capacity_mb: 64,
         meta_cache_capacity_mb: 64,
+        high_priority_ratio: 0,
         disable_remote_compactor: false,
         enable_local_spill: false,
         local_object_store: "memory".to_string(),
@@ -134,7 +135,6 @@ pub fn default_writer_opt_for_test() -> SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
         policy: CachePolicy::Disable,
-        fill_high_priority_cache: false,
     }
 }
 
@@ -207,7 +207,6 @@ pub async fn gen_test_sstable_inner<B: AsRef<[u8]>>(
     let writer_opts = SstableWriterOptions {
         capacity_hint: None,
         tracker: None,
-        fill_high_priority_cache: false,
         policy,
     };
     let writer = sstable_store.clone().create_sst_writer(sst_id, writer_opts);
@@ -322,5 +321,5 @@ pub async fn count_stream<T>(s: impl Stream<Item = StorageResult<T>> + Send) -> 
 }
 
 pub fn create_small_table_cache() -> Arc<LruCache<HummockSstableId, Box<Sstable>>> {
-    Arc::new(LruCache::new(1, 4))
+    Arc::new(LruCache::new(1, 4, 0))
 }

@@ -140,6 +140,7 @@ fn bench_builder(
         "test".to_string(),
         64 << 20,
         128 << 20,
+        0,
         TieredCache::none(),
     ));
 

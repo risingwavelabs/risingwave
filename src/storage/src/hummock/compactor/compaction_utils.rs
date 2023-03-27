@@ -71,7 +71,6 @@ impl<W: SstableWriterFactory, F: FilterBuilder> TableBuilderFactory for RemoteBu
             capacity_hint: Some(self.options.capacity + self.options.block_capacity),
             tracker: Some(tracker),
             policy: self.policy,
-            fill_high_priority_cache: self.fill_high_priority_cache,
         };
         let writer = self
             .sstable_writer_factory

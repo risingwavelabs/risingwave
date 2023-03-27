@@ -68,6 +68,7 @@ pub fn mock_sstable_store_with_object_store(store: ObjectStoreRef) -> SstableSto
         path,
         64 << 20,
         64 << 20,
+        0,
         TieredCache::none(),
     ))
 }

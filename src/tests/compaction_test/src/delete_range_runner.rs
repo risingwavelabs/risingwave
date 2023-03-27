@@ -179,6 +179,7 @@ async fn compaction_test(
         system_params.data_directory().to_string(),
         config.storage.block_cache_capacity_mb * (1 << 20),
         config.storage.meta_cache_capacity_mb * (1 << 20),
+        0,
         TieredCache::none(),
     ));
 

@@ -40,6 +40,8 @@ pub struct StorageOpts {
     pub block_cache_capacity_mb: usize,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
+    /// Percent of the ratio of high priority data in block-cache
+    pub high_priority_ratio: usize,
     pub disable_remote_compactor: bool,
     pub enable_local_spill: bool,
     /// Local object store root. We should call `get_local_object_store` to get the object store.
@@ -102,6 +104,7 @@ impl From<(&RwConfig, &SystemParamsReader)> for StorageOpts {
             write_conflict_detection_enabled: c.storage.write_conflict_detection_enabled,
             block_cache_capacity_mb: c.storage.block_cache_capacity_mb,
             meta_cache_capacity_mb: c.storage.meta_cache_capacity_mb,
+            high_priority_ratio: c.storage.high_priority_ratio_in_percent,
             disable_remote_compactor: c.storage.disable_remote_compactor,
             enable_local_spill: c.storage.enable_local_spill,
             local_object_store: c.storage.local_object_store.to_string(),

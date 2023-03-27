@@ -64,7 +64,7 @@ impl BackwardSstableIterator {
                 .get(
                     self.sst.value(),
                     idx as usize,
-                    crate::hummock::CachePolicy::Fill,
+                    crate::hummock::CachePolicy::Fill(true),
                     &mut self.stats,
                 )
                 .await?;
@@ -199,7 +199,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut cnt = TEST_KEYS_COUNT;
         sstable_iter.rewind().await.unwrap();
@@ -226,7 +226,7 @@ mod tests {
         // path.
         assert!(sstable.meta.block_metas.len() > 10);
         let cache = create_small_table_cache();
-        let handle = cache.insert(0, 0, 1, Box::new(sstable));
+        let handle = cache.insert(0, 0, 1, Box::new(sstable), true);
         let mut sstable_iter = BackwardSstableIterator::new(handle, sstable_store);
         let mut all_key_to_test = (0..TEST_KEYS_COUNT).collect_vec();
         let mut rng = thread_rng();

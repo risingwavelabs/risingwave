@@ -123,6 +123,7 @@ impl DiskObjectStore {
             opened_read_file_cache: Arc::new(LruCache::new(
                 OPENED_FILE_CACHE_DEFAULT_NUM_SHARD_BITS,
                 OPENED_FILE_CACHE_DEFAULT_CAPACITY,
+                0,
             )),
         }
     }

@@ -116,21 +116,28 @@ impl BlockResponse {
 }
 
 impl BlockCache {
-    pub fn new(capacity: usize, max_shard_bits: usize) -> Self {
-        Self::new_inner(capacity, max_shard_bits, None)
+    pub fn new(capacity: usize, max_shard_bits: usize, high_priority_ratio: usize) -> Self {
+        Self::new_inner(capacity, max_shard_bits, high_priority_ratio, None)
     }
 
     pub fn with_event_listener(
         capacity: usize,
         max_shard_bits: usize,
+        high_priority_ratio: usize,
         listener: BlockCacheEventListener,
     ) -> Self {
-        Self::new_inner(capacity, max_shard_bits, Some(listener))
+        Self::new_inner(
+            capacity,
+            max_shard_bits,
+            high_priority_ratio,
+            Some(listener),
+        )
     }
 
     fn new_inner(
         capacity: usize,
         mut max_shard_bits: usize,
+        high_priority_ratio: usize,
         listener: Option<BlockCacheEventListener>,
     ) -> Self {
         if capacity == 0 {
@@ -141,8 +148,13 @@ impl BlockCache {
         }
 
         let cache = match listener {
-            Some(listener) => LruCache::with_event_listener(max_shard_bits, capacity, listener),
-            None => LruCache::new(max_shard_bits, capacity),
+            Some(listener) => LruCache::with_event_listener(
+                max_shard_bits,
+                capacity,
+                high_priority_ratio,
+                listener,
+            ),
+            None => LruCache::new(max_shard_bits, capacity, high_priority_ratio),
         };
 
         Self {
