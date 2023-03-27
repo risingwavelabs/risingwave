@@ -138,11 +138,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                             let fixed_changes = self
                                 .materialize_cache
-                                .handlle_conflict(
-                                    buffer,
-                                    &self.state_table,
-                                    &self.conflict_behavior,
-                                )
+                                .handle_conflict(buffer, &self.state_table, &self.conflict_behavior)
                                 .await?;
 
                             // TODO(st1page): when materialize partial columns(), we should
@@ -430,7 +426,7 @@ impl<SD: ValueRowSerde> MaterializeCache<SD> {
         }
     }
 
-    pub async fn handlle_conflict<'a, S: StateStore>(
+    pub async fn handle_conflict<'a, S: StateStore>(
         &mut self,
         buffer: MaterializeBuffer,
         table: &StateTableInner<S, SD>,
