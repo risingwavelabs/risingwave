@@ -207,7 +207,7 @@ pub const INVALID_EPOCH: u64 = 0;
 
 type UpstreamFragmentId = FragmentId;
 
-/// See [`risingwave_pb::stream_plan::barrier::Mutation`] for the semantics of each mutation.
+/// See [`PbMutation`] for the semantics of each mutation.
 #[derive(Debug, Clone, PartialEq, EnumAsInner)]
 pub enum Mutation {
     Stop(HashSet<ActorId>),
@@ -220,6 +220,7 @@ pub enum Mutation {
     },
     Add {
         adds: HashMap<ActorId, Vec<PbDispatcher>>,
+        added_actors: HashSet<ActorId>,
         // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
         splits: HashMap<ActorId, Vec<SplitImpl>>,
     },
@@ -277,7 +278,7 @@ impl Barrier {
     }
 
     /// Whether this barrier is to stop the actor with `actor_id`.
-    pub fn is_stop_or_update_drop_actor(&self, actor_id: ActorId) -> bool {
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
         self.all_stop_actors()
             .map_or(false, |actors| actors.contains(&actor_id))
     }
@@ -291,15 +292,16 @@ impl Barrier {
         }
     }
 
-    /// Whether this barrier is to add new dispatchers for the actor with `actor_id`.
-    pub fn is_add_dispatcher(&self, actor_id: ActorId) -> bool {
-        matches!(
-            self.mutation.as_deref(),
-            Some(Mutation::Add {adds, ..}) if adds
-                .values()
-                .flatten()
-                .any(|dispatcher| dispatcher.downstream_actor_id.contains(&actor_id))
-        )
+    /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
+    /// `Values` to decide whether to output the existing (historical) data.
+    ///
+    /// By "newly", we mean the actor belongs to a subgraph of a new streaming job. That is, actors
+    /// added for scaling are not included.
+    pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
+        match self.mutation.as_deref() {
+            Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
+            _ => todo!(),
+        }
     }
 
     /// Whether this barrier is for pause.
@@ -469,6 +471,7 @@ impl Mutation {
                     .iter()
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
+                added_actors: add.added_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add
