@@ -17,8 +17,7 @@ use std::ops::{self, Deref};
 use super::Row;
 use crate::collection::estimate_size::EstimateSize;
 use crate::types::{
-    DataType, Datum, DatumRef, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper,
-    NaiveTimeWrapper, ScalarImpl, ToDatumRef,
+    DataType, Date, Datum, DatumRef, Decimal, Interval, ScalarImpl, Time, Timestamp, ToDatumRef,
 };
 use crate::util::iter_util::ZipEqDebug;
 use crate::util::value_encoding;
@@ -78,10 +77,10 @@ impl OwnedRow {
                     DataType::Float64 => x.parse::<f64>().unwrap().into(),
                     DataType::Varchar => x.to_string().into(),
                     DataType::Boolean => x.parse::<bool>().unwrap().into(),
-                    DataType::Date => x.parse::<NaiveDateWrapper>().unwrap().into(),
-                    DataType::Time => x.parse::<NaiveTimeWrapper>().unwrap().into(),
-                    DataType::Timestamp => x.parse::<NaiveDateTimeWrapper>().unwrap().into(),
-                    DataType::Interval => x.parse::<IntervalUnit>().unwrap().into(),
+                    DataType::Date => x.parse::<Date>().unwrap().into(),
+                    DataType::Time => x.parse::<Time>().unwrap().into(),
+                    DataType::Timestamp => x.parse::<Timestamp>().unwrap().into(),
+                    DataType::Interval => x.parse::<Interval>().unwrap().into(),
                     DataType::Decimal => x.parse::<Decimal>().unwrap().into(),
                     _ => todo!(),
                 };
@@ -269,7 +268,7 @@ mod tests {
 
     use super::*;
     use crate::row::RowExt;
-    use crate::types::{DataType as Ty, IntervalUnit, ScalarImpl};
+    use crate::types::{DataType as Ty, Interval, ScalarImpl};
     use crate::util::hash_util::Crc32FastBuilder;
 
     #[test]
@@ -283,9 +282,7 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                7, 8, 9,
-            ))),
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(7, 8, 9))),
         ]);
         let value_indices = (0..9).collect_vec();
         let bytes = (&row).project(&value_indices).value_serialize();
@@ -318,14 +315,10 @@ mod tests {
             Some(ScalarImpl::Float32(4.0.into())),
             Some(ScalarImpl::Float64(5.0.into())),
             Some(ScalarImpl::Decimal("-233.3".parse().unwrap())),
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                7, 8, 9,
-            ))),
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(7, 8, 9))),
         ]);
         let row2 = OwnedRow::new(vec![
-            Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                7, 8, 9,
-            ))),
+            Some(ScalarImpl::Interval(Interval::from_month_day_usec(7, 8, 9))),
             Some(ScalarImpl::Utf8("string".into())),
             Some(ScalarImpl::Bool(true)),
             Some(ScalarImpl::Int16(1)),

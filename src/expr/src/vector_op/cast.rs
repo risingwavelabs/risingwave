@@ -27,8 +27,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::types::struct_type::StructType;
 use risingwave_common::types::to_text::ToText;
 use risingwave_common::types::{
-    DataType, Decimal, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-    OrderedF32, OrderedF64, ScalarImpl,
+    DataType, Date, Decimal, Interval, ScalarImpl, Time, Timestamp, F32, F64,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr_macro::{build_function, function};
@@ -58,24 +57,24 @@ const PARSE_ERROR_STR_TO_DATE: &str = "Can't cast string to date (expected forma
 const PARSE_ERROR_STR_TO_BYTEA: &str = "Invalid Bytea syntax";
 
 #[function("cast(varchar) -> date")]
-pub fn str_to_date(elem: &str) -> Result<NaiveDateWrapper> {
-    Ok(NaiveDateWrapper::new(parse_naive_date(elem)?))
+pub fn str_to_date(elem: &str) -> Result<Date> {
+    Ok(Date::new(parse_naive_date(elem)?))
 }
 
 #[function("cast(varchar) -> time")]
-pub fn str_to_time(elem: &str) -> Result<NaiveTimeWrapper> {
-    Ok(NaiveTimeWrapper::new(parse_naive_time(elem)?))
+pub fn str_to_time(elem: &str) -> Result<Time> {
+    Ok(Time::new(parse_naive_time(elem)?))
 }
 
 #[function("cast(varchar) -> timestamp")]
-pub fn str_to_timestamp(elem: &str) -> Result<NaiveDateTimeWrapper> {
-    Ok(NaiveDateTimeWrapper::new(parse_naive_datetime(elem)?))
+pub fn str_to_timestamp(elem: &str) -> Result<Timestamp> {
+    Ok(Timestamp::new(parse_naive_datetime(elem)?))
 }
 
 #[inline]
 fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
     if let Ok(res) = SpeedDateTime::parse_str(s) {
-        Ok(NaiveDateWrapper::from_ymd_uncheck(
+        Ok(Date::from_ymd_uncheck(
             res.date.year as i32,
             res.date.month as u32,
             res.date.day as u32,
@@ -91,7 +90,7 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
         let res = SpeedDate::parse_str(s)
             .map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIMESTAMP.into()))?;
         Ok(
-            NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
+            Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32)
                 .and_hms_micro_uncheck(0, 0, 0, 0)
                 .0,
         )
@@ -133,9 +132,9 @@ fn parse_naive_datetime(s: &str) -> Result<NaiveDateTime> {
 /// );
 /// ```
 #[inline]
-pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
+pub fn i64_to_timestamp(t: i64) -> Result<Timestamp> {
     let us = i64_to_timestamptz(t)?;
-    Ok(NaiveDateTimeWrapper::from_timestamp_uncheck(
+    Ok(Timestamp::from_timestamp_uncheck(
         us / 1_000_000,
         (us % 1_000_000) as u32 * 1000,
     ))
@@ -145,14 +144,14 @@ pub fn i64_to_timestamp(t: i64) -> Result<NaiveDateTimeWrapper> {
 fn parse_naive_date(s: &str) -> Result<NaiveDate> {
     let res =
         SpeedDate::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_DATE.into()))?;
-    Ok(NaiveDateWrapper::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
+    Ok(Date::from_ymd_uncheck(res.year as i32, res.month as u32, res.day as u32).0)
 }
 
 #[inline]
 fn parse_naive_time(s: &str) -> Result<NaiveTime> {
     let res =
         SpeedTime::parse_str(s).map_err(|_| ExprError::Parse(PARSE_ERROR_STR_TO_TIME.into()))?;
-    Ok(NaiveTimeWrapper::from_hms_micro_uncheck(
+    Ok(Time::from_hms_micro_uncheck(
         res.hour as u32,
         res.minute as u32,
         res.second as u32,
@@ -303,14 +302,14 @@ pub fn to_i64<T: ToPrimitive + Debug>(elem: T) -> Result<i64> {
 #[function("cast(int64) -> float32")]
 #[function("cast(float64) -> float32")]
 #[function("cast(decimal) -> float32")]
-pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF32> {
+pub fn to_f32<T: ToPrimitive + Debug>(elem: T) -> Result<F32> {
     elem.to_f32()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f32"))
 }
 
 #[function("cast(decimal) -> float64")]
-pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<OrderedF64> {
+pub fn to_f64<T: ToPrimitive + Debug>(elem: T) -> Result<F64> {
     elem.to_f64()
         .map(Into::into)
         .ok_or(ExprError::CastOutOfRange("f64"))
@@ -367,28 +366,28 @@ macro_rules! define_jsonb_to_number {
 define_jsonb_to_number! { i16, "cast(jsonb) -> int16" }
 define_jsonb_to_number! { i32, "cast(jsonb) -> int32" }
 define_jsonb_to_number! { i64, "cast(jsonb) -> int64" }
-define_jsonb_to_number! { f32, OrderedF32, "cast(jsonb) -> float32" }
-define_jsonb_to_number! { f64, OrderedF64, "cast(jsonb) -> float64" }
+define_jsonb_to_number! { f32, F32, "cast(jsonb) -> float32" }
+define_jsonb_to_number! { f64, F64, "cast(jsonb) -> float64" }
 
 /// In `PostgreSQL`, casting from timestamp to date discards the time part.
 #[function("cast(timestamp) -> date")]
-pub fn timestamp_to_date(elem: NaiveDateTimeWrapper) -> NaiveDateWrapper {
-    NaiveDateWrapper(elem.0.date())
+pub fn timestamp_to_date(elem: Timestamp) -> Date {
+    Date(elem.0.date())
 }
 
 /// In `PostgreSQL`, casting from timestamp to time discards the date part.
 #[function("cast(timestamp) -> time")]
-pub fn timestamp_to_time(elem: NaiveDateTimeWrapper) -> NaiveTimeWrapper {
-    NaiveTimeWrapper(elem.0.time())
+pub fn timestamp_to_time(elem: Timestamp) -> Time {
+    Time(elem.0.time())
 }
 
 /// In `PostgreSQL`, casting from interval to time discards the days part.
 #[function("cast(interval) -> time")]
-pub fn interval_to_time(elem: IntervalUnit) -> NaiveTimeWrapper {
+pub fn interval_to_time(elem: Interval) -> Time {
     let usecs = elem.get_usecs_of_day();
     let secs = (usecs / 1_000_000) as u32;
     let nano = (usecs % 1_000_000 * 1000) as u32;
-    NaiveTimeWrapper::from_num_seconds_from_midnight_uncheck(secs, nano)
+    Time::from_num_seconds_from_midnight_uncheck(secs, nano)
 }
 
 #[function("cast(boolean) -> int32")]
@@ -496,8 +495,8 @@ pub fn literal_parsing(
         DataType::Int64 => str_parse::<i64>(s)?.into(),
         DataType::Serial => return Err(None),
         DataType::Decimal => str_parse::<Decimal>(s)?.into(),
-        DataType::Float32 => str_parse::<OrderedF32>(s)?.into(),
-        DataType::Float64 => str_parse::<OrderedF64>(s)?.into(),
+        DataType::Float32 => str_parse::<F32>(s)?.into(),
+        DataType::Float64 => str_parse::<F64>(s)?.into(),
         DataType::Varchar => return Err(None),
         DataType::Date => str_to_date(s)?.into(),
         DataType::Timestamp => str_to_timestamp(s)?.into(),
@@ -505,7 +504,7 @@ pub fn literal_parsing(
         // for later phase.
         DataType::Timestamptz => str_with_time_zone_to_timestamptz(s)?.into(),
         DataType::Time => str_to_time(s)?.into(),
-        DataType::Interval => str_parse::<IntervalUnit>(s)?.into(),
+        DataType::Interval => str_parse::<Interval>(s)?.into(),
         // Not processing list or struct literal right now. Leave it for later phase (normal backend
         // evaluation).
         DataType::List { .. } => return Err(None),
@@ -770,11 +769,11 @@ mod tests {
         test!(general_to_text(i64::MIN), "-9223372036854775808");
         test!(general_to_text(i64::MAX), "9223372036854775807");
 
-        test!(general_to_text(OrderedF64::from(32.12)), "32.12");
-        test!(general_to_text(OrderedF64::from(-32.14)), "-32.14");
+        test!(general_to_text(F64::from(32.12)), "32.12");
+        test!(general_to_text(F64::from(-32.14)), "-32.14");
 
-        test!(general_to_text(OrderedF32::from(32.12_f32)), "32.12");
-        test!(general_to_text(OrderedF32::from(-32.14_f32)), "-32.14");
+        test!(general_to_text(F32::from(32.12_f32)), "32.12");
+        test!(general_to_text(F32::from(-32.14_f32)), "-32.14");
 
         test!(general_to_text(Decimal::from_f64(1.222).unwrap()), "1.222");
 
@@ -792,11 +791,11 @@ mod tests {
             str_to_time("04:02").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::from_month_day_usec(1, 2, 61000003)),
+            interval_to_time(Interval::from_month_day_usec(1, 2, 61000003)),
             str_to_time("00:01:01.000003").unwrap(),
         );
         assert_eq!(
-            interval_to_time(IntervalUnit::from_month_day_usec(0, 0, -61000003)),
+            interval_to_time(Interval::from_month_day_usec(0, 0, -61000003)),
             str_to_time("23:58:58.999997").unwrap(),
         );
     }
@@ -984,7 +983,7 @@ mod tests {
             struct_cast(
                 StructValue::new(vec![
                     Some("1".into()),
-                    Some(OrderedF32::from(0.0).to_scalar_value()),
+                    Some(F32::from(0.0).to_scalar_value()),
                 ])
                 .as_scalar_ref(),
                 &StructType::new(vec![
@@ -1018,9 +1017,8 @@ mod tests {
     #[test]
     fn test_timestamp() {
         assert_eq!(
-            try_cast::<_, NaiveDateTimeWrapper>(NaiveDateWrapper::from_ymd_uncheck(1994, 1, 1))
-                .unwrap(),
-            NaiveDateTimeWrapper::new(
+            try_cast::<_, Timestamp>(Date::from_ymd_uncheck(1994, 1, 1)).unwrap(),
+            Timestamp::new(
                 NaiveDateTime::parse_from_str("1994-1-1 0:0:0", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         )

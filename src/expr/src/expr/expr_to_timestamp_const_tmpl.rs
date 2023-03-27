@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use risingwave_common::array::{Array, ArrayBuilder, NaiveDateTimeArrayBuilder, Utf8Array};
+use risingwave_common::array::{Array, ArrayBuilder, TimestampArrayBuilder, Utf8Array};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -48,7 +48,7 @@ impl Expression for ExprToTimestampConstTmpl {
     ) -> crate::Result<risingwave_common::array::ArrayRef> {
         let data_arr = self.child.eval_checked(input).await?;
         let data_arr: &Utf8Array = data_arr.as_ref().into();
-        let mut output = NaiveDateTimeArrayBuilder::new(input.capacity());
+        let mut output = TimestampArrayBuilder::new(input.capacity());
         for (data, vis) in data_arr.iter().zip_eq_fast(input.vis().iter()) {
             if !vis {
                 output.append_null();
@@ -94,7 +94,7 @@ fn build_to_timestamp_expr(
         }
         .boxed()
     } else {
-        BinaryExpression::<Utf8Array, Utf8Array, NaiveDateTimeArray, _>::new(
+        BinaryExpression::<Utf8Array, Utf8Array, TimestampArray, _>::new(
             data_expr,
             tmpl_expr,
             return_type,

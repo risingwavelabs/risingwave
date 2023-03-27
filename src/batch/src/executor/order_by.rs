@@ -140,10 +140,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::test_prelude::DataChunkTestExt;
-    use risingwave_common::types::{
-        DataType, IntervalUnit, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper,
-        OrderedF32, Scalar,
-    };
+    use risingwave_common::types::{DataType, Date, Interval, Scalar, Time, Timestamp, F32};
     use risingwave_common::util::sort_util::OrderType;
 
     use super::*;
@@ -379,12 +376,12 @@ mod tests {
             vec![
                 column! { Utf8Array, [Some("abc"), Some("b"), Some("abc"), Some("abcdefgh"), Some("b")] },
                 column! { DecimalArray, [None, Some(-3), None, None, Some(7)] },
-                column! { NaiveDateArray, [
-                Some(NaiveDateWrapper::with_days(123).unwrap()),
-                Some(NaiveDateWrapper::with_days(789).unwrap()),
-                Some(NaiveDateWrapper::with_days(456).unwrap()),
+                column! { DateArray, [
+                Some(Date::with_days(123).unwrap()),
+                Some(Date::with_days(789).unwrap()),
+                Some(Date::with_days(456).unwrap()),
                 None,
-                Some(NaiveDateWrapper::with_days(345).unwrap())] },
+                Some(Date::with_days(345).unwrap())] },
             ],
             5,
         );
@@ -397,12 +394,12 @@ mod tests {
             vec![
                 column! { Utf8Array, [Some("b"), Some("b"), Some("abcdefgh"), Some("abc"), Some("abc")] },
                 column! { DecimalArray, [Some(7), Some(-3), None, None, None] },
-                column! { NaiveDateArray, [
-                Some(NaiveDateWrapper::with_days(345).unwrap()),
-                Some(NaiveDateWrapper::with_days(789).unwrap()),
+                column! { DateArray, [
+                Some(Date::with_days(345).unwrap()),
+                Some(Date::with_days(789).unwrap()),
                 None,
-                Some(NaiveDateWrapper::with_days(123).unwrap()),
-                Some(NaiveDateWrapper::with_days(456).unwrap())] },
+                Some(Date::with_days(123).unwrap()),
+                Some(Date::with_days(456).unwrap())] },
             ],
             5,
         );
@@ -450,23 +447,23 @@ mod tests {
         // 7:89  .     .
         let input_chunk = DataChunk::new(
             vec![
-                column! { NaiveTimeArray, [
+                column! { TimeArray, [
                 None,
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
                 None,
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap())] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(7, 89).unwrap())] },
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None] },
                 column! { IntervalArray, [
                 None,
-                Some(IntervalUnit::from_month_day_usec(1, 2, 3)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
-                Some(IntervalUnit::from_month_day_usec(4, 5, 6)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
                 None] },
             ],
             5,
@@ -478,21 +475,21 @@ mod tests {
         // .     7:89  .
         let output_chunk = DataChunk::new(
             vec![
-                column! { NaiveTimeArray, [
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(4, 56).unwrap()),
-                Some(NaiveTimeWrapper::with_secs_nano(7, 89).unwrap()),
+                column! { TimeArray, [
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(4, 56).unwrap()),
+                Some(Time::with_secs_nano(7, 89).unwrap()),
                 None,
                 None] },
-                column! { NaiveDateTimeArray, [
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(4, 56).unwrap()),
+                column! { TimestampArray, [
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
+                Some(Timestamp::with_secs_nsecs(4, 56).unwrap()),
                 None,
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(1, 23).unwrap()),
-                Some(NaiveDateTimeWrapper::with_secs_nsecs(7, 89).unwrap())] },
+                Some(Timestamp::with_secs_nsecs(1, 23).unwrap()),
+                Some(Timestamp::with_secs_nsecs(7, 89).unwrap())] },
                 column! { IntervalArray, [
-                Some(IntervalUnit::from_month_day_usec(4, 5, 6)),
-                Some(IntervalUnit::from_month_day_usec(1, 2, 3)),
+                Some(Interval::from_month_day_usec(4, 5, 6)),
+                Some(Interval::from_month_day_usec(1, 2, 3)),
                 None,
                 None,
                 None] },
@@ -564,13 +561,13 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
@@ -579,14 +576,11 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },
@@ -633,29 +627,26 @@ mod tests {
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("abcd".into()),
-                            Some(OrderedF32::from(-1.2).to_scalar_value()),
+                            Some(F32::from(-1.2).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![
                             Some("c".into()),
-                            Some(OrderedF32::from(0.0).to_scalar_value()),
+                            Some(F32::from(0.0).to_scalar_value()),
                         ]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
                         val: &StructValue::new(vec![Some("c".into()), None]),
                     }));
                     struct_builder.append(Some(StructRef::ValueRef {
-                        val: &StructValue::new(vec![
-                            None,
-                            Some(OrderedF32::from(3.4).to_scalar_value()),
-                        ]),
+                        val: &StructValue::new(vec![None, Some(F32::from(3.4).to_scalar_value())]),
                     }));
                     struct_builder.finish().into()
                 },

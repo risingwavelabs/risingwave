@@ -61,14 +61,14 @@ impl TableFunctionType {
     }
 }
 
-impl TableFunctionType {
+impl TableFunction {
     pub fn name(&self) -> &str {
-        match self {
+        match self.function_type {
             TableFunctionType::Generate => "generate_series",
             TableFunctionType::Range => "range",
             TableFunctionType::Unnest => "unnest",
             TableFunctionType::RegexpMatches => "regexp_matches",
-            TableFunctionType::Udtf => "udtf",
+            TableFunctionType::Udtf => &self.udtf_catalog.as_ref().unwrap().name,
         }
     }
 }

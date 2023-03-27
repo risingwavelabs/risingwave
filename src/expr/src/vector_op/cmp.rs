@@ -346,7 +346,7 @@ fn boolarray_is_not_false(a: &BoolArray) -> BoolArray {
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::{Decimal, OrderedF32, OrderedF64};
+    use risingwave_common::types::{Decimal, F32, F64};
 
     use super::*;
 
@@ -399,13 +399,13 @@ mod tests {
         assert!(!general_is_distinct_from::<Decimal, f32, Decimal>(
             None, None
         ));
-        assert!(general_eq::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(!general_ne::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(!general_lt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(general_le::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(!general_gt::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(general_ge::<OrderedF32, i32, OrderedF64>(1.0.into(), 1));
-        assert!(!general_is_distinct_from::<OrderedF32, i32, OrderedF64>(
+        assert!(general_eq::<F32, i32, F64>(1.0.into(), 1));
+        assert!(!general_ne::<F32, i32, F64>(1.0.into(), 1));
+        assert!(!general_lt::<F32, i32, F64>(1.0.into(), 1));
+        assert!(general_le::<F32, i32, F64>(1.0.into(), 1));
+        assert!(!general_gt::<F32, i32, F64>(1.0.into(), 1));
+        assert!(general_ge::<F32, i32, F64>(1.0.into(), 1));
+        assert!(!general_is_distinct_from::<F32, i32, F64>(
             Some(1.0.into()),
             Some(1)
         ));

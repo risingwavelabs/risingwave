@@ -269,8 +269,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 tokio::select! {
                     _ = &mut handle => {
                         tracing::info!("receive leader lost signal");
-                        shutdown_send.send(()).unwrap();
-                        join_handle.await.unwrap()
+                        // When we lose leadership, we will exit as soon as possible.
                     }
                     _ = tokio::signal::ctrl_c() => {
                         tracing::info!("receive ctrl+c");
