@@ -1,0 +1,5 @@
+# UNION should also be in local mode
+query I
+SELECT name FROM pg_catalog.pg_settings union select 'a';
+----
+a
