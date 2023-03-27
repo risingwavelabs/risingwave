@@ -46,39 +46,57 @@ public class DbzSourceHandler implements SourceHandler {
             // Start the engine
             runner.start();
             LOG.info("Start consuming events of table {}", config.getSourceId());
-            while (runner.isRunning()) {
-                try {
-                    // Thread will block on the channel to get output from engine
-                    var resp =
-                            runner.getEngine().getOutputChannel().poll(500, TimeUnit.MILLISECONDS);
 
-                    if (resp != null) {
-                        // check whether the send queue has room for new messages
-                        while (!responseObserver.isReady() && !Context.current().isCancelled()) {
-                            // wait a bit to avoid OOM
-                            Thread.sleep(500);
+            class OnReadyHandler implements Runnable {
+                @Override
+                public void run() {
+                    while (runner.isRunning()) {
+                        if (Context.current().isCancelled()) {
+                            LOG.info(
+                                    "Engine#{}: Connection broken detected, stop the engine",
+                                    config.getSourceId());
+                            try {
+                                runner.stop();
+                            } catch (Exception e) {
+                                throw new RuntimeException(e);
+                            }
                         }
-                        ConnectorNodeMetrics.incSourceRowsReceived(
-                                config.getSourceType().toString(),
-                                String.valueOf(config.getSourceId()),
-                                resp.getEventsCount());
-                        LOG.debug(
-                                "Engine#{}: emit one chunk {} events to network ",
-                                config.getSourceId(),
-                                resp.getEventsCount());
-                        responseObserver.onNext(resp);
+                        // check whether the send queue has room for new messages
+                        if (responseObserver.isReady()) {
+                            try {
+                                // Thread will block on the channel to get output from engine
+                                var resp =
+                                        runner.getEngine()
+                                                .getOutputChannel()
+                                                .poll(500, TimeUnit.MILLISECONDS);
+                                if (resp != null) {
+                                    ConnectorNodeMetrics.incSourceRowsReceived(
+                                            config.getSourceType().toString(),
+                                            String.valueOf(config.getSourceId()),
+                                            resp.getEventsCount());
+                                    LOG.debug(
+                                            "Engine#{}: emit one chunk {} events to network ",
+                                            config.getSourceId(),
+                                            resp.getEventsCount());
+                                    responseObserver.onNext(resp);
+                                }
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        } else {
+                            return;
+                        }
                     }
-
-                    if (Context.current().isCancelled()) {
-                        LOG.info(
-                                "Engine#{}: Connection broken detected, stop the engine",
-                                config.getSourceId());
-                        runner.stop();
-                    }
-                } catch (InterruptedException e) {
-                    LOG.error("Poll engine output channel fail. ", e);
                 }
             }
+
+            final OnReadyHandler onReadyHandler = new OnReadyHandler();
+
+            responseObserver.disableAutoRequest();
+            responseObserver.setOnReadyHandler(onReadyHandler);
+
+            onReadyHandler.run();
+
         } catch (Throwable t) {
             LOG.error("Cdc engine failed.", t);
             try {
