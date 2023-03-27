@@ -38,7 +38,6 @@ use crate::utils::{
     ColIndexMapping, ColIndexMappingRewriteExt, Condition, ConditionDisplay,
     ConnectedComponentLabeller,
 };
-use crate::Explain;
 
 /// `LogicalMultiJoin` combines two or more relations according to some condition.
 ///
@@ -506,13 +505,8 @@ impl LogicalMultiJoin {
         while let Some(nodes) = que.pop_front() {
             if nodes.len() == 1 {
                 let node = nodes.into_values().next().unwrap();
-
-                optimized_bushy_tree = Some(if let Some(old_tree) = optimized_bushy_tree {
-                    if node.borrow().join_tree.height < old_tree.borrow().join_tree.height {
-                        node
-                    } else {
-                        old_tree
-                    }
+                optimized_bushy_tree = Some(if let Some(old) = optimized_bushy_tree {
+                    node.min(old)
                 } else {
                     node
                 });
@@ -545,7 +539,7 @@ impl LogicalMultiJoin {
             }
 
             n.borrow_mut().relations.sort();
-            n.borrow_mut().relations.dedup();
+            n.borrow_mut().relations.dedup_by_key(|n| n.borrow().id);
 
             for merge_node in &n.borrow().relations {
                 let mut nodes = clone_graph(&nodes);
@@ -554,7 +548,7 @@ impl LogicalMultiJoin {
                 let merge_node = nodes.get(&merge_node_id).unwrap().clone();
                 for adj_node in &n.borrow().relations {
                     let adj_node = adj_node.clone();
-                    if adj_node != merge_node {
+                    if adj_node.borrow().id != merge_node_id {
                         let n_idx = adj_node
                             .borrow()
                             .relations
@@ -856,7 +850,7 @@ impl fmt::Debug for GraphNode {
 
 impl PartialEq for GraphNode {
     fn eq(&self, other: &Self) -> bool {
-        self.id.eq(&other.id)
+        self.join_tree.p.eq(&other.join_tree.height)
     }
 }
 
@@ -864,7 +858,7 @@ impl Eq for GraphNode {}
 
 impl PartialOrd for GraphNode {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.join_tree.height.partial_cmp(&other.join_tree.height)
+        Some(self.join_tree.height.cmp(&other.join_tree.height))
     }
 }
 

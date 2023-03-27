@@ -359,16 +359,22 @@
     └─StreamProject { exprs: [nation.n_name, sum($expr1)] }
       └─StreamHashAgg { group_key: [nation.n_name], aggs: [sum($expr1), count] }
         └─StreamExchange { dist: HashShard(nation.n_name) }
-          └─StreamProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey, supplier.s_nationkey] }
-            └─StreamHashJoin { type: Inner, predicate: lineitem.l_orderkey = orders.o_orderkey AND supplier.s_nationkey = customer.c_nationkey AND supplier.s_nationkey = nation.n_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, lineitem.l_orderkey, lineitem.l_linenumber, supplier.s_suppkey, lineitem.l_suppkey, supplier.s_nationkey, region.r_regionkey, nation.n_nationkey, orders.o_orderkey, customer.c_custkey, orders.o_custkey] }
-              ├─StreamExchange { dist: HashShard(supplier.s_nationkey) }
-              | └─StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey, output: [lineitem.l_orderkey, lineitem.l_extendedprice, lineitem.l_discount, supplier.s_nationkey, lineitem.l_linenumber, lineitem.l_suppkey, supplier.s_suppkey] }
-              |   ├─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-              |   | └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-              |   └─StreamExchange { dist: HashShard(supplier.s_suppkey) }
-              |     └─StreamFilter { predicate: (supplier.s_nationkey = supplier.s_nationkey) }
-              |       └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-              └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = customer.c_nationkey, output: [nation.n_nationkey, nation.n_name, orders.o_orderkey, customer.c_nationkey, region.r_regionkey, customer.c_custkey, orders.o_custkey] }
+          └─StreamProject { exprs: [nation.n_name, (lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) as $expr1, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, customer.c_custkey, orders.o_custkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey, lineitem.l_suppkey, customer.c_nationkey] }
+            └─StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey AND customer.c_nationkey = supplier.s_nationkey AND customer.c_nationkey = nation.n_nationkey, output: [lineitem.l_extendedprice, lineitem.l_discount, nation.n_name, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, customer.c_custkey, orders.o_custkey, lineitem.l_suppkey, customer.c_nationkey, region.r_regionkey, nation.n_nationkey, supplier.s_suppkey] }
+              ├─StreamExchange { dist: HashShard(customer.c_nationkey) }
+              | └─StreamHashJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, customer.c_nationkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, orders.o_custkey, customer.c_custkey] }
+              |   ├─StreamExchange { dist: HashShard(orders.o_custkey) }
+              |   | └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_custkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+              |   |   ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+              |   |   | └─StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
+              |   |   |   └─StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < '1995-01-01 00:00:00':Timestamp) }
+              |   |   |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+              |   |   └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+              |   |     └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_suppkey, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              |   └─StreamExchange { dist: HashShard(customer.c_custkey) }
+              |     └─StreamFilter { predicate: (customer.c_nationkey = customer.c_nationkey) }
+              |       └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
+              └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey, output: [nation.n_nationkey, nation.n_name, supplier.s_suppkey, supplier.s_nationkey, region.r_regionkey] }
                 ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
                 | └─StreamHashJoin { type: Inner, predicate: region.r_regionkey = nation.n_regionkey, output: [nation.n_nationkey, nation.n_name, region.r_regionkey] }
                 |   ├─StreamExchange { dist: HashShard(region.r_regionkey) }
@@ -377,14 +383,8 @@
                 |   |     └─StreamTableScan { table: region, columns: [region.r_regionkey, region.r_name], pk: [region.r_regionkey], dist: UpstreamHashShard(region.r_regionkey) }
                 |   └─StreamExchange { dist: HashShard(nation.n_regionkey) }
                 |     └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
-                └─StreamExchange { dist: HashShard(customer.c_nationkey) }
-                  └─StreamHashJoin { type: Inner, predicate: orders.o_custkey = customer.c_custkey, output: [orders.o_orderkey, customer.c_nationkey, orders.o_custkey, customer.c_custkey] }
-                    ├─StreamExchange { dist: HashShard(orders.o_custkey) }
-                    | └─StreamProject { exprs: [orders.o_orderkey, orders.o_custkey] }
-                    |   └─StreamFilter { predicate: (orders.o_orderdate >= '1994-01-01':Date) AND (orders.o_orderdate < '1995-01-01 00:00:00':Timestamp) }
-                    |     └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_custkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
-                    └─StreamExchange { dist: HashShard(customer.c_custkey) }
-                      └─StreamTableScan { table: customer, columns: [customer.c_custkey, customer.c_nationkey], pk: [customer.c_custkey], dist: UpstreamHashShard(customer.c_custkey) }
+                └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
+                  └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
   with_config_map:
     RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
 - id: tpch_q6
@@ -609,31 +609,31 @@
     └─StreamProject { exprs: [nation.n_name, $expr1, RoundDigit(sum($expr2), 2:Int32) as $expr3] }
       └─StreamHashAgg { group_key: [nation.n_name, $expr1], aggs: [sum($expr2), count] }
         └─StreamExchange { dist: HashShard(nation.n_name, $expr1) }
-          └─StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)) as $expr2, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
-            └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = lineitem.l_suppkey AND partsupp.ps_partkey = lineitem.l_partkey AND partsupp.ps_suppkey = supplier.s_suppkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, part.p_partkey, partsupp.ps_partkey, partsupp.ps_suppkey, nation.n_nationkey, supplier.s_suppkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
-              ├─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
-              | └─StreamHashJoin { type: Inner, predicate: part.p_partkey = partsupp.ps_partkey, output: all }
+          └─StreamProject { exprs: [nation.n_name, Extract('YEAR':Varchar, orders.o_orderdate) as $expr1, ((lineitem.l_extendedprice * (1:Int32 - lineitem.l_discount)) - (partsupp.ps_supplycost * lineitem.l_quantity)) as $expr2, part.p_partkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, lineitem.l_suppkey, lineitem.l_partkey] }
+            └─StreamHashJoin { type: Inner, predicate: lineitem.l_suppkey = supplier.s_suppkey AND lineitem.l_suppkey = partsupp.ps_suppkey AND lineitem.l_partkey = partsupp.ps_partkey AND part.p_partkey = partsupp.ps_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, partsupp.ps_supplycost, orders.o_orderdate, nation.n_name, part.p_partkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_suppkey, lineitem.l_partkey, nation.n_nationkey, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey] }
+              ├─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
+              | └─StreamHashJoin { type: Inner, predicate: part.p_partkey = lineitem.l_partkey, output: all }
               |   ├─StreamExchange { dist: HashShard(part.p_partkey) }
               |   | └─StreamProject { exprs: [part.p_partkey] }
               |   |   └─StreamFilter { predicate: Like(part.p_name, '%yellow%':Varchar) }
               |   |     └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_name], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-              |   └─StreamExchange { dist: HashShard(partsupp.ps_partkey) }
-              |     └─StreamFilter { predicate: (partsupp.ps_suppkey = partsupp.ps_suppkey) }
-              |       └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
-              └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = lineitem.l_suppkey, output: [nation.n_name, supplier.s_suppkey, orders.o_orderdate, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, nation.n_nationkey, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+              |   └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
+              |     └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
+              |       ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
+              |       | └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
+              |       └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
+              |         └─StreamFilter { predicate: (lineitem.l_suppkey = lineitem.l_suppkey) }
+              |           └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+              └─StreamHashJoin { type: Inner, predicate: supplier.s_suppkey = partsupp.ps_suppkey, output: [nation.n_name, supplier.s_suppkey, partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost, nation.n_nationkey] }
                 ├─StreamExchange { dist: HashShard(supplier.s_suppkey) }
                 | └─StreamHashJoin { type: Inner, predicate: nation.n_nationkey = supplier.s_nationkey, output: [nation.n_name, supplier.s_suppkey, nation.n_nationkey] }
                 |   ├─StreamExchange { dist: HashShard(nation.n_nationkey) }
                 |   | └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], pk: [nation.n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
                 |   └─StreamExchange { dist: HashShard(supplier.s_nationkey) }
                 |     └─StreamTableScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey], pk: [supplier.s_suppkey], dist: UpstreamHashShard(supplier.s_suppkey) }
-                └─StreamExchange { dist: HashShard(lineitem.l_suppkey) }
-                  └─StreamHashJoin { type: Inner, predicate: orders.o_orderkey = lineitem.l_orderkey, output: [orders.o_orderdate, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, orders.o_orderkey, lineitem.l_orderkey, lineitem.l_linenumber] }
-                    ├─StreamExchange { dist: HashShard(orders.o_orderkey) }
-                    | └─StreamTableScan { table: orders, columns: [orders.o_orderkey, orders.o_orderdate], pk: [orders.o_orderkey], dist: UpstreamHashShard(orders.o_orderkey) }
-                    └─StreamExchange { dist: HashShard(lineitem.l_orderkey) }
-                      └─StreamFilter { predicate: (lineitem.l_partkey = lineitem.l_partkey) }
-                        └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_partkey, lineitem.l_suppkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_discount, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
+                └─StreamExchange { dist: HashShard(partsupp.ps_suppkey) }
+                  └─StreamFilter { predicate: (partsupp.ps_partkey = partsupp.ps_partkey) }
+                    └─StreamTableScan { table: partsupp, columns: [partsupp.ps_partkey, partsupp.ps_suppkey, partsupp.ps_supplycost], pk: [partsupp.ps_partkey, partsupp.ps_suppkey], dist: UpstreamHashShard(partsupp.ps_partkey, partsupp.ps_suppkey) }
   with_config_map:
     RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
 - id: tpch_q10
@@ -1029,35 +1029,10 @@
         where
           l_partkey = p_partkey
       );
-  stream_plan: |
-    StreamMaterialize { columns: [avg_yearly], pk_columns: [], pk_conflict: "no check" }
-    └─StreamProject { exprs: [RoundDigit((sum(sum(lineitem.l_extendedprice)) / 7.0:Decimal), 16:Int32) as $expr2] }
-      └─StreamGlobalSimpleAgg { aggs: [sum(sum(lineitem.l_extendedprice)), count] }
-        └─StreamExchange { dist: Single }
-          └─StreamStatelessLocalSimpleAgg { aggs: [sum(lineitem.l_extendedprice)] }
-            └─StreamProject { exprs: [lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, part.p_partkey, lineitem.l_partkey] }
-              └─StreamFilter { predicate: (lineitem.l_quantity < $expr1) }
-                └─StreamHashJoin { type: Inner, predicate: part.p_partkey IS NOT DISTINCT FROM part.p_partkey, output: all }
-                  ├─StreamProject { exprs: [part.p_partkey, (0.2:Decimal * (sum(lineitem.l_quantity) / count(lineitem.l_quantity))) as $expr1] }
-                  | └─StreamHashAgg { group_key: [part.p_partkey], aggs: [sum(lineitem.l_quantity), count(lineitem.l_quantity), count] }
-                  |   └─StreamHashJoin { type: LeftOuter, predicate: part.p_partkey IS NOT DISTINCT FROM lineitem.l_partkey, output: [part.p_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber] }
-                  |     ├─StreamExchange { dist: HashShard(part.p_partkey) }
-                  |     | └─StreamProject { exprs: [part.p_partkey] }
-                  |     |   └─StreamHashAgg { group_key: [part.p_partkey], aggs: [count] }
-                  |     |     └─StreamProject { exprs: [part.p_partkey] }
-                  |     |       └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                  |     |         └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
-                  |     └─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                  |       └─StreamFilter { predicate: IsNotNull(lineitem.l_partkey) }
-                  |         └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                  └─StreamExchange { dist: HashShard(part.p_partkey) }
-                    └─StreamHashJoin { type: Inner, predicate: lineitem.l_partkey = part.p_partkey, output: [lineitem.l_quantity, lineitem.l_extendedprice, part.p_partkey, lineitem.l_orderkey, lineitem.l_linenumber, lineitem.l_partkey] }
-                      ├─StreamExchange { dist: HashShard(lineitem.l_partkey) }
-                      | └─StreamTableScan { table: lineitem, columns: [lineitem.l_partkey, lineitem.l_quantity, lineitem.l_extendedprice, lineitem.l_orderkey, lineitem.l_linenumber], pk: [lineitem.l_orderkey, lineitem.l_linenumber], dist: UpstreamHashShard(lineitem.l_orderkey, lineitem.l_linenumber) }
-                      └─StreamExchange { dist: HashShard(part.p_partkey) }
-                        └─StreamProject { exprs: [part.p_partkey] }
-                          └─StreamFilter { predicate: (part.p_brand = 'Brand#13':Varchar) AND (part.p_container = 'JUMBO PKG':Varchar) }
-                            └─StreamTableScan { table: part, columns: [part.p_partkey, part.p_brand, part.p_container], pk: [part.p_partkey], dist: UpstreamHashShard(part.p_partkey) }
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://github.com/risingwavelabs/rfcs/blob/main/rfcs/0033-dynamic-filter.md
   with_config_map:
     RW_STREAMING_ENABLE_BUSHY_JOIN: 'true'
 - id: tpch_q18
