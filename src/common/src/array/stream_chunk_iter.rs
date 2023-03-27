@@ -19,7 +19,7 @@ use crate::array::{Op, StreamChunk};
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.
-    pub fn records(&self) -> impl Iterator<Item = Record<RowRef<'_>>> {
+    pub fn records(&self) -> StreamChunkRefIter<'_> {
         StreamChunkRefIter {
             chunk: self,
             inner: self.data.rows(),
@@ -40,7 +40,7 @@ impl StreamChunk {
     }
 }
 
-struct StreamChunkRefIter<'a> {
+pub struct StreamChunkRefIter<'a> {
     chunk: &'a StreamChunk,
 
     inner: DataChunkRefIter<'a>,
