@@ -355,6 +355,7 @@ where
                     hash_builder.hash_one(&key),
                     utils::align_up(self.block_size, block_loc.len as usize),
                     slot,
+                    true,
                 );
             }
         }
