@@ -108,10 +108,10 @@ pub struct StateTableInner<
 
     value_indices: Option<Vec<usize>>,
 
-    /// latest watermark
-    cur_watermark: Option<ScalarImpl>,
-
+    /// Strategy to buffer watermark for lazy state cleaning.
     watermark_buffer_strategy: W,
+    /// State cleaning watermark. Old states will be cleaned under this watermark when commiting.
+    state_clean_watermark: Option<ScalarImpl>,
 }
 
 /// `StateTable` will use `BasicSerde` as default
@@ -252,8 +252,8 @@ where
             table_option,
             vnode_col_idx_in_pk,
             value_indices,
-            cur_watermark: None,
             watermark_buffer_strategy: W::default(),
+            state_clean_watermark: None,
         }
     }
 
@@ -423,8 +423,8 @@ where
             table_option: Default::default(),
             vnode_col_idx_in_pk: None,
             value_indices,
-            cur_watermark: None,
             watermark_buffer_strategy: W::default(),
+            state_clean_watermark: None,
         }
     }
 
@@ -590,7 +590,7 @@ where
         }
         assert_eq!(self.vnodes.len(), new_vnodes.len());
 
-        self.cur_watermark = None;
+        self.state_clean_watermark = None;
 
         std::mem::replace(&mut self.vnodes, new_vnodes)
     }
@@ -746,9 +746,18 @@ where
         }
     }
 
-    pub fn update_watermark(&mut self, watermark: ScalarImpl) {
+    /// Update watermark for state cleaning.
+    ///
+    /// # Arguments
+    ///
+    /// * `watermark` - Latest watermark received.
+    /// * `eager_cleaning` - Whether to clean up the state table eagerly.
+    pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        self.cur_watermark = Some(watermark);
+        self.watermark_buffer_strategy.tick();
+        if eager_cleaning || self.watermark_buffer_strategy.apply() {
+            self.state_clean_watermark = Some(watermark);
+        }
     }
 
     pub async fn commit(&mut self, new_epoch: EpochPair) -> StreamExecutorResult<()> {
@@ -767,28 +776,12 @@ where
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
-        if self.cur_watermark.is_some() {
-            self.watermark_buffer_strategy.tick();
-        }
         self.local_store.seal_current_epoch(new_epoch.curr);
     }
 
     /// Write to state store.
     async fn seal_current_epoch(&mut self, next_epoch: u64) -> StreamExecutorResult<()> {
-        let watermark = {
-            if let Some(watermark) = self.cur_watermark.take() {
-                self.watermark_buffer_strategy.tick();
-                if !self.watermark_buffer_strategy.apply() {
-                    self.cur_watermark = Some(watermark);
-                    None
-                } else {
-                    Some(watermark)
-                }
-            } else {
-                None
-            }
-        };
-
+        let watermark = self.state_clean_watermark.take();
         watermark.as_ref().inspect(|watermark| {
             trace!(table_id = %self.table_id, watermark = ?watermark, "state cleaning");
         });

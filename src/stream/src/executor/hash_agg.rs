@@ -127,6 +127,10 @@ impl<K: HashKey, S: StateStore> ExecutorInner<K, S> {
             .chain(self.distinct_dedup_tables.values_mut())
             .chain(std::iter::once(&mut self.result_table))
     }
+
+    fn all_state_tables_except_result_mut(&mut self) -> impl Iterator<Item = &mut StateTable<S>> {
+        iter_table_storage(&mut self.storages).chain(self.distinct_dedup_tables.values_mut())
+    }
 }
 
 struct ExecutionVars<K: HashKey, S: StateStore> {
@@ -421,7 +425,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             .buffered_watermarks
             .first()
             .and_then(|opt_watermark| opt_watermark.as_ref())
-            .map(|watermark| &watermark.val);
+            .map(|watermark| watermark.val.clone());
 
         let n_dirty_group = vars.group_change_set.len();
 
@@ -514,24 +518,24 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
             yield chunk;
         }
 
-        if n_dirty_group > 0 {
-            // Commit all state tables.
-            futures::future::try_join_all(this.all_state_tables_mut().map(|table| async {
-                if let Some(watermark) = window_watermark {
-                    table.update_watermark(watermark.clone())
-                };
-                table.commit(epoch).await
-            }))
-            .await?;
-        } else {
+        if n_dirty_group == 0 && window_watermark.is_none() {
             // Nothing is expected to be changed.
-            // Call commit on state table to increment the epoch.
             this.all_state_tables_mut().for_each(|table| {
-                if let Some(watermark) = window_watermark {
-                    table.update_watermark(watermark.clone())
-                };
                 table.commit_no_data_expected(epoch);
             });
+        } else {
+            if let Some(watermark) = window_watermark {
+                // Update watermark of state tables, for state cleaning.
+                this.all_state_tables_except_result_mut()
+                    .for_each(|table| table.update_watermark(watermark.clone(), false));
+                this.result_table.update_watermark(watermark, true);
+            }
+            // Commit all state tables.
+            futures::future::try_join_all(
+                this.all_state_tables_mut()
+                    .map(|table| async { table.commit(epoch).await }),
+            )
+            .await?;
         }
 
         // Flush distinct dedup state.

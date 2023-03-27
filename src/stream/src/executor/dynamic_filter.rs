@@ -420,7 +420,8 @@ impl<S: StateStore> DynamicFilterExecutor<S> {
                     }
 
                     if let Some(mut watermark) = unused_clean_hint.take() {
-                        self.left_table.update_watermark(watermark.val.clone());
+                        self.left_table
+                            .update_watermark(watermark.val.clone(), false);
                         watermark.col_idx = self.key_l;
                         yield Message::Watermark(watermark);
                     };

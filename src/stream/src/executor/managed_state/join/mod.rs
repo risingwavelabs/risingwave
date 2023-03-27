@@ -325,8 +325,8 @@ impl<K: HashKey, S: StateStore> JoinHashMap<K, S> {
 
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
         // TODO: remove data in cache.
-        self.state.table.update_watermark(watermark.clone());
-        self.degree_state.table.update_watermark(watermark);
+        self.state.table.update_watermark(watermark.clone(), false);
+        self.degree_state.table.update_watermark(watermark, false);
     }
 
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
