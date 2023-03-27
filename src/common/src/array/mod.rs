@@ -58,14 +58,14 @@ pub use jsonb_array::{JsonbArray, JsonbArrayBuilder, JsonbRef, JsonbVal};
 pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
-use risingwave_pb::data::{Array as ProstArray, ArrayType as ProstArrayType};
+use risingwave_pb::data::{PbArray, PbArrayType};
+pub use serial_array::{Serial, SerialArray, SerialArrayBuilder};
 pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
 pub use vis::{Vis, VisRef};
 
 pub use self::error::ArrayError;
-use crate::array::serial_array::{Serial, SerialArray, SerialArrayBuilder};
 use crate::buffer::Bitmap;
 use crate::types::*;
 use crate::util::iter_util::ZipEqFast;
@@ -221,7 +221,7 @@ pub trait Array: std::fmt::Debug + Send + Sync + Sized + 'static + Into<ArrayImp
     }
 
     /// Serialize to protobuf
-    fn to_protobuf(&self) -> ProstArray;
+    fn to_protobuf(&self) -> PbArray;
 
     /// Get the null `Bitmap` from `Array`.
     fn null_bitmap(&self) -> &Bitmap;
@@ -496,7 +496,8 @@ macro_rules! impl_array_builder {
                 }
             }
 
-            /// Append a [`Datum`] or [`DatumRef`] multiple times, return error while type not match.
+            /// Append a [`Datum`] or [`DatumRef`] multiple times,
+            /// panicking if the datum's type does not match the array builder's type.
             pub fn append_datum_n(&mut self, n: usize, datum: impl ToDatumRef) {
                 match datum.to_datum_ref() {
                     None => match self {
@@ -575,7 +576,7 @@ macro_rules! impl_array {
                 }
             }
 
-            pub fn to_protobuf(&self) -> ProstArray {
+            pub fn to_protobuf(&self) -> PbArray {
                 match self {
                     $( Self::$variant_name(inner) => inner.to_protobuf(), )*
                 }
@@ -662,40 +663,40 @@ impl ArrayImpl {
         (0..self.len()).map(|i| self.value_at(i))
     }
 
-    pub fn from_protobuf(array: &ProstArray, cardinality: usize) -> ArrayResult<Self> {
+    pub fn from_protobuf(array: &PbArray, cardinality: usize) -> ArrayResult<Self> {
         use self::column_proto_readers::*;
         use crate::array::value_reader::*;
         let array = match array.array_type() {
-            ProstArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
-            ProstArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
-            ProstArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
-            ProstArrayType::Serial => {
+            PbArrayType::Int16 => read_numeric_array::<i16, I16ValueReader>(array, cardinality)?,
+            PbArrayType::Int32 => read_numeric_array::<i32, I32ValueReader>(array, cardinality)?,
+            PbArrayType::Int64 => read_numeric_array::<i64, I64ValueReader>(array, cardinality)?,
+            PbArrayType::Serial => {
                 read_numeric_array::<Serial, SerialValueReader>(array, cardinality)?
             }
-            ProstArrayType::Float32 => {
+            PbArrayType::Float32 => {
                 read_numeric_array::<OrderedF32, F32ValueReader>(array, cardinality)?
             }
-            ProstArrayType::Float64 => {
+            PbArrayType::Float64 => {
                 read_numeric_array::<OrderedF64, F64ValueReader>(array, cardinality)?
             }
-            ProstArrayType::Bool => read_bool_array(array, cardinality)?,
-            ProstArrayType::Utf8 => {
+            PbArrayType::Bool => read_bool_array(array, cardinality)?,
+            PbArrayType::Utf8 => {
                 read_string_array::<Utf8ArrayBuilder, Utf8ValueReader>(array, cardinality)?
             }
-            ProstArrayType::Decimal => {
+            PbArrayType::Decimal => {
                 read_numeric_array::<Decimal, DecimalValueReader>(array, cardinality)?
             }
-            ProstArrayType::Date => read_naive_date_array(array, cardinality)?,
-            ProstArrayType::Time => read_naive_time_array(array, cardinality)?,
-            ProstArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
-            ProstArrayType::Interval => read_interval_unit_array(array, cardinality)?,
-            ProstArrayType::Jsonb => {
+            PbArrayType::Date => read_naive_date_array(array, cardinality)?,
+            PbArrayType::Time => read_naive_time_array(array, cardinality)?,
+            PbArrayType::Timestamp => read_naive_date_time_array(array, cardinality)?,
+            PbArrayType::Interval => read_interval_unit_array(array, cardinality)?,
+            PbArrayType::Jsonb => {
                 read_string_array::<JsonbArrayBuilder, JsonbValueReader>(array, cardinality)?
             }
-            ProstArrayType::Struct => StructArray::from_protobuf(array)?,
-            ProstArrayType::List => ListArray::from_protobuf(array)?,
-            ProstArrayType::Unspecified => unreachable!(),
-            ProstArrayType::Bytea => {
+            PbArrayType::Struct => StructArray::from_protobuf(array)?,
+            PbArrayType::List => ListArray::from_protobuf(array)?,
+            PbArrayType::Unspecified => unreachable!(),
+            PbArrayType::Bytea => {
                 read_string_array::<BytesArrayBuilder, BytesValueReader>(array, cardinality)?
             }
         };

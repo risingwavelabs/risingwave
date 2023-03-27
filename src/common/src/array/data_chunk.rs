@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use bytes::{Bytes, BytesMut};
 use itertools::Itertools;
-use risingwave_pb::data::DataChunk as ProstDataChunk;
+use risingwave_pb::data::PbDataChunk;
 
 use super::{ArrayResult, Vis};
 use crate::array::column::Column;
@@ -34,7 +34,23 @@ use crate::util::hash_util::finalize_hashers;
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::value_encoding::{serialize_datum_into, ValueRowSerializer};
 
-/// `DataChunk` is a collection of arrays with visibility mask.
+/// [`DataChunk`] is a collection of Columns,
+/// a with visibility mask for each row.
+/// For instance, we could have a [`DataChunk`] of this format.
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 2  | b  | f  |
+/// | 3  | c  | t  |
+/// | 4  | d  | f  |
+///
+/// Our columns are v1, v2, v3.
+/// Then, if the Visibility Mask hides rows 2 and 4,
+/// We will only have these rows visible:
+/// | v1 | v2 | v3 |
+/// |----|----|----|
+/// | 1  | a  | t  |
+/// | 3  | c  | t  |
 #[derive(Clone, PartialEq)]
 #[must_use]
 pub struct DataChunk {
@@ -122,6 +138,19 @@ impl DataChunk {
         &self.vis2
     }
 
+    pub fn selectivity(&self) -> f64 {
+        match &self.vis2 {
+            Vis::Bitmap(b) => {
+                if b.is_empty() {
+                    0.0
+                } else {
+                    b.count_ones() as f64 / b.len() as f64
+                }
+            }
+            Vis::Compact(_) => 1.0,
+        }
+    }
+
     pub fn with_visibility(&self, visibility: Bitmap) -> Self {
         DataChunk::new(self.columns.clone(), visibility)
     }
@@ -152,12 +181,12 @@ impl DataChunk {
         &self.columns
     }
 
-    pub fn to_protobuf(&self) -> ProstDataChunk {
+    pub fn to_protobuf(&self) -> PbDataChunk {
         assert!(
             matches!(self.vis2, Vis::Compact(_)),
             "must be compacted before transfer"
         );
-        let mut proto = ProstDataChunk {
+        let mut proto = PbDataChunk {
             cardinality: self.cardinality() as u32,
             columns: Default::default(),
         };
@@ -170,7 +199,18 @@ impl DataChunk {
     }
 
     /// `compact` will convert the chunk to compact format.
-    /// Compact format means that `visibility == None`.
+    /// Compacting removes the hidden rows, and returns a new visibility
+    /// mask which indicates this.
+    ///
+    /// `compact` has trade-offs:
+    ///
+    /// Cost:
+    /// It has to rebuild the each column, meaning it will incur cost
+    /// of copying over bytes from the original column array to the new one.
+    ///
+    /// Benefit:
+    /// The main benefit is that the data chunk is smaller, taking up less memory.
+    /// We can also save the cost of iterating over many hidden rows.
     pub fn compact(self) -> Self {
         match &self.vis2 {
             Vis::Compact(_) => self,
@@ -189,7 +229,7 @@ impl DataChunk {
         }
     }
 
-    pub fn from_protobuf(proto: &ProstDataChunk) -> ArrayResult<Self> {
+    pub fn from_protobuf(proto: &PbDataChunk) -> ArrayResult<Self> {
         let mut columns = vec![];
         for any_col in proto.get_columns() {
             let cardinality = proto.get_cardinality() as usize;
@@ -479,6 +519,7 @@ pub trait DataChunkTestExt {
     /// //     f: f32
     /// //     T: str
     /// //    TS: Timestamp
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self;
@@ -504,6 +545,7 @@ impl DataChunkTestExt for DataChunk {
                 "TS" => DataType::Timestamp,
                 "TSZ" => DataType::Timestamptz,
                 "T" => DataType::Varchar,
+                "SRL" => DataType::Serial,
                 array if array.starts_with('{') && array.ends_with('}') => {
                     DataType::Struct(Arc::new(StructType {
                         fields: array[1..array.len() - 1]
@@ -565,6 +607,12 @@ impl DataChunkTestExt for DataChunk {
                             ))
                         }
                         ArrayBuilderImpl::Utf8(_) => ScalarImpl::Utf8(s.into()),
+                        ArrayBuilderImpl::Serial(_) => ScalarImpl::Serial(
+                            s.parse::<i64>()
+                                .map_err(|_| panic!("invalid serial: {s:?}"))
+                                .unwrap()
+                                .into(),
+                        ),
                         ArrayBuilderImpl::Struct(builder) => {
                             assert!(s.starts_with('{') && s.ends_with('}'));
                             let fields = s[1..s.len() - 1]
@@ -641,7 +689,6 @@ impl DataChunkTestExt for DataChunk {
 
 #[cfg(test)]
 mod tests {
-
     use crate::array::*;
     use crate::row::Row;
     use crate::{column, column_nonnull};

@@ -17,11 +17,15 @@
 //! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
 //! for the rationale behind this approach.
 
+#![feature(stmt_expr_attributes)]
+
 mod cascade_materialized_view;
+mod delta_join;
 mod dynamic_filter;
 mod hello;
 mod nexmark_chaos;
 mod nexmark_q4;
+mod nexmark_recovery;
 mod nexmark_source;
 mod singleton_migration;
 mod streaming_parallelism;

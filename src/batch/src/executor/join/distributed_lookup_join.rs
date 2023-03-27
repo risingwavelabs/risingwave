@@ -186,7 +186,7 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
         let order_types: Vec<OrderType> = table_desc
             .pk
             .iter()
-            .map(|order| OrderType::from_protobuf(&order.get_order_type().unwrap().direction()))
+            .map(|order| OrderType::from_protobuf(order.get_order_type().unwrap()))
             .collect();
 
         let pk_indices = table_desc
@@ -195,13 +195,13 @@ impl BoxedExecutorBuilder for DistributedLookupJoinExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         // Lookup Join always contains distribution key, so we don't need vnode bitmap
-        let distribution = Distribution::all_vnodes(dist_key_indices);
+        let distribution = Distribution::all_vnodes(dist_key_in_pk_indices);
         let table_option = TableOption {
             retention_seconds: if table_desc.retention_seconds > 0 {
                 Some(table_desc.retention_seconds)

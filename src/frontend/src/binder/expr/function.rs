@@ -114,7 +114,15 @@ impl Binder {
                 &inputs.iter().map(|arg| arg.return_type()).collect_vec(),
             )
         {
-            return Ok(UserDefinedFunction::new(func.clone(), inputs).into());
+            use crate::catalog::function_catalog::FunctionKind::*;
+            match &func.kind {
+                Scalar { .. } => return Ok(UserDefinedFunction::new(func.clone(), inputs).into()),
+                Table { .. } => {
+                    self.ensure_table_function_allowed()?;
+                    return Ok(TableFunction::new_user_defined(func.clone(), inputs).into());
+                }
+                Aggregate => todo!("support UDAF"),
+            }
         }
 
         self.bind_builtin_scalar_function(function_name.as_str(), inputs)
@@ -295,7 +303,7 @@ impl Binder {
         fn now() -> Handle {
             Box::new(move |binder, mut inputs| {
                 binder.ensure_now_function_allowed()?;
-                if !binder.in_create_mv {
+                if !binder.in_streaming {
                     inputs.push(ExprImpl::from(Literal::new(
                         Some(ScalarImpl::Int64((binder.bind_timestamp_ms * 1000) as i64)),
                         DataType::Timestamptz,
@@ -303,6 +311,9 @@ impl Binder {
                 }
                 raw_call(ExprType::Now)(binder, inputs)
             })
+        }
+        fn pi() -> Handle {
+            raw_literal(ExprImpl::literal_f64(std::f64::consts::PI))
         }
 
         static HANDLES: LazyLock<HashMap<&'static str, Handle>> = LazyLock::new(|| {
@@ -369,6 +380,15 @@ impl Binder {
                 ("octet_length", raw_call(ExprType::OctetLength)),
                 ("bit_length", raw_call(ExprType::BitLength)),
                 ("regexp_match", raw_call(ExprType::RegexpMatch)),
+                ("chr", raw_call(ExprType::Chr)),
+                ("starts_with", raw_call(ExprType::StartsWith)),
+                ("initcap", raw_call(ExprType::Initcap)),
+                ("lpad", raw_call(ExprType::Lpad)),
+                ("rpad", raw_call(ExprType::Rpad)),
+                ("reverse", raw_call(ExprType::Reverse)),
+                ("strpos", raw_call(ExprType::Strpos)),
+                ("to_ascii", raw_call(ExprType::ToAscii)),
+                ("to_hex", raw_call(ExprType::ToHex)),
                 // array
                 ("array_cat", raw_call(ExprType::ArrayCat)),
                 ("array_append", raw_call(ExprType::ArrayAppend)),
@@ -376,6 +396,7 @@ impl Binder {
                 ("array_prepend", raw_call(ExprType::ArrayPrepend)),
                 ("array_to_string", raw_call(ExprType::ArrayToString)),
                 ("array_distinct", raw_call(ExprType::ArrayDistinct)),
+                ("array_length", raw_call(ExprType::ArrayLength)),
                 // jsonb
                 ("jsonb_object_field", raw_call(ExprType::JsonbAccessInner)),
                 ("jsonb_array_element", raw_call(ExprType::JsonbAccessInner)),
@@ -383,6 +404,8 @@ impl Binder {
                 ("jsonb_array_element_text", raw_call(ExprType::JsonbAccessStr)),
                 ("jsonb_typeof", raw_call(ExprType::JsonbTypeof)),
                 ("jsonb_array_length", raw_call(ExprType::JsonbArrayLength)),
+                // Functions that return a constant value
+                ("pi", pi()),
                 // System information operations.
                 (
                     "pg_typeof",
@@ -627,7 +650,7 @@ impl Binder {
     }
 
     fn ensure_now_function_allowed(&self) -> Result<()> {
-        if self.in_create_mv
+        if self.in_streaming
             && !matches!(
                 self.context.clause,
                 Some(Clause::Where) | Some(Clause::Having)

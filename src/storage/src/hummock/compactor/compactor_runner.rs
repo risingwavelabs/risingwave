@@ -53,17 +53,6 @@ impl CompactorRunner {
             .map(|table| table.file_size)
             .sum::<u64>();
 
-        let stats_target_table_ids: HashSet<u32> = task
-            .input_ssts
-            .iter()
-            .flat_map(|i| {
-                i.table_infos
-                    .iter()
-                    .flat_map(|t| t.table_ids.clone())
-                    .collect_vec()
-            })
-            .collect();
-
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.capacity = std::cmp::min(task.target_file_size as usize, max_target_file_size);
         options.compression_algorithm = match task.compression_algorithm {
@@ -89,7 +78,7 @@ impl CompactorRunner {
                 cache_policy: CachePolicy::NotFill,
                 gc_delete_keys: task.gc_delete_keys,
                 watermark: task.watermark,
-                stats_target_table_ids: Some(stats_target_table_ids),
+                stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
                 fill_high_priority_cache: false,
                 task_type: task.task_type(),
                 split_by_table: task.split_by_state_table,
@@ -182,6 +171,7 @@ impl CompactorRunner {
                     .cloned()
                     .collect_vec();
                 table_iters.push(ConcatSstableIterator::new(
+                    self.compact_task.existing_table_ids.clone(),
                     tables,
                     self.compactor.task_config.key_range.clone(),
                     self.sstable_store.clone(),
@@ -193,6 +183,7 @@ impl CompactorRunner {
                         continue;
                     }
                     table_iters.push(ConcatSstableIterator::new(
+                        self.compact_task.existing_table_ids.clone(),
                         vec![table_info.clone()],
                         self.compactor.task_config.key_range.clone(),
                         self.sstable_store.clone(),

@@ -18,7 +18,7 @@ use futures::future::try_join_all;
 use futures::StreamExt;
 use itertools::Itertools;
 use opendal::services::Memory;
-use opendal::Operator;
+use opendal::{Metakey, Operator};
 use tokio::io::AsyncRead;
 
 use crate::object::{
@@ -39,6 +39,8 @@ pub enum EngineType {
     Gcs,
     Oss,
     Webhdfs,
+    Azblob,
+    Fs,
 }
 
 impl OpendalObjectStore {
@@ -47,7 +49,7 @@ impl OpendalObjectStore {
         // Create memory backend builder.
         let builder = Memory::default();
 
-        let op: Operator = Operator::create(builder)?.finish();
+        let op: Operator = Operator::new(builder)?.finish();
         Ok(Self {
             op,
             engine_type: EngineType::Memory,
@@ -65,7 +67,7 @@ impl ObjectStore for OpendalObjectStore {
         if obj.is_empty() {
             Err(ObjectError::internal("upload empty object"))
         } else {
-            self.op.object(path).write(obj).await?;
+            self.op.write(path, obj).await?;
             Ok(())
         }
     }
@@ -81,7 +83,7 @@ impl ObjectStore for OpendalObjectStore {
         match block {
             Some(block) => {
                 let range = block.offset as u64..(block.offset + block.size) as u64;
-                let res = Bytes::from(self.op.object(path).range_read(range).await?);
+                let res = Bytes::from(self.op.range_read(path, range).await?);
 
                 if block.size != res.len() {
                     Err(ObjectError::internal("bad block offset and size"))
@@ -89,7 +91,7 @@ impl ObjectStore for OpendalObjectStore {
                     Ok(res)
                 }
             }
-            None => Ok(Bytes::from(self.op.object(path).read().await?)),
+            None => Ok(Bytes::from(self.op.read(path).await?)),
         }
     }
 
@@ -114,20 +116,15 @@ impl ObjectStore for OpendalObjectStore {
         ));
 
         let reader = match start_pos {
-            Some(start_position) => {
-                self.op
-                    .object(path)
-                    .range_reader(start_position as u64..)
-                    .await?
-            }
-            None => self.op.object(path).reader().await?,
+            Some(start_position) => self.op.range_reader(path, start_position as u64..).await?,
+            None => self.op.reader(path).await?,
         };
 
         Ok(Box::new(reader))
     }
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
-        let opendal_metadata = self.op.object(path).metadata().await?;
+        let opendal_metadata = self.op.stat(path).await?;
         let key = path.to_string();
         let last_modified = match opendal_metadata.last_modified() {
             Some(t) => t.unix_timestamp() as f64,
@@ -144,24 +141,28 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn delete(&self, path: &str) -> ObjectResult<()> {
-        self.op.object(path).delete().await?;
+        self.op.delete(path).await?;
         Ok(())
     }
 
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        self.op.batch().remove(paths.to_vec()).await?;
+        self.op.remove(paths.to_vec()).await?;
         Ok(())
     }
 
     async fn list(&self, prefix: &str) -> ObjectResult<Vec<ObjectMetadata>> {
-        let mut object_lister = self.op.object(prefix).list().await?;
+        let mut object_lister = self.op.list(prefix).await?;
         let mut metadata_list = vec![];
         while let Some(obj) = object_lister.next().await {
             let object = obj?;
             let key = prefix.to_string();
-            let om = object.metadata().await?;
+
+            let om = self
+                .op
+                .metadata(&object, Metakey::LastModified | Metakey::ContentLength)
+                .await?;
 
             let last_modified = match om.last_modified() {
                 Some(t) => t.unix_timestamp() as f64,
@@ -186,6 +187,8 @@ impl ObjectStore for OpendalObjectStore {
             EngineType::Gcs => "Gcs",
             EngineType::Oss => "Oss",
             EngineType::Webhdfs => "Webhdfs",
+            EngineType::Azblob => "Azblob",
+            EngineType::Fs => "Fs",
         }
     }
 }
@@ -213,7 +216,7 @@ impl StreamingUploader for OpenDalStreamingUploader {
     }
 
     async fn finish(mut self: Box<Self>) -> ObjectResult<()> {
-        self.op.object(&self.path).write(self.buffer).await?;
+        self.op.write(&self.path, self.buffer).await?;
 
         Ok(())
     }

@@ -223,9 +223,7 @@ pub(self) fn build_and_add_fragment(
 }
 
 /// Build new fragment and link dependencies by visiting children recursively, update
-/// `is_singleton` and `fragment_type` properties for current fragment. While traversing the
-/// tree, count how many table ids should be allocated in this fragment.
-// TODO: Should we store the concurrency in StreamFragment directly?
+/// `requires_singleton` and `fragment_type` properties for current fragment.
 fn build_fragment(
     state: &mut BuildFragmentGraphState,
     current_fragment: &mut StreamFragment,
@@ -233,6 +231,10 @@ fn build_fragment(
 ) -> Result<StreamNode> {
     // Update current fragment based on the node we're visiting.
     match stream_node.get_node_body()? {
+        NodeBody::BarrierRecv(_) => {
+            current_fragment.fragment_type_mask |= FragmentTypeFlag::BarrierRecv as u32
+        }
+
         NodeBody::Source(src) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Source as u32;
             // Note: For creating table with connector, the source id is left with placeholder and
@@ -248,10 +250,8 @@ fn build_fragment(
 
         NodeBody::Sink(_) => current_fragment.fragment_type_mask |= FragmentTypeFlag::Sink as u32,
 
-        // TODO: Force singleton for TopN as a workaround. We should implement two phase TopN.
-        NodeBody::TopN(_) => current_fragment.is_singleton = true,
+        NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
-        // FIXME: workaround for single-fragment mview on singleton upstream mview.
         NodeBody::Chain(node) => {
             current_fragment.fragment_type_mask |= FragmentTypeFlag::ChainNode as u32;
             // memorize table id for later use
@@ -259,12 +259,12 @@ fn build_fragment(
                 .dependent_relation_ids
                 .insert(TableId::new(node.table_id));
             current_fragment.upstream_table_ids.push(node.table_id);
-            current_fragment.is_singleton = node.is_singleton;
         }
 
         NodeBody::Now(_) => {
+            // TODO: Remove this and insert a `BarrierRecv` instead.
             current_fragment.fragment_type_mask |= FragmentTypeFlag::Now as u32;
-            current_fragment.is_singleton = true;
+            current_fragment.requires_singleton = true;
         }
 
         _ => {}
@@ -293,8 +293,6 @@ fn build_fragment(
                 // Exchange node indicates a new child fragment.
                 NodeBody::Exchange(exchange_node) => {
                     let exchange_node_strategy = exchange_node.get_strategy()?.clone();
-                    let is_simple_dispatcher =
-                        exchange_node_strategy.get_type()? == DispatcherType::Simple;
 
                     // Exchange node should have only one input.
                     let [input]: [_; 1] = std::mem::take(&mut child_node.input).try_into().unwrap();
@@ -308,9 +306,6 @@ fn build_fragment(
                         },
                     );
 
-                    if is_simple_dispatcher {
-                        current_fragment.is_singleton = true;
-                    }
                     Ok(child_node)
                 }
 

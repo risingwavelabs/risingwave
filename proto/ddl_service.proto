@@ -139,6 +139,21 @@ message CreateTableResponse {
   uint64 version = 3;
 }
 
+message AlterRelationNameRequest {
+  oneof relation {
+    uint32 table_id = 1;
+    uint32 view_id = 2;
+    uint32 index_id = 3;
+    uint32 sink_id = 4;
+  }
+  string new_name = 20;
+}
+
+message AlterRelationNameResponse {
+  common.Status status = 1;
+  uint64 version = 2;
+}
+
 message CreateFunctionRequest {
   catalog.Function function = 1;
 }
@@ -237,6 +252,36 @@ message GetDdlProgressResponse {
   repeated DdlProgress ddl_progress = 1;
 }
 
+message CreateConnectionRequest {
+  message PrivateLink {
+    string provider = 1;
+    string service_name = 2;
+    repeated string availability_zones = 3;
+  }
+
+  oneof payload {
+    PrivateLink private_link = 1;
+  }
+}
+
+message CreateConnectionResponse {
+  uint32 connection_id = 1;
+  // global catalog version
+  uint64 version = 2;
+}
+
+message ListConnectionsRequest {}
+
+message ListConnectionsResponse {
+  repeated catalog.Connection connections = 1;
+}
+
+message DropConnectionRequest {
+  string connection_name = 1;
+}
+
+message DropConnectionResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -249,6 +294,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc AlterRelationName(AlterRelationNameRequest) returns (AlterRelationNameResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
@@ -260,4 +306,7 @@ service DdlService {
   rpc ReplaceTablePlan(ReplaceTablePlanRequest) returns (ReplaceTablePlanResponse);
   rpc GetTable(GetTableRequest) returns (GetTableResponse);
   rpc GetDdlProgress(GetDdlProgressRequest) returns (GetDdlProgressResponse);
+  rpc CreateConnection(CreateConnectionRequest) returns (CreateConnectionResponse);
+  rpc ListConnections(ListConnectionsRequest) returns (ListConnectionsResponse);
+  rpc DropConnection(DropConnectionRequest) returns (DropConnectionResponse);
 }

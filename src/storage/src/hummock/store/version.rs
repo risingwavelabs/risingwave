@@ -676,7 +676,7 @@ impl HummockVersionReader {
                 for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
+                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone
@@ -702,7 +702,7 @@ impl HummockVersionReader {
                 for sstable_info in fetch_meta_req {
                     let (sstable, local_cache_meta_block_miss) =
                         flatten_resps.pop().unwrap().unwrap();
-                    assert_eq!(sstable_info.id, sstable.value().id);
+                    assert_eq!(sstable_info.get_object_id(), sstable.value().id);
                     local_stats.apply_meta_fetch(local_cache_meta_block_miss);
                     if !sstable.value().meta.range_tombstone_list.is_empty()
                         && !read_options.ignore_range_tombstone

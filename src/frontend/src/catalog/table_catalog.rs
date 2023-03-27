@@ -19,13 +19,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, TableDesc, TableId, TableVersionId};
 use risingwave_common::constants::hummock::TABLE_OPTION_DUMMY_RETENTION_SECOND;
 use risingwave_common::error::{ErrorCode, RwError};
-use risingwave_pb::catalog::table::{
-    OptionalAssociatedSourceId, TableType as ProstTableType, TableVersion as ProstTableVersion,
-};
-use risingwave_pb::catalog::Table as ProstTable;
+use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbTableType, PbTableVersion};
+use risingwave_pb::catalog::PbTable;
 
 use super::{ColumnId, ConflictBehaviorType, DatabaseId, FragmentId, RelationCatalog, SchemaId};
-use crate::optimizer::property::FieldOrder;
 use crate::user::UserId;
 use crate::WithOptions;
 
@@ -75,7 +73,7 @@ pub struct TableCatalog {
     pub columns: Vec<ColumnCatalog>,
 
     /// Key used as materialize's storage key prefix, including MV order columns and stream_key.
-    pub pk: Vec<FieldOrder>,
+    pub pk: Vec<ColumnOrder>,
 
     /// pk_indices of the corresponding materialize operator's output.
     pub stream_key: Vec<usize>,
@@ -150,27 +148,27 @@ impl Default for TableType {
 }
 
 impl TableType {
-    fn from_prost(prost: ProstTableType) -> Self {
+    fn from_prost(prost: PbTableType) -> Self {
         match prost {
-            ProstTableType::Table => Self::Table,
-            ProstTableType::MaterializedView => Self::MaterializedView,
-            ProstTableType::Index => Self::Index,
-            ProstTableType::Internal => Self::Internal,
-            ProstTableType::Unspecified => unreachable!(),
+            PbTableType::Table => Self::Table,
+            PbTableType::MaterializedView => Self::MaterializedView,
+            PbTableType::Index => Self::Index,
+            PbTableType::Internal => Self::Internal,
+            PbTableType::Unspecified => unreachable!(),
         }
     }
 
-    fn to_prost(self) -> ProstTableType {
+    pub(crate) fn to_prost(self) -> PbTableType {
         match self {
-            Self::Table => ProstTableType::Table,
-            Self::MaterializedView => ProstTableType::MaterializedView,
-            Self::Index => ProstTableType::Index,
-            Self::Internal => ProstTableType::Internal,
+            Self::Table => PbTableType::Table,
+            Self::MaterializedView => PbTableType::MaterializedView,
+            Self::Index => PbTableType::Index,
+            Self::Internal => PbTableType::Internal,
         }
     }
 }
 
-/// The version of a table, used by schema change. See [`ProstTableVersion`].
+/// The version of a table, used by schema change. See [`PbTableVersion`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TableVersion {
     pub version_id: TableVersionId,
@@ -189,15 +187,15 @@ impl TableVersion {
         }
     }
 
-    pub fn from_prost(prost: ProstTableVersion) -> Self {
+    pub fn from_prost(prost: PbTableVersion) -> Self {
         Self {
             version_id: prost.version,
             next_column_id: ColumnId::from(prost.next_column_id),
         }
     }
 
-    pub fn to_prost(&self) -> ProstTableVersion {
-        ProstTableVersion {
+    pub fn to_prost(&self) -> PbTableVersion {
+        PbTableVersion {
             version: self.version_id,
             next_column_id: self.next_column_id.into(),
         }
@@ -270,7 +268,7 @@ impl TableCatalog {
     }
 
     /// Get a reference to the table catalog's pk desc.
-    pub fn pk(&self) -> &[FieldOrder] {
+    pub fn pk(&self) -> &[ColumnOrder] {
         self.pk.as_ref()
     }
 
@@ -278,7 +276,7 @@ impl TableCatalog {
     pub fn pk_column_ids(&self) -> Vec<ColumnId> {
         self.pk
             .iter()
-            .map(|f| self.columns[f.index].column_id())
+            .map(|x| self.columns[x.column_index].column_id())
             .collect()
     }
 
@@ -291,7 +289,7 @@ impl TableCatalog {
 
         TableDesc {
             table_id: self.id,
-            pk: self.pk.iter().map(FieldOrder::to_order_pair).collect(),
+            pk: self.pk.clone(),
             stream_key: self.stream_key.clone(),
             columns: self.columns.iter().map(|c| c.column_desc.clone()).collect(),
             distribution_key: self.distribution_key.clone(),
@@ -315,7 +313,7 @@ impl TableCatalog {
         self.distribution_key.as_ref()
     }
 
-    pub fn to_internal_table_prost(&self) -> ProstTable {
+    pub fn to_internal_table_prost(&self) -> PbTable {
         use risingwave_common::catalog::{DatabaseId, SchemaId};
         self.to_prost(
             SchemaId::placeholder().schema_id,
@@ -338,8 +336,8 @@ impl TableCatalog {
         self.version().map(|v| v.version_id)
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> ProstTable {
-        ProstTable {
+    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbTable {
+        PbTable {
             id: self.id.table_id,
             schema_id,
             database_id,
@@ -372,10 +370,28 @@ impl TableCatalog {
             handle_pk_conflict_behavior: self.conflict_behavior_type,
         }
     }
+
+    /// Get columns excluding hidden columns and generated golumns.
+    pub fn columns_to_insert(&self) -> impl Iterator<Item = &ColumnCatalog> {
+        self.columns
+            .iter()
+            .filter(|c| !c.is_hidden() && !c.is_generated())
+    }
+
+    pub fn generated_column_names(&self) -> impl Iterator<Item = &str> {
+        self.columns
+            .iter()
+            .filter(|c| c.is_generated())
+            .map(|c| c.name())
+    }
+
+    pub fn has_generated_column(&self) -> bool {
+        self.columns.iter().any(|c| c.is_generated())
+    }
 }
 
-impl From<ProstTable> for TableCatalog {
-    fn from(tb: ProstTable) -> Self {
+impl From<PbTable> for TableCatalog {
+    fn from(tb: PbTable) -> Self {
         let id = tb.id;
         let table_type = tb.get_table_type().unwrap();
         let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
@@ -395,7 +411,7 @@ impl From<ProstTable> for TableCatalog {
             col_index.insert(col_id, idx);
         }
 
-        let pk = tb.pk.iter().map(FieldOrder::from_protobuf).collect();
+        let pk = tb.pk.iter().map(ColumnOrder::from_protobuf).collect();
         let mut watermark_columns = FixedBitSet::with_capacity(columns.len());
         for idx in tb.watermark_indices {
             watermark_columns.insert(idx as _);
@@ -433,8 +449,8 @@ impl From<ProstTable> for TableCatalog {
     }
 }
 
-impl From<&ProstTable> for TableCatalog {
-    fn from(tb: &ProstTable) -> Self {
+impl From<&PbTable> for TableCatalog {
+    fn from(tb: &PbTable) -> Self {
         tb.clone().into()
     }
 }
@@ -455,55 +471,41 @@ mod tests {
     use risingwave_common::constants::hummock::PROPERTIES_RETENTION_SECOND_KEY;
     use risingwave_common::test_prelude::*;
     use risingwave_common::types::*;
-    use risingwave_pb::catalog::Table as ProstTable;
-    use risingwave_pb::plan_common::{
-        ColumnCatalog as ProstColumnCatalog, ColumnDesc as ProstColumnDesc,
-    };
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 
     use super::*;
     use crate::catalog::table_catalog::{TableCatalog, TableType};
-    use crate::optimizer::property::{Direction, FieldOrder};
     use crate::WithOptions;
 
     #[test]
     fn test_into_table_catalog() {
-        let table: TableCatalog = ProstTable {
+        let table: TableCatalog = PbTable {
             id: 0,
             schema_id: 0,
             database_id: 0,
             name: "test".to_string(),
-            table_type: ProstTableType::Table as i32,
+            table_type: PbTableType::Table as i32,
             columns: vec![
-                ProstColumnCatalog {
+                PbColumnCatalog {
                     column_desc: Some((&row_id_column_desc()).into()),
                     is_hidden: true,
                 },
-                ProstColumnCatalog {
-                    column_desc: Some(ProstColumnDesc::new_struct(
+                PbColumnCatalog {
+                    column_desc: Some(PbColumnDesc::new_struct(
                         "country",
                         1,
                         ".test.Country",
                         vec![
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "address",
-                                2,
-                            ),
-                            ProstColumnDesc::new_atomic(
-                                DataType::Varchar.to_protobuf(),
-                                "zipcode",
-                                3,
-                            ),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "address", 2),
+                            PbColumnDesc::new_atomic(DataType::Varchar.to_protobuf(), "zipcode", 3),
                         ],
                     )),
                     is_hidden: false,
                 },
             ],
-            pk: vec![FieldOrder {
-                index: 0,
-                direct: Direction::Asc,
-            }
-            .to_protobuf()],
+            pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             dependent_relations: vec![],
             distribution_key: vec![],
@@ -521,7 +523,7 @@ mod tests {
             read_prefix_len_hint: 0,
             vnode_col_index: None,
             row_id_index: None,
-            version: Some(ProstTableVersion {
+            version: Some(PbTableVersion {
                 version: 0,
                 next_column_id: 2,
             }),
@@ -549,31 +551,17 @@ mod tests {
                             column_id: ColumnId::new(1),
                             name: "country".to_string(),
                             field_descs: vec![
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(2),
-                                    name: "address".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                },
-                                ColumnDesc {
-                                    data_type: DataType::Varchar,
-                                    column_id: ColumnId::new(3),
-                                    name: "zipcode".to_string(),
-                                    field_descs: vec![],
-                                    type_name: String::new(),
-                                }
+                                ColumnDesc::new_atomic(DataType::Varchar, "address", 2),
+                                ColumnDesc::new_atomic(DataType::Varchar, "zipcode", 3),
                             ],
-                            type_name: ".test.Country".to_string()
+                            type_name: ".test.Country".to_string(),
+                            generated_column: None,
                         },
                         is_hidden: false
                     }
                 ],
                 stream_key: vec![0],
-                pk: vec![FieldOrder {
-                    index: 0,
-                    direct: Direction::Asc,
-                }],
+                pk: vec![ColumnOrder::new(0, OrderType::ascending())],
                 distribution_key: vec![],
                 append_only: false,
                 owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,

@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::types::{Decimal, OrderedF64};
+use risingwave_expr_macro::function;
 
-#[inline(always)]
+#[function("round_digit(decimal, int32) -> decimal")]
 pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     let digits = digits.into();
     if digits < 0 {
@@ -25,37 +26,38 @@ pub fn round_digits<D: Into<i32>>(input: Decimal, digits: D) -> Decimal {
     }
 }
 
-#[inline(always)]
+#[function("ceil(float64) -> float64")]
 pub fn ceil_f64(input: OrderedF64) -> OrderedF64 {
     f64::ceil(input.0).into()
 }
 
-#[inline(always)]
+#[function("ceil(decimal) -> decimal")]
 pub fn ceil_decimal(input: Decimal) -> Decimal {
     input.ceil()
 }
 
-#[inline(always)]
+#[function("floor(float64) -> float64")]
 pub fn floor_f64(input: OrderedF64) -> OrderedF64 {
     f64::floor(input.0).into()
 }
 
-#[inline(always)]
+#[function("floor(decimal) -> decimal")]
 pub fn floor_decimal(input: Decimal) -> Decimal {
     input.floor()
 }
 
 // Ties are broken by rounding away from zero
-#[inline(always)]
+#[function("round(float64) -> float64")]
 pub fn round_f64(input: OrderedF64) -> OrderedF64 {
     f64::round(input.0).into()
 }
 
 // Ties are broken by rounding away from zero
-#[inline(always)]
+#[function("round(decimal) -> decimal")]
 pub fn round_decimal(input: Decimal) -> Decimal {
     input.round_dp(0)
 }
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
@@ -78,8 +80,10 @@ mod tests {
         do_test("84818.33333333333333333333333", 4, "84818.3333");
         do_test("84818.15", 1, "84818.2");
         do_test("21.372736", -1, "0");
-        // Maximum of 28 digits
-        do_test("0", 340, &format!("0.{}", "0".repeat(28)));
+        // When digit extends past original scale, it should just return original scale.
+        // Intuitively, it does not make sense after rounding `0` it becomes `0.000`. Precision
+        // should always be less or equal, not more.
+        do_test("0", 340, "0");
     }
 
     #[test]

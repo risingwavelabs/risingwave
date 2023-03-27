@@ -102,7 +102,7 @@ async fn build_tables<F: SstableWriterFactory>(
     for i in RANGE {
         builder
             .add_full_key(
-                &FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
+                FullKey::from_user_key(test_user_key_of(i).as_ref(), 1),
                 HummockValue::put(VALUE),
                 true,
             )

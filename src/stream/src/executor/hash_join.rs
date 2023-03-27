@@ -43,7 +43,7 @@ use super::{
     Watermark,
 };
 use crate::common::table::state_table::StateTable;
-use crate::common::{InfallibleExpression, StreamChunkBuilder};
+use crate::common::StreamChunkBuilder;
 use crate::executor::expect_first_barrier_from_aligned_stream;
 use crate::executor::JoinType::LeftAnti;
 use crate::task::AtomicU64Ref;
@@ -52,6 +52,10 @@ use crate::task::AtomicU64Ref;
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 pub type JoinTypePrimitive = u8;
+
+/// Evict the cache every n rows.
+const EVICT_EVERY_N_ROWS: u32 = 1024;
+
 #[allow(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
     use super::JoinTypePrimitive;
@@ -242,6 +246,8 @@ pub struct HashJoinExecutor<K: HashKey, S: StateStore, const T: JoinTypePrimitiv
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
     chunk_size: usize,
+    /// Count the messages received, clear to 0 when counted to `EVICT_EVERY_N_MESSAGES`
+    cnt_rows_received: u32,
 
     /// watermark column index -> `BufferedWatermarks`
     watermark_buffers: BTreeMap<usize, BufferedWatermarks<SideTypePrimitive>>,
@@ -603,6 +609,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             append_only_optimize,
             metrics,
             chunk_size,
+            cnt_rows_received: 0,
             watermark_buffers,
         }
     }
@@ -662,6 +669,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &mut self.cnt_rows_received,
                     ) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -687,6 +695,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         chunk,
                         self.append_only_optimize,
                         self.chunk_size,
+                        &mut self.cnt_rows_received,
                     ) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -704,7 +713,11 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
 
                     // Update the vnode bitmap for state tables of both sides if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone());
+                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
+                            self.watermark_buffers
+                                .values_mut()
+                                .for_each(|buffers| buffers.clear());
+                        }
                         self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
                     }
 
@@ -748,12 +761,21 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         // `commit` them here.
         self.side_l.ht.flush(epoch).await?;
         self.side_r.ht.flush(epoch).await?;
-
-        // We need to manually evict the cache to the target capacity.
-        self.side_l.ht.evict();
-        self.side_r.ht.evict();
-
         Ok(())
+    }
+
+    // We need to manually evict the cache.
+    fn evict_cache(
+        side_update: &mut JoinSide<K, S>,
+        side_match: &mut JoinSide<K, S>,
+        cnt_rows_received: &mut u32,
+    ) {
+        *cnt_rows_received += 1;
+        if *cnt_rows_received == EVICT_EVERY_N_ROWS {
+            side_update.ht.evict();
+            side_match.ht.evict();
+            *cnt_rows_received = 0;
+        }
     }
 
     fn handle_watermark(
@@ -846,6 +868,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
         chunk: StreamChunk,
         append_only_optimize: bool,
         chunk_size: usize,
+        cnt_rows_received: &'a mut u32,
     ) {
         let chunk = chunk.compact();
 
@@ -864,28 +887,10 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
             ),
         };
 
-        let mut check_join_condition = |row_update: &RowRef<'_>, row_matched: &OwnedRow| -> bool {
-            // TODO(yuhao-su): We should find a better way to eval the expression without concat
-            // two rows.
-            // if there are non-equi expressions
-            if let Some(ref mut cond) = cond {
-                let new_row = Self::row_concat(
-                    row_update,
-                    side_update.start_pos,
-                    row_matched,
-                    side_match.start_pos,
-                );
-
-                cond.eval_row_infallible(&new_row, |err| ctx.on_compute_error(err, identity))
-                    .map(|s| *s.as_bool())
-                    .unwrap_or(false)
-            } else {
-                true
-            }
-        };
-
         let keys = K::build(&side_update.join_key_indices, chunk.data_chunk())?;
         for ((op, row), key) in chunk.rows().zip_eq_debug(keys.iter()) {
+            Self::evict_cache(side_update, side_match, cnt_rows_received);
+
             let matched_rows: Option<HashValueType> =
                 Self::hash_eq_match(key, &mut side_match.ht).await?;
             match op {
@@ -897,7 +902,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
-                            if check_join_condition(&row, &matched_row.row) {
+                            // TODO(yuhao-su): We should find a better way to eval the expression
+                            // without concat two rows.
+                            // if there are non-equi expressions
+                            let check_join_condition = if let Some(ref mut cond) = cond {
+                                let new_row = Self::row_concat(
+                                    &row,
+                                    side_update.start_pos,
+                                    &matched_row.row,
+                                    side_match.start_pos,
+                                );
+
+                                cond.eval_row_infallible(&new_row, |err| {
+                                    ctx.on_compute_error(err, identity)
+                                })
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                            } else {
+                                true
+                            };
+                            if check_join_condition {
                                 degree += 1;
                                 if !forward_exactly_once(T, SIDE) {
                                     if let Some(chunk) = hashjoin_chunk_builder
@@ -922,19 +947,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Insert, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Insert, row)
                     {
                         yield chunk;
                     }
@@ -954,7 +979,27 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                             matched_rows.values_mut(&side_match.all_data_types)
                         {
                             let mut matched_row = matched_row?;
-                            if check_join_condition(&row, &matched_row.row) {
+                            // TODO(yuhao-su): We should find a better way to eval the expression
+                            // without concat two rows.
+                            // if there are non-equi expressions
+                            let check_join_condition = if let Some(ref mut cond) = cond {
+                                let new_row = Self::row_concat(
+                                    &row,
+                                    side_update.start_pos,
+                                    &matched_row.row,
+                                    side_match.start_pos,
+                                );
+
+                                cond.eval_row_infallible(&new_row, |err| {
+                                    ctx.on_compute_error(err, identity)
+                                })
+                                .await
+                                .map(|s| *s.as_bool())
+                                .unwrap_or(false)
+                            } else {
+                                true
+                            };
+                            if check_join_condition {
                                 degree += 1;
                                 if side_match.need_degree_table {
                                     side_match.ht.dec_degree(matched_row_ref, &mut matched_row);
@@ -970,19 +1015,19 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive> HashJoinExecutor<K, 
                         }
                         if degree == 0 {
                             if let Some(chunk) =
-                                hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                                hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                             {
                                 yield chunk;
                             }
                         } else if let Some(chunk) =
-                            hashjoin_chunk_builder.forward_exactly_once_if_matched(op, row)
+                            hashjoin_chunk_builder.forward_exactly_once_if_matched(Op::Delete, row)
                         {
                             yield chunk;
                         }
                         // Insert back the state taken from ht.
                         side_match.ht.update_state(key, matched_rows);
                     } else if let Some(chunk) =
-                        hashjoin_chunk_builder.forward_if_not_matched(op, row)
+                        hashjoin_chunk_builder.forward_if_not_matched(Op::Delete, row)
                     {
                         yield chunk;
                     }
@@ -1012,8 +1057,8 @@ mod tests {
     use risingwave_common::hash::{Key128, Key64};
     use risingwave_common::types::ScalarImpl;
     use risingwave_common::util::sort_util::OrderType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build, InputRefExpression};
+    use risingwave_pb::expr::expr_node::PbType;
     use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
@@ -1027,20 +1072,18 @@ mod tests {
         order_types: &[OrderType],
         pk_indices: &[usize],
         table_id: u32,
-        prefix_hint_len: usize,
     ) -> (StateTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let column_descs = data_types
             .iter()
             .enumerate()
             .map(|(id, data_type)| ColumnDesc::unnamed(ColumnId::new(id as i32), data_type.clone()))
             .collect_vec();
-        let state_table = StateTable::new_without_distribution_with_prefix_hint_len(
+        let state_table = StateTable::new_without_distribution(
             mem_state.clone(),
             TableId::new(table_id),
             column_descs,
             order_types.to_vec(),
             pk_indices.to_vec(),
-            prefix_hint_len,
         )
         .await;
 
@@ -1068,13 +1111,13 @@ mod tests {
     }
 
     fn create_cond() -> BoxedExpression {
-        let left_expr = InputRefExpression::new(DataType::Int64, 1);
-        let right_expr = InputRefExpression::new(DataType::Int64, 3);
-        new_binary_expr(
-            Type::LessThan,
+        build(
+            PbType::LessThan,
             DataType::Boolean,
-            Box::new(left_expr),
-            Box::new(right_expr),
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 1)),
+                Box::new(InputRefExpression::new(DataType::Int64, 3)),
+            ],
         )
         .unwrap()
     }
@@ -1091,9 +1134,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![1]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![1]);
-        let join_key_indices = vec![0];
-        let params_l = JoinParams::new(join_key_indices.clone(), vec![1]);
-        let params_r = JoinParams::new(join_key_indices.clone(), vec![1]);
+        let params_l = JoinParams::new(vec![0], vec![1]);
+        let params_r = JoinParams::new(vec![0], vec![1]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();
@@ -1101,20 +1143,18 @@ mod tests {
         let (state_l, degree_state_l) = create_in_memory_state_table(
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             0,
-            join_key_indices.len(),
         )
         .await;
 
         let (state_r, degree_state_r) = create_in_memory_state_table(
             mem_state,
             &[DataType::Int64, DataType::Int64],
-            &[OrderType::Ascending, OrderType::Ascending],
+            &[OrderType::ascending(), OrderType::ascending()],
             &[0, 1],
             2,
-            join_key_indices.len(),
         )
         .await;
 
@@ -1160,9 +1200,8 @@ mod tests {
         };
         let (tx_l, source_l) = MockSource::channel(schema.clone(), vec![0]);
         let (tx_r, source_r) = MockSource::channel(schema, vec![0]);
-        let join_key_indices = vec![0, 1];
-        let params_l = JoinParams::new(join_key_indices.clone(), vec![]);
-        let params_r = JoinParams::new(join_key_indices.clone(), vec![]);
+        let params_l = JoinParams::new(vec![0, 1], vec![]);
+        let params_r = JoinParams::new(vec![0, 1], vec![]);
         let cond = with_condition.then(create_cond);
 
         let mem_state = MemoryStateStore::new();
@@ -1171,13 +1210,12 @@ mod tests {
             mem_state.clone(),
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 0],
             0,
-            join_key_indices.len(),
         )
         .await;
 
@@ -1185,13 +1223,12 @@ mod tests {
             mem_state,
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &[0, 1, 1],
             0,
-            join_key_indices.len(),
         )
         .await;
         let schema_len = match T {

@@ -22,10 +22,8 @@ use risingwave_connector::parser::SpecificParserConfig;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_connector::source::{SourceColumnDesc, SourceFormat};
 use risingwave_connector::ConnectorParams;
-use risingwave_pb::catalog::StreamSourceInfo as ProstStreamSourceInfo;
-use risingwave_pb::plan_common::{
-    ColumnCatalog as ProstColumnCatalog, RowFormatType as ProstRowFormatType,
-};
+use risingwave_pb::catalog::PbStreamSourceInfo;
+use risingwave_pb::plan_common::{PbColumnCatalog, PbRowFormatType};
 
 use crate::connector_source::ConnectorSource;
 use crate::fs_connector_source::FsConnectorSource;
@@ -54,12 +52,12 @@ pub struct FsSourceDesc {
 
 #[derive(Clone)]
 pub struct SourceDescBuilder {
-    columns: Vec<ProstColumnCatalog>,
+    columns: Vec<PbColumnCatalog>,
     metrics: Arc<SourceMetrics>,
     pk_column_ids: Vec<i32>,
     row_id_index: Option<usize>,
     properties: HashMap<String, String>,
-    source_info: ProstStreamSourceInfo,
+    source_info: PbStreamSourceInfo,
     connector_params: ConnectorParams,
     connector_message_buffer_size: usize,
 }
@@ -67,12 +65,12 @@ pub struct SourceDescBuilder {
 impl SourceDescBuilder {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        columns: Vec<ProstColumnCatalog>,
+        columns: Vec<PbColumnCatalog>,
         metrics: Arc<SourceMetrics>,
         pk_column_ids: Vec<i32>,
         row_id_index: Option<usize>,
         properties: HashMap<String, String>,
-        source_info: ProstStreamSourceInfo,
+        source_info: PbStreamSourceInfo,
         connector_params: ConnectorParams,
         connector_message_buffer_size: usize,
     ) -> Self {
@@ -90,16 +88,16 @@ impl SourceDescBuilder {
 
     pub async fn build(self) -> Result<SourceDesc> {
         let format = match self.source_info.get_row_format()? {
-            ProstRowFormatType::Json => SourceFormat::Json,
-            ProstRowFormatType::Protobuf => SourceFormat::Protobuf,
-            ProstRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
-            ProstRowFormatType::Avro => SourceFormat::Avro,
-            ProstRowFormatType::Maxwell => SourceFormat::Maxwell,
-            ProstRowFormatType::CanalJson => SourceFormat::CanalJson,
-            ProstRowFormatType::Native => SourceFormat::Native,
-            ProstRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
-            ProstRowFormatType::UpsertJson => SourceFormat::UpsertJson,
-            ProstRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
+            PbRowFormatType::Json => SourceFormat::Json,
+            PbRowFormatType::Protobuf => SourceFormat::Protobuf,
+            PbRowFormatType::DebeziumJson => SourceFormat::DebeziumJson,
+            PbRowFormatType::Avro => SourceFormat::Avro,
+            PbRowFormatType::Maxwell => SourceFormat::Maxwell,
+            PbRowFormatType::CanalJson => SourceFormat::CanalJson,
+            PbRowFormatType::Native => SourceFormat::Native,
+            PbRowFormatType::DebeziumAvro => SourceFormat::DebeziumAvro,
+            PbRowFormatType::UpsertJson => SourceFormat::UpsertJson,
+            PbRowFormatType::UpsertAvro => SourceFormat::UpsertAvro,
             _ => unreachable!(),
         };
 
@@ -146,8 +144,8 @@ impl SourceDescBuilder {
 
     pub async fn build_fs_source_desc(&self) -> Result<FsSourceDesc> {
         let format = match self.source_info.get_row_format()? {
-            ProstRowFormatType::Csv => SourceFormat::Csv,
-            ProstRowFormatType::Json => SourceFormat::Json,
+            PbRowFormatType::Csv => SourceFormat::Csv,
+            PbRowFormatType::Json => SourceFormat::Json,
             _ => unreachable!(),
         };
 
@@ -214,6 +212,7 @@ pub mod test_utils {
                         name: f.name.clone(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        generated_column: None,
                     }
                     .to_protobuf(),
                 ),

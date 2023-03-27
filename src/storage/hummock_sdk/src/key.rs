@@ -372,9 +372,7 @@ pub struct TableKey<T: AsRef<[u8]>>(pub T);
 
 impl<T: AsRef<[u8]>> Debug for TableKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("TableKey")
-            .field("table_key", &self.0.as_ref().to_vec())
-            .finish()
+        write!(f, "TableKey {{ {} }}", hex::encode(self.0.as_ref()))
     }
 }
 
@@ -408,12 +406,22 @@ pub fn map_table_key_range(range: (Bound<KeyPayloadType>, Bound<KeyPayloadType>)
 /// will group these two values into one struct for convenient filtering.
 ///
 /// The encoded format is | `table_id` | `table_key` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 pub struct UserKey<T: AsRef<[u8]>> {
     // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
     // declaration matters.
     pub table_id: TableId,
     pub table_key: TableKey<T>,
+}
+
+impl<T: AsRef<[u8]>> Debug for UserKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "UserKey {{ {}, {:?} }}",
+            self.table_id.table_id, self.table_key
+        )
+    }
 }
 
 impl<T: AsRef<[u8]>> UserKey<T> {
@@ -435,6 +443,10 @@ impl<T: AsRef<[u8]>> UserKey<T> {
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
         buf.put_u32(self.table_id.table_id());
+        buf.put_slice(self.table_key.as_ref());
+    }
+
+    pub fn encode_table_key_into(&self, buf: &mut impl BufMut) {
         buf.put_slice(self.table_key.as_ref());
     }
 
@@ -543,10 +555,16 @@ impl UserKey<Vec<u8>> {
 /// [`FullKey`] is an internal concept in storage. It associates [`UserKey`] with an epoch.
 ///
 /// The encoded format is | `user_key` | `epoch` |.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct FullKey<T: AsRef<[u8]>> {
     pub user_key: UserKey<T>,
     pub epoch: HummockEpoch,
+}
+
+impl<T: AsRef<[u8]>> Debug for FullKey<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "FullKey {{ {:?}, {} }}", self.user_key, self.epoch)
+    }
 }
 
 impl<T: AsRef<[u8]>> FullKey<T> {
@@ -583,6 +601,12 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
+    // Encode in to a buffer.
+    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
+        self.user_key.encode_table_key_into(buf);
+        buf.put_u64(self.epoch);
+    }
+
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
@@ -610,6 +634,20 @@ impl<'a> FullKey<&'a [u8]> {
 
         Self {
             user_key: UserKey::decode(&slice[..epoch_pos]),
+            epoch,
+        }
+    }
+
+    /// Construct a [`FullKey`] from a byte slice without `table_id` encoded.
+    pub fn from_slice_without_table_id(
+        table_id: TableId,
+        slice_without_table_id: &'a [u8],
+    ) -> Self {
+        let epoch_pos = slice_without_table_id.len() - EPOCH_LEN;
+        let epoch = (&slice_without_table_id[epoch_pos..]).get_u64();
+
+        Self {
+            user_key: UserKey::new(table_id, TableKey(&slice_without_table_id[..epoch_pos])),
             epoch,
         }
     }

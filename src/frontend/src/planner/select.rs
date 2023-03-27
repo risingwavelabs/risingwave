@@ -19,6 +19,7 @@ use risingwave_common::catalog::Schema;
 use risingwave_common::error::{ErrorCode, Result};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::ExprError;
 use risingwave_pb::plan_common::JoinType;
 
@@ -33,7 +34,7 @@ use crate::optimizer::plan_node::{
     LogicalAgg, LogicalApply, LogicalOverAgg, LogicalProject, LogicalProjectSet, LogicalTopN,
     LogicalValues, PlanAggCall, PlanRef,
 };
-use crate::optimizer::property::{FieldOrder, Order};
+use crate::optimizer::property::Order;
 use crate::planner::Planner;
 use crate::utils::Condition;
 
@@ -50,7 +51,7 @@ impl Planner {
             ..
         }: BoundSelect,
         extra_order_exprs: Vec<ExprImpl>,
-        order: &[FieldOrder],
+        order: &[ColumnOrder],
     ) -> Result<PlanRef> {
         // Append expressions in ORDER BY.
         if distinct.is_distinct() && !extra_order_exprs.is_empty() {
@@ -65,9 +66,7 @@ impl Planner {
             let mut distinct_on_exprs: HashMap<ExprImpl, bool> =
                 exprs.iter().map(|expr| (expr.clone(), false)).collect();
             let mut uncovered_distinct_on_exprs_cnt = distinct_on_exprs.len();
-            let mut order_iter = order
-                .iter()
-                .map(|FieldOrder { index, .. }| &select_items[*index]);
+            let mut order_iter = order.iter().map(|o| &select_items[o.column_index]);
             while uncovered_distinct_on_exprs_cnt > 0 && let Some(order_expr) = order_iter.next() {
                 match distinct_on_exprs.get_mut(order_expr) {
                     Some(has_been_covered) => {

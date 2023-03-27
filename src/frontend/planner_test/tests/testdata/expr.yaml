@@ -165,9 +165,7 @@
 - sql: |
     select position(replace('1','1','2'),'123') where '12' like '%1';
   batch_plan: |
-    BatchProject { exprs: [0:Int32] }
-    └─BatchFilter { predicate: false:Boolean }
-      └─BatchValues { rows: [[]] }
+    BatchValues { rows: [] }
 - name: case searched form with else
   sql: |
     create table t (v1 int);
@@ -379,14 +377,12 @@
   sql: |
     select array[1] < SOME(null);
   binder_error: |-
-    Feature is not yet implemented: LessThan[List, unknown]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Bind error: array/struct on left are not supported yet
 - name: array of array/struct on right not supported yet 5808
   sql: |
     select null < SOME(array[array[1]]);
   binder_error: |-
-    Feature is not yet implemented: LessThan[unknown, List]
-    Tracking issue: https://github.com/risingwavelabs/risingwave/issues/112
+    Bind error: array of array/struct on right are not supported yet
 - sql: |
     select 1 < SOME(array[null]::integer[]);
   logical_plan: |
@@ -406,7 +402,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
+    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List { datatype: Int32 }]] }
@@ -429,7 +425,7 @@
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10035, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
+    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10037, ARRAY[2]:List { datatype: Int32 }))) as $expr1] }
     └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
       ├─BatchValues { rows: [[]] }
       └─BatchValues { rows: [[ARRAY[1]:List { datatype: Int32 }]] }

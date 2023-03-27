@@ -1,5 +1,15 @@
 statement ok
-create table t_remote (id integer primary key, name varchar);
+create table t_remote (
+    id integer primary key,
+    v_varchar varchar,
+    v_smallint smallint,
+    v_integer integer,
+    v_bigint bigint,
+    v_decimal decimal,
+    v_float float,
+    v_double double,
+    v_timestamp timestamp
+);
 
 statement ok
 create materialized view mv_remote as select * from t_remote;
@@ -19,16 +29,22 @@ CREATE SINK s_mysql FROM mv_remote WITH (
 );
 
 statement ok
-INSERT INTO t_remote VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carl');
+INSERT INTO t_remote VALUES
+    (1, 'Alice', 28208, 281620391, 4986480304337356659, 28162.0391, 2.03, 28162.0391, '2023-03-20 10:18:30'),
+    (2, 'Bob', 10580, 2131030003, 3074255027698877876, 21310.30003, 10.3, 21310.30003, '2023-03-20 10:18:31'),
+    (3, 'Carl', 18300, 1702307129, 7878292368468104216, 17023.07129, 23.07, 17023.07129, '2023-03-20 10:18:32');
 
 statement ok
-INSERT INTO t_remote VALUES (4, 'Doris'), (5, 'Eve'), (6, 'Frank');
+INSERT INTO t_remote VALUES
+    (4, 'Doris', 17250, 151951802, 3946135584462581863, 1519518.02, 18.02, 1519518.02, '2023-03-21 10:18:30'),
+    (5, 'Eve', 9725, 698160808, 524334216698825611, 69.8160808, 69.81, 69.8160808, '2023-03-21 10:18:31'),
+    (6, 'Frank', 28131, 1233587627, 8492820454814063326, 123358.7627, 58.76, 123358.7627, '2023-03-21 10:18:32');
 
 statement ok
 FLUSH;
 
 statement ok
-UPDATE t_remote SET name = 'Alex' WHERE id = 1;
+UPDATE t_remote SET v_varchar = 'Alex' WHERE id = 1;
 
 statement ok
 DELETE FROM t_remote WHERE id = 2;

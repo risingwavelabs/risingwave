@@ -17,7 +17,7 @@ use std::fmt;
 use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use risingwave_pb::expr::InputRef as ProstInputRef;
+use risingwave_pb::expr::PbInputRef;
 
 use super::Expr;
 use crate::expr::ExprType;
@@ -108,8 +108,8 @@ impl InputRef {
     }
 
     /// Convert to protobuf.
-    pub fn to_proto(&self) -> ProstInputRef {
-        ProstInputRef {
+    pub fn to_proto(&self) -> PbInputRef {
+        PbInputRef {
             index: self.index as _,
             r#type: Some(self.data_type.to_protobuf()),
         }

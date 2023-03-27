@@ -23,7 +23,7 @@ use risingwave_sqlparser::ast::{
 };
 
 use crate::binder::Binder;
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, SubqueryKind};
+use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, Parameter, SubqueryKind};
 
 mod binary_op;
 mod column;
@@ -123,6 +123,7 @@ impl Binder {
                 start,
                 count,
             } => self.bind_overlay(*expr, *new_substring, *start, count),
+            Expr::Parameter { index } => self.bind_parameter(index),
             _ => Err(ErrorCode::NotImplemented(
                 format!("unsupported expression {:?}", expr),
                 112.into(),
@@ -297,6 +298,10 @@ impl Binder {
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
     }
 
+    fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
+        Ok(Parameter::new(index, self.param_types.clone()).into())
+    }
+
     /// Bind `expr (not) between low and high`
     pub(super) fn bind_between(
         &mut self,
@@ -447,6 +452,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
                     name: f.name.real_value(),
                     field_descs: vec![],
                     type_name: "".to_string(),
+                    generated_column: None,
                 })
             })
             .collect::<Result<Vec<_>>>()?
@@ -459,6 +465,7 @@ pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
         name: column_def.name.real_value(),
         field_descs,
         type_name: "".to_string(),
+        generated_column: None,
     })
 }
 
@@ -512,6 +519,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                 "float8" => DataType::Float64,
                 "timestamptz" => DataType::Timestamptz,
                 "jsonb" => DataType::Jsonb,
+                "serial" => {
+                    return Err(ErrorCode::NotSupported(
+                        "Column type SERIAL is not supported".into(),
+                        "Please remove the SERIAL column".into(),
+                    )
+                    .into())
+                }
                 _ => return Err(new_err().into()),
             }
         }

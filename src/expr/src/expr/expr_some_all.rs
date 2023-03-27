@@ -19,10 +19,13 @@ use risingwave_common::array::{Array, ArrayMeta, ArrayRef, BoolArray, DataChunk}
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Scalar, ScalarImpl, ScalarRefImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_pb::expr::expr_node::Type;
+use risingwave_common::{bail, ensure};
+use risingwave_pb::expr::expr_node::{RexNode, Type};
+use risingwave_pb::expr::{ExprNode, FunctionCall};
 
-use super::{BoxedExpression, Expression};
-use crate::Result;
+use super::build_expr_from_prost::get_children_and_return_type;
+use super::{build_from_prost, BoxedExpression, Expression};
+use crate::{ExprError, Result};
 
 #[derive(Debug)]
 pub struct SomeAllExpression {
@@ -72,14 +75,15 @@ impl SomeAllExpression {
     }
 }
 
+#[async_trait::async_trait]
 impl Expression for SomeAllExpression {
     fn return_type(&self) -> DataType {
         DataType::Boolean
     }
 
-    fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
-        let arr_left = self.left_expr.eval_checked(data_chunk)?;
-        let arr_right = self.right_expr.eval_checked(data_chunk)?;
+    async fn eval(&self, data_chunk: &DataChunk) -> Result<ArrayRef> {
+        let arr_left = self.left_expr.eval_checked(data_chunk).await?;
+        let arr_right = self.right_expr.eval_checked(data_chunk).await?;
         let bitmap = data_chunk.visibility();
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
@@ -148,7 +152,7 @@ impl Expression for SomeAllExpression {
             capacity,
         );
 
-        let func_results = self.func.eval(&data_chunk)?;
+        let func_results = self.func.eval(&data_chunk).await?;
         let mut func_results_iter = func_results.as_bool().iter();
         Ok(Arc::new(
             num_array
@@ -164,20 +168,20 @@ impl Expression for SomeAllExpression {
         ))
     }
 
-    fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
-        let datum_left = self.left_expr.eval_row(row)?;
-        let datum_right = self.right_expr.eval_row(row)?;
+    async fn eval_row(&self, row: &OwnedRow) -> Result<Datum> {
+        let datum_left = self.left_expr.eval_row(row).await?;
+        let datum_right = self.right_expr.eval_row(row).await?;
         if let Some(array) = datum_right {
             match array {
                 ScalarImpl::List(array) => {
-                    let scalar_vec = array
-                        .values()
-                        .iter()
-                        .map(|d| {
-                            self.func
-                                .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
-                        })
-                        .collect::<Result<Vec<_>>>()?;
+                    let mut scalar_vec = Vec::with_capacity(array.values().len());
+                    for d in array.values() {
+                        let e = self
+                            .func
+                            .eval_row(&OwnedRow::new(vec![datum_left.clone(), d.clone()]))
+                            .await?;
+                        scalar_vec.push(e);
+                    }
                     let boolean_vec = scalar_vec
                         .into_iter()
                         .map(|scalar_ref| scalar_ref.map(|s| s.into_bool()))
@@ -191,5 +195,69 @@ impl Expression for SomeAllExpression {
         } else {
             Ok(None)
         }
+    }
+}
+
+impl<'a> TryFrom<&'a ExprNode> for SomeAllExpression {
+    type Error = ExprError;
+
+    fn try_from(prost: &'a ExprNode) -> Result<Self> {
+        let outer_expr_type = prost.get_expr_type().unwrap();
+        let (outer_children, outer_return_type) = get_children_and_return_type(prost)?;
+        ensure!(matches!(outer_return_type, DataType::Boolean));
+
+        let mut inner_expr_type = outer_children[0].get_expr_type().unwrap();
+        let (mut inner_children, mut inner_return_type) =
+            get_children_and_return_type(&outer_children[0])?;
+        let mut stack = vec![];
+        while inner_children.len() != 2 {
+            stack.push((inner_expr_type, inner_return_type));
+            inner_expr_type = inner_children[0].get_expr_type().unwrap();
+            (inner_children, inner_return_type) = get_children_and_return_type(&inner_children[0])?;
+        }
+
+        let left_expr = build_from_prost(&inner_children[0])?;
+        let right_expr = build_from_prost(&inner_children[1])?;
+
+        let DataType::List { datatype: right_expr_return_type } = right_expr.return_type() else {
+        bail!("Expect Array Type");
+    };
+
+        let eval_func = {
+            let left_expr_input_ref = ExprNode {
+                expr_type: Type::InputRef as i32,
+                return_type: Some(left_expr.return_type().to_protobuf()),
+                rex_node: Some(RexNode::InputRef(0)),
+            };
+            let right_expr_input_ref = ExprNode {
+                expr_type: Type::InputRef as i32,
+                return_type: Some(right_expr_return_type.to_protobuf()),
+                rex_node: Some(RexNode::InputRef(1)),
+            };
+            let mut root_expr_node = ExprNode {
+                expr_type: inner_expr_type as i32,
+                return_type: Some(inner_return_type.to_protobuf()),
+                rex_node: Some(RexNode::FuncCall(FunctionCall {
+                    children: vec![left_expr_input_ref, right_expr_input_ref],
+                })),
+            };
+            while let Some((expr_type, return_type)) = stack.pop() {
+                root_expr_node = ExprNode {
+                    expr_type: expr_type as i32,
+                    return_type: Some(return_type.to_protobuf()),
+                    rex_node: Some(RexNode::FuncCall(FunctionCall {
+                        children: vec![root_expr_node],
+                    })),
+                }
+            }
+            build_from_prost(&root_expr_node)?
+        };
+
+        Ok(SomeAllExpression::new(
+            left_expr,
+            right_expr,
+            outer_expr_type,
+            eval_func,
+        ))
     }
 }

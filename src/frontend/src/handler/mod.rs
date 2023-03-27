@@ -18,7 +18,9 @@ use std::task::{Context, Poll};
 
 use futures::stream::{self, BoxStream};
 use futures::{Stream, StreamExt};
-use pgwire::pg_response::StatementType::{ABORT, BEGIN, COMMIT, ROLLBACK, START_TRANSACTION};
+use pgwire::pg_response::StatementType::{
+    ABORT, BEGIN, COMMIT, ROLLBACK, SET_TRANSACTION, START_TRANSACTION,
+};
 use pgwire::pg_response::{PgResponse, RowSetResult};
 use pgwire::pg_server::BoxedError;
 use pgwire::types::{Format, Row};
@@ -26,10 +28,13 @@ use risingwave_common::error::{ErrorCode, Result};
 use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
+use self::variable::handle_set_time_zone;
+use crate::catalog::table_catalog::TableType;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_relation_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -56,6 +61,7 @@ pub mod drop_table;
 pub mod drop_user;
 mod drop_view;
 pub mod explain;
+pub mod extended_handle;
 mod flush;
 pub mod handle_privilege;
 pub mod privilege;
@@ -171,7 +177,7 @@ pub async fn handle(
             temporary,
             name,
             args,
-            return_type,
+            returns,
             params,
         } => {
             create_function::handle_create_function(
@@ -180,7 +186,7 @@ pub async fn handle(
                 temporary,
                 name,
                 args,
-                return_type,
+                returns,
                 params,
             )
             .await
@@ -318,7 +324,6 @@ pub async fn handle(
             name,
             columns,
             query,
-
             with_options: _, // It is put in OptimizerContext
             or_replace,      // not supported
             emit_mode,
@@ -349,6 +354,7 @@ pub async fn handle(
             variable,
             value,
         } => variable::handle_set(handler_args, variable, value),
+        Statement::SetTimeZone { local: _, value } => handle_set_time_zone(handler_args, value),
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable).await,
         Statement::CreateIndex {
             name,
@@ -382,6 +388,43 @@ pub async fn handle(
                 operation @ (AlterTableOperation::AddColumn { .. }
                 | AlterTableOperation::DropColumn { .. }),
         } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RenameTable { table_name },
+        } => {
+            alter_relation_rename::handle_rename_table(
+                handler_args,
+                TableType::Table,
+                name,
+                table_name,
+            )
+            .await
+        }
+        Statement::AlterIndex {
+            name,
+            operation: AlterIndexOperation::RenameIndex { index_name },
+        } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::RenameView { view_name },
+        } => {
+            if materialized {
+                alter_relation_rename::handle_rename_table(
+                    handler_args,
+                    TableType::MaterializedView,
+                    name,
+                    view_name,
+                )
+                .await
+            } else {
+                alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
+            }
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::RenameSink { sink_name },
+        } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }
@@ -408,6 +451,10 @@ pub async fn handle(
         )),
         Statement::Rollback { .. } => Ok(PgResponse::empty_result_with_notice(
             ROLLBACK,
+            "Ignored temporarily. See detail in issue#2541".to_string(),
+        )),
+        Statement::SetTransaction { .. } => Ok(PgResponse::empty_result_with_notice(
+            SET_TRANSACTION,
             "Ignored temporarily. See detail in issue#2541".to_string(),
         )),
         _ => Err(

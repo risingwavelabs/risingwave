@@ -16,14 +16,17 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use anyhow::{bail, Result};
 use clap::Parser;
+use futures::channel::{mpsc, oneshot};
 use futures::future::join_all;
+use futures::{SinkExt, StreamExt};
 use madsim::net::ipvs::*;
 use madsim::runtime::{Handle, NodeHandle};
+use madsim::task::JoinHandle;
 use rand::Rng;
 use sqllogictest::AsyncDB;
 
@@ -109,6 +112,9 @@ pub struct Cluster {
 }
 
 impl Cluster {
+    /// Start a RisingWave cluster for testing.
+    ///
+    /// This function should be called exactly once in a test.
     pub async fn start(conf: Configuration) -> Result<Self> {
         let handle = madsim::runtime::Handle::current();
         println!("seed = {}", handle.seed());
@@ -204,6 +210,8 @@ impl Cluster {
                 "etcd",
                 "--etcd-endpoints",
                 "etcd:2388",
+                "--state-store",
+                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -245,8 +253,6 @@ impl Cluster {
                 "0.0.0.0:5688",
                 "--advertise-addr",
                 &format!("192.168.3.{i}:5688"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
                 "--parallelism",
                 &conf.compute_node_cores.to_string(),
             ]);
@@ -269,8 +275,6 @@ impl Cluster {
                 "0.0.0.0:6660",
                 "--advertise-addr",
                 &format!("192.168.4.{i}:6660"),
-                "--state-store",
-                "hummock+minio://hummockadmin:hummockadmin@192.168.12.1:9301/hummock001",
             ]);
             handle
                 .create_node()
@@ -305,35 +309,47 @@ impl Cluster {
         })
     }
 
-    /// Run a SQL query from the client.
-    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
-        let sql = sql.into();
+    /// Start a SQL session on the client node.
+    pub fn start_session(&mut self) -> Session {
+        let (query_tx, mut query_rx) = mpsc::channel::<SessionRequest>(0);
 
-        let result = self
-            .client
-            .spawn(async move {
-                // TODO: reuse session
-                let mut session = RisingWave::connect("frontend".into(), "dev".into())
+        self.client.spawn(async move {
+            let mut client = RisingWave::connect("frontend".into(), "dev".into()).await?;
+
+            while let Some((sql, tx)) = query_rx.next().await {
+                let result = client
+                    .run(&sql)
                     .await
-                    .expect("failed to connect to RisingWave");
-                let result = session.run(&sql).await?;
-                Ok::<_, anyhow::Error>(result)
-            })
-            .await??;
+                    .map(|output| match output {
+                        sqllogictest::DBOutput::Rows { rows, .. } => rows
+                            .into_iter()
+                            .map(|row| {
+                                row.into_iter()
+                                    .map(|v| v.to_string())
+                                    .collect::<Vec<_>>()
+                                    .join(" ")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        _ => "".to_string(),
+                    })
+                    .map_err(Into::into);
 
-        match result {
-            sqllogictest::DBOutput::Rows { rows, .. } => Ok(rows
-                .into_iter()
-                .map(|row| {
-                    row.into_iter()
-                        .map(|v| v.to_string())
-                        .collect::<Vec<_>>()
-                        .join(" ")
-                })
-                .collect::<Vec<_>>()
-                .join("\n")),
-            _ => Ok("".to_string()),
-        }
+                let _ = tx.send(result);
+            }
+
+            Ok::<_, anyhow::Error>(())
+        });
+
+        Session { query_tx }
+    }
+
+    /// Run a SQL query on a **new** session of the client node.
+    ///
+    /// This is a convenience method that creates a new session and runs the query on it. If you
+    /// want to run multiple queries on the same session, use `start_session` and `Session::run`.
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
+        self.start_session().run(sql).await
     }
 
     /// Run a future on the client node.
@@ -514,6 +530,27 @@ impl Cluster {
     }
 }
 
+type SessionRequest = (
+    String,                          // query sql
+    oneshot::Sender<Result<String>>, // channel to send result back
+);
+
+/// A SQL session on the simulated client node.
+#[derive(Debug, Clone)]
+pub struct Session {
+    query_tx: mpsc::Sender<SessionRequest>,
+}
+
+impl Session {
+    /// Run the given SQL query on the session.
+    pub async fn run(&mut self, sql: impl Into<String>) -> Result<String> {
+        let (tx, rx) = oneshot::channel();
+        self.query_tx.send((sql.into(), tx)).await?;
+        rx.await?
+    }
+}
+
+/// Options for killing nodes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct KillOpts {
     pub kill_rate: f32,
@@ -521,4 +558,15 @@ pub struct KillOpts {
     pub kill_frontend: bool,
     pub kill_compute: bool,
     pub kill_compactor: bool,
+}
+
+impl KillOpts {
+    /// Killing all kind of nodes.
+    pub const ALL: Self = KillOpts {
+        kill_rate: 1.0,
+        kill_meta: true,
+        kill_frontend: true,
+        kill_compute: true,
+        kill_compactor: true,
+    };
 }

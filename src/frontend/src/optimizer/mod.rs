@@ -41,8 +41,8 @@ use risingwave_pb::catalog::WatermarkDesc;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::{
-    BatchProject, Convention, LogicalProject, StreamDml, StreamMaterialize, StreamProject,
-    StreamRowIdGen, StreamSink, StreamWatermarkFilter,
+    BatchProject, Convention, LogicalProject, LogicalSource, StreamDml, StreamMaterialize,
+    StreamProject, StreamRowIdGen, StreamSink, StreamWatermarkFilter,
 };
 use self::plan_visitor::has_batch_exchange;
 #[cfg(debug_assertions)]
@@ -54,6 +54,7 @@ use crate::expr::InputRef;
 use crate::optimizer::plan_node::{
     BatchExchange, PlanNodeType, PlanTreeNode, RewriteExprsRecursive,
 };
+use crate::optimizer::plan_visitor::TemporalJoinValidator;
 use crate::optimizer::property::Distribution;
 use crate::utils::ColIndexMappingRewriteExt;
 use crate::WithOptions;
@@ -160,6 +161,14 @@ impl PlanRoot {
         // Logical optimization
         let mut plan = self.gen_optimized_logical_plan_for_batch()?;
 
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "do not support temporal join for batch queries".to_string(),
+                "please use temporal join in streaming queries".to_string(),
+            )
+            .into());
+        }
+
         // Convert to physical plan node
         plan = plan.to_batch_with_order_required(&self.required_order)?;
 
@@ -254,12 +263,70 @@ impl PlanRoot {
         Ok(plan)
     }
 
+    /// Generate optimized stream plan
+    fn gen_optimized_stream_plan(&mut self) -> Result<PlanRef> {
+        let ctx = self.plan.ctx();
+        let _explain_trace = ctx.is_explain_trace();
+
+        let mut plan = self.gen_stream_plan()?;
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Add identity project between exchange and share",
+            vec![AvoidExchangeShareRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
+        plan = plan.optimize_by_rules(&OptimizationStage::new(
+            "Merge StreamProject",
+            vec![StreamProjectMergeRule::create()],
+            ApplyOrder::BottomUp,
+        ));
+
+        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
+            // TODO: make it a logical optimization.
+            // Rewrite joins with index to delta join
+            plan = plan.optimize_by_rules(&OptimizationStage::new(
+                "To IndexDeltaJoin",
+                vec![IndexDeltaJoinRule::create()],
+                ApplyOrder::BottomUp,
+            ));
+        }
+
+        // Inline session timezone
+        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Inline session timezone:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        // Const eval of exprs at the last minute
+        plan = const_eval_exprs(plan)?;
+
+        if ctx.is_explain_trace() {
+            ctx.trace("Const eval exprs:");
+            ctx.trace(plan.explain_to_string().unwrap());
+        }
+
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
+        if TemporalJoinValidator::exist_dangling_temporal_scan(plan.clone()) {
+            return Err(ErrorCode::NotSupported(
+                "exist dangling temporal scan".to_string(),
+                "please check your temporal join syntax e.g. consider removing the right outer join if it is being used.".to_string(),
+            ).into());
+        }
+
+        Ok(plan)
+    }
+
     /// Generate create index or create materialize view plan.
     fn gen_stream_plan(&mut self) -> Result<PlanRef> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
 
-        let mut plan = match self.plan.convention() {
+        let plan = match self.plan.convention() {
             Convention::Logical => {
                 let plan = self.gen_optimized_logical_plan_for_stream()?;
 
@@ -313,42 +380,6 @@ impl PlanRoot {
             ctx.trace("To Stream Plan:");
             ctx.trace(plan.explain_to_string().unwrap());
         }
-
-        plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Add identity project between exchange and share",
-            vec![AvoidExchangeShareRule::create()],
-            ApplyOrder::BottomUp,
-        ));
-
-        if ctx.session_ctx().config().get_streaming_enable_delta_join() {
-            // TODO: make it a logical optimization.
-            // Rewrite joins with index to delta join
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "To IndexDeltaJoin",
-                vec![IndexDeltaJoinRule::create()],
-                ApplyOrder::BottomUp,
-            ));
-        }
-
-        // Inline session timezone
-        plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Inline session timezone:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        // Const eval of exprs at the last minute
-        plan = const_eval_exprs(plan)?;
-
-        if ctx.is_explain_trace() {
-            ctx.trace("Const eval exprs:");
-            ctx.trace(plan.explain_to_string().unwrap());
-        }
-
-        #[cfg(debug_assertions)]
-        InputRefValidator.validate(plan.clone());
-
         Ok(plan)
     }
 
@@ -364,15 +395,27 @@ impl PlanRoot {
         watermark_descs: Vec<WatermarkDesc>,
         version: Option<TableVersion>,
     ) -> Result<StreamMaterialize> {
-        let mut stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan()?;
 
         // Add DML node.
         stream_plan = StreamDml::new(
             stream_plan,
             append_only,
-            columns.iter().map(|c| c.column_desc.clone()).collect(),
+            columns
+                .iter()
+                .filter_map(|c| (!c.is_generated()).then(|| c.column_desc.clone()))
+                .collect(),
         )
         .into();
+
+        // Add generated columns.
+        let exprs = LogicalSource::gen_optional_generated_column_project_exprs(
+            columns.iter().map(|c| c.column_desc.clone()).collect(),
+        )?;
+        if let Some(exprs) = exprs {
+            let logical_project = LogicalProject::new(stream_plan, exprs);
+            stream_plan = StreamProject::new(logical_project).into();
+        }
 
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
@@ -407,7 +450,7 @@ impl PlanRoot {
         mv_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -427,7 +470,7 @@ impl PlanRoot {
         index_name: String,
         definition: String,
     ) -> Result<StreamMaterialize> {
-        let stream_plan = self.gen_stream_plan()?;
+        let stream_plan = self.gen_optimized_stream_plan()?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -448,7 +491,7 @@ impl PlanRoot {
         definition: String,
         properties: WithOptions,
     ) -> Result<StreamSink> {
-        let mut stream_plan = self.gen_stream_plan()?;
+        let mut stream_plan = self.gen_optimized_stream_plan()?;
 
         // Add a project node if there is hidden column(s).
         let input_fields = stream_plan.schema().fields();

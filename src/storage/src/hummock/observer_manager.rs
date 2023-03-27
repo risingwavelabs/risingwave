@@ -21,20 +21,20 @@ use risingwave_hummock_sdk::filter_key_extractor::{
 };
 use risingwave_pb::catalog::Table;
 use risingwave_pb::hummock::version_update_payload;
+use risingwave_pb::meta::relation::RelationInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::SubscribeResponse;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::backup_reader::BackupReaderRef;
 use crate::hummock::event_handler::HummockEvent;
+use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
     filter_key_extractor_manager: FilterKeyExtractorManagerRef,
-
     backup_reader: BackupReaderRef,
-
+    write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockEvent>,
-
     version: u64,
 }
 
@@ -47,19 +47,25 @@ impl ObserverState for HummockObserverNode {
         };
 
         match info.to_owned() {
-            Info::Table(table_catalog) => {
-                assert!(
-                    resp.version > self.version,
-                    "resp version={:?}, current version={:?}",
-                    resp.version,
-                    self.version
-                );
+            Info::RelationGroup(relation_group) => {
+                for relation in relation_group.relations {
+                    match relation.relation_info.unwrap() {
+                        RelationInfo::Table(table_catalog) => {
+                            assert!(
+                                resp.version > self.version,
+                                "resp version={:?}, current version={:?}",
+                                resp.version,
+                                self.version
+                            );
 
-                self.handle_catalog_notification(resp.operation(), table_catalog);
+                            self.handle_catalog_notification(resp.operation(), table_catalog);
 
-                self.version = resp.version;
+                            self.version = resp.version;
+                        }
+                        _ => panic!("error type notification"),
+                    };
+                }
             }
-
             Info::HummockVersionDeltas(hummock_version_deltas) => {
                 let _ = self
                     .version_update_sender
@@ -73,6 +79,11 @@ impl ObserverState for HummockObserverNode {
 
             Info::MetaBackupManifestId(id) => {
                 self.backup_reader.try_refresh_manifest(id.id);
+            }
+
+            Info::HummockWriteLimits(write_limits) => {
+                self.write_limiter
+                    .update_write_limits(write_limits.write_limits);
             }
 
             _ => {
@@ -92,6 +103,12 @@ impl ObserverState for HummockObserverNode {
                 .meta_backup_manifest_id
                 .expect("should get meta backup manifest id")
                 .id,
+        );
+        self.write_limiter.update_write_limits(
+            snapshot
+                .hummock_write_limits
+                .expect("should get hummock_write_limits")
+                .write_limits,
         );
         let _ = self
             .version_update_sender
@@ -115,12 +132,14 @@ impl HummockObserverNode {
         filter_key_extractor_manager: FilterKeyExtractorManagerRef,
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockEvent>,
+        write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
             backup_reader,
             version_update_sender,
             version: 0,
+            write_limiter,
         }
     }
 

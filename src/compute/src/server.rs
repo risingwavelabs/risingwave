@@ -26,6 +26,8 @@ use risingwave_common::config::{
 };
 use risingwave_common::monitor::process_linux::monitor_process;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
+use risingwave_common::telemetry::manager::TelemetryManager;
+use risingwave_common::telemetry::telemetry_env_enabled;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_service::metrics_manager::MetricsManager;
@@ -34,6 +36,7 @@ use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::compute::config_service_server::ConfigServiceServer;
+use risingwave_pb::connector_service::SinkPayloadFormat;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
@@ -57,10 +60,10 @@ use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
+use crate::memory_management::memory_control_policy_from_config;
 use crate::memory_management::memory_manager::{
     GlobalMemoryManager, MIN_COMPUTE_MEMORY_MB, SYSTEM_RESERVED_MEMORY_MB,
 };
-use crate::memory_management::policy::StreamingOnlyPolicy;
 use crate::observer::observer_manager::ComputeObserverNode;
 use crate::rpc::service::config_service::ConfigServiceImpl;
 use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
@@ -70,6 +73,7 @@ use crate::rpc::service::monitor_service::{
     AwaitTreeMiddlewareLayer, AwaitTreeRegistryRef, MonitorServiceImpl,
 };
 use crate::rpc::service::stream_service::StreamServiceImpl;
+use crate::telemetry::ComputeTelemetryCreator;
 use crate::ComputeNodeOpts;
 
 /// Bootstraps the compute-node.
@@ -79,7 +83,7 @@ pub async fn compute_node_serve(
     opts: ComputeNodeOpts,
 ) -> (Vec<JoinHandle<()>>, Sender<()>) {
     // Load the configuration.
-    let config = load_config(&opts.config_path, Some(opts.override_config));
+    let config = load_config(&opts.config_path, Some(opts.override_config.clone()));
 
     info!("Starting compute node",);
     info!("> config: {:?}", config);
@@ -104,17 +108,15 @@ pub async fn compute_node_serve(
     .unwrap();
     let storage_opts = Arc::new(StorageOpts::from((&config, &system_params)));
 
-    let state_store_url = {
-        let from_local = opts.state_store.unwrap_or("hummock+memory".to_string());
-        system_params.state_store(from_local)
-    };
+    let state_store_url = system_params.state_store();
 
     let embedded_compactor_enabled =
-        embedded_compactor_enabled(&state_store_url, config.storage.disable_remote_compactor);
+        embedded_compactor_enabled(state_store_url, config.storage.disable_remote_compactor);
     let storage_memory_bytes =
         total_storage_memory_limit_bytes(&config.storage, embedded_compactor_enabled);
     let compute_memory_bytes =
         validate_compute_node_memory_config(opts.total_memory_bytes, storage_memory_bytes);
+    let memory_control_policy = memory_control_policy_from_config(&opts).unwrap();
 
     let worker_id = meta_client.worker_id();
     info!("Assigned worker node id {}", worker_id);
@@ -144,7 +146,7 @@ pub async fn compute_node_serve(
     let mut join_handle_vec = vec![];
 
     let state_store = StateStoreImpl::new(
-        &state_store_url,
+        state_store_url,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -166,9 +168,16 @@ pub async fn compute_node_serve(
     .await
     .unwrap();
 
+    // Initialize observer manager.
+    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params.clone()));
+    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
+    let observer_manager =
+        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
+    observer_manager.start().await;
+
     let mut extra_info_sources: Vec<ExtraInfoSourceRef> = vec![];
     if let Some(storage) = state_store.as_hummock_trait() {
-        extra_info_sources.push(storage.sstable_id_manager().clone());
+        extra_info_sources.push(storage.sstable_object_id_manager().clone());
         if embedded_compactor_enabled {
             tracing::info!("start embedded compactor");
             let read_memory_limiter = Arc::new(MemoryLimiter::new(
@@ -183,7 +192,7 @@ pub async fn compute_node_serve(
                 compaction_executor: Arc::new(CompactionExecutor::new(Some(1))),
                 filter_key_extractor_manager: storage.filter_key_extractor_manager().clone(),
                 read_memory_limiter,
-                sstable_id_manager: storage.sstable_id_manager().clone(),
+                sstable_object_id_manager: storage.sstable_object_id_manager().clone(),
                 task_progress_manager: Default::default(),
                 compactor_runtime_config: Arc::new(tokio::sync::Mutex::new(
                     CompactorRuntimeConfig {
@@ -202,6 +211,13 @@ pub async fn compute_node_serve(
             memory_limiter,
         ));
         monitor_cache(memory_collector, &registry).unwrap();
+        let backup_reader = storage.backup_reader();
+        let system_params_mgr = system_params_manager.clone();
+        tokio::spawn(async move {
+            backup_reader
+                .watch_config_change(system_params_mgr.watch_params())
+                .await;
+        });
     }
 
     sub_tasks.push(MetaClient::start_heartbeat_loop(
@@ -239,7 +255,7 @@ pub async fn compute_node_serve(
         compute_memory_bytes,
         system_params.barrier_interval_ms(),
         streaming_metrics.clone(),
-        Box::new(StreamingOnlyPolicy {}),
+        memory_control_policy,
     );
     // Run a background memory monitor
     tokio::spawn(memory_mgr.clone().run(batch_mgr_clone, stream_mgr_clone));
@@ -249,12 +265,7 @@ pub async fn compute_node_serve(
     // of lru manager.
     stream_mgr.set_watermark_epoch(watermark_epoch).await;
 
-    // Initialize observer manager.
-    let system_params_manager = Arc::new(LocalSystemParamsManager::new(system_params));
-    let compute_observer_node = ComputeObserverNode::new(system_params_manager.clone());
-    let observer_manager =
-        ObserverManager::new_with_meta_client(meta_client.clone(), compute_observer_node).await;
-    observer_manager.start().await;
+    let telemetry_enabled = system_params.telemetry_enabled();
 
     let grpc_await_tree_reg = await_tree_config
         .map(|config| AwaitTreeRegistryRef::new(await_tree::Registry::new(config).into()));
@@ -276,7 +287,20 @@ pub async fn compute_node_serve(
 
     let connector_params = risingwave_connector::ConnectorParams {
         connector_rpc_endpoint: opts.connector_rpc_endpoint,
+        sink_payload_format: match opts.connector_rpc_sink_payload_format.as_deref() {
+            None | Some("json") => SinkPayloadFormat::Json,
+            Some("stream_chunk") => SinkPayloadFormat::StreamChunk,
+            _ => {
+                unreachable!(
+                    "invalid sink payload format: {:?}. Should be either json or stream_chunk",
+                    opts.connector_rpc_sink_payload_format
+                )
+            }
+        },
     };
+
+    info!("connector param: {:?}", connector_params);
+
     // Initialize the streaming environment.
     let stream_env = StreamEnvironment::new(
         advertise_addr.clone(),
@@ -285,6 +309,7 @@ pub async fn compute_node_serve(
         worker_id,
         state_store,
         dml_mgr,
+        system_params_manager.clone(),
         source_metrics,
     );
 
@@ -305,6 +330,25 @@ pub async fn compute_node_serve(
     let monitor_srv = MonitorServiceImpl::new(stream_mgr.clone(), grpc_await_tree_reg.clone());
     let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr);
     let health_srv = HealthServiceImpl::new();
+
+    let telemetry_manager = TelemetryManager::new(
+        system_params_manager.watch_params(),
+        Arc::new(meta_client.clone()),
+        Arc::new(ComputeTelemetryCreator::new()),
+    );
+
+    // if the toml config file or env variable disables telemetry, do not watch system params change
+    // because if any of configs disable telemetry, we should never start it
+    if config.server.telemetry_enabled && telemetry_env_enabled() {
+        // if all configs are true, start reporting
+        if telemetry_enabled {
+            telemetry_manager.start_telemetry_reporting();
+        }
+        // if config and env are true, starting watching
+        sub_tasks.push(telemetry_manager.watch_params_change());
+    } else {
+        tracing::info!("Telemetry didn't start due to config");
+    }
 
     let (shutdown_send, mut shutdown_recv) = tokio::sync::oneshot::channel::<()>();
     let join_handle = tokio::spawn(async move {

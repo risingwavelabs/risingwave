@@ -21,39 +21,17 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_expr::expr::BoxedExpression;
 
-use super::{
-    ActorContextRef, Executor, ExecutorInfo, PkIndices, PkIndicesRef, SimpleExecutor,
-    SimpleExecutorWrapper, StreamExecutorResult, Watermark,
-};
-use crate::common::InfallibleExpression;
-
-pub type ProjectExecutor = SimpleExecutorWrapper<SimpleProjectExecutor>;
-
-impl ProjectExecutor {
-    pub fn new(
-        ctx: ActorContextRef,
-        input: Box<dyn Executor>,
-        pk_indices: PkIndices,
-        exprs: Vec<BoxedExpression>,
-        execuotr_id: u64,
-        watermark_derivations: MultiMap<usize, usize>,
-    ) -> Self {
-        let info = ExecutorInfo {
-            schema: input.schema().to_owned(),
-            pk_indices,
-            identity: "Project".to_owned(),
-        };
-        SimpleExecutorWrapper {
-            input,
-            inner: SimpleProjectExecutor::new(ctx, info, exprs, execuotr_id, watermark_derivations),
-        }
-    }
-}
+use super::*;
 
 /// `ProjectExecutor` project data with the `expr`. The `expr` takes a chunk of data,
 /// and returns a new data chunk. And then, `ProjectExecutor` will insert, delete
 /// or update element into next operator according to the result of the expression.
-pub struct SimpleProjectExecutor {
+pub struct ProjectExecutor {
+    input: BoxedExecutor,
+    inner: Inner,
+}
+
+struct Inner {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -62,16 +40,28 @@ pub struct SimpleProjectExecutor {
     /// All the watermark derivations, (input_column_index, output_column_index). And the
     /// derivation expression is the project's expression itself.
     watermark_derivations: MultiMap<usize, usize>,
+
+    /// the selectivity threshold which should be in [0,1]. for the chunk with selectivity less
+    /// than the threshold, the Project executor will construct a new chunk before expr evaluation,
+    materialize_selectivity_threshold: f64,
 }
 
-impl SimpleProjectExecutor {
+impl ProjectExecutor {
     pub fn new(
         ctx: ActorContextRef,
-        input_info: ExecutorInfo,
+        input: Box<dyn Executor>,
+        pk_indices: PkIndices,
         exprs: Vec<BoxedExpression>,
         executor_id: u64,
         watermark_derivations: MultiMap<usize, usize>,
+        materialize_selectivity_threshold: f64,
     ) -> Self {
+        let info = ExecutorInfo {
+            schema: input.schema().to_owned(),
+            pk_indices,
+            identity: "Project".to_owned(),
+        };
+
         let schema = Schema {
             fields: exprs
                 .iter()
@@ -79,47 +69,77 @@ impl SimpleProjectExecutor {
                 .collect_vec(),
         };
         Self {
-            ctx,
-            info: ExecutorInfo {
-                schema,
-                pk_indices: input_info.pk_indices,
-                identity: format!("ProjectExecutor {:X}", executor_id),
+            input,
+            inner: Inner {
+                ctx,
+                info: ExecutorInfo {
+                    schema,
+                    pk_indices: info.pk_indices,
+                    identity: format!("ProjectExecutor {:X}", executor_id),
+                },
+                exprs,
+                watermark_derivations,
+                materialize_selectivity_threshold,
             },
-            exprs,
-            watermark_derivations,
         }
     }
 }
 
-impl Debug for SimpleProjectExecutor {
+impl Debug for ProjectExecutor {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProjectExecutor")
-            .field("exprs", &self.exprs)
+            .field("exprs", &self.inner.exprs)
             .finish()
     }
 }
 
-impl SimpleExecutor for SimpleProjectExecutor {
-    fn map_filter_chunk(&self, chunk: StreamChunk) -> StreamExecutorResult<Option<StreamChunk>> {
-        let chunk = chunk.compact();
+impl Executor for ProjectExecutor {
+    fn schema(&self) -> &Schema {
+        &self.inner.info.schema
+    }
 
+    fn pk_indices(&self) -> PkIndicesRef<'_> {
+        &self.inner.info.pk_indices
+    }
+
+    fn identity(&self) -> &str {
+        &self.inner.info.identity
+    }
+
+    fn execute(self: Box<Self>) -> BoxedMessageStream {
+        self.inner.execute(self.input).boxed()
+    }
+}
+
+impl Inner {
+    async fn map_filter_chunk(
+        &self,
+        chunk: StreamChunk,
+    ) -> StreamExecutorResult<Option<StreamChunk>> {
+        let chunk = if chunk.selectivity() <= self.materialize_selectivity_threshold {
+            chunk.compact()
+        } else {
+            chunk
+        };
         let (data_chunk, ops) = chunk.into_parts();
+        let mut projected_columns = Vec::new();
 
-        let projected_columns = self
-            .exprs
-            .iter()
-            .map(|expr| {
-                Column::new(expr.eval_infallible(&data_chunk, |err| {
+        for expr in &self.exprs {
+            let evaluated_expr = expr
+                .eval_infallible(&data_chunk, |err| {
                     self.ctx.on_compute_error(err, &self.info.identity)
-                }))
-            })
-            .collect();
-
-        let new_chunk = StreamChunk::new(ops, projected_columns, None);
+                })
+                .await;
+            let new_column = Column::new(evaluated_expr);
+            projected_columns.push(new_column);
+        }
+        let (_, vis) = data_chunk.into_parts();
+        let vis = vis.into_visibility();
+        let new_chunk = StreamChunk::new(ops, projected_columns, vis);
         Ok(Some(new_chunk))
     }
 
-    fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
+    async fn handle_watermark(&self, watermark: Watermark) -> StreamExecutorResult<Vec<Watermark>> {
         let out_col_indices = match self.watermark_derivations.get_vec(&watermark.col_idx) {
             Some(v) => v,
             None => return Ok(vec![]),
@@ -127,16 +147,15 @@ impl SimpleExecutor for SimpleProjectExecutor {
         let mut ret = vec![];
         for out_col_idx in out_col_indices {
             let out_col_idx = *out_col_idx;
-            let derived_watermark = watermark.clone().transform_with_expr(
-                &self.exprs[out_col_idx],
-                out_col_idx,
-                |err| {
+            let derived_watermark = watermark
+                .clone()
+                .transform_with_expr(&self.exprs[out_col_idx], out_col_idx, |err| {
                     self.ctx.on_compute_error(
                         err,
                         &(self.info.identity.to_string() + "(when computing watermark)"),
                     )
-                },
-            );
+                })
+                .await;
             if let Some(derived_watermark) = derived_watermark {
                 ret.push(derived_watermark);
             } else {
@@ -149,16 +168,25 @@ impl SimpleExecutor for SimpleProjectExecutor {
         Ok(ret)
     }
 
-    fn schema(&self) -> &Schema {
-        &self.info.schema
-    }
-
-    fn pk_indices(&self) -> PkIndicesRef<'_> {
-        &self.info.pk_indices
-    }
-
-    fn identity(&self) -> &str {
-        &self.info.identity
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn execute(self, input: BoxedExecutor) {
+        #[for_await]
+        for msg in input.execute() {
+            let msg = msg?;
+            match msg {
+                Message::Watermark(w) => {
+                    let watermarks = self.handle_watermark(w).await?;
+                    for watermark in watermarks {
+                        yield Message::Watermark(watermark)
+                    }
+                }
+                Message::Chunk(chunk) => match self.map_filter_chunk(chunk).await? {
+                    Some(new_chunk) => yield Message::Chunk(new_chunk),
+                    None => continue,
+                },
+                m => yield m,
+            }
+        }
     }
 }
 
@@ -169,8 +197,8 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
-    use risingwave_expr::expr::{new_binary_expr, InputRefExpression, LiteralExpression};
-    use risingwave_pb::expr::expr_node::Type;
+    use risingwave_expr::expr::{build, Expression, InputRefExpression, LiteralExpression};
+    use risingwave_pb::expr::expr_node::PbType;
 
     use super::super::test_utils::MockSource;
     use super::super::*;
@@ -197,13 +225,13 @@ mod tests {
         };
         let source = MockSource::with_chunks(schema, PkIndices::new(), vec![chunk1, chunk2]);
 
-        let left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let right_expr = InputRefExpression::new(DataType::Int64, 1);
-        let test_expr = new_binary_expr(
-            Type::Add,
+        let test_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(left_expr),
-            Box::new(right_expr),
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                InputRefExpression::new(DataType::Int64, 1).boxed(),
+            ],
         )
         .unwrap();
 
@@ -214,6 +242,7 @@ mod tests {
             vec![test_expr],
             1,
             MultiMap::new(),
+            0.0,
         ));
         let mut project = project.execute();
 
@@ -250,23 +279,26 @@ mod tests {
         };
         let (mut tx, source) = MockSource::channel(schema, PkIndices::new());
 
-        let a_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let a_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let a_expr = new_binary_expr(
-            Type::Add,
+        let a_expr = build(
+            PbType::Add,
             DataType::Int64,
-            Box::new(a_left_expr),
-            Box::new(a_right_expr),
+            vec![
+                InputRefExpression::new(DataType::Int64, 0).boxed(),
+                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1))).boxed(),
+            ],
         )
         .unwrap();
 
-        let b_left_expr = InputRefExpression::new(DataType::Int64, 0);
-        let b_right_expr = LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(1)));
-        let b_expr = new_binary_expr(
-            Type::Subtract,
+        let b_expr = build(
+            PbType::Subtract,
             DataType::Int64,
-            Box::new(b_left_expr),
-            Box::new(b_right_expr),
+            vec![
+                Box::new(InputRefExpression::new(DataType::Int64, 0)),
+                Box::new(LiteralExpression::new(
+                    DataType::Int64,
+                    Some(ScalarImpl::Int64(1)),
+                )),
+            ],
         )
         .unwrap();
 
@@ -277,6 +309,7 @@ mod tests {
             vec![a_expr, b_expr],
             1,
             MultiMap::from_iter(vec![(0, 0), (0, 1)].into_iter()),
+            0.0,
         ));
         let mut project = project.execute();
 

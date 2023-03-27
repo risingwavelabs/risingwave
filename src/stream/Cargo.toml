@@ -52,6 +52,7 @@ risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
 risingwave_source = { path = "../source" }
 risingwave_storage = { path = "../storage" }
+serde_json = "1"
 smallvec = "1"
 static_assertions = "1"
 task_stats_alloc = { path = "../utils/task_stats_alloc" }
@@ -76,3 +77,4 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 risingwave_hummock_test = { path = "../storage/hummock_test", features = ["test"] }
+tracing-test = "0.2"

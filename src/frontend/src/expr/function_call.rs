@@ -111,10 +111,14 @@ impl FunctionCall {
 
     /// Create a cast expr over `child` to `target` type in `allows` context.
     pub fn new_cast(
-        child: ExprImpl,
+        mut child: ExprImpl,
         target: DataType,
         allows: CastContext,
     ) -> Result<ExprImpl, CastError> {
+        if let ExprImpl::Parameter(expr) = &mut child && !expr.has_infer() {
+            expr.cast_infer_type(target);
+            return Ok(child);
+        }
         if is_row_function(&child) {
             // Row function will have empty fields in Datatype::Struct at this point. Therefore,
             // we will need to take some special care to generate the cast types. For normal struct
@@ -219,18 +223,15 @@ impl FunctionCall {
         let expr_type = func_types.remove(0);
         match expr_type {
             ExprType::Some | ExprType::All => {
-                let ensure_return_boolean = |return_type: &DataType| {
-                    if &DataType::Boolean == return_type {
-                        Ok(())
-                    } else {
-                        Err(ErrorCode::BindError(
-                            "op ANY/ALL (array) requires operator to yield boolean".to_string(),
-                        ))
-                    }
-                };
-
                 let return_type = infer_some_all(func_types, &mut inputs)?;
-                ensure_return_boolean(&return_type)?;
+
+                if return_type != DataType::Boolean {
+                    return Err(ErrorCode::BindError(format!(
+                        "op ANY/ALL (array) requires operator to yield boolean, but got {:?}",
+                        return_type
+                    ))
+                    .into());
+                }
 
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }

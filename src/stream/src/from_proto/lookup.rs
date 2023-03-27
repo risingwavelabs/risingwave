@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{ColumnDesc, TableId, TableOption};
-use risingwave_common::util::sort_util::{OrderPair, OrderType};
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::LookupNode;
 use risingwave_storage::table::batch_table::storage_table::StorageTable;
@@ -42,7 +42,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .get_arrangement_table_info()?
             .arrange_key_orders
             .iter()
-            .map(OrderPair::from_protobuf)
+            .map(ColumnOrder::from_protobuf)
             .collect();
 
         let arrangement_col_descs = lookup
@@ -65,7 +65,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         let order_types = table_desc
             .pk
             .iter()
-            .map(|desc| OrderType::from_protobuf(&desc.get_order_type().unwrap().direction()))
+            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
             .collect_vec();
 
         let column_descs = table_desc
@@ -82,14 +82,14 @@ impl ExecutorBuilder for LookupExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         let distribution = match params.vnode_bitmap {
             Some(vnodes) => Distribution {
-                dist_key_indices,
+                dist_key_in_pk_indices,
                 vnodes: vnodes.into(),
             },
             None => Distribution::fallback(),
@@ -125,6 +125,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
+            ctx: params.actor_context,
             schema: params.schema,
             arrangement,
             stream,

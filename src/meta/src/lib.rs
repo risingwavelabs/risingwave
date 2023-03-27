@@ -46,6 +46,7 @@ mod model;
 mod rpc;
 pub mod storage;
 mod stream;
+pub(crate) mod telemetry;
 
 use std::time::Duration;
 
@@ -53,30 +54,29 @@ use clap::Parser;
 pub use error::{MetaError, MetaResult};
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_proc_macro::OverrideConfig;
-use risingwave_pb::meta::SystemParams;
 
 use crate::manager::MetaOpts;
 use crate::rpc::server::{rpc_serve, AddressInfo, MetaStoreBackend};
 
 #[derive(Debug, Clone, Parser)]
 pub struct MetaNodeOpts {
+    #[clap(long, env = "RW_VPC_ID")]
+    vpd_id: Option<String>,
+
+    #[clap(long, env = "RW_VPC_SECURITY_GROUP_ID")]
+    security_group_id: Option<String>,
+
     // TODO: rename to listen_address and separate out the port.
     #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:5690")]
     listen_addr: String,
-
-    /// Deprecated. But we keep it for backward compatibility.
-    #[clap(long, env = "RW_HOST")]
-    host: Option<String>,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// It will serve as a unique identifier in cluster
     /// membership and leader election. Must be specified for etcd backend.
-    /// TODO: After host is removed, we require that this parameter must be provided when using
-    /// etcd
     #[clap(long, env = "RW_ADVERTISE_ADDR")]
-    advertise_addr: Option<String>,
+    advertise_addr: String,
 
     #[clap(long, env = "RW_DASHBOARD_HOST")]
     dashboard_host: Option<String>,
@@ -106,11 +106,6 @@ pub struct MetaNodeOpts {
     #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
     prometheus_endpoint: Option<String>,
 
-    // TODO(zhidong): Make it required in v0.1.18
-    /// State store url.
-    #[clap(long, env = "RW_STATE_STORE")]
-    state_store: Option<String>,
-
     /// Endpoint of the connector node, there will be a sidecar connector node
     /// colocated with Meta node in the cloud environment
     #[clap(long, env = "RW_CONNECTOR_RPC_ENDPOINT")]
@@ -133,39 +128,48 @@ pub struct OverrideConfigOpts {
     #[override_opts(path = meta.backend)]
     backend: Option<MetaBackend>,
 
+    /// The interval of periodic barrier.
+    #[clap(long, env = "RW_BARRIER_INTERVAL_MS")]
+    #[override_opts(path = system.barrier_interval_ms)]
+    barrier_interval_ms: Option<u32>,
+
     /// Target size of the Sstable.
     #[clap(long, env = "RW_SSTABLE_SIZE_MB")]
-    #[override_opts(path = storage.sstable_size_mb)]
+    #[override_opts(path = system.sstable_size_mb)]
     sstable_size_mb: Option<u32>,
 
     /// Size of each block in bytes in SST.
     #[clap(long, env = "RW_BLOCK_SIZE_KB")]
-    #[override_opts(path = storage.block_size_kb)]
+    #[override_opts(path = system.block_size_kb)]
     block_size_kb: Option<u32>,
 
     /// False positive probability of bloom filter.
     #[clap(long, env = "RW_BLOOM_FALSE_POSITIVE")]
-    #[override_opts(path = storage.bloom_false_positive)]
+    #[override_opts(path = system.bloom_false_positive)]
     bloom_false_positive: Option<f64>,
+
+    /// State store url
+    #[clap(long, env = "RW_STATE_STORE")]
+    #[override_opts(path = system.state_store)]
+    state_store: Option<String>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, env = "RW_DATA_DIRECTORY")]
-    #[override_opts(path = storage.data_directory)]
+    #[override_opts(path = system.data_directory)]
     data_directory: Option<String>,
 
     /// Remote storage url for storing snapshots.
     #[clap(long, env = "RW_BACKUP_STORAGE_URL")]
-    #[override_opts(path = backup.storage_url)]
+    #[override_opts(path = system.backup_storage_url)]
     backup_storage_url: Option<String>,
 
     /// Remote directory for storing snapshots.
-    #[clap(long, env = "RW_STORAGE_DIRECTORY")]
-    #[override_opts(path = backup.storage_directory)]
+    #[clap(long, env = "RW_BACKUP_STORAGE_DIRECTORY")]
+    #[override_opts(path = system.backup_storage_directory)]
     backup_storage_directory: Option<String>,
 }
 
 use std::future::Future;
-use std::net::SocketAddr;
 use std::pin::Pin;
 
 use risingwave_common::config::{load_config, MetaBackend, RwConfig};
@@ -181,13 +185,9 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         let config = load_config(&opts.config_path, Some(opts.override_opts));
         info!("> config: {:?}", config);
         info!("> version: {} ({})", RW_VERSION, GIT_SHA);
-        let listen_addr: SocketAddr = opts.listen_addr.parse().unwrap();
-        let meta_addr = opts.host.unwrap_or_else(|| listen_addr.ip().to_string());
+        let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_host.map(|x| x.parse().unwrap());
-        let advertise_addr = opts
-            .advertise_addr
-            .unwrap_or_else(|| format!("{}:{}", meta_addr, listen_addr.port()));
         let backend = match config.meta.backend {
             MetaBackend::Etcd => MetaStoreBackend::Etcd {
                 endpoints: opts
@@ -212,7 +212,7 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
 
         info!("Meta server listening at {}", listen_addr);
         let add_info = AddressInfo {
-            advertise_addr,
+            advertise_addr: opts.advertise_addr,
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -237,41 +237,54 @@ pub fn start(opts: MetaNodeOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
                 prometheus_endpoint: opts.prometheus_endpoint,
+                vpc_id: opts.vpd_id,
+                security_group_id: opts.security_group_id,
                 connector_rpc_endpoint: opts.connector_rpc_endpoint,
                 periodic_space_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_space_reclaim_compaction_interval_sec,
+                telemetry_enabled: config.server.telemetry_enabled,
                 periodic_ttl_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_ttl_reclaim_compaction_interval_sec,
+                max_compactor_task_multiplier: config.meta.max_compactor_task_multiplier,
             },
-            SystemParams {
-                barrier_interval_ms: Some(config.streaming.barrier_interval_ms),
-                checkpoint_frequency: Some(config.streaming.checkpoint_frequency as u64),
-                sstable_size_mb: Some(config.storage.sstable_size_mb),
-                block_size_kb: Some(config.storage.block_size_kb),
-                bloom_false_positive: Some(config.storage.bloom_false_positive),
-                state_store: Some(opts.state_store.unwrap_or_default()),
-                data_directory: Some(config.storage.data_directory),
-                backup_storage_url: Some(config.backup.storage_url),
-                backup_storage_directory: Some(config.backup.storage_directory),
-            },
+            config.system.into_init_system_params(),
         )
         .await
         .unwrap();
 
-        let res = tokio::select! {
-            _ = tokio::signal::ctrl_c() => {
-                tracing::info!("receive ctrl+c");
-                shutdown_send.send(()).unwrap();
-                join_handle.await
+        match leader_lost_handle {
+            None => {
+                tokio::select! {
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("receive ctrl+c");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap()
+                    }
+                    res = &mut join_handle => res.unwrap(),
+                };
             }
-            res = &mut join_handle => res,
+            Some(mut handle) => {
+                tokio::select! {
+                    _ = &mut handle => {
+                        tracing::info!("receive leader lost signal");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap()
+                    }
+                    _ = tokio::signal::ctrl_c() => {
+                        tracing::info!("receive ctrl+c");
+                        shutdown_send.send(()).unwrap();
+                        join_handle.await.unwrap();
+                        handle.abort();
+                    }
+                    res = &mut join_handle => {
+                        res.unwrap();
+                        handle.abort();
+                    },
+                };
+            }
         };
-        res.unwrap();
-        if let Some(leader_lost_handle) = leader_lost_handle {
-            leader_lost_handle.abort();
-        }
     })
 }
 

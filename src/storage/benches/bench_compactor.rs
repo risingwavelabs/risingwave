@@ -75,7 +75,7 @@ const MAX_KEY_COUNT: usize = 128 * 1024;
 
 async fn build_table(
     sstable_store: SstableStoreRef,
-    sstable_id: u64,
+    sstable_object_id: u64,
     range: Range<u64>,
     epoch: u64,
 ) -> SstableInfo {
@@ -87,14 +87,14 @@ async fn build_table(
         compression_algorithm: CompressionAlgorithm::None,
     };
     let writer = sstable_store.create_sst_writer(
-        sstable_id,
+        sstable_object_id,
         SstableWriterOptions {
             capacity_hint: None,
             tracker: None,
             policy: CachePolicy::Fill(true),
         },
     );
-    let mut builder = SstableBuilder::for_test(sstable_id, writer, opt);
+    let mut builder = SstableBuilder::for_test(sstable_object_id, writer, opt);
     let value = b"1234567890123456789";
     let mut full_key = test_key_of(0, epoch);
     let table_key_len = full_key.user_key.table_key.len();
@@ -103,7 +103,11 @@ async fn build_table(
         let end = start + 8;
         full_key.user_key.table_key[table_key_len - 8..].copy_from_slice(&i.to_be_bytes());
         builder
-            .add(&full_key, HummockValue::put(&value[start..end]), true)
+            .add(
+                full_key.to_ref(),
+                HummockValue::put(&value[start..end]),
+                true,
+            )
             .await
             .unwrap();
     }
@@ -229,8 +233,18 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     c.bench_function("bench_merge_iterator", |b| {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
-                ConcatSstableIterator::new(level1.clone(), KeyRange::inf(), sstable_store.clone()),
-                ConcatSstableIterator::new(level2.clone(), KeyRange::inf(), sstable_store.clone()),
+                ConcatSstableIterator::new(
+                    vec![0],
+                    level1.clone(),
+                    KeyRange::inf(),
+                    sstable_store.clone(),
+                ),
+                ConcatSstableIterator::new(
+                    vec![0],
+                    level2.clone(),
+                    KeyRange::inf(),
+                    sstable_store.clone(),
+                ),
             ];
             let iter = UnorderedMergeIteratorInner::for_compactor(sub_iters);
             let sstable_store1 = sstable_store.clone();

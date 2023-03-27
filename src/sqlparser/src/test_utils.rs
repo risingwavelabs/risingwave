@@ -34,7 +34,7 @@ where
     F: Fn(&mut Parser) -> T,
 {
     let mut tokenizer = Tokenizer::new(sql);
-    let tokens = tokenizer.tokenize().unwrap();
+    let tokens = tokenizer.tokenize_with_location().unwrap();
     f(&mut Parser::new(tokens))
 }
 
@@ -138,6 +138,7 @@ pub fn table_alias(name: impl Into<String>) -> Option<TableAlias> {
 pub fn table(name: impl Into<String>) -> TableFactor {
     TableFactor::Table {
         name: ObjectName(vec![Ident::new_unchecked(name.into())]),
+        for_system_time_as_of_now: false,
         alias: None,
     }
 }

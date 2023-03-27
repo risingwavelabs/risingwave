@@ -19,7 +19,7 @@
 
 mod resolve_id;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ use risingwave_frontend::session::SessionImpl;
 use risingwave_frontend::test_utils::{create_proto_file, get_explain_output, LocalFrontend};
 use risingwave_frontend::{
     build_graph, explain_stream_graph, Binder, Explain, FrontendOpts, OptimizerContext,
-    OptimizerContextRef, PlanRef, Planner,
+    OptimizerContextRef, PlanRef, Planner, WithOptions,
 };
 use risingwave_sqlparser::ast::{ExplainOptions, ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -82,6 +82,10 @@ pub struct TestCase {
 
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
+
+    /// Create sink plan (assumes blackhole sink)
+    /// TODO: Other sinks
+    pub sink_plan: Option<String>,
 
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
@@ -152,6 +156,9 @@ pub struct TestCaseResult {
     /// Batch plan for local execution `.gen_batch_local_plan()`
     pub batch_local_plan: Option<String>,
 
+    /// Generate sink plan
+    pub sink_plan: Option<String>,
+
     /// Create MV plan `.gen_create_mv_plan()`
     pub stream_plan: Option<String>,
 
@@ -175,6 +182,9 @@ pub struct TestCaseResult {
 
     /// Error of `.gen_stream_plan()`
     pub stream_error: Option<String>,
+
+    /// Error of `.gen_sink_plan()`
+    pub sink_error: Option<String>,
 
     /// The result of an `EXPLAIN` statement.
     ///
@@ -209,6 +219,7 @@ impl TestCaseResult {
             batch_plan: self.batch_plan,
             batch_local_plan: self.batch_local_plan,
             stream_plan: self.stream_plan,
+            sink_plan: self.sink_plan,
             batch_plan_proto: self.batch_plan_proto,
             planner_error: self.planner_error,
             optimizer_error: self.optimizer_error,
@@ -635,7 +646,31 @@ impl TestCase {
                 // Only generate stream_dist_plan if it is specified in test case
                 if self.stream_dist_plan.is_some() {
                     let graph = build_graph(stream_plan);
-                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false).unwrap());
+                    ret.stream_dist_plan = Some(explain_stream_graph(&graph, false));
+                }
+            }
+        }
+
+        'sink: {
+            if self.sink_plan.is_some() {
+                let sink_name = "sink_test";
+                let mut options = HashMap::new();
+                options.insert("connector".to_string(), "blackhole".to_string());
+                options.insert("type".to_string(), "append-only".to_string());
+                let options = WithOptions::new(options);
+                match logical_plan.gen_sink_plan(
+                    sink_name.to_string(),
+                    format!("CREATE SINK {sink_name} AS {}", stmt),
+                    options,
+                ) {
+                    Ok(sink_plan) => {
+                        ret.sink_plan = Some(explain_plan(&sink_plan.into()));
+                        break 'sink;
+                    }
+                    Err(err) => {
+                        ret.sink_error = Some(err.to_string());
+                        break 'sink;
+                    }
                 }
             }
         }
@@ -696,7 +731,7 @@ fn check_result(expected: &TestCase, actual: &TestCaseResult) -> Result<()> {
         &expected.explain_output,
         &actual.explain_output,
     )?;
-
+    check_option_plan_eq("sink_plan", &expected.sink_plan, &actual.sink_plan)?;
     Ok(())
 }
 

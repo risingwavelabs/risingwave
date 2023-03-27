@@ -95,6 +95,15 @@ message ExprNode {
     REGEXP_MATCH = 232;
     POW = 233;
     EXP = 234;
+    CHR = 235;
+    STARTS_WITH = 236;
+    INITCAP = 237;
+    LPAD = 238;
+    RPAD = 239;
+    REVERSE = 240;
+    STRPOS = 241;
+    TO_ASCII = 242;
+    TO_HEX = 243;
 
     // Boolean comparison
     IS_TRUE = 301;
@@ -120,6 +129,7 @@ message ExprNode {
     ARRAY_PREPEND = 533;
     FORMAT_TYPE = 534;
     ARRAY_DISTINCT = 535;
+    ARRAY_LENGTH = 536;
 
     // Jsonb functions
 
@@ -129,6 +139,9 @@ message ExprNode {
     JSONB_ACCESS_STR = 601;
     JSONB_TYPEOF = 602;
     JSONB_ARRAY_LENGTH = 603;
+
+    // Functions that return a constant value
+    PI = 610;
 
     // Non-pure functions below (> 1000)
     // ------------------------
@@ -156,10 +169,14 @@ message TableFunction {
     UNNEST = 2;
     REGEXP_MATCHES = 3;
     RANGE = 4;
+    // User defined table function
+    UDTF = 100;
   }
   Type function_type = 1;
   repeated expr.ExprNode args = 2;
   data.DataType return_type = 3;
+  // optional. only used when the type is UDTF.
+  UserDefinedTableFunction udtf = 4;
 }
 
 // Reference to an upstream column, containing its index and data type.
@@ -235,6 +252,13 @@ message AggCall {
 message UserDefinedFunction {
   repeated ExprNode children = 1;
   string name = 2;
+  repeated data.DataType arg_types = 3;
+  string language = 4;
+  string link = 5;
+  string identifier = 6;
+}
+
+message UserDefinedTableFunction {
   repeated data.DataType arg_types = 3;
   string language = 4;
   string link = 5;

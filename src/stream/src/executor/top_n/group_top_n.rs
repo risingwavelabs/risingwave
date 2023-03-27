@@ -22,13 +22,13 @@ use risingwave_common::hash::HashKey;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::OrderPair;
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_storage::StateStore;
 
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{cache_may_stale, new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -37,16 +37,16 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
-    TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
+    TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input: Box<dyn Executor>,
         ctx: ActorContextRef,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -56,7 +56,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerGroupTopNExecutorNew::new(
+            inner: InnerGroupTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -70,7 +70,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
     }
 }
 
-pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES: bool> {
+pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// `LIMIT XXX`. None means no limit.
@@ -94,13 +94,13 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     cache_key_serde: CacheKeySerde,
 }
 
-impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<K, S, WITH_TIES> {
+impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
-        storage_key: Vec<OrderPair>,
+        storage_key: Vec<ColumnOrder>,
         offset_and_limit: (usize, usize),
-        order_by: Vec<OrderPair>,
+        order_by: Vec<ColumnOrder>,
         executor_id: u64,
         group_by: Vec<usize>,
         state_table: StateTable<S>,
@@ -123,7 +123,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew
             offset: offset_and_limit.0,
             limit: offset_and_limit.1,
             managed_state,
-            storage_key_indices: storage_key.into_iter().map(|op| op.column_idx).collect(),
+            storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             group_by,
             caches: GroupTopNCache::new(lru_manager),
             cache_key_serde,
@@ -158,7 +158,7 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
 
 #[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
-    for InnerGroupTopNExecutorNew<K, S, WITH_TIES>
+    for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
@@ -178,7 +178,8 @@ where
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                let mut topn_cache = TopNCache::new(self.offset, self.limit);
+                let mut topn_cache =
+                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -221,12 +222,12 @@ where
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self
+        let (_previous_vnode_bitmap, cache_may_stale) = self
             .managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+            .update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.caches.clear();
         }
     }
@@ -280,22 +281,22 @@ mod tests {
         }
     }
 
-    fn storage_key() -> Vec<OrderPair> {
+    fn storage_key() -> Vec<ColumnOrder> {
         vec![
-            OrderPair::new(1, OrderType::Ascending),
-            OrderPair::new(2, OrderType::Ascending),
-            OrderPair::new(0, OrderType::Ascending),
+            ColumnOrder::new(1, OrderType::ascending()),
+            ColumnOrder::new(2, OrderType::ascending()),
+            ColumnOrder::new(0, OrderType::ascending()),
         ]
     }
 
     /// group by 1, order by 2
-    fn order_by_1() -> Vec<OrderPair> {
-        vec![OrderPair::new(2, OrderType::Ascending)]
+    fn order_by_1() -> Vec<ColumnOrder> {
+        vec![ColumnOrder::new(2, OrderType::ascending())]
     }
 
     /// group by 1,2, order by 0
-    fn order_by_2() -> Vec<OrderPair> {
-        vec![OrderPair::new(0, OrderType::Ascending)]
+    fn order_by_2() -> Vec<ColumnOrder> {
+        vec![ColumnOrder::new(0, OrderType::ascending())]
     }
 
     fn pk_indices() -> PkIndices {
@@ -360,9 +361,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -456,9 +457,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )
@@ -546,9 +547,9 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64, DataType::Int64],
             &[
-                OrderType::Ascending,
-                OrderType::Ascending,
-                OrderType::Ascending,
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
             ],
             &pk_indices(),
         )

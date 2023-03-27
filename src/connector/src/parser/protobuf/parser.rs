@@ -154,6 +154,7 @@ impl ProtobufParserConfig {
                 column_type: Some(field_type.to_protobuf()),
                 field_descs,
                 type_name: m.full_name().to_string(),
+                generated_column: None,
             })
         } else {
             *index += 1;
@@ -188,13 +189,14 @@ impl ProtobufParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &self,
-        mut payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        if self.confluent_wire_type {
-            let raw_payload = resolve_pb_header(payload)?;
-            payload = raw_payload;
-        }
+        let payload = if self.confluent_wire_type {
+            resolve_pb_header(&payload)?
+        } else {
+            &payload
+        };
 
         let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
             .map_err(|e| ProtocolError(format!("parse message failed: {}", e)))?;
@@ -341,7 +343,7 @@ mod test {
 
     use std::path::PathBuf;
 
-    use risingwave_pb::data::data_type::TypeName as ProstTypeName;
+    use risingwave_pb::data::data_type::PbTypeName;
 
     use super::*;
 
@@ -413,35 +415,29 @@ mod test {
         assert_eq!(columns[2].name, "timestamp".to_string());
 
         let data_type = columns[3].column_type.as_ref().unwrap();
-        assert_eq!(data_type.get_type_name().unwrap(), ProstTypeName::List);
+        assert_eq!(data_type.get_type_name().unwrap(), PbTypeName::List);
         let inner_field_type = data_type.field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::Struct
+            PbTypeName::Struct
         );
         let struct_inner = inner_field_type[0].field_type.clone();
-        assert_eq!(
-            struct_inner[0].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
-        assert_eq!(
-            struct_inner[1].get_type_name().unwrap(),
-            ProstTypeName::Int32
-        );
+        assert_eq!(struct_inner[0].get_type_name().unwrap(), PbTypeName::Int32);
+        assert_eq!(struct_inner[1].get_type_name().unwrap(), PbTypeName::Int32);
         assert_eq!(
             struct_inner[2].get_type_name().unwrap(),
-            ProstTypeName::Varchar
+            PbTypeName::Varchar
         );
 
         assert_eq!(columns[4].name, "contacts".to_string());
         let inner_field_type = columns[4].column_type.as_ref().unwrap().field_type.clone();
         assert_eq!(
             inner_field_type[0].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         assert_eq!(
             inner_field_type[1].get_type_name().unwrap(),
-            ProstTypeName::List
+            PbTypeName::List
         );
         Ok(())
     }

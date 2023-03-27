@@ -152,7 +152,8 @@ mod tests {
             compact_task.task_id,
             compact_task.target_level as usize,
             &[SstableInfo {
-                id: 1,
+                object_id: 1,
+                sst_id: 1,
                 ..Default::default()
             }],
         );

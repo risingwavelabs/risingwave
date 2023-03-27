@@ -116,15 +116,7 @@ where
         };
 
         notification_vec.retain_mut(|notification| match notification.info.as_ref().unwrap() {
-            Info::Database(_)
-            | Info::Schema(_)
-            | Info::Table(_)
-            | Info::Source(_)
-            | Info::Sink(_)
-            | Info::Index(_)
-            | Info::View(_)
-            | Info::Function(_)
-            | Info::User(_) => {
+            Info::Database(_) | Info::Schema(_) | Info::RelationGroup(_) | Info::User(_) => {
                 notification.version > info.version.as_ref().unwrap().catalog_version
             }
             Info::ParallelUnitMapping(_) => {
@@ -139,7 +131,7 @@ where
             Info::HummockSnapshot(_) => true,
             Info::MetaBackupManifestId(_) => true,
             Info::SystemParams(_) => true,
-            Info::Snapshot(_) => unreachable!(),
+            Info::Snapshot(_) | Info::HummockWriteLimits(_) => unreachable!(),
         });
 
         self.observer_states

@@ -16,14 +16,12 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
 
 use super::agg_common::AggExecutorArgs;
 use super::aggregation::{
-    agg_call_filter_res, iter_table_storage, AggChangesInfo, AggStateStorage, AlwaysOutput,
-    DistinctDeduplicater,
+    agg_call_filter_res, iter_table_storage, AggStateStorage, AlwaysOutput, DistinctDeduplicater,
 };
 use super::*;
 use crate::common::table::state_table::StateTable;
@@ -168,20 +166,19 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
         let (ops, columns, visibility) = chunk.into_inner();
 
         // Calculate the row visibility for every agg call.
-        let visibilities: Vec<_> = this
-            .agg_calls
-            .iter()
-            .map(|agg_call| {
-                agg_call_filter_res(
-                    &this.actor_ctx,
-                    &this.info.identity,
-                    agg_call,
-                    &columns,
-                    visibility.as_ref(),
-                    capacity,
-                )
-            })
-            .try_collect()?;
+        let mut visibilities = Vec::with_capacity(this.agg_calls.len());
+        for agg_call in &this.agg_calls {
+            let result = agg_call_filter_res(
+                &this.actor_ctx,
+                &this.info.identity,
+                agg_call,
+                &columns,
+                visibility.as_ref(),
+                capacity,
+            )
+            .await?;
+            visibilities.push(result);
+        }
 
         // Materialize input chunk if needed.
         this.storages
@@ -252,28 +249,17 @@ impl<S: StateStore> GlobalSimpleAggExecutor<S> {
             let mut new_ops = Vec::with_capacity(2);
             // Retrieve modified states and put the changes into the builders.
             let curr_outputs = vars.agg_group.get_outputs(&this.storages).await?;
-            let AggChangesInfo {
-                result_row,
-                prev_outputs,
-                n_appended_ops,
-            } = vars
-                .agg_group
-                .build_changes(curr_outputs, &mut builders, &mut new_ops);
-
-            if n_appended_ops == 0 {
+            if let Some(change) = vars.agg_group.build_change(curr_outputs) {
+                vars.agg_group
+                    .apply_change_to_builders(&change, &mut builders, &mut new_ops);
+                vars.agg_group
+                    .apply_change_to_result_table(&change, &mut this.result_table);
+                this.result_table.commit(epoch).await?;
+            } else {
                 // Agg result is not changed.
                 this.result_table.commit_no_data_expected(epoch);
                 return Ok(None);
             }
-
-            // Update the result table with latest agg outputs.
-            if let Some(prev_outputs) = prev_outputs {
-                let old_row = vars.agg_group.group_key().chain(prev_outputs);
-                this.result_table.update(old_row, result_row);
-            } else {
-                this.result_table.insert(result_row);
-            }
-            this.result_table.commit(epoch).await?;
 
             let columns = builders
                 .into_iter()
@@ -409,7 +395,7 @@ mod tests {
                 kind: AggKind::Count, // as row count, index: 0
                 args: AggArgs::None,
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -418,7 +404,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -427,7 +413,7 @@ mod tests {
                 kind: AggKind::Sum,
                 args: AggArgs::Unary(DataType::Int64, 1),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,
@@ -436,7 +422,7 @@ mod tests {
                 kind: AggKind::Min,
                 args: AggArgs::Unary(DataType::Int64, 0),
                 return_type: DataType::Int64,
-                order_pairs: vec![],
+                column_orders: vec![],
                 append_only,
                 filter: None,
                 distinct: false,

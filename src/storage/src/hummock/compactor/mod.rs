@@ -23,6 +23,7 @@ pub(super) mod task_progress;
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
+use std::ops::Div;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -37,6 +38,7 @@ use futures::future::try_join_all;
 use futures::{stream, StreamExt};
 pub use iterator::ConcatSstableIterator;
 use itertools::Itertools;
+use risingwave_common::util::resource_util;
 use risingwave_hummock_sdk::compact::compact_task_to_string;
 use risingwave_hummock_sdk::filter_key_extractor::FilterKeyExtractorImpl;
 use risingwave_hummock_sdk::key::FullKey;
@@ -44,9 +46,12 @@ use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, Table
 use risingwave_hummock_sdk::LocalSstableInfo;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::subscribe_compact_tasks_response::Task;
-use risingwave_pb::hummock::{CompactTask, CompactTaskProgress, SubscribeCompactTasksResponse};
+use risingwave_pb::hummock::{
+    CompactTask, CompactTaskProgress, CompactorWorkload, SubscribeCompactTasksResponse,
+};
 use risingwave_rpc_client::HummockMetaClient;
 pub use shared_buffer_compact::compact;
+use sysinfo::{CpuRefreshKind, ProcessExt, ProcessRefreshKind, RefreshKind, System, SystemExt};
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 
@@ -55,7 +60,7 @@ use self::task_progress::TaskProgress;
 use super::multi_builder::CapacitySplitTableBuilder;
 use super::{HummockResult, SstableBuilderOptions, XorFilterBuilder};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, estimate_memory_use_for_compaction, generate_splits,
+    build_multi_compaction_filter, estimate_state_for_compaction, generate_splits,
 };
 use crate::hummock::compactor::compactor_runner::CompactorRunner;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -90,18 +95,22 @@ impl Compactor {
         let context = compactor_context.clone();
         // Set a watermark SST id to prevent full GC from accidentally deleting SSTs for in-progress
         // write op. The watermark is invalidated when this method exits.
-        let tracker_id = match context.sstable_id_manager.add_watermark_sst_id(None).await {
+        let tracker_id = match context
+            .sstable_object_id_manager
+            .add_watermark_object_id(None)
+            .await
+        {
             Ok(tracker_id) => tracker_id,
             Err(err) => {
-                tracing::warn!("Failed to track pending SST id. {:#?}", err);
-                return TaskStatus::TrackSstIdFailed;
+                tracing::warn!("Failed to track pending SST object id. {:#?}", err);
+                return TaskStatus::TrackSstObjectIdFailed;
             }
         };
-        let sstable_id_manager_clone = context.sstable_id_manager.clone();
+        let sstable_object_id_manager_clone = context.sstable_object_id_manager.clone();
         let _guard = scopeguard::guard(
-            (tracker_id, sstable_id_manager_clone),
-            |(tracker_id, sstable_id_manager)| {
-                sstable_id_manager.remove_watermark_sst_id(tracker_id);
+            (tracker_id, sstable_object_id_manager_clone),
+            |(tracker_id, sstable_object_id_manager)| {
+                sstable_object_id_manager.remove_watermark_object_id(tracker_id);
             },
         );
         let group_label = compact_task.compaction_group_id.to_string();
@@ -153,11 +162,12 @@ impl Compactor {
             .with_label_values(&[compact_task.input_ssts[0].level_idx.to_string().as_str()])
             .start_timer();
 
-        let need_quota = estimate_memory_use_for_compaction(&compact_task);
+        let (need_quota, file_counts) = estimate_state_for_compaction(&compact_task);
         tracing::info!(
-            "Ready to handle compaction task: {} need memory: {} target_level {} compression_algorithm {:?}",
+            "Ready to handle compaction task: {} need memory: {} input_file_counts {} target_level {} compression_algorithm {:?}",
             compact_task.task_id,
             need_quota,
+            file_counts,
             compact_task.target_level,
             compact_task.compression_algorithm,
         );
@@ -264,7 +274,7 @@ impl Compactor {
         context.compactor_metrics.compact_task_pending_num.dec();
         for level in &compact_task.input_ssts {
             for table in &level.table_infos {
-                context.sstable_store.delete_cache(table.id);
+                context.sstable_store.delete_cache(table.get_object_id());
             }
         }
         task_status
@@ -333,13 +343,21 @@ impl Compactor {
     ) -> (JoinHandle<()>, Sender<()>) {
         type CompactionShutdownMap = Arc<Mutex<HashMap<u64, Sender<()>>>>;
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
-        let stream_retry_interval = Duration::from_secs(60);
+        let stream_retry_interval = Duration::from_secs(30);
         let task_progress = compactor_context.task_progress_manager.clone();
         let task_progress_update_interval = Duration::from_millis(1000);
+        let cpu_core_num = resource_util::cpu::total_cpu_available() as u32;
+
+        let mut system =
+            System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
+        let pid = sysinfo::get_current_pid().unwrap();
+
         let join_handle = tokio::spawn(async move {
             let shutdown_map = CompactionShutdownMap::default();
             let mut min_interval = tokio::time::interval(stream_retry_interval);
             let mut task_progress_interval = tokio::time::interval(task_progress_update_interval);
+            let mut workload_collect_interval = tokio::time::interval(Duration::from_secs(60));
+
             // This outer loop is to recreate stream.
             'start_stream: loop {
                 tokio::select! {
@@ -354,7 +372,7 @@ impl Compactor {
 
                 let config = compactor_context.lock_config().await;
                 let mut stream = match hummock_meta_client
-                    .subscribe_compact_tasks(config.max_concurrent_task_number)
+                    .subscribe_compact_tasks(config.max_concurrent_task_number, cpu_core_num)
                     .await
                 {
                     Ok(stream) => {
@@ -372,6 +390,8 @@ impl Compactor {
                 drop(config);
 
                 let executor = compactor_context.compaction_executor.clone();
+                let mut last_workload = CompactorWorkload::default();
+
                 // This inner loop is to consume stream or report task progress.
                 'consume_stream: loop {
                     let message = tokio::select! {
@@ -384,12 +404,34 @@ impl Compactor {
                                     num_ssts_uploaded: progress.num_ssts_uploaded.load(Ordering::Relaxed),
                                 });
                             }
-                            if let Err(e) = hummock_meta_client.report_compaction_task_progress(progress_list).await {
+
+                            if let Err(e) = hummock_meta_client.compactor_heartbeat(progress_list, last_workload.clone()).await {
                                 // ignore any errors while trying to report task progress
                                 tracing::warn!("Failed to report task progress. {e:?}");
                             }
                             continue;
                         }
+
+                        _ = workload_collect_interval.tick() => {
+                            let refresh_result = system.refresh_process_specifics(pid, ProcessRefreshKind::new().with_cpu());
+                            debug_assert!(refresh_result);
+                            let cpu = if let Some(process) = system.process(pid) {
+                                process.cpu_usage().div(cpu_core_num as f32) as u32
+                            } else {
+                                tracing::warn!("fail to get process pid {:?}", pid);
+                                0
+                            };
+
+                            tracing::debug!("compactor cpu usage {cpu}");
+                            let workload = CompactorWorkload {
+                                cpu,
+                            };
+
+                            last_workload = workload.clone();
+
+                            continue;
+                        }
+
                         message = stream.next() => {
                             message
                         },
@@ -408,15 +450,13 @@ impl Compactor {
                             let shutdown = shutdown_map.clone();
                             let context = compactor_context.clone();
                             let meta_client = hummock_meta_client.clone();
+
                             executor.spawn(async move {
                                 match task {
                                     Task::CompactTask(compact_task) => {
                                         let (tx, rx) = tokio::sync::oneshot::channel();
                                         let task_id = compact_task.task_id;
-                                        shutdown
-                                            .lock()
-                                            .unwrap()
-                                            .insert(task_id, tx);
+                                        shutdown.lock().unwrap().insert(task_id, tx);
                                         Compactor::compact(context, compact_task, rx).await;
                                         shutdown.lock().unwrap().remove(&task_id);
                                     }
@@ -454,15 +494,15 @@ impl Compactor {
                                                     "Cancellation of compaction task failed. task_id: {}",
                                                     cancel_compact_task.task_id
                                                 );
-                                            }
-                                        } else {
-                                            tracing::warn!(
+                                        }
+                                    } else {
+                                        tracing::warn!(
                                                 "Attempting to cancel non-existent compaction task. task_id: {}",
                                                 cancel_compact_task.task_id
                                             );
-                                        }
                                     }
                                 }
+                            }
                             });
                         }
                         Some(Err(e)) => {
@@ -592,7 +632,7 @@ impl Compactor {
 
             // Don't allow two SSTs to share same user key
             sst_builder
-                .add_full_key(&iter_key, value, is_new_user_key)
+                .add_full_key(iter_key, value, is_new_user_key)
                 .await?;
 
             iter.next().await?;
@@ -732,7 +772,7 @@ impl Compactor {
         task_progress: Option<Arc<TaskProgress>>,
     ) -> HummockResult<(Vec<SplitTableOutput>, CompactionStatistics)> {
         let builder_factory = RemoteBuilderFactory::<F, XorFilterBuilder> {
-            sstable_id_manager: self.context.sstable_id_manager.clone(),
+            sstable_object_id_manager: self.context.sstable_object_id_manager.clone(),
             limiter: self.context.read_memory_limiter.clone(),
             options: self.options.clone(),
             policy: self.task_config.cache_policy,

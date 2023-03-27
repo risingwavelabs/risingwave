@@ -27,23 +27,23 @@ use lru::LruCache;
 use risingwave_common::catalog::{CatalogVersion, FunctionId, IndexId, TableId};
 use risingwave_common::config::MAX_CONNECTION_WINDOW_SIZE;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_common::telemetry::report::TelemetryInfoFetcher;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_hummock_sdk::compact::CompactorRuntimeConfig;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockEpoch, HummockSstableId, HummockVersionId, LocalSstableInfo,
-    SstIdRange,
+    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
+    SstObjectIdRange,
 };
 use risingwave_pb::backup_service::backup_service_client::BackupServiceClient;
 use risingwave_pb::backup_service::*;
 use risingwave_pb::catalog::{
-    Database as ProstDatabase, Function as ProstFunction, Index as ProstIndex,
-    Schema as ProstSchema, Sink as ProstSink, Source as ProstSource, Table as ProstTable,
-    View as ProstView,
+    Connection, PbDatabase, PbFunction, PbIndex, PbSchema, PbSink, PbSource, PbTable, PbView,
 };
 use risingwave_pb::common::{HostAddress, WorkerType};
+use risingwave_pb::ddl_service::alter_relation_name_request::Relation;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::drop_table_request::SourceId;
 use risingwave_pb::ddl_service::*;
@@ -56,10 +56,11 @@ use risingwave_pb::meta::heartbeat_service_client::HeartbeatServiceClient;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
 use risingwave_pb::meta::notification_service_client::NotificationServiceClient;
-use risingwave_pb::meta::reschedule_request::Reschedule as ProstReschedule;
+use risingwave_pb::meta::reschedule_request::PbReschedule;
 use risingwave_pb::meta::scale_service_client::ScaleServiceClient;
 use risingwave_pb::meta::stream_manager_service_client::StreamManagerServiceClient;
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
+use risingwave_pb::meta::telemetry_info_service_client::TelemetryInfoServiceClient;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_pb::user::update_user_request::UpdateField;
@@ -121,6 +122,26 @@ impl MetaClient {
             self.inner.subscribe(request).await
         })
         .await
+    }
+
+    pub async fn create_connection(&self, req: create_connection_request::Payload) -> Result<u32> {
+        let request = CreateConnectionRequest { payload: Some(req) };
+        let resp = self.inner.create_connection(request).await?;
+        Ok(resp.connection_id)
+    }
+
+    pub async fn list_connections(&self, _name: Option<&str>) -> Result<Vec<Connection>> {
+        let request = ListConnectionsRequest {};
+        let resp = self.inner.list_connections(request).await?;
+        Ok(resp.connections)
+    }
+
+    pub async fn drop_connection(&self, connection_name: &str) -> Result<()> {
+        let request = DropConnectionRequest {
+            connection_name: connection_name.to_string(),
+        };
+        let _ = self.inner.drop_connection(request).await?;
+        Ok(())
     }
 
     pub(crate) fn parse_meta_addr(meta_addr: &str) -> Result<MetaAddressStrategy> {
@@ -241,14 +262,14 @@ impl MetaClient {
         Ok(())
     }
 
-    pub async fn create_database(&self, db: ProstDatabase) -> Result<(DatabaseId, CatalogVersion)> {
+    pub async fn create_database(&self, db: PbDatabase) -> Result<(DatabaseId, CatalogVersion)> {
         let request = CreateDatabaseRequest { db: Some(db) };
         let resp = self.inner.create_database(request).await?;
         // TODO: handle error in `resp.status` here
         Ok((resp.database_id, resp.version))
     }
 
-    pub async fn create_schema(&self, schema: ProstSchema) -> Result<(SchemaId, CatalogVersion)> {
+    pub async fn create_schema(&self, schema: PbSchema) -> Result<(SchemaId, CatalogVersion)> {
         let request = CreateSchemaRequest {
             schema: Some(schema),
         };
@@ -259,7 +280,7 @@ impl MetaClient {
 
     pub async fn create_materialized_view(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateMaterializedViewRequest {
@@ -280,7 +301,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_source(&self, source: ProstSource) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_source(&self, source: PbSource) -> Result<(u32, CatalogVersion)> {
         let request = CreateSourceRequest {
             source: Some(source),
         };
@@ -291,7 +312,7 @@ impl MetaClient {
 
     pub async fn create_sink(
         &self,
-        sink: ProstSink,
+        sink: PbSink,
         graph: StreamFragmentGraph,
     ) -> Result<(u32, CatalogVersion)> {
         let request = CreateSinkRequest {
@@ -305,7 +326,7 @@ impl MetaClient {
 
     pub async fn create_function(
         &self,
-        function: ProstFunction,
+        function: PbFunction,
     ) -> Result<(FunctionId, CatalogVersion)> {
         let request = CreateFunctionRequest {
             function: Some(function),
@@ -316,8 +337,8 @@ impl MetaClient {
 
     pub async fn create_table(
         &self,
-        source: Option<ProstSource>,
-        table: ProstTable,
+        source: Option<PbSource>,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateTableRequest {
@@ -330,9 +351,22 @@ impl MetaClient {
         Ok((resp.table_id.into(), resp.version))
     }
 
+    pub async fn alter_relation_name(
+        &self,
+        relation: Relation,
+        name: &str,
+    ) -> Result<CatalogVersion> {
+        let request = AlterRelationNameRequest {
+            relation: Some(relation),
+            new_name: name.to_string(),
+        };
+        let resp = self.inner.alter_relation_name(request).await?;
+        Ok(resp.version)
+    }
+
     pub async fn replace_table(
         &self,
-        table: ProstTable,
+        table: PbTable,
         graph: StreamFragmentGraph,
         table_col_index_mapping: ColIndexMapping,
     ) -> Result<CatalogVersion> {
@@ -346,7 +380,7 @@ impl MetaClient {
         Ok(resp.version)
     }
 
-    pub async fn create_view(&self, view: ProstView) -> Result<(u32, CatalogVersion)> {
+    pub async fn create_view(&self, view: PbView) -> Result<(u32, CatalogVersion)> {
         let request = CreateViewRequest { view: Some(view) };
         let resp = self.inner.create_view(request).await?;
         // TODO: handle error in `resp.status` here
@@ -355,8 +389,8 @@ impl MetaClient {
 
     pub async fn create_index(
         &self,
-        index: ProstIndex,
-        table: ProstTable,
+        index: PbIndex,
+        table: PbTable,
         graph: StreamFragmentGraph,
     ) -> Result<(TableId, CatalogVersion)> {
         let request = CreateIndexRequest {
@@ -568,7 +602,7 @@ impl MetaClient {
         (join_handle, shutdown_tx)
     }
 
-    pub async fn risectl_list_state_tables(&self) -> Result<Vec<ProstTable>> {
+    pub async fn risectl_list_state_tables(&self) -> Result<Vec<PbTable>> {
         let request = RisectlListStateTablesRequest {};
         let resp = self.inner.risectl_list_state_tables(request).await?;
         Ok(resp.tables)
@@ -615,7 +649,7 @@ impl MetaClient {
         Ok(resp)
     }
 
-    pub async fn reschedule(&self, reschedules: HashMap<u32, ProstReschedule>) -> Result<bool> {
+    pub async fn reschedule(&self, reschedules: HashMap<u32, PbReschedule>) -> Result<bool> {
         let request = RescheduleRequest { reschedules };
         let resp = self.inner.reschedule(request).await?;
         Ok(resp.success)
@@ -641,7 +675,7 @@ impl MetaClient {
 
     pub async fn init_metadata_for_replay(
         &self,
-        tables: Vec<ProstTable>,
+        tables: Vec<PbTable>,
         compaction_groups: Vec<CompactionGroupInfo>,
     ) -> Result<()> {
         let req = InitMetadataForReplayRequest {
@@ -781,6 +815,12 @@ impl MetaClient {
         Ok(resp.manifest.expect("should exist"))
     }
 
+    pub async fn get_telemetry_info(&self) -> Result<TelemetryInfoResponse> {
+        let req = GetTelemetryInfoRequest {};
+        let resp = self.inner.get_telemetry_info(req).await?;
+        Ok(resp)
+    }
+
     pub async fn get_system_params(&self) -> Result<SystemParamsReader> {
         let req = GetSystemParamsRequest {};
         let resp = self.inner.get_system_params(req).await?;
@@ -869,12 +909,12 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstIdRange> {
+    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
         let resp = self
             .inner
             .get_new_sst_ids(GetNewSstIdsRequest { number })
             .await?;
-        Ok(SstIdRange::new(resp.start_id, resp.end_id))
+        Ok(SstObjectIdRange::new(resp.start_id, resp.end_id))
     }
 
     async fn report_compaction_task(
@@ -906,24 +946,28 @@ impl HummockMetaClient for MetaClient {
     async fn subscribe_compact_tasks(
         &self,
         max_concurrent_task_number: u64,
+        cpu_core_num: u32,
     ) -> Result<BoxStream<'static, CompactTaskItem>> {
         let req = SubscribeCompactTasksRequest {
             context_id: self.worker_id(),
             max_concurrent_task_number,
+            cpu_core_num,
         };
         let stream = self.inner.subscribe_compact_tasks(req).await?;
         Ok(Box::pin(stream))
     }
 
-    async fn report_compaction_task_progress(
+    async fn compactor_heartbeat(
         &self,
         progress: Vec<CompactTaskProgress>,
+        workload: CompactorWorkload,
     ) -> Result<()> {
-        let req = ReportCompactionTaskProgressRequest {
+        let req = CompactorHeartbeatRequest {
             context_id: self.worker_id(),
             progress,
+            workload: Some(workload),
         };
-        self.inner.report_compaction_task_progress(req).await?;
+        self.inner.compactor_heartbeat(req).await?;
         Ok(())
     }
 
@@ -935,8 +979,8 @@ impl HummockMetaClient for MetaClient {
         Ok(())
     }
 
-    async fn report_full_scan_task(&self, sst_ids: Vec<HummockSstableId>) -> Result<()> {
-        let req = ReportFullScanTaskRequest { sst_ids };
+    async fn report_full_scan_task(&self, object_ids: Vec<HummockSstableObjectId>) -> Result<()> {
+        let req = ReportFullScanTaskRequest { object_ids };
         self.inner.report_full_scan_task(req).await?;
         Ok(())
     }
@@ -971,6 +1015,17 @@ impl HummockMetaClient for MetaClient {
     }
 }
 
+#[async_trait]
+impl TelemetryInfoFetcher for MetaClient {
+    async fn fetch_telemetry_info(&self) -> anyhow::Result<String> {
+        let resp = self.get_telemetry_info().await?;
+        let tracking_id = resp
+            .get_tracking_id()
+            .map_err(|e| anyhow::format_err!("failed to get tracking_id {:?}", e))?;
+        Ok(tracking_id.to_string())
+    }
+}
+
 #[derive(Debug, Clone)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
@@ -983,6 +1038,7 @@ struct GrpcMetaClientCore {
     user_client: UserServiceClient<Channel>,
     scale_client: ScaleServiceClient<Channel>,
     backup_client: BackupServiceClient<Channel>,
+    telemetry_client: TelemetryInfoServiceClient<Channel>,
     system_params_client: SystemParamsServiceClient<Channel>,
 }
 
@@ -998,7 +1054,9 @@ impl GrpcMetaClientCore {
         let user_client = UserServiceClient::new(channel.clone());
         let scale_client = ScaleServiceClient::new(channel.clone());
         let backup_client = BackupServiceClient::new(channel.clone());
+        let telemetry_client = TelemetryInfoServiceClient::new(channel.clone());
         let system_params_client = SystemParamsServiceClient::new(channel);
+
         GrpcMetaClientCore {
             cluster_client,
             meta_member_client,
@@ -1010,6 +1068,7 @@ impl GrpcMetaClientCore {
             user_client,
             scale_client,
             backup_client,
+            telemetry_client,
             system_params_client,
         }
     }
@@ -1303,7 +1362,6 @@ impl GrpcMetaClient {
             )))
         })
         .await?;
-
         Ok(channel)
     }
 
@@ -1338,6 +1396,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, cancel_creating_jobs, CancelCreatingJobsRequest, CancelCreatingJobsResponse }
             ,{ stream_client, list_table_fragments, ListTableFragmentsRequest, ListTableFragmentsResponse }
             ,{ ddl_client, create_table, CreateTableRequest, CreateTableResponse }
+             ,{ ddl_client, alter_relation_name, AlterRelationNameRequest, AlterRelationNameResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
             ,{ ddl_client, create_source, CreateSourceRequest, CreateSourceResponse }
@@ -1358,6 +1417,9 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, replace_table_plan, ReplaceTablePlanRequest, ReplaceTablePlanResponse }
             ,{ ddl_client, risectl_list_state_tables, RisectlListStateTablesRequest, RisectlListStateTablesResponse }
             ,{ ddl_client, get_ddl_progress, GetDdlProgressRequest, GetDdlProgressResponse }
+            ,{ ddl_client, create_connection, CreateConnectionRequest, CreateConnectionResponse }
+            ,{ ddl_client, list_connections, ListConnectionsRequest, ListConnectionsResponse }
+            ,{ ddl_client, drop_connection, DropConnectionRequest, DropConnectionResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }
@@ -1373,7 +1435,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, report_compaction_tasks, ReportCompactionTasksRequest, ReportCompactionTasksResponse }
             ,{ hummock_client, get_new_sst_ids, GetNewSstIdsRequest, GetNewSstIdsResponse }
             ,{ hummock_client, subscribe_compact_tasks, SubscribeCompactTasksRequest, Streaming<SubscribeCompactTasksResponse> }
-            ,{ hummock_client, report_compaction_task_progress, ReportCompactionTaskProgressRequest, ReportCompactionTaskProgressResponse }
+            ,{ hummock_client, compactor_heartbeat, CompactorHeartbeatRequest, CompactorHeartbeatResponse }
             ,{ hummock_client, report_vacuum_task, ReportVacuumTaskRequest, ReportVacuumTaskResponse }
             ,{ hummock_client, trigger_manual_compaction, TriggerManualCompactionRequest, TriggerManualCompactionResponse }
             ,{ hummock_client, report_full_scan_task, ReportFullScanTaskRequest, ReportFullScanTaskResponse }
@@ -1399,6 +1461,7 @@ macro_rules! for_all_meta_rpc {
             ,{ backup_client, get_backup_job_status, GetBackupJobStatusRequest, GetBackupJobStatusResponse }
             ,{ backup_client, delete_meta_snapshot, DeleteMetaSnapshotRequest, DeleteMetaSnapshotResponse}
             ,{ backup_client, get_meta_snapshot_manifest, GetMetaSnapshotManifestRequest, GetMetaSnapshotManifestResponse}
+            ,{ telemetry_client, get_telemetry_info, GetTelemetryInfoRequest, TelemetryInfoResponse}
             ,{ system_params_client, get_system_params, GetSystemParamsRequest, GetSystemParamsResponse }
             ,{ system_params_client, set_system_param, SetSystemParamRequest, SetSystemParamResponse }
         }

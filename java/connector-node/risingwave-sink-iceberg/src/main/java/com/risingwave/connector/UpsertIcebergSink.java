@@ -1,3 +1,17 @@
+// Copyright 2023 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package com.risingwave.connector;
 
 import static io.grpc.Status.INTERNAL;
@@ -61,7 +75,7 @@ public class UpsertIcebergSink extends SinkBase {
                         .collect(Collectors.toList());
     }
 
-    private Record newRecord(Schema schema, SinkRow row) {
+    private static Record newRecord(Schema schema, SinkRow row) {
         Record record = GenericRecord.create(schema);
         for (int i = 0; i < schema.columns().size(); i++) {
             record.set(i, row.get(i));
@@ -141,52 +155,57 @@ public class UpsertIcebergSink extends SinkBase {
     @Override
     public void write(Iterator<SinkRow> rows) {
         while (rows.hasNext()) {
-            SinkRow row = rows.next();
-            if (row.size() != getTableSchema().getColumnNames().length) {
-                throw Status.FAILED_PRECONDITION
-                        .withDescription("row values do not match table schema")
-                        .asRuntimeException();
-            }
-            Record record = newRecord(rowSchema, row);
-            PartitionKey partitionKey =
-                    new PartitionKey(transaction.table().spec(), transaction.table().schema());
-            partitionKey.partition(record);
-            SinkRowMap sinkRowMap;
-            if (sinkRowMapByPartition.containsKey(partitionKey)) {
-                sinkRowMap = sinkRowMapByPartition.get(partitionKey);
-            } else {
-                sinkRowMap = new SinkRowMap();
-                sinkRowMapByPartition.put(partitionKey, sinkRowMap);
-            }
-            switch (row.getOp()) {
-                case INSERT:
-                    sinkRowMap.insert(getKeyFromRow(row), row);
-                    break;
-                case DELETE:
-                    sinkRowMap.delete(getKeyFromRow(row), row);
-                    break;
-                case UPDATE_DELETE:
-                    if (updateBufferExists) {
-                        throw Status.FAILED_PRECONDITION
-                                .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
-                                .asRuntimeException();
-                    }
-                    sinkRowMap.delete(getKeyFromRow(row), row);
-                    updateBufferExists = true;
-                    break;
-                case UPDATE_INSERT:
-                    if (!updateBufferExists) {
-                        throw Status.FAILED_PRECONDITION
-                                .withDescription("an UPDATE_INSERT should precede an UPDATE_DELETE")
-                                .asRuntimeException();
-                    }
-                    sinkRowMap.insert(getKeyFromRow(row), row);
-                    updateBufferExists = false;
-                    break;
-                default:
-                    throw UNIMPLEMENTED
-                            .withDescription("unsupported operation: " + row.getOp())
+            try (SinkRow row = rows.next()) {
+                if (row.size() != getTableSchema().getColumnNames().length) {
+                    throw Status.FAILED_PRECONDITION
+                            .withDescription("row values do not match table schema")
                             .asRuntimeException();
+                }
+                Record record = newRecord(rowSchema, row);
+                PartitionKey partitionKey =
+                        new PartitionKey(transaction.table().spec(), transaction.table().schema());
+                partitionKey.partition(record);
+                SinkRowMap sinkRowMap;
+                if (sinkRowMapByPartition.containsKey(partitionKey)) {
+                    sinkRowMap = sinkRowMapByPartition.get(partitionKey);
+                } else {
+                    sinkRowMap = new SinkRowMap();
+                    sinkRowMapByPartition.put(partitionKey, sinkRowMap);
+                }
+                switch (row.getOp()) {
+                    case INSERT:
+                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
+                        break;
+                    case DELETE:
+                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
+                        break;
+                    case UPDATE_DELETE:
+                        if (updateBufferExists) {
+                            throw Status.FAILED_PRECONDITION
+                                    .withDescription(
+                                            "an UPDATE_INSERT should precede an UPDATE_DELETE")
+                                    .asRuntimeException();
+                        }
+                        sinkRowMap.delete(getKeyFromRow(row), newRecord(deleteRowSchema, row));
+                        updateBufferExists = true;
+                        break;
+                    case UPDATE_INSERT:
+                        if (!updateBufferExists) {
+                            throw Status.FAILED_PRECONDITION
+                                    .withDescription(
+                                            "an UPDATE_INSERT should precede an UPDATE_DELETE")
+                                    .asRuntimeException();
+                        }
+                        sinkRowMap.insert(getKeyFromRow(row), newRecord(rowSchema, row));
+                        updateBufferExists = false;
+                        break;
+                    default:
+                        throw UNIMPLEMENTED
+                                .withDescription("unsupported operation: " + row.getOp())
+                                .asRuntimeException();
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
             }
         }
     }
@@ -198,13 +217,13 @@ public class UpsertIcebergSink extends SinkBase {
                     newEqualityDeleteWriter(entry.getKey());
             DataWriter<Record> dataWriter = newDataWriter(entry.getKey());
             for (SinkRowOp sinkRowOp : entry.getValue().map.values()) {
-                SinkRow insert = sinkRowOp.getInsert();
-                SinkRow delete = sinkRowOp.getDelete();
+                Record insert = sinkRowOp.getInsert();
+                Record delete = sinkRowOp.getDelete();
                 if (insert != null) {
-                    dataWriter.write(newRecord(rowSchema, insert));
+                    dataWriter.write(insert);
                 }
                 if (delete != null) {
-                    equalityDeleteWriter.write(newRecord(deleteRowSchema, delete));
+                    equalityDeleteWriter.write(delete);
                 }
             }
             try {

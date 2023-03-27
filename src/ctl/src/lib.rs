@@ -95,6 +95,9 @@ enum HummockCommands {
 
         #[clap(short, long = "table-id")]
         table_id: u32,
+
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     SstDump(SstDumpArgs),
     /// trigger a targeted compaction through compaction_group_id
@@ -140,6 +143,8 @@ enum HummockCommands {
         compaction_filter_mask: Option<u32>,
         #[clap(long)]
         max_sub_compaction: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_sub_level_number: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -156,11 +161,15 @@ enum TableCommands {
     Scan {
         /// name of the materialized view to operate on
         mv_name: String,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// scan a state table using Id
     ScanById {
         /// id of the state table to operate on
         table_id: u32,
+        // data directory for hummock state store. None: use default
+        data_dir: Option<String>,
     },
     /// list all state tables
     List,
@@ -201,6 +210,25 @@ enum MetaCommands {
     BackupMeta,
     /// delete meta snapshots
     DeleteMetaSnapshots { snapshot_ids: Vec<u64> },
+
+    /// Create a new connection object
+    CreateConnection {
+        #[clap(long)]
+        provider: String,
+        #[clap(long)]
+        service_name: String,
+        #[clap(long)]
+        availability_zones: String,
+    },
+
+    /// List all existing connections in the catalog
+    ListConnections,
+
+    /// Drop a connection by its name
+    DropConnection {
+        #[clap(long)]
+        connection_name: String,
+    },
 }
 
 pub async fn start(opts: CliOpts) -> Result<()> {
@@ -227,8 +255,12 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             cmd_impl::hummock::list_version_deltas(context, start_id, num_epochs).await?;
         }
-        Commands::Hummock(HummockCommands::ListKv { epoch, table_id }) => {
-            cmd_impl::hummock::list_kv(context, epoch, table_id).await?;
+        Commands::Hummock(HummockCommands::ListKv {
+            epoch,
+            table_id,
+            data_dir,
+        }) => {
+            cmd_impl::hummock::list_kv(context, epoch, table_id, data_dir).await?;
         }
         Commands::Hummock(HummockCommands::SstDump(args)) => {
             cmd_impl::hummock::sst_dump(context, args).await.unwrap()
@@ -268,6 +300,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             target_file_size_base,
             compaction_filter_mask,
             max_sub_compaction,
+            level0_stop_write_threshold_sub_level_number,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -281,6 +314,7 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     target_file_size_base,
                     compaction_filter_mask,
                     max_sub_compaction,
+                    level0_stop_write_threshold_sub_level_number,
                 ),
             )
             .await?
@@ -292,11 +326,11 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(context, compaction_group_id, &table_ids)
                 .await?;
         }
-        Commands::Table(TableCommands::Scan { mv_name }) => {
-            cmd_impl::table::scan(context, mv_name).await?
+        Commands::Table(TableCommands::Scan { mv_name, data_dir }) => {
+            cmd_impl::table::scan(context, mv_name, data_dir).await?
         }
-        Commands::Table(TableCommands::ScanById { table_id }) => {
-            cmd_impl::table::scan_id(context, table_id).await?
+        Commands::Table(TableCommands::ScanById { table_id, data_dir }) => {
+            cmd_impl::table::scan_id(context, table_id, data_dir).await?
         }
         Commands::Table(TableCommands::List) => cmd_impl::table::list(context).await?,
         Commands::Bench(cmd) => cmd_impl::bench::do_bench(context, cmd).await?,
@@ -309,6 +343,20 @@ pub async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::BackupMeta) => cmd_impl::meta::backup_meta(context).await?,
         Commands::Meta(MetaCommands::DeleteMetaSnapshots { snapshot_ids }) => {
             cmd_impl::meta::delete_meta_snapshots(context, &snapshot_ids).await?
+        }
+        Commands::Meta(MetaCommands::CreateConnection {
+            provider,
+            service_name,
+            availability_zones,
+        }) => {
+            cmd_impl::meta::create_connection(context, provider, service_name, availability_zones)
+                .await?
+        }
+        Commands::Meta(MetaCommands::ListConnections) => {
+            cmd_impl::meta::list_connections(context).await?
+        }
+        Commands::Meta(MetaCommands::DropConnection { connection_name }) => {
+            cmd_impl::meta::drop_connection(context, connection_name).await?
         }
         Commands::Trace => cmd_impl::trace::trace(context).await?,
         Commands::Profile { sleep } => cmd_impl::profile::profile(context, sleep).await?,

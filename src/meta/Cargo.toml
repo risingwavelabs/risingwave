@@ -18,6 +18,8 @@ anyhow = "1"
 arc-swap = "1"
 assert_matches = "1"
 async-trait = "0.1"
+aws-config = { workspace = true }
+aws-sdk-ec2 = { workspace = true }
 bytes = { version = "1", features = ["serde"] }
 clap = { version = "4", features = ["derive", "env"] }
 crepe = "0.1"
@@ -50,6 +52,7 @@ risingwave_hummock_sdk = { path = "../storage/hummock_sdk" }
 risingwave_object_store = { path = "../object_store" }
 risingwave_pb = { path = "../prost" }
 risingwave_rpc_client = { path = "../rpc_client" }
+risingwave_sqlparser = { path = "../sqlparser" }
 scopeguard = "1.1.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

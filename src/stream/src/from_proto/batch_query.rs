@@ -44,7 +44,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         let order_types = table_desc
             .pk
             .iter()
-            .map(|desc| OrderType::from_protobuf(&desc.get_order_type().unwrap().direction()))
+            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
             .collect_vec();
 
         let column_descs = table_desc
@@ -66,14 +66,14 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(|k| k.column_index as usize)
             .collect_vec();
 
-        let dist_key_indices = table_desc
-            .dist_key_indices
+        let dist_key_in_pk_indices = table_desc
+            .dist_key_in_pk_indices
             .iter()
             .map(|&k| k as usize)
             .collect_vec();
         let distribution = match params.vnode_bitmap {
             Some(vnodes) => Distribution {
-                dist_key_indices,
+                dist_key_in_pk_indices,
                 vnodes: vnodes.into(),
             },
             None => Distribution::fallback(),

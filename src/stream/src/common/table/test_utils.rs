@@ -16,8 +16,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::catalog::Table as ProstTable;
-use risingwave_pb::common::{PbColumnOrder, PbOrderType};
+use risingwave_pb::catalog::PbTable;
+use risingwave_pb::common::PbColumnOrder;
 use risingwave_pb::plan_common::ColumnCatalog;
 
 pub(crate) fn gen_prost_table(
@@ -26,7 +26,7 @@ pub(crate) fn gen_prost_table(
     order_types: Vec<OrderType>,
     pk_index: Vec<usize>,
     read_prefix_len_hint: u32,
-) -> ProstTable {
+) -> PbTable {
     let col_len = column_descs.len() as i32;
     gen_prost_table_with_value_indices(
         table_id,
@@ -45,15 +45,13 @@ pub(crate) fn gen_prost_table_with_value_indices(
     pk_index: Vec<usize>,
     read_prefix_len_hint: u32,
     value_indices: Vec<i32>,
-) -> ProstTable {
+) -> PbTable {
     let prost_pk = pk_index
         .iter()
         .zip_eq_fast(order_types.iter())
         .map(|(idx, order)| PbColumnOrder {
             column_index: *idx as _,
-            order_type: Some(PbOrderType {
-                direction: order.to_protobuf() as _,
-            }),
+            order_type: Some(order.to_protobuf()),
         })
         .collect();
     let prost_columns = column_descs
@@ -64,7 +62,7 @@ pub(crate) fn gen_prost_table_with_value_indices(
         })
         .collect();
 
-    ProstTable {
+    PbTable {
         id: table_id.table_id(),
         columns: prost_columns,
         pk: prost_pk,

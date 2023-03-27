@@ -32,16 +32,16 @@ pub struct Block {
     offset: u64,
 }
 
-fn make_key(sst_id: u64, block_idx: u64) -> Bytes {
+fn make_key(sst_object_id: u64, block_idx: u64) -> Bytes {
     let mut key = BytesMut::with_capacity(16);
-    key.put_u64_le(sst_id);
+    key.put_u64_le(sst_object_id);
     key.put_u64_le(block_idx);
     key.freeze()
 }
 
 #[async_trait]
 pub trait CacheBase: Sync + Send {
-    async fn try_get_with(&self, sst_id: u64, block_idx: u64) -> HummockResult<Arc<Block>>;
+    async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>>;
 }
 
 pub struct MokaCache {
@@ -64,12 +64,12 @@ impl MokaCache {
 
 #[async_trait]
 impl CacheBase for MokaCache {
-    async fn try_get_with(&self, sst_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
-        let k = make_key(sst_id, block_idx);
+    async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+        let k = make_key(sst_object_id, block_idx);
         let latency = self.fake_io_latency;
         self.inner
             .try_get_with(k, async move {
-                match get_fake_block(sst_id, block_idx, latency).await {
+                match get_fake_block(sst_object_id, block_idx, latency).await {
                     Ok(ret) => Ok(Arc::new(ret)),
                     Err(e) => Err(e),
                 }
@@ -95,17 +95,17 @@ impl LruCacheImpl {
 
 #[async_trait]
 impl CacheBase for LruCacheImpl {
-    async fn try_get_with(&self, sst_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
+    async fn try_get_with(&self, sst_object_id: u64, block_idx: u64) -> HummockResult<Arc<Block>> {
         let mut hasher = DefaultHasher::new();
-        let key = (sst_id, block_idx);
-        sst_id.hash(&mut hasher);
+        let key = (sst_object_id, block_idx);
+        sst_object_id.hash(&mut hasher);
         block_idx.hash(&mut hasher);
         let h = hasher.finish();
         let latency = self.fake_io_latency;
         let entry = self
             .inner
             .lookup_with_request_dedup(h, key, true, || async move {
-                get_fake_block(sst_id, block_idx, latency)
+                get_fake_block(sst_object_id, block_idx, latency)
                     .await
                     .map(|block| (Arc::new(block), 1))
             })
@@ -141,11 +141,14 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion, k
             let mut rng = SmallRng::seed_from_u64(seed);
             let t = Instant::now();
             for _ in 0..key_count {
-                let sst_id = rng.next_u64() % 8;
+                let sst_object_id = rng.next_u64() % 8;
                 let block_offset = rng.next_u64() % key_count;
-                let block = cache.try_get_with(sst_id, block_offset).await.unwrap();
+                let block = cache
+                    .try_get_with(sst_object_id, block_offset)
+                    .await
+                    .unwrap();
                 assert_eq!(block.offset, block_offset);
-                assert_eq!(block.sst, sst_id);
+                assert_eq!(block.sst, sst_object_id);
             }
             t.elapsed()
         });
@@ -169,11 +172,14 @@ fn bench_cache<C: CacheBase + 'static>(block_cache: Arc<C>, c: &mut Criterion, k
                 let seed = 10244021u64;
                 let mut rng = SmallRng::seed_from_u64(seed);
                 for _ in 0..(key_count / 100) {
-                    let sst_id = rng.next_u64() % 1024;
+                    let sst_object_id = rng.next_u64() % 1024;
                     let block_offset = rng.next_u64() % 1024;
-                    let block = cache.try_get_with(sst_id, block_offset).await.unwrap();
+                    let block = cache
+                        .try_get_with(sst_object_id, block_offset)
+                        .await
+                        .unwrap();
                     assert_eq!(block.offset, block_offset);
-                    assert_eq!(block.sst, sst_id);
+                    assert_eq!(block.sst, sst_object_id);
                 }
             };
             current.block_on(f);

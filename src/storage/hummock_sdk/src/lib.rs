@@ -32,7 +32,7 @@ use risingwave_pb::hummock::SstableInfo;
 
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
-use crate::table_stats::{to_prost_table_stats_map, ProstTableStatsMap, TableStatsMap};
+use crate::table_stats::{to_prost_table_stats_map, PbTableStatsMap, TableStatsMap};
 
 pub mod compact;
 pub mod compaction_group;
@@ -42,6 +42,7 @@ pub mod key_range;
 pub mod prost_key_range;
 pub mod table_stats;
 
+pub type HummockSstableObjectId = u64;
 pub type HummockSstableId = u64;
 pub type HummockRefCount = u64;
 pub type HummockVersionId = u64;
@@ -51,6 +52,8 @@ pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;
 pub const INVALID_VERSION_ID: HummockVersionId = 0;
 pub const FIRST_VERSION_ID: HummockVersionId = 1;
+pub const SPLIT_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 1u64 << 56;
+pub const SINGLE_TABLE_COMPACTION_GROUP_ID_HEAD: u64 = 2u64 << 56;
 
 #[macro_export]
 /// This is wrapper for `info` log.
@@ -130,14 +133,14 @@ impl LocalSstableInfo {
 pub struct ExtendedSstableInfo {
     pub compaction_group_id: CompactionGroupId,
     pub sst_info: SstableInfo,
-    pub table_stats: ProstTableStatsMap,
+    pub table_stats: PbTableStatsMap,
 }
 
 impl ExtendedSstableInfo {
     pub fn new(
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
-        table_stats: ProstTableStatsMap,
+        table_stats: PbTableStatsMap,
     ) -> Self {
         Self {
             compaction_group_id,
@@ -150,7 +153,7 @@ impl ExtendedSstableInfo {
         compaction_group_id: CompactionGroupId,
         sst_info: SstableInfo,
     ) -> Self {
-        Self::new(compaction_group_id, sst_info, ProstTableStatsMap::default())
+        Self::new(compaction_group_id, sst_info, PbTableStatsMap::default())
     }
 }
 
@@ -209,19 +212,19 @@ impl HummockReadEpoch {
         }
     }
 }
-pub struct SstIdRange {
+pub struct SstObjectIdRange {
     // inclusive
-    pub start_id: HummockSstableId,
+    pub start_id: HummockSstableObjectId,
     // exclusive
-    pub end_id: HummockSstableId,
+    pub end_id: HummockSstableObjectId,
 }
 
-impl SstIdRange {
-    pub fn new(start_id: HummockSstableId, end_id: HummockSstableId) -> Self {
+impl SstObjectIdRange {
+    pub fn new(start_id: HummockSstableObjectId, end_id: HummockSstableObjectId) -> Self {
         Self { start_id, end_id }
     }
 
-    pub fn peek_next_sst_id(&self) -> Option<HummockSstableId> {
+    pub fn peek_next_sst_object_id(&self) -> Option<HummockSstableObjectId> {
         if self.start_id < self.end_id {
             return Some(self.start_id);
         }
@@ -229,8 +232,8 @@ impl SstIdRange {
     }
 
     /// Pops and returns next SST id.
-    pub fn get_next_sst_id(&mut self) -> Option<HummockSstableId> {
-        let next_id = self.peek_next_sst_id();
+    pub fn get_next_sst_object_id(&mut self) -> Option<HummockSstableObjectId> {
+        let next_id = self.peek_next_sst_object_id();
         self.start_id += 1;
         next_id
     }

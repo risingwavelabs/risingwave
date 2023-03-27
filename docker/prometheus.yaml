@@ -15,11 +15,11 @@ scrape_configs:
   - job_name: meta
     static_configs:
       - targets: ["meta-node-0:1250"]
-  
+
   - job_name: minio
     metrics_path: /minio/v2/metrics/cluster
     static_configs:
-    - targets: ["minio-0:9301"]
+      - targets: ["minio-0:9301"]
 
   - job_name: compactor
     static_configs:
@@ -29,6 +29,14 @@ scrape_configs:
     static_configs:
       - targets: ["etcd-0:2379"]
 
+  - job_name: frontend
+    static_configs:
+      - targets: ["frontend-node-0:2222"]
+
   - job_name: redpanda
     static_configs:
-      - targets: ["redpanda:9644"]
+      - targets: ["message_queue:9644"]
+
+  - job_name: connector-node
+    static_configs:
+      - targets: ["connector-node:50052"]

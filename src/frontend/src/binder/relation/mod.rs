@@ -27,6 +27,7 @@ use risingwave_sqlparser::ast::{
 
 use self::watermark::is_watermark_func;
 use super::bind_context::ColumnBinding;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{Binder, BoundSetExpr};
 use crate::catalog::system_catalog::pg_catalog::{
     PG_GET_KEYWORDS_FUNC_NAME, PG_KEYWORDS_TABLE_NAME,
@@ -62,6 +63,26 @@ pub enum Relation {
     TableFunction(Box<TableFunction>),
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
+}
+
+impl RewriteExprsRecursive for Relation {
+    fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
+        match self {
+            Relation::Subquery(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Join(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::WindowTableFunction(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Watermark(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::Share(inner) => inner.rewrite_exprs_recursive(rewriter),
+            Relation::TableFunction(inner) => {
+                let new_args = std::mem::take(&mut inner.args)
+                    .into_iter()
+                    .map(|expr| rewriter.rewrite_expr(expr))
+                    .collect();
+                inner.args = new_args;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Relation {
@@ -182,6 +203,21 @@ impl Binder {
         Self::resolve_single_name(name.0, "index name")
     }
 
+    /// return the `view_name`
+    pub fn resolve_view_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "view name")
+    }
+
+    /// return the `sink_name`
+    pub fn resolve_sink_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "sink name")
+    }
+
+    /// return the `table_name`
+    pub fn resolve_table_name(name: ObjectName) -> Result<String> {
+        Self::resolve_single_name(name.0, "table name")
+    }
+
     /// return the `user_name`
     pub fn resolve_user_name(name: ObjectName) -> Result<String> {
         Self::resolve_single_name(name.0, "user name")
@@ -258,6 +294,7 @@ impl Binder {
         &mut self,
         name: ObjectName,
         alias: Option<TableAlias>,
+        for_system_time_as_of_now: bool,
     ) -> Result<Relation> {
         let (schema_name, table_name) = Self::resolve_schema_qualified_name(&self.db_name, name)?;
         if schema_name.is_none() && let Some(item) = self.context.cte_to_relation.get(&table_name) {
@@ -293,7 +330,7 @@ impl Binder {
             Ok(share_relation)
         } else {
 
-            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias)
+            self.bind_relation_by_name_inner(schema_name.as_deref(), &table_name, alias, for_system_time_as_of_now)
         }
     }
 
@@ -313,7 +350,7 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(table_name.clone(), None)?,
+            self.bind_relation_by_name(table_name.clone(), None, false)?,
             table_name,
         ))
     }
@@ -358,12 +395,16 @@ impl Binder {
             .map_or(DEFAULT_SCHEMA_NAME.to_string(), |arg| arg.to_string());
 
         let table_name = self.catalog.get_table_name_by_id(table_id)?;
-        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias)
+        self.bind_relation_by_name_inner(Some(&schema), &table_name, alias, false)
     }
 
     pub(super) fn bind_table_factor(&mut self, table_factor: TableFactor) -> Result<Relation> {
         match table_factor {
-            TableFactor::Table { name, alias } => self.bind_relation_by_name(name, alias),
+            TableFactor::Table {
+                name,
+                alias,
+                for_system_time_as_of_now,
+            } => self.bind_relation_by_name(name, alias, for_system_time_as_of_now),
             TableFactor::TableFunction { name, alias, args } => {
                 let func_name = &name.0[0].real_value();
                 if func_name.eq_ignore_ascii_case(RW_INTERNAL_TABLE_FUNCTION_NAME) {
@@ -378,6 +419,7 @@ impl Binder {
                         Some(PG_CATALOG_SCHEMA_NAME),
                         PG_KEYWORDS_TABLE_NAME,
                         alias,
+                        false,
                     )
                 } else if let Ok(table_function_type) = TableFunctionType::from_str(func_name) {
                     let args: Vec<ExprImpl> = args

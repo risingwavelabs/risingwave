@@ -22,6 +22,7 @@ use risingwave_common::types::DataType;
 #[derive(Clone, Debug)]
 pub struct SourceColumnDesc {
     pub name: String,
+    pub name_in_lower_case: String,
     pub data_type: DataType,
     pub column_id: ColumnId,
     pub fields: Vec<ColumnDesc>,
@@ -39,14 +40,22 @@ impl SourceColumnDesc {
             !matches!(data_type, DataType::List { .. } | DataType::Struct(..)),
             "called `SourceColumnDesc::simple` with a composite type."
         );
+        let name = name.into();
+        let name_in_lower_case = name.to_ascii_lowercase();
         Self {
-            name: name.into(),
+            name,
+            name_in_lower_case,
             data_type,
             column_id,
             fields: vec![],
             is_row_id: false,
             is_meta: false,
         }
+    }
+
+    #[inline]
+    pub fn is_visible(&self) -> bool {
+        !self.is_row_id && !self.is_meta
     }
 }
 
@@ -55,6 +64,7 @@ impl From<&ColumnDesc> for SourceColumnDesc {
         let is_meta = c.name.starts_with("_rw_kafka_timestamp");
         Self {
             name: c.name.clone(),
+            name_in_lower_case: c.name.to_ascii_lowercase(),
             data_type: c.data_type.clone(),
             column_id: c.column_id,
             fields: c.field_descs.clone(),
@@ -72,6 +82,23 @@ impl From<&SourceColumnDesc> for ColumnDesc {
             name: s.name.clone(),
             field_descs: s.fields.clone(),
             type_name: "".to_string(),
+            generated_column: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_visible() {
+        let mut c = SourceColumnDesc::simple("a", DataType::Int32, ColumnId::new(0));
+        assert!(c.is_visible());
+        c.is_row_id = true;
+        assert!(!c.is_visible());
+        c.is_row_id = false;
+        c.is_meta = true;
+        assert!(!c.is_visible());
     }
 }

@@ -520,10 +520,16 @@ def section_cluster_node(panels):
             [
                 panels.target(
                     f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance)",
-                    "{{job}} @ {{instance}}",
-                )
+                    "cpu - {{job}} @ {{instance}}",
+                ),
+
+                panels.target(
+                    f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by (job,instance) / avg({metric('process_cpu_core_num')}) by (job,instance)",
+                    "cpu usage -{{job}} @ {{instance}}",
+                ),
             ],
         ),
+
         panels.timeseries_count(
             "Meta Cluster",
             "",
@@ -559,6 +565,16 @@ def section_compaction(outer_panels):
                         panels.target(
                             f"sum({metric('storage_level_total_file_size')}) by (instance, level_index)",
                             "L{{level_index}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "scale compactor core count",
+                    "compactor core resource need to scale out",
+                    [
+                        panels.target(
+                            f"sum({metric('storage_compactor_suggest_core_count')})",
+                            "suggest-core-count"
                         ),
                     ],
                 ),
@@ -768,12 +784,23 @@ def section_compaction(outer_panels):
                     "Total bytes gotten from sstable_avg_key_size, for observing sstable_avg_key_size",
                     [
                         panels.target(
-                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('state_store_sstable_avg_key_size_count')}[$__rate_interval]))",
+                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_avg_key_size_count')}[$__rate_interval]))",
                             "avg_key_size - {{job}} @ {{instance}}",
                         ),
                         panels.target(
                             f"sum by(le, job, instance)(rate({metric('compactor_sstable_avg_value_size_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_avg_value_size_count')}[$__rate_interval]))",
                             "avg_value_size - {{job}} @ {{instance}}",
+                        ),
+                    ],
+                ),
+
+                 panels.timeseries_count(
+                    "Hummock Sstable Stat",
+                    "Avg count gotten from sstable_distinct_epoch_count, for observing sstable_distinct_epoch_count",
+                    [
+                        panels.target(
+                            f"sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_sum')}[$__rate_interval]))  / sum by(le, job, instance)(rate({metric('compactor_sstable_distinct_epoch_count_count')}[$__rate_interval]))",
+                            "avg_epoch_count - {{job}} @ {{instance}}",
                         ),
                     ],
                 ),
@@ -1351,11 +1378,7 @@ def section_streaming_actors(outer_panels):
                         ),
                         panels.target(
                             f"rate({metric('stream_join_insert_cache_miss_count')}[$__rate_interval])",
-                            "cache miss when insert {{actor_id}} {{side}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_join_may_exist_true_count')}[$__rate_interval])",
-                            "may_exist true when insert {{actor_id}} {{side}}",
+                            "cache miss when insert{{actor_id}} {{side}}",
                         ),
                     ],
                 ),
@@ -1552,7 +1575,6 @@ def section_batch_exchange(outer_panels):
             ],
         ),
     ]
-
 
 def section_frontend(outer_panels):
     panels = outer_panels.sub_panel()

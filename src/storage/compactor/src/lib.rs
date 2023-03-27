@@ -15,6 +15,7 @@
 mod compactor_observer;
 mod rpc;
 mod server;
+mod telemetry;
 
 use clap::Parser;
 use risingwave_common_proc_macro::OverrideConfig;
@@ -27,19 +28,14 @@ pub struct CompactorOpts {
     // TODO: rename to listen_addr and separate out the port.
     /// The address that this service listens to.
     /// Usually the localhost + desired port.
-    #[clap(
-        long,
-        alias = "host",
-        env = "RW_LISTEN_ADDR",
-        default_value = "127.0.0.1:6660"
-    )]
+    #[clap(long, env = "RW_LISTEN_ADDR", default_value = "127.0.0.1:6660")]
     pub listen_addr: String,
 
     /// The address for contacting this instance of the service.
     /// This would be synonymous with the service's "public address"
     /// or "identifying address".
     /// Optional, we will use listen_addr if not specified.
-    #[clap(long, env = "RW_ADVERTISE_ADDR", alias = "client-address")]
+    #[clap(long, env = "RW_ADVERTISE_ADDR")]
     pub advertise_addr: Option<String>,
 
     // TODO: This is currently unused.
@@ -55,12 +51,6 @@ pub struct CompactorOpts {
 
     #[clap(long, env = "RW_META_ADDR", default_value = "http://127.0.0.1:5690")]
     pub meta_address: String,
-
-    /// Of the form `hummock+{object_store}` where `object_store`
-    /// is one of `s3://{path}`, `s3-compatible://{path}`, `minio://{path}`, `disk://{path}`,
-    /// `memory` or `memory-shared`.
-    #[clap(long, env = "RW_STATE_STORE")]
-    pub state_store: Option<String>,
 
     #[clap(long, env = "RW_COMPACTION_WORKER_THREADS_NUMBER")]
     pub compaction_worker_threads_number: Option<usize>,
@@ -99,7 +89,6 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     // slow compile in release mode.
     Box::pin(async move {
         tracing::info!("Compactor node options: {:?}", opts);
-        warn_future_deprecate_options(&opts);
         tracing::info!("meta address: {}", opts.meta_address.clone());
 
         let listen_addr = opts.listen_addr.parse().unwrap();
@@ -122,10 +111,4 @@ pub fn start(opts: CompactorOpts) -> Pin<Box<dyn Future<Output = ()> + Send>> {
         join_handle.await.unwrap();
         observer_join_handle.abort();
     })
-}
-
-fn warn_future_deprecate_options(opts: &CompactorOpts) {
-    if opts.state_store.is_some() {
-        tracing::warn!("`--state-store` will not be accepted by compactor node in the next release. Please consider moving this argument to the meta node.");
-    }
 }

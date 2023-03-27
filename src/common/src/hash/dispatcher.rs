@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use super::HashKey;
+use crate::array::serial_array::Serial;
 use crate::hash;
 use crate::types::DataType;
 
 /// An enum to help to dynamically dispatch [`HashKey`] template.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum HashKeyKind {
+pub enum HashKeyKind {
     Key8,
     Key16,
     Key32,
@@ -90,6 +91,7 @@ fn hash_key_size(data_type: &DataType) -> HashKeySize {
         DataType::Int16 => HashKeySize::Fixed(size_of::<i16>()),
         DataType::Int32 => HashKeySize::Fixed(size_of::<i32>()),
         DataType::Int64 => HashKeySize::Fixed(size_of::<i64>()),
+        DataType::Serial => HashKeySize::Fixed(size_of::<Serial>()),
         DataType::Float32 => HashKeySize::Fixed(size_of::<OrderedF32>()),
         DataType::Float64 => HashKeySize::Fixed(size_of::<OrderedF64>()),
         DataType::Decimal => HashKeySize::Fixed(size_of::<Decimal>()),
@@ -118,7 +120,7 @@ const MAX_FIXED_SIZE_KEY_ELEMENTS: usize = 8;
 /// 4. Any column's serialized format can't be used for equality check.
 ///
 /// Otherwise we choose smallest [`crate::hash::FixedSizeKey`] whose size can hold all data types.
-fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
+pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
     if data_types.len() > MAX_FIXED_SIZE_KEY_ELEMENTS {
         return HashKeyKind::KeySerialized;
     }
