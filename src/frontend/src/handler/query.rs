@@ -30,6 +30,7 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{Portal, PrepareStatement};
 use super::{PgResponseStream, RwPgResponse};
 use crate::binder::{Binder, BoundSetExpr, BoundStatement};
+use crate::catalog::ViewId;
 use crate::handler::flush::do_flush;
 use crate::handler::privilege::resolve_privileges;
 use crate::handler::util::{to_pg_field, DataChunkToRowSetAdapter};
@@ -90,16 +91,24 @@ fn must_run_in_local_mode(bound: &BoundStatement) -> bool {
     must_local
 }
 
+pub struct BatchQueryPlanResult {
+    pub(crate) plan: PlanRef,
+    pub(crate) query_mode: QueryMode,
+    pub(crate) schema: Schema,
+    pub(crate) dependent_views: Vec<ViewId>,
+}
+
 pub fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<(PlanRef, QueryMode, Schema)> {
+) -> Result<BatchQueryPlanResult> {
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let bound = {
+    let (dependent_views, bound) = {
         let mut binder = Binder::new(session);
-        binder.bind(stmt)?
+        let bound = binder.bind(stmt)?;
+        (binder.shared_views(), bound)
     };
 
     let check_items = resolve_privileges(&bound);
@@ -134,7 +143,13 @@ pub fn gen_batch_query_plan(
         QueryMode::Local => logical.gen_batch_local_plan(batch_plan)?,
         QueryMode::Distributed => logical.gen_batch_distributed_plan(batch_plan)?,
     };
-    Ok((physical, query_mode, schema))
+
+    Ok(BatchQueryPlanResult {
+        plan: physical,
+        query_mode,
+        schema,
+        dependent_views,
+    })
 }
 
 fn determine_query_mode(batch_plan: PlanRef) -> QueryMode {
@@ -160,7 +175,12 @@ pub async fn handle_query(
     // Subblock to make sure PlanRef (an Rc) is dropped before `await` below.
     let (plan_fragmenter, query_mode, output_schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, query_mode, schema) = gen_batch_query_plan(&session, context.into(), stmt)?;
+        let BatchQueryPlanResult {
+            plan,
+            query_mode,
+            schema,
+            ..
+        } = gen_batch_query_plan(&session, context.into(), stmt)?;
 
         let context = plan.plan_base().ctx.clone();
         tracing::trace!(

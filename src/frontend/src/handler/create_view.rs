@@ -46,7 +46,12 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let (plan, _mode, schema) = super::query::gen_batch_query_plan(
+        let super::query::BatchQueryPlanResult {
+            plan,
+            schema,
+            dependent_views: mut dependent_relations,
+            ..
+        } = super::query::gen_batch_query_plan(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
@@ -56,7 +61,8 @@ pub async fn handle_create_view(
             table_ids: HashSet::new(),
         };
         visitor.visit(plan);
-        (visitor.table_ids.into_iter().collect(), schema)
+        dependent_relations.extend(visitor.table_ids.into_iter());
+        (dependent_relations, schema)
     };
 
     let columns = if columns.is_empty() {
@@ -108,5 +114,11 @@ impl PlanVisitor<()> for CollectTableIds {
     fn visit_batch_seq_scan(&mut self, plan: &crate::optimizer::plan_node::BatchSeqScan) {
         self.table_ids
             .insert(plan.logical().table_desc().table_id.table_id);
+    }
+
+    fn visit_batch_source(&mut self, plan: &crate::optimizer::plan_node::BatchSource) -> () {
+        if let Some(catalog) = plan.logical().source_catalog() {
+            self.table_ids.insert(catalog.id);
+        }
     }
 }

@@ -438,7 +438,7 @@ where
         database_core.ensure_schema_id(view.schema_id)?;
         for dependent_id in &view.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (view.database_id, view.schema_id, view.name.clone());
         database_core.check_relation_name_duplicated(&key)?;
@@ -634,7 +634,7 @@ where
         database_core.ensure_schema_id(table.schema_id)?;
         for dependent_id in &table.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         #[cfg(not(test))]
         user_core.ensure_user_id(table.owner)?;
@@ -1673,7 +1673,7 @@ where
         database_core.ensure_schema_id(sink.schema_id)?;
         for dependent_id in &sink.dependent_relations {
             // TODO(zehua): refactor when using SourceId.
-            database_core.ensure_table_or_source_id(dependent_id)?;
+            database_core.ensure_table_view_or_source_id(dependent_id)?;
         }
         let key = (sink.database_id, sink.schema_id, sink.name.clone());
         database_core.check_relation_name_duplicated(&key)?;

@@ -335,7 +335,7 @@ where
         // 2. Set the graph-related fields and freeze the `stream_job`.
         stream_job.set_table_fragment_id(fragment_graph.table_fragment_id());
         let dependent_relations = fragment_graph.dependent_relations().clone();
-        stream_job.set_dependent_relations(dependent_relations);
+        stream_job.add_dependent_relations(dependent_relations);
         let stream_job = &*stream_job;
 
         // 3. Mark current relation as "creating" and add reference count to dependent relations.
