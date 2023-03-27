@@ -86,7 +86,7 @@ impl Planner {
         let pk_col_ids = source.catalog.pk_col_ids.clone();
         let row_id_index = source.catalog.row_id_index;
         let gen_row_id = source.catalog.append_only;
-        Ok(LogicalSource::new(
+        LogicalSource::create(
             Some(Rc::new(source.catalog)),
             column_descs,
             pk_col_ids,
@@ -95,7 +95,6 @@ impl Planner {
             false,
             self.ctx(),
         )
-        .into())
     }
 
     pub(super) fn plan_join(&mut self, join: BoundJoin) -> Result<PlanRef> {

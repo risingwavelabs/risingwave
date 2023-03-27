@@ -29,10 +29,12 @@ use risingwave_sqlparser::ast::*;
 
 use self::util::DataChunkToRowSetAdapter;
 use self::variable::handle_set_time_zone;
+use crate::catalog::table_catalog::TableType;
 use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_relation_rename;
 mod alter_system;
 mod alter_table_column;
 pub mod alter_user;
@@ -322,7 +324,6 @@ pub async fn handle(
             name,
             columns,
             query,
-
             with_options: _, // It is put in OptimizerContext
             or_replace,      // not supported
             emit_mode,
@@ -387,6 +388,43 @@ pub async fn handle(
                 operation @ (AlterTableOperation::AddColumn { .. }
                 | AlterTableOperation::DropColumn { .. }),
         } => alter_table_column::handle_alter_table_column(handler_args, name, operation).await,
+        Statement::AlterTable {
+            name,
+            operation: AlterTableOperation::RenameTable { table_name },
+        } => {
+            alter_relation_rename::handle_rename_table(
+                handler_args,
+                TableType::Table,
+                name,
+                table_name,
+            )
+            .await
+        }
+        Statement::AlterIndex {
+            name,
+            operation: AlterIndexOperation::RenameIndex { index_name },
+        } => alter_relation_rename::handle_rename_index(handler_args, name, index_name).await,
+        Statement::AlterView {
+            materialized,
+            name,
+            operation: AlterViewOperation::RenameView { view_name },
+        } => {
+            if materialized {
+                alter_relation_rename::handle_rename_table(
+                    handler_args,
+                    TableType::MaterializedView,
+                    name,
+                    view_name,
+                )
+                .await
+            } else {
+                alter_relation_rename::handle_rename_view(handler_args, name, view_name).await
+            }
+        }
+        Statement::AlterSink {
+            name,
+            operation: AlterSinkOperation::RenameSink { sink_name },
+        } => alter_relation_rename::handle_rename_sink(handler_args, name, sink_name).await,
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
         }

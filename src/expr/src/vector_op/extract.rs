@@ -14,6 +14,7 @@
 
 use chrono::{Datelike, Timelike};
 use risingwave_common::types::{Decimal, NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper};
+use risingwave_expr_macro::function;
 
 use crate::{ExprError, Result};
 
@@ -51,10 +52,12 @@ fn invalid_unit(name: &'static str, unit: &str) -> ExprError {
     }
 }
 
+#[function("extract(varchar, date) -> decimal")]
 pub fn extract_from_date(unit: &str, date: NaiveDateWrapper) -> Result<Decimal> {
     extract_date(date.0, unit).ok_or_else(|| invalid_unit("date unit", unit))
 }
 
+#[function("extract(varchar, timestamp) -> decimal")]
 pub fn extract_from_timestamp(unit: &str, timestamp: NaiveDateTimeWrapper) -> Result<Decimal> {
     let time = timestamp.0;
 
@@ -63,6 +66,7 @@ pub fn extract_from_timestamp(unit: &str, timestamp: NaiveDateTimeWrapper) -> Re
         .ok_or_else(|| invalid_unit("timestamp unit", unit))
 }
 
+#[function("extract(varchar, timestamptz) -> decimal")]
 pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
     match unit {
         "EPOCH" => Ok(Decimal::from(usecs) / 1_000_000.into()),
@@ -71,6 +75,7 @@ pub fn extract_from_timestamptz(unit: &str, usecs: i64) -> Result<Decimal> {
     }
 }
 
+#[function("extract(varchar, time) -> decimal")]
 pub fn extract_from_time(unit: &str, time: NaiveTimeWrapper) -> Result<Decimal> {
     extract_time(time.0, unit).ok_or_else(|| invalid_unit("time unit", unit))
 }

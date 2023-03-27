@@ -279,6 +279,7 @@ where
         // FIXME: we use a dummy table ID for new table fragments, so we can drop the old fragments
         // with the real table ID, then replace the dummy table ID with the real table ID. This is a
         // workaround for not having the version info in the fragment manager.
+        #[allow(unused_variables)]
         let old_table_fragment = table_fragments
             .remove(table_id)
             .with_context(|| format!("table_fragment not exist: id={}", table_id))?;
@@ -344,8 +345,10 @@ where
         // Commit changes and notify about the changes.
         commit_meta!(self, table_fragments)?;
 
-        self.notify_fragment_mapping(&old_table_fragment, Operation::Delete)
-            .await;
+        // FIXME: Do not notify frontend currently, because frontend nodes might refer to old table
+        // catalog and need to access the old fragment. Let frontend nodes delete the old fragment
+        // when they receive table catalog change. self.notify_fragment_mapping(&
+        // old_table_fragment, Operation::Delete)     .await;
         self.notify_fragment_mapping(&table_fragment, Operation::Add)
             .await;
 

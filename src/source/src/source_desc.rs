@@ -212,6 +212,7 @@ pub mod test_utils {
                         name: f.name.clone(),
                         field_descs: vec![],
                         type_name: "".to_string(),
+                        generated_column: None,
                     }
                     .to_protobuf(),
                 ),

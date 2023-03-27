@@ -86,6 +86,7 @@ pub use top_n_on_index_rule::*;
 mod stream;
 pub use stream::bushy_tree_join_ordering_rule::*;
 pub use stream::filter_with_now_to_join_rule::*;
+pub use stream::stream_project_merge_rule::*;
 mod trivial_project_to_values_rule;
 pub use trivial_project_to_values_rule::*;
 mod union_input_values_merge_rule;
@@ -141,6 +142,7 @@ macro_rules! for_all_rules {
             , { MinMaxOnIndexRule }
             , { AlwaysFalseFilterRule }
             , { BushyTreeJoinOrderingRule }
+            , { StreamProjectMergeRule }
         }
     };
 }
