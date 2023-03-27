@@ -705,13 +705,21 @@ def section_compaction(outer_panels):
                                       "L{{level_index}}"),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Compacting Task Count",
+                    "num of compact_task",
+                    [
+                        panels.target(f"{metric('storage_level_compact_task_cnt')}",
+                                      "{{task}}"),
+                    ],
+                ),
                 panels.timeseries_bytes_per_sec(
                     "KBs Read from Next Level",
                     "",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_next')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
                 ),
@@ -721,7 +729,7 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_curr')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
                 ),
@@ -731,7 +739,7 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_sstn_curr')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
                 ),
@@ -741,7 +749,7 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write",
                         ),
                     ],
                 ),
@@ -751,7 +759,7 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_write_sstn')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} write",
+                            "cg{{group}}-L{{level_index}} write",
                         ),
                     ],
                 ),
@@ -761,7 +769,7 @@ def section_compaction(outer_panels):
                     [
                         panels.target(
                             f"sum(rate({metric('storage_level_compact_read_sstn_next')}[$__rate_interval])) by (le, level_index)",
-                            "L{{level_index}} read",
+                            "cg{{group}}-L{{level_index}} read",
                         ),
                     ],
                 ),

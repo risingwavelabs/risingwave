@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -89,9 +89,10 @@ pub fn trigger_sst_stat(
         level_sst_size / 1024
     };
 
+    let mut compacting_task_stat: BTreeMap<(usize, usize), usize> = BTreeMap::default();
     for idx in 0..current_version.num_levels(compaction_group_id) {
         let sst_num = level_sst_cnt(idx);
-        let level_label = format!("{}_{}", idx, compaction_group_id);
+        let level_label = format!("cg{}_L{}", compaction_group_id, idx);
         metrics
             .level_sst_num
             .with_label_values(&[&level_label])
@@ -106,7 +107,29 @@ pub fn trigger_sst_stat(
                 .level_compact_cnt
                 .with_label_values(&[&level_label])
                 .set(compact_cnt as i64);
+
+            let compacting_task = compact_status.level_handlers[idx].get_pending_tasks();
+            let mut pending_task_ids: HashSet<u64> = HashSet::default();
+            for task in compacting_task {
+                if pending_task_ids.contains(&task.task_id) {
+                    continue;
+                }
+
+                let key = (idx, task.target_level as usize);
+                let count = compacting_task_stat.entry(key).or_insert(0);
+                *count += 1;
+
+                pending_task_ids.insert(task.task_id);
+            }
         }
+    }
+
+    for ((select, target), compacting_task_count) in compacting_task_stat {
+        let label_str = format!("cg{} L{} -> L{}", compaction_group_id, select, target);
+        metrics
+            .level_compact_task_cnt
+            .with_label_values(&[&label_str])
+            .set(compacting_task_count as _);
     }
 
     let level_label = format!("cg{}_l0_sub", compaction_group_id);

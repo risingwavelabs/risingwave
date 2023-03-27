@@ -102,6 +102,8 @@ pub struct MetaMetrics {
 
     /// The number of compactor CPU need to be scale.
     pub scale_compactor_core_num: IntGauge,
+
+    pub level_compact_task_cnt: IntGaugeVec,
 }
 
 impl MetaMetrics {
@@ -307,6 +309,14 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let level_compact_task_cnt = register_int_gauge_vec_with_registry!(
+            "storage_level_compact_task_cnt",
+            "num of compact_task organized by group and level",
+            &["task"],
+            registry
+        )
+        .unwrap();
+
         Self {
             registry,
 
@@ -340,6 +350,7 @@ impl MetaMetrics {
             compact_pending_bytes,
             compact_level_compression_ratio,
             scale_compactor_core_num,
+            level_compact_task_cnt,
         }
     }
 
