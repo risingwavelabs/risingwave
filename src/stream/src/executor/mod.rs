@@ -300,7 +300,7 @@ impl Barrier {
     pub fn is_newly_added(&self, actor_id: ActorId) -> bool {
         match self.mutation.as_deref() {
             Some(Mutation::Add { added_actors, .. }) => added_actors.contains(&actor_id),
-            _ => todo!(),
+            _ => false,
         }
     }
 
