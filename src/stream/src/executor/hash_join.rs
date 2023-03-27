@@ -173,7 +173,16 @@ struct JoinSide<K: HashKey, S: StateStore> {
     /// The mapping from input indices of a side to output columes.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
+    /// The first field of the ith element indicates that when a watermark at the ith column of
+    /// this side comes, what band join conditions should be updated in order to possibly
+    /// generate a new watermark at that column or the corresponding column in the counterpart
+    /// join side.
+    ///
+    /// The second field indicates that whether the column is required less than the
+    /// the corresponding column in the counterpart join side in the band join condition.
     input2inequality_index: Vec<Vec<(usize, bool)>>,
+    /// (i, j) in this `Vec` means that state data in this join side can be cleaned if the value of
+    /// its ith column is less than the synthetic watermark of the jth band join condition.
     state_clean_columns: Vec<(usize, usize)>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
