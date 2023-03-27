@@ -252,9 +252,9 @@ impl StructArray {
         &self.children_type
     }
 
-    // returns a vector containing a reference to the arrayimpl.
-    pub fn field_arrays(&self) -> Vec<&ArrayImpl> {
-        self.children.iter().map(|f| &(**f)).collect()
+    /// Returns an iterator over the field array.
+    pub fn fields(&self) -> impl ExactSizeIterator<Item = &ArrayImpl> {
+        self.children.iter().map(|f| &(**f))
     }
 
     pub fn field_at(&self, index: usize) -> ArrayRef {
