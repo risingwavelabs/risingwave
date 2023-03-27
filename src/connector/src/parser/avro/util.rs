@@ -19,9 +19,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ListValue, StructValue};
 use risingwave_common::error::ErrorCode::{InternalError, ProtocolError};
 use risingwave_common::error::{Result, RwError};
-use risingwave_common::types::{
-    DataType, Datum, IntervalUnit, NaiveDateWrapper, OrderedF32, OrderedF64, ScalarImpl,
-};
+use risingwave_common::types::{DataType, Date, Datum, Interval, ScalarImpl, F32, F64};
 use risingwave_pb::plan_common::ColumnDesc;
 
 const RW_DECIMAL_MAX_PRECISION: usize = 28;
@@ -189,9 +187,7 @@ pub(crate) fn avro_decimal_to_rust_decimal(
 }
 
 pub(crate) fn unix_epoch_days() -> i32 {
-    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1)
-        .0
-        .num_days_from_ce()
+    Date::from_ymd_uncheck(1970, 1, 1).0.num_days_from_ce()
 }
 
 // extract inner filed/item schema of record/array/union
@@ -259,8 +255,8 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
         Value::String(s) => ScalarImpl::Utf8(s.into_boxed_str()),
         Value::Int(i) => ScalarImpl::Int32(i),
         Value::Long(i) => ScalarImpl::Int64(i),
-        Value::Float(f) => ScalarImpl::Float32(OrderedF32::from(f)),
-        Value::Double(f) => ScalarImpl::Float64(OrderedF64::from(f)),
+        Value::Float(f) => ScalarImpl::Float32(F32::from(f)),
+        Value::Double(f) => ScalarImpl::Float64(F64::from(f)),
         Value::Decimal(avro_decimal) => {
             let (precision, scale) = match value_schema {
                 Schema::Decimal {
@@ -275,12 +271,12 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
             let decimal = avro_decimal_to_rust_decimal(avro_decimal, precision, scale)?;
             ScalarImpl::Decimal(risingwave_common::types::Decimal::Normalized(decimal))
         }
-        Value::Date(days) => ScalarImpl::NaiveDate(
-            NaiveDateWrapper::with_days(days + unix_epoch_days()).map_err(|e| {
+        Value::Date(days) => {
+            ScalarImpl::Date(Date::with_days(days + unix_epoch_days()).map_err(|e| {
                 let err_msg = format!("avro parse error.wrong date value {}, err {:?}", days, e);
                 RwError::from(InternalError(err_msg))
-            })?,
-        ),
+            })?)
+        }
         Value::TimestampMicros(us) => ScalarImpl::Int64(us),
         Value::TimestampMillis(ms) => ScalarImpl::Int64(ms.checked_mul(1000).ok_or_else(|| {
             RwError::from(InternalError(format!(
@@ -292,7 +288,7 @@ pub(crate) fn from_avro_value(value: Value, value_schema: &Schema) -> Result<Dat
             let months = u32::from(duration.months()) as i32;
             let days = u32::from(duration.days()) as i32;
             let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-            ScalarImpl::Interval(IntervalUnit::from_month_day_usec(months, days, usecs))
+            ScalarImpl::Interval(Interval::from_month_day_usec(months, days, usecs))
         }
         Value::Enum(_, symbol) => ScalarImpl::Utf8(symbol.into_boxed_str()),
         Value::Record(descs) => {

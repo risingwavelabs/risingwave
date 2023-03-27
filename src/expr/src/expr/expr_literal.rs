@@ -125,8 +125,8 @@ impl<'a> TryFrom<&'a ExprNode> for LiteralExpression {
 mod tests {
     use risingwave_common::array::{I32Array, StructValue};
     use risingwave_common::array_nonnull;
-    use risingwave_common::types::test_utils::IntervalUnitTestExt;
-    use risingwave_common::types::{Decimal, IntervalUnit, IntoOrdered};
+    use risingwave_common::types::test_utils::IntervalTestExt;
+    use risingwave_common::types::{Decimal, Interval, IntoOrdered};
     use risingwave_common::util::value_encoding::serialize_datum;
     use risingwave_pb::data::data_type::{IntervalType, TypeName};
     use risingwave_pb::data::{PbDataType, PbDatum};
@@ -229,10 +229,10 @@ mod tests {
 
         let v = 32i32;
         let t = TypeName::Interval;
-        let bytes = serialize_datum(Some(IntervalUnit::from_month(v).to_scalar_value()).as_ref());
+        let bytes = serialize_datum(Some(Interval::from_month(v).to_scalar_value()).as_ref());
         let expr = LiteralExpression::try_from(&make_expression(Some(bytes), t)).unwrap();
         assert_eq!(
-            IntervalUnit::from_month(v).to_scalar_value(),
+            Interval::from_month(v).to_scalar_value(),
             expr.literal().unwrap()
         );
     }

@@ -22,7 +22,7 @@ use crate::array::{
     ArrayBuilder, BytesArrayBuilder, JsonbArrayBuilder, PrimitiveArrayItemType, Serial,
     Utf8ArrayBuilder,
 };
-use crate::types::{Decimal, OrderedF32, OrderedF64};
+use crate::types::{Decimal, F32, F64};
 
 /// Reads an encoded buffer into a value.
 pub trait PrimitiveValueReader<T: PrimitiveArrayItemType> {
@@ -53,8 +53,8 @@ impl_numeric_value_reader!(i16, I16ValueReader, read_i16);
 impl_numeric_value_reader!(i32, I32ValueReader, read_i32);
 impl_numeric_value_reader!(i64, I64ValueReader, read_i64);
 impl_numeric_value_reader!(Serial, SerialValueReader, read_i64);
-impl_numeric_value_reader!(OrderedF32, F32ValueReader, read_f32);
-impl_numeric_value_reader!(OrderedF64, F64ValueReader, read_f64);
+impl_numeric_value_reader!(F32, F32ValueReader, read_f32);
+impl_numeric_value_reader!(F64, F64ValueReader, read_f64);
 
 pub struct DecimalValueReader;
 

@@ -300,7 +300,7 @@ mod test {
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::error;
     use risingwave_common::row::Row;
-    use risingwave_common::types::{DataType, IntervalUnit, NaiveDateWrapper, ScalarImpl};
+    use risingwave_common::types::{DataType, Date, Interval, ScalarImpl};
     use url::Url;
 
     use super::{
@@ -415,8 +415,8 @@ mod test {
                     assert_eq!(row[i], Some(ScalarImpl::Float64(f64_val.into())));
                 }
                 Value::Date(days) => {
-                    let date = Some(ScalarImpl::NaiveDate(
-                        NaiveDateWrapper::with_days(days + unix_epoch_days()).unwrap(),
+                    let date = Some(ScalarImpl::Date(
+                        Date::with_days(days + unix_epoch_days()).unwrap(),
                     ));
                     assert_eq!(row[i], date);
                 }
@@ -432,7 +432,7 @@ mod test {
                     let months = u32::from(duration.months()) as i32;
                     let days = u32::from(duration.days()) as i32;
                     let usecs = (u32::from(duration.millis()) as i64) * 1000; // never overflows
-                    let duration = Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                    let duration = Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                         months, days, usecs,
                     )));
                     assert_eq!(row[i], duration);
@@ -469,22 +469,18 @@ mod test {
             Schema::Boolean => Some(Value::Boolean(true)),
 
             Schema::Date => {
-                let original_date =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
-                let naive_date =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let original_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let naive_date = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let num_days = naive_date.0.sub(original_date.0).num_days() as i32;
                 Some(Value::Date(num_days))
             }
             Schema::TimestampMillis => {
-                let datetime =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let timestamp_mills = Value::TimestampMillis(datetime.0.timestamp() * 1_000);
                 Some(timestamp_mills)
             }
             Schema::TimestampMicros => {
-                let datetime =
-                    NaiveDateWrapper::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
+                let datetime = Date::from_ymd_uncheck(1970, 1, 1).and_hms_uncheck(0, 0, 0);
                 let timestamp_micros = Value::TimestampMicros(datetime.0.timestamp() * 1_000_000);
                 Some(timestamp_micros)
             }

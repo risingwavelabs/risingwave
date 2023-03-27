@@ -50,9 +50,7 @@ pub mod to_text;
 mod ordered_float;
 
 use chrono::{Datelike, NaiveDate, NaiveDateTime, Timelike};
-pub use chrono_wrapper::{
-    NaiveDateTimeWrapper, NaiveDateWrapper, NaiveTimeWrapper, UNIX_EPOCH_DAYS,
-};
+pub use chrono_wrapper::{Date, Time, Timestamp, UNIX_EPOCH_DAYS};
 pub use decimal::Decimal;
 pub use interval::*;
 use itertools::Itertools;
@@ -72,8 +70,8 @@ use crate::array::{
 };
 use crate::error::Result as RwResult;
 
-pub type OrderedF32 = ordered_float::OrderedFloat<f32>;
-pub type OrderedF64 = ordered_float::OrderedFloat<f64>;
+pub type F32 = ordered_float::OrderedFloat<f32>;
+pub type F64 = ordered_float::OrderedFloat<f64>;
 
 /// `EnumDiscriminants` will generate a `DataTypeName` enum with the same variants,
 /// but without data fields.
@@ -276,13 +274,13 @@ impl DataType {
             DataType::Int32 => PrimitiveArrayBuilder::<i32>::new(capacity).into(),
             DataType::Int64 => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Serial => PrimitiveArrayBuilder::<Serial>::new(capacity).into(),
-            DataType::Float32 => PrimitiveArrayBuilder::<OrderedF32>::new(capacity).into(),
-            DataType::Float64 => PrimitiveArrayBuilder::<OrderedF64>::new(capacity).into(),
+            DataType::Float32 => PrimitiveArrayBuilder::<F32>::new(capacity).into(),
+            DataType::Float64 => PrimitiveArrayBuilder::<F64>::new(capacity).into(),
             DataType::Decimal => DecimalArrayBuilder::new(capacity).into(),
-            DataType::Date => NaiveDateArrayBuilder::new(capacity).into(),
+            DataType::Date => DateArrayBuilder::new(capacity).into(),
             DataType::Varchar => Utf8ArrayBuilder::new(capacity).into(),
-            DataType::Time => NaiveTimeArrayBuilder::new(capacity).into(),
-            DataType::Timestamp => NaiveDateTimeArrayBuilder::new(capacity).into(),
+            DataType::Time => TimeArrayBuilder::new(capacity).into(),
+            DataType::Timestamp => TimestampArrayBuilder::new(capacity).into(),
             DataType::Timestamptz => PrimitiveArrayBuilder::<i64>::new(capacity).into(),
             DataType::Interval => IntervalArrayBuilder::new(capacity).into(),
             DataType::Jsonb => JsonbArrayBuilder::new(capacity).into(),
@@ -397,20 +395,18 @@ impl DataType {
             DataType::Int32 => ScalarImpl::Int32(i32::MIN),
             DataType::Int64 => ScalarImpl::Int64(i64::MIN),
             DataType::Serial => ScalarImpl::Serial(Serial::from(i64::MIN)),
-            DataType::Float32 => ScalarImpl::Float32(OrderedF32::neg_infinity()),
-            DataType::Float64 => ScalarImpl::Float64(OrderedF64::neg_infinity()),
+            DataType::Float32 => ScalarImpl::Float32(F32::neg_infinity()),
+            DataType::Float64 => ScalarImpl::Float64(F64::neg_infinity()),
             DataType::Boolean => ScalarImpl::Bool(false),
             DataType::Varchar => ScalarImpl::Utf8("".into()),
             DataType::Bytea => ScalarImpl::Bytea("".to_string().into_bytes().into()),
-            DataType::Date => ScalarImpl::NaiveDate(NaiveDateWrapper(NaiveDate::MIN)),
-            DataType::Time => ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(0, 0, 0)),
-            DataType::Timestamp => {
-                ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper(NaiveDateTime::MIN))
-            }
+            DataType::Date => ScalarImpl::Date(Date(NaiveDate::MIN)),
+            DataType::Time => ScalarImpl::Time(Time::from_hms_uncheck(0, 0, 0)),
+            DataType::Timestamp => ScalarImpl::Timestamp(Timestamp(NaiveDateTime::MIN)),
             // FIXME(yuhao): Add a timestamptz scalar.
             DataType::Timestamptz => ScalarImpl::Int64(i64::MIN),
             DataType::Decimal => ScalarImpl::Decimal(Decimal::NegativeInf),
-            DataType::Interval => ScalarImpl::Interval(IntervalUnit::MIN),
+            DataType::Interval => ScalarImpl::Interval(Interval::MIN),
             DataType::Jsonb => ScalarImpl::Jsonb(JsonbVal::dummy()), // NOT `min` #7981
             DataType::Struct(data_types) => ScalarImpl::Struct(StructValue::new(
                 data_types
@@ -504,15 +500,15 @@ macro_rules! for_all_scalar_variants {
             { Int32, int32, i32, i32 },
             { Int64, int64, i64, i64 },
             { Serial, serial, Serial, Serial },
-            { Float32, float32, OrderedF32, OrderedF32 },
-            { Float64, float64, OrderedF64, OrderedF64 },
+            { Float32, float32, F32, F32 },
+            { Float64, float64, F64, F64 },
             { Utf8, utf8, Box<str>, &'scalar str },
             { Bool, bool, bool, bool },
             { Decimal, decimal, Decimal, Decimal  },
-            { Interval, interval, IntervalUnit, IntervalUnit },
-            { NaiveDate, naivedate, NaiveDateWrapper, NaiveDateWrapper },
-            { NaiveDateTime, naivedatetime, NaiveDateTimeWrapper, NaiveDateTimeWrapper },
-            { NaiveTime, naivetime, NaiveTimeWrapper, NaiveTimeWrapper },
+            { Interval, interval, Interval, Interval },
+            { Date, date, Date, Date },
+            { Timestamp, timestamp, Timestamp, Timestamp },
+            { Time, time, Time, Time },
             { Jsonb, jsonb, JsonbVal, JsonbRef<'scalar> },
             { Struct, struct, StructValue, StructRef<'scalar> },
             { List, list, ListValue, ListRef<'scalar> },
@@ -636,8 +632,8 @@ macro_rules! for_all_native_types {
             { i32, Int32 },
             { i64, Int64 },
             { Serial, Serial },
-            { $crate::types::OrderedF32, Float32 },
-            { $crate::types::OrderedF64, Float64 }
+            { $crate::types::F32, Float32 },
+            { $crate::types::F64, Float64 }
         }
     };
 }
@@ -794,17 +790,17 @@ impl ScalarImpl {
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
                     .into(),
             ),
-            DataType::Date => Self::NaiveDate(
+            DataType::Date => Self::Date(
                 chrono::NaiveDate::from_sql(&Type::DATE, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
                     .into(),
             ),
-            DataType::Time => Self::NaiveTime(
+            DataType::Time => Self::Time(
                 chrono::NaiveTime::from_sql(&Type::TIME, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
                     .into(),
             ),
-            DataType::Timestamp => Self::NaiveDateTime(
+            DataType::Timestamp => Self::Timestamp(
                 chrono::NaiveDateTime::from_sql(&Type::TIMESTAMP, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?
                     .into(),
@@ -815,7 +811,7 @@ impl ScalarImpl {
                     .timestamp_micros(),
             ),
             DataType::Interval => Self::Interval(
-                IntervalUnit::from_sql(&Type::INTERVAL, bytes)
+                Interval::from_sql(&Type::INTERVAL, bytes)
                     .map_err(|err| ErrorCode::InvalidInputSyntax(err.to_string()))?,
             ),
             DataType::Jsonb => {
@@ -885,17 +881,15 @@ impl ScalarImpl {
                     })?
                     .into(),
             ),
-            DataType::Date => Self::NaiveDate(NaiveDateWrapper::from_str(str).map_err(|_| {
+            DataType::Date => Self::Date(Date::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Time => Self::NaiveTime(NaiveTimeWrapper::from_str(str).map_err(|_| {
+            DataType::Time => Self::Time(Time::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
-            DataType::Timestamp => {
-                Self::NaiveDateTime(NaiveDateTimeWrapper::from_str(str).map_err(|_| {
-                    ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
-                })?)
-            }
+            DataType::Timestamp => Self::Timestamp(Timestamp::from_str(str).map_err(|_| {
+                ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
+            })?),
             DataType::Timestamptz => Self::Int64(
                 chrono::DateTime::<chrono::Utc>::from_str(str)
                     .map_err(|_| {
@@ -903,7 +897,7 @@ impl ScalarImpl {
                     })?
                     .timestamp_micros(),
             ),
-            DataType::Interval => Self::Interval(IntervalUnit::from_str(str).map_err(|_| {
+            DataType::Interval => Self::Interval(Interval::from_str(str).map_err(|_| {
                 ErrorCode::InvalidInputSyntax(format!("Invalid param string: {}", str))
             })?),
             DataType::Jsonb => Self::Jsonb(JsonbVal::from_str(str).map_err(|_| {
@@ -1043,12 +1037,12 @@ impl ScalarRefImpl<'_> {
             Self::Bool(v) => v.serialize(ser)?,
             Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
             Self::Interval(v) => v.serialize(ser)?,
-            Self::NaiveDate(v) => v.0.num_days_from_ce().serialize(ser)?,
-            Self::NaiveDateTime(v) => {
+            Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
+            Self::Timestamp(v) => {
                 v.0.timestamp().serialize(&mut *ser)?;
                 v.0.timestamp_subsec_nanos().serialize(ser)?;
             }
-            Self::NaiveTime(v) => {
+            Self::Time(v) => {
                 v.0.num_seconds_from_midnight().serialize(&mut *ser)?;
                 v.0.nanosecond().serialize(ser)?;
             }
@@ -1086,24 +1080,23 @@ impl ScalarImpl {
             Ty::Bytea => Self::Bytea(Box::<[u8]>::deserialize(de)?),
             Ty::Boolean => Self::Bool(bool::deserialize(de)?),
             Ty::Decimal => Self::Decimal(de.deserialize_decimal()?.into()),
-            Ty::Interval => Self::Interval(IntervalUnit::deserialize(de)?),
-            Ty::Time => Self::NaiveTime({
+            Ty::Interval => Self::Interval(Interval::deserialize(de)?),
+            Ty::Time => Self::Time({
                 let secs = u32::deserialize(&mut *de)?;
                 let nano = u32::deserialize(de)?;
-                NaiveTimeWrapper::with_secs_nano(secs, nano)
+                Time::with_secs_nano(secs, nano)
                     .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
-            Ty::Timestamp => Self::NaiveDateTime({
+            Ty::Timestamp => Self::Timestamp({
                 let secs = i64::deserialize(&mut *de)?;
                 let nsecs = u32::deserialize(de)?;
-                NaiveDateTimeWrapper::with_secs_nsecs(secs, nsecs)
+                Timestamp::with_secs_nsecs(secs, nsecs)
                     .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Timestamptz => Self::Int64(i64::deserialize(de)?),
-            Ty::Date => Self::NaiveDate({
+            Ty::Date => Self::Date({
                 let days = i32::deserialize(de)?;
-                NaiveDateWrapper::with_days(days)
-                    .map_err(|e| memcomparable::Error::Message(format!("{e}")))?
+                Date::with_days(days).map_err(|e| memcomparable::Error::Message(format!("{e}")))?
             }),
             Ty::Jsonb => Self::Jsonb(JsonbVal::memcmp_deserialize(de)?),
             Ty::Struct(t) => StructValue::memcmp_deserialize(&t.fields, de)?.to_scalar_value(),
@@ -1140,9 +1133,9 @@ macro_rules! for_all_type_pairs {
             { Float64,     Float64 },
             { Varchar,     Utf8 },
             { Bytea,       Bytea },
-            { Date,        NaiveDate },
-            { Time,        NaiveTime },
-            { Timestamp,   NaiveDateTime },
+            { Date,        Date },
+            { Time,        Time },
+            { Timestamp,   Timestamp },
             { Timestamptz, Int64 },
             { Interval,    Interval },
             { Decimal,     Decimal },
@@ -1199,7 +1192,7 @@ mod tests {
         assert_item_size_eq!(ListArray, 16); // Box<[Datum]>
         assert_item_size_eq!(Utf8Array, 16); // Box<str>
         assert_item_size_eq!(IntervalArray, 16);
-        assert_item_size_eq!(NaiveDateTimeArray, 12);
+        assert_item_size_eq!(TimestampArray, 12);
 
         // TODO: try to reduce the memory usage of `Decimal`, `ScalarImpl` and `Datum`.
         assert_item_size_eq!(DecimalArray, 20);
@@ -1268,7 +1261,7 @@ mod tests {
                     DataType::Decimal,
                 ),
                 DataTypeName::Date => (
-                    ScalarImpl::NaiveDate(NaiveDateWrapper::from_ymd_uncheck(2333, 3, 3)),
+                    ScalarImpl::Date(Date::from_ymd_uncheck(2333, 3, 3)),
                     DataType::Date,
                 ),
                 DataTypeName::Varchar => (ScalarImpl::Utf8("233".into()), DataType::Varchar),
@@ -1277,18 +1270,16 @@ mod tests {
                     DataType::Bytea,
                 ),
                 DataTypeName::Time => (
-                    ScalarImpl::NaiveTime(NaiveTimeWrapper::from_hms_uncheck(2, 3, 3)),
+                    ScalarImpl::Time(Time::from_hms_uncheck(2, 3, 3)),
                     DataType::Time,
                 ),
                 DataTypeName::Timestamp => (
-                    ScalarImpl::NaiveDateTime(NaiveDateTimeWrapper::from_timestamp_uncheck(
-                        23333333, 2333,
-                    )),
+                    ScalarImpl::Timestamp(Timestamp::from_timestamp_uncheck(23333333, 2333)),
                     DataType::Timestamp,
                 ),
                 DataTypeName::Timestamptz => (ScalarImpl::Int64(233333333), DataType::Timestamptz),
                 DataTypeName::Interval => (
-                    ScalarImpl::Interval(IntervalUnit::from_month_day_usec(2, 3, 3333)),
+                    ScalarImpl::Interval(Interval::from_month_day_usec(2, 3, 3333)),
                     DataType::Interval,
                 ),
                 DataTypeName::Jsonb => (ScalarImpl::Jsonb(JsonbVal::dummy()), DataType::Jsonb),
