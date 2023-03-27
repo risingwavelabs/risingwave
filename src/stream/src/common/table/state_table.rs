@@ -111,7 +111,7 @@ pub struct StateTableInner<
 
     /// Strategy to buffer watermark for lazy state cleaning.
     watermark_buffer_strategy: W,
-    /// State cleaning watermark. Old states will be cleaned under this watermark when commiting.
+    /// State cleaning watermark. Old states will be cleaned under this watermark when committing.
     state_clean_watermark: Option<ScalarImpl>,
 }
 
@@ -762,7 +762,6 @@ where
     /// * `eager_cleaning` - Whether to clean up the state table eagerly.
     pub fn update_watermark(&mut self, watermark: ScalarImpl, eager_cleaning: bool) {
         trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
-        self.watermark_buffer_strategy.tick();
         if eager_cleaning || self.watermark_buffer_strategy.apply() {
             self.state_clean_watermark = Some(watermark);
         }
@@ -775,6 +774,9 @@ where
             epoch = ?self.epoch(),
             "commit state table"
         );
+        // Tick the watermark buffer here because state table is expected to be committed once
+        // per epoch.
+        self.watermark_buffer_strategy.tick();
         self.seal_current_epoch(new_epoch.curr).await
     }
 
@@ -784,6 +786,9 @@ where
     pub fn commit_no_data_expected(&mut self, new_epoch: EpochPair) {
         assert_eq!(self.epoch(), new_epoch.prev);
         assert!(!self.is_dirty());
+        // Tick the watermark buffer here because state table is expected to be committed once
+        // per epoch.
+        self.watermark_buffer_strategy.tick();
         self.local_store.seal_current_epoch(new_epoch.curr);
     }
 
