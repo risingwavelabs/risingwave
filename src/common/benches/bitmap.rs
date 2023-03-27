@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use itertools::Itertools;
 use risingwave_common::buffer::{Bitmap, BitmapIter};
 
@@ -38,17 +38,20 @@ fn bench_bitmap_iter(c: &mut Criterion) {
     }
     fn bench_bitmap_iter(bench_id: &str, bitmap: Bitmap, c: &mut Criterion) {
         let bitmaps = vec![bitmap; N_CHUNKS];
-        let iters = || make_iterators(&bitmaps);
-        let result = || vec![true; CHUNK_SIZE];
+        let make_iters = || make_iterators(&bitmaps);
+        let mut result = vec![true; CHUNK_SIZE];
         c.bench_function(bench_id, |b| {
-            b.iter(|| {
-                let mut result = result();
-                for iter in iters() {
-                    for (i, bit_flag) in iter.enumerate() {
-                        result[i] = bit_flag;
+            b.iter_batched(
+                make_iters,
+                |iters| {
+                    for iter in iters {
+                        for (i, bit_flag) in iter.enumerate() {
+                            result[i] = bit_flag;
+                        }
                     }
-                }
-            })
+                },
+                BatchSize::SmallInput,
+            )
         });
     }
     let zeros = Bitmap::zeros(CHUNK_SIZE);
