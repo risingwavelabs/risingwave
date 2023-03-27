@@ -125,6 +125,7 @@ impl ExecutorBuilder for LookupExecutorBuilder {
         );
 
         Ok(Box::new(LookupExecutor::new(LookupExecutorParams {
+            ctx: params.actor_context,
             schema: params.schema,
             arrangement,
             stream,

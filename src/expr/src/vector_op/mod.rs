@@ -29,24 +29,19 @@ pub mod jsonb_info;
 pub mod length;
 pub mod like;
 pub mod lower;
-pub mod ltrim;
 pub mod md5;
 pub mod overlay;
 pub mod position;
 pub mod repeat;
 pub mod replace;
 pub mod round;
-pub mod rtrim;
 pub mod split_part;
+pub mod string;
 pub mod substr;
 pub mod timestamptz;
 pub mod to_char;
 pub mod to_timestamp;
 pub mod translate;
 pub mod trim;
-pub mod trim_characters;
 pub mod tumble;
 pub mod upper;
-
-#[cfg(test)]
-mod tests;

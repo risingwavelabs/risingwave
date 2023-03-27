@@ -14,6 +14,8 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::hash::VirtualNode;
+
 const TIMESTAMP_SHIFT_BITS: u8 = 22;
 const VNODE_ID_SHIFT_BITS: u8 = 12;
 const SEQUENCE_UPPER_BOUND: u16 = 1 << 12;
@@ -39,6 +41,13 @@ pub struct RowIdGenerator {
 }
 
 pub type RowId = i64;
+
+#[inline]
+pub fn extract_vnode_id_from_row_id(id: RowId) -> VirtualNode {
+    let vnode_id = ((id >> VNODE_ID_SHIFT_BITS) & (VNODE_ID_UPPER_BOUND as i64 - 1)) as u32;
+    assert!(vnode_id < VNODE_ID_UPPER_BOUND);
+    VirtualNode::from_index(vnode_id as usize)
+}
 
 impl RowIdGenerator {
     pub fn new(vnode_id: u32) -> Self {

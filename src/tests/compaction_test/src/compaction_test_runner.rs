@@ -82,6 +82,7 @@ pub async fn compaction_test_main(
 
     let _meta_handle = tokio::spawn(start_meta_node(
         meta_listen_addr.clone(),
+        opts.state_store.clone(),
         opts.config_path_for_meta.clone(),
     ));
 
@@ -92,7 +93,6 @@ pub async fn compaction_test_main(
     let (compactor_thrd, compactor_shutdown_tx) = start_compactor_thread(
         opts.meta_address.clone(),
         advertise_addr.to_string(),
-        opts.state_store.clone(),
         opts.config_path.clone(),
     );
 
@@ -124,7 +124,7 @@ pub async fn compaction_test_main(
     Ok(())
 }
 
-pub async fn start_meta_node(listen_addr: String, config_path: String) {
+pub async fn start_meta_node(listen_addr: String, state_store: String, config_path: String) {
     let meta_opts = risingwave_meta::MetaNodeOpts::parse_from([
         "meta-node",
         "--listen-addr",
@@ -133,17 +133,20 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
         &listen_addr,
         "--backend",
         "mem",
-        "--checkpoint-frequency",
-        &CHECKPOINT_FREQ_FOR_REPLAY.to_string(),
+        "--state-store",
+        &state_store,
         "--config-path",
         &config_path,
     ]);
-    // We set a large checkpoint frequency to prevent the embedded meta node
-    // to commit new epochs to avoid bumping the hummock version during version log replay.
-    assert_eq!(CHECKPOINT_FREQ_FOR_REPLAY, meta_opts.checkpoint_frequency);
     let config = load_config(
         &meta_opts.config_path,
         Some(meta_opts.override_opts.clone()),
+    );
+    // We set a large checkpoint frequency to prevent the embedded meta node
+    // to commit new epochs to avoid bumping the hummock version during version log replay.
+    assert_eq!(
+        CHECKPOINT_FREQ_FOR_REPLAY,
+        config.system.checkpoint_frequency
     );
     assert!(
         config.meta.enable_compaction_deterministic,
@@ -156,7 +159,6 @@ pub async fn start_meta_node(listen_addr: String, config_path: String) {
 async fn start_compactor_node(
     meta_rpc_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) {
     let opts = risingwave_compactor::CompactorOpts::parse_from([
@@ -167,8 +169,6 @@ async fn start_compactor_node(
         &advertise_addr,
         "--meta-address",
         &meta_rpc_endpoint,
-        "--state-store",
-        &state_store,
         "--config-path",
         &config_path,
     ]);
@@ -178,7 +178,6 @@ async fn start_compactor_node(
 pub fn start_compactor_thread(
     meta_endpoint: String,
     advertise_addr: String,
-    state_store: String,
     config_path: String,
 ) -> (JoinHandle<()>, std::sync::mpsc::Sender<()>) {
     let (tx, rx) = std::sync::mpsc::channel();
@@ -190,7 +189,7 @@ pub fn start_compactor_thread(
         runtime.block_on(async {
             tokio::spawn(async {
                 tracing::info!("Starting compactor node");
-                start_compactor_node(meta_endpoint, advertise_addr, state_store, config_path).await
+                start_compactor_node(meta_endpoint, advertise_addr, config_path).await
             });
             rx.recv().unwrap();
         });

@@ -222,6 +222,14 @@ impl Catalog {
             .update_table(proto);
     }
 
+    pub fn update_index(&mut self, proto: &PbIndex) {
+        self.get_database_mut(proto.database_id)
+            .unwrap()
+            .get_schema_mut(proto.schema_id)
+            .unwrap()
+            .update_index(proto);
+    }
+
     pub fn drop_source(&mut self, db_id: DatabaseId, schema_id: SchemaId, source_id: SourceId) {
         self.get_database_mut(db_id)
             .unwrap()
@@ -260,14 +268,6 @@ impl Catalog {
             .get_schema_mut(schema_id)
             .unwrap()
             .drop_index(index_id);
-    }
-
-    pub fn update_index(&mut self, proto: &PbIndex) {
-        self.get_database_mut(proto.database_id)
-            .unwrap()
-            .get_schema_mut(proto.schema_id)
-            .unwrap()
-            .update_index(proto);
     }
 
     pub fn drop_view(&mut self, db_id: DatabaseId, schema_id: SchemaId, view_id: ViewId) {

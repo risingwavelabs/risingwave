@@ -379,6 +379,13 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
             Ok(None)
         }
     }
+
+    /// Update the vnode bitmap of the storage table, returns the previous vnode bitmap.
+    #[must_use = "the executor should decide whether to manipulate the cache based on the previous vnode bitmap"]
+    pub fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> Arc<Bitmap> {
+        assert_eq!(self.vnodes.len(), new_vnodes.len());
+        std::mem::replace(&mut self.vnodes, new_vnodes)
+    }
 }
 
 pub trait PkAndRowStream = Stream<Item = StorageResult<(Vec<u8>, OwnedRow)>> + Send;
@@ -479,7 +486,7 @@ impl<S: StateStore, SD: ValueRowSerde> StorageTableInner<S, SD> {
         }))
         .await?;
 
-        #[auto_enum(futures::Stream)]
+        #[auto_enum(futures03::Stream)]
         let iter = match iterators.len() {
             0 => unreachable!(),
             1 => iterators.into_iter().next().unwrap(),

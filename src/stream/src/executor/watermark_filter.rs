@@ -23,7 +23,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, row};
 use risingwave_expr::expr::{
-    new_binary_expr, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
+    build, BoxedExpression, Expression, InputRefExpression, LiteralExpression,
 };
 use risingwave_expr::Result as ExprResult;
 use risingwave_pb::expr::expr_node::Type;
@@ -199,7 +199,8 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                 Message::Barrier(barrier) => {
                     // Update the vnode bitmap for state tables of all agg calls if asked.
                     if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(ctx.id) {
-                        let previous_vnode_bitmap = table.update_vnode_bitmap(vnode_bitmap.clone());
+                        let (previous_vnode_bitmap, _cache_may_stale) =
+                            table.update_vnode_bitmap(vnode_bitmap.clone());
 
                         // Take the global max watermark when scaling happens.
                         if previous_vnode_bitmap != vnode_bitmap {
@@ -235,11 +236,13 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
         event_time_col_idx: usize,
         watermark: ScalarImpl,
     ) -> ExprResult<BoxedExpression> {
-        new_binary_expr(
+        build(
             Type::GreaterThanOrEqual,
             DataType::Boolean,
-            InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
-            LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            vec![
+                InputRefExpression::new(watermark_type.clone(), event_time_col_idx).boxed(),
+                LiteralExpression::new(watermark_type, Some(watermark)).boxed(),
+            ],
         )
     }
 
@@ -332,17 +335,19 @@ mod tests {
             ],
         };
 
-        let watermark_expr = new_binary_expr(
+        let watermark_expr = build(
             Type::Subtract,
             WATERMARK_TYPE.clone(),
-            InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
-            LiteralExpression::new(
-                interval_type,
-                Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
-                    0, 1, 0,
-                ))),
-            )
-            .boxed(),
+            vec![
+                InputRefExpression::new(WATERMARK_TYPE.clone(), 1).boxed(),
+                LiteralExpression::new(
+                    interval_type,
+                    Some(ScalarImpl::Interval(IntervalUnit::from_month_day_usec(
+                        0, 1, 0,
+                    ))),
+                )
+                .boxed(),
+            ],
         )
         .unwrap();
 

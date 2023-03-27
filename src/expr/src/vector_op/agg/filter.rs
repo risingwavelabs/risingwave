@@ -117,7 +117,7 @@ mod tests {
     use risingwave_pb::expr::expr_node::PbType;
 
     use super::*;
-    use crate::expr::{new_binary_expr, Expression, InputRefExpression, LiteralExpression};
+    use crate::expr::{build, Expression, InputRefExpression, LiteralExpression};
 
     #[derive(Clone)]
     struct MockAgg {
@@ -186,15 +186,16 @@ mod tests {
     #[tokio::test]
     async fn test_selective_agg() -> Result<()> {
         // filter (where $1 > 5)
-        let condition = Arc::from(
-            new_binary_expr(
-                PbType::GreaterThan,
-                DataType::Boolean,
+        let expr = build(
+            PbType::GreaterThan,
+            DataType::Boolean,
+            vec![
                 InputRefExpression::new(DataType::Int64, 0).boxed(),
-                LiteralExpression::new(DataType::Int64, Some((5_i64).into())).boxed(),
-            )
-            .unwrap(),
-        );
+                LiteralExpression::new(DataType::Int64, Some(ScalarImpl::Int64(5))).boxed(),
+            ],
+        )
+        .unwrap();
+        let condition = Arc::from(expr);
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
             condition,
@@ -228,18 +229,18 @@ mod tests {
 
     #[tokio::test]
     async fn test_selective_agg_null_condition() -> Result<()> {
-        let condition = Arc::from(
-            new_binary_expr(
-                PbType::Equal,
-                DataType::Boolean,
+        let expr = build(
+            PbType::Equal,
+            DataType::Boolean,
+            vec![
                 InputRefExpression::new(DataType::Int64, 0).boxed(),
                 LiteralExpression::new(DataType::Int64, None).boxed(),
-            )
-            .unwrap(),
-        );
+            ],
+        )
+        .unwrap();
         let agg_count = Arc::new(AtomicUsize::new(0));
         let mut agg = Filter::new(
-            condition,
+            Arc::from(expr),
             Box::new(MockAgg {
                 count: agg_count.clone(),
             }),

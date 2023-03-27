@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
+use std::ptr::NonNull;
 use std::sync::Arc;
 
 use futures::{stream, StreamExt, TryStreamExt};
@@ -24,7 +25,6 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::buffer::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, PrecomputedBuildHasher};
-use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_storage::StateStore;
@@ -41,14 +41,14 @@ use super::{
 use crate::cache::{cache_may_stale, new_with_hasher, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
-use crate::executor::aggregation::{generate_agg_schema, AggCall, AggChangesInfo, AggGroup};
+use crate::executor::aggregation::{generate_agg_schema, AggCall, AggGroup as GenericAggGroup};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{BoxedMessageStream, Message};
 use crate::task::AtomicU64Ref;
 
-type BoxedAggGroup<S> = Box<AggGroup<S, OnlyOutputIfHasInput>>;
-type AggGroupCache<K, S> = ExecutorCache<K, BoxedAggGroup<S>, PrecomputedBuildHasher>;
+type AggGroup<S> = GenericAggGroup<S, OnlyOutputIfHasInput>;
+type AggGroupCache<K, S> = ExecutorCache<K, AggGroup<S>, PrecomputedBuildHasher>;
 
 /// [`HashAggExecutor`] could process large amounts of data using a state backend. It works as
 /// follows:
@@ -255,19 +255,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     Some(async {
                         // Create `AggGroup` for the current group if not exists. This will
                         // fetch previous agg result from the result table.
-                        let agg_group = Box::new(
-                            AggGroup::create(
-                                Some(key.deserialize(group_key_types)?),
-                                &this.agg_calls,
-                                &this.storages,
-                                &this.result_table,
-                                &this.input_pk_indices,
-                                this.row_count_index,
-                                this.extreme_cache_size,
-                                &this.input_schema,
-                            )
-                            .await?,
-                        );
+                        let agg_group = AggGroup::create(
+                            Some(key.deserialize(group_key_types)?),
+                            &this.agg_calls,
+                            &this.storages,
+                            &this.result_table,
+                            &this.input_pk_indices,
+                            this.row_count_index,
+                            this.extreme_cache_size,
+                            &this.input_schema,
+                        )
+                        .await?;
                         Ok::<_, StreamExecutorError>((key.clone(), agg_group))
                     })
                 }
@@ -345,7 +343,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
         // Apply chunk to each of the state (per agg_call), for each group.
         for (key, visibility) in group_visibilities {
-            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap().as_mut();
+            let agg_group = vars.agg_group_cache.get_mut(&key).unwrap();
             let visibilities = call_visibilities
                 .iter()
                 .map(Option::as_ref)
@@ -411,8 +409,6 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
         let dirty_cnt = vars.group_change_set.len();
         if dirty_cnt > 0 {
             // Produce the stream chunk
-            let group_key_data_types =
-                &this.info.schema.data_types()[..this.group_key_indices.len()];
             let mut group_chunks =
                 IterChunks::chunks(vars.group_change_set.drain(), this.chunk_size);
             while let Some(batch) = group_chunks.next() {
@@ -423,8 +419,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     let agg_group = vars
                         .agg_group_cache
                         .get_mut(key)
-                        .expect("changed group must have corresponding AggGroup")
-                        .as_mut();
+                        .expect("changed group must have corresponding AggGroup");
                     agg_group.flush_state_if_needed(&mut this.storages).await?;
                 }
 
@@ -436,11 +431,17 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
 
                 // Calculate current outputs, concurrently.
                 let futs = keys_in_batch.into_iter().map(|key| {
-                    // Pop out the agg group temporarily.
-                    let mut agg_group = vars
-                        .agg_group_cache
-                        .pop(&key)
-                        .expect("changed group must have corresponding AggGroup");
+                    // Get agg group of the key.
+                    let agg_group = {
+                        let mut ptr: NonNull<_> = vars
+                            .agg_group_cache
+                            .get_mut(&key)
+                            .expect("changed group must have corresponding AggGroup")
+                            .into();
+                        // SAFETY: `key`s in `keys_in_batch` are unique by nature, because they're
+                        // from `group_change_set` which is a set.
+                        unsafe { ptr.as_mut() }
+                    };
                     async {
                         let curr_outputs = agg_group.get_outputs(&this.storages).await?;
                         Ok::<_, StreamExecutorError>((key, agg_group, curr_outputs))
@@ -452,34 +453,11 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     .try_collect()
                     .await?;
 
-                for (key, mut agg_group, curr_outputs) in outputs_in_batch {
-                    let AggChangesInfo {
-                        n_appended_ops,
-                        result_row,
-                        prev_outputs,
-                    } = agg_group.build_changes(
-                        curr_outputs,
-                        &mut builders[this.group_key_indices.len()..],
-                        &mut new_ops,
-                    );
-
-                    if n_appended_ops != 0 {
-                        for _ in 0..n_appended_ops {
-                            key.deserialize_to_builders(
-                                &mut builders[..this.group_key_indices.len()],
-                                group_key_data_types,
-                            )?;
-                        }
-                        if let Some(prev_outputs) = prev_outputs {
-                            let old_row = agg_group.group_key().chain(prev_outputs);
-                            this.result_table.update(old_row, result_row);
-                        } else {
-                            this.result_table.insert(result_row);
-                        }
+                for (_key, agg_group, curr_outputs) in outputs_in_batch {
+                    if let Some(change) = agg_group.build_change(curr_outputs) {
+                        agg_group.apply_change_to_builders(&change, &mut builders, &mut new_ops);
+                        agg_group.apply_change_to_result_table(&change, &mut this.result_table);
                     }
-
-                    // Put the agg group back into the agg group cache.
-                    vars.agg_group_cache.put(key, agg_group);
                 }
 
                 let columns = builders

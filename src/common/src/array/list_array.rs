@@ -27,10 +27,8 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayRe
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::to_text::ToText;
-use crate::types::{
-    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
-    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
-};
+use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
+use crate::util::memcmp_encoding;
 
 #[derive(Debug)]
 pub struct ListArrayBuilder {
@@ -158,7 +156,7 @@ pub struct ListArray {
     bitmap: Bitmap,
     pub(super) offsets: Vec<u32>,
     pub(super) value: Box<ArrayImpl>,
-    value_type: DataType,
+    pub(super) value_type: DataType,
 }
 
 impl Array for ListArray {
@@ -359,7 +357,7 @@ impl ListValue {
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
         let mut values = Vec::new();
         while inner_deserializer.has_remaining() {
-            values.push(memcmp_deserialize_datum_from(
+            values.push(memcmp_encoding::deserialize_datum_in_composite(
                 datatype,
                 &mut inner_deserializer,
             )?)
@@ -434,7 +432,7 @@ impl<'a> ListRef<'a> {
         let mut inner_serializer = memcomparable::Serializer::new(vec![]);
         iter_elems_ref!(self, it, {
             for datum_ref in it {
-                memcmp_serialize_datum_into(datum_ref, &mut inner_serializer)?
+                memcmp_encoding::serialize_datum_in_composite(datum_ref, &mut inner_serializer)?
             }
         });
         serializer.serialize_bytes(&inner_serializer.into_inner())

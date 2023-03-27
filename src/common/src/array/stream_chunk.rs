@@ -133,6 +133,10 @@ impl StreamChunk {
         self.data.capacity()
     }
 
+    pub fn selectivity(&self) -> f64 {
+        self.data.selectivity()
+    }
+
     /// Get the reference of the underlying data chunk.
     pub fn data_chunk(&self) -> &DataChunk {
         &self.data
@@ -338,6 +342,7 @@ impl StreamChunkTestExt for StreamChunk {
     /// //     T: str
     /// //    TS: Timestamp
     /// //   TSZ: Timestamptz
+    /// //   SRL: Serial
     /// // {i,f}: struct
     /// ```
     fn from_pretty(s: &str) -> Self {

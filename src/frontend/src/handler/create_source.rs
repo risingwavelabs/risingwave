@@ -41,12 +41,14 @@ use risingwave_sqlparser::ast::{
     SourceWatermark,
 };
 
-use super::create_table::bind_sql_table_constraints;
+use super::create_table::bind_sql_table_column_constraints;
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::ColumnId;
 use crate::expr::Expr;
-use crate::handler::create_table::{bind_sql_columns, ColumnIdGenerator};
+use crate::handler::create_table::{
+    bind_sql_column_constraints, bind_sql_columns, ColumnIdGenerator,
+};
 use crate::handler::HandlerArgs;
 use crate::optimizer::plan_node::KAFKA_TIMESTAMP_COLUMN_NAME;
 use crate::session::SessionImpl;
@@ -456,6 +458,7 @@ fn check_and_add_timestamp_column(
             name: KAFKA_TIMESTAMP_COLUMN_NAME.to_string(),
             field_descs: vec![],
             type_name: "".to_string(),
+            generated_column: None,
         };
         column_descs.push(kafka_timestamp_column);
     }
@@ -594,16 +597,13 @@ pub async fn handle_create_source(
 
     let mut col_id_gen = ColumnIdGenerator::new_initial();
 
-    let (mut column_descs, pk_column_id_from_columns) =
-        bind_sql_columns(stmt.columns, &mut col_id_gen)?;
+    let mut column_descs = bind_sql_columns(stmt.columns.clone(), &mut col_id_gen)?;
 
     check_and_add_timestamp_column(&with_properties, &mut column_descs, &mut col_id_gen);
 
-    let (mut columns, mut pk_column_ids, mut row_id_index) = bind_sql_table_constraints(
-        column_descs.clone(),
-        pk_column_id_from_columns,
-        stmt.constraints,
-    )?;
+    let (mut columns, mut pk_column_ids, mut row_id_index) =
+        bind_sql_table_column_constraints(column_descs, stmt.columns.clone(), stmt.constraints)?;
+
     if row_id_index.is_none() {
         return Err(ErrorCode::InvalidInputSyntax(
             "Source does not support PRIMARY KEY constraint, please use \"CREATE TABLE\" instead"
@@ -628,6 +628,15 @@ pub async fn handle_create_source(
         bind_source_watermark(&session, name.clone(), stmt.source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
+
+    bind_sql_column_constraints(&session, name.clone(), &mut columns, stmt.columns)?;
+
+    if columns.iter().any(|c| c.is_generated()) {
+        // TODO(yuhao): allow generated columns on source
+        return Err(RwError::from(ErrorCode::BindError(
+            "Generated columns on source has not been implemented.".to_string(),
+        )));
+    }
 
     let row_id_index = row_id_index.map(|index| index as _);
     let pk_column_ids = pk_column_ids.into_iter().map(Into::into).collect();
@@ -700,7 +709,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "id" => DataType::Int32,
             "zipcode" => DataType::Int64,
             "rate" => DataType::Float32,

@@ -28,7 +28,7 @@ use risingwave_storage::StateStore;
 use super::top_n_cache::TopNCacheTrait;
 use super::utils::*;
 use super::TopNCache;
-use crate::cache::{cache_may_stale, new_unbounded, ExecutorCache};
+use crate::cache::{new_unbounded, ExecutorCache};
 use crate::common::table::state_table::StateTable;
 use crate::error::StreamResult;
 use crate::executor::error::StreamExecutorResult;
@@ -37,7 +37,7 @@ use crate::executor::{ActorContextRef, Executor, ExecutorInfo, PkIndices, Waterm
 use crate::task::AtomicU64Ref;
 
 pub type GroupTopNExecutor<K, S, const WITH_TIES: bool> =
-    TopNExecutorWrapper<InnerGroupTopNExecutorNew<K, S, WITH_TIES>>;
+    TopNExecutorWrapper<InnerGroupTopNExecutor<K, S, WITH_TIES>>;
 
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
@@ -56,7 +56,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
         Ok(TopNExecutorWrapper {
             input,
             ctx,
-            inner: InnerGroupTopNExecutorNew::new(
+            inner: InnerGroupTopNExecutor::new(
                 info,
                 storage_key,
                 offset_and_limit,
@@ -70,7 +70,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool> GroupTopNExecutor<K, S, W
     }
 }
 
-pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES: bool> {
+pub struct InnerGroupTopNExecutor<K: HashKey, S: StateStore, const WITH_TIES: bool> {
     info: ExecutorInfo,
 
     /// `LIMIT XXX`. None means no limit.
@@ -94,7 +94,7 @@ pub struct InnerGroupTopNExecutorNew<K: HashKey, S: StateStore, const WITH_TIES:
     cache_key_serde: CacheKeySerde,
 }
 
-impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutorNew<K, S, WITH_TIES> {
+impl<K: HashKey, S: StateStore, const WITH_TIES: bool> InnerGroupTopNExecutor<K, S, WITH_TIES> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         input_info: ExecutorInfo,
@@ -158,7 +158,7 @@ impl<K: HashKey, const WITH_TIES: bool> DerefMut for GroupTopNCache<K, WITH_TIES
 
 #[async_trait]
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool> TopNExecutorBase
-    for InnerGroupTopNExecutorNew<K, S, WITH_TIES>
+    for InnerGroupTopNExecutor<K, S, WITH_TIES>
 where
     TopNCache<WITH_TIES>: TopNCacheTrait,
 {
@@ -178,7 +178,8 @@ where
             // If 'self.caches' does not already have a cache for the current group, create a new
             // cache for it and insert it into `self.caches`
             if !self.caches.contains(group_cache_key) {
-                let mut topn_cache = TopNCache::new(self.offset, self.limit);
+                let mut topn_cache =
+                    TopNCache::new(self.offset, self.limit, self.schema().data_types());
                 self.managed_state
                     .init_topn_cache(Some(group_key), &mut topn_cache)
                     .await?;
@@ -221,12 +222,12 @@ where
     }
 
     fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
-        let previous_vnode_bitmap = self
+        let (_previous_vnode_bitmap, cache_may_stale) = self
             .managed_state
             .state_table
-            .update_vnode_bitmap(vnode_bitmap.clone());
+            .update_vnode_bitmap(vnode_bitmap);
 
-        if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+        if cache_may_stale {
             self.caches.clear();
         }
     }

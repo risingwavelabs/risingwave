@@ -146,7 +146,7 @@ where
                         .await
                 }
                 DdlCommand::AlterRelationName(relation, name) => {
-                    ctrl.alter_relation_table(relation, &name).await
+                    ctrl.alter_relation_name(relation, &name).await
                 }
                 DdlCommand::CreateConnection(connection) => {
                     ctrl.create_connection(connection).await
@@ -555,7 +555,12 @@ where
 
         let result = try {
             let (ctx, table_fragments) = self
-                .build_replace_table(env, &stream_job, fragment_graph, table_col_index_mapping)
+                .build_replace_table(
+                    env,
+                    &stream_job,
+                    fragment_graph,
+                    table_col_index_mapping.clone(),
+                )
                 .await?;
 
             self.stream_manager
@@ -564,7 +569,10 @@ where
         };
 
         match result {
-            Ok(_) => self.finish_replace_table(&stream_job).await,
+            Ok(_) => {
+                self.finish_replace_table(&stream_job, table_col_index_mapping)
+                    .await
+            }
             Err(err) => {
                 self.cancel_replace_table(&stream_job).await?;
                 Err(err)
@@ -692,13 +700,14 @@ where
     async fn finish_replace_table(
         &self,
         stream_job: &StreamingJob,
+        table_col_index_mapping: ColIndexMapping,
     ) -> MetaResult<NotificationVersion> {
         let StreamingJob::Table(None, table) = stream_job else {
             unreachable!("unexpected job: {stream_job:?}")
         };
 
         self.catalog_manager
-            .finish_replace_table_procedure(table)
+            .finish_replace_table_procedure(table, table_col_index_mapping)
             .await
     }
 
@@ -712,7 +721,7 @@ where
             .await
     }
 
-    async fn alter_relation_table(
+    async fn alter_relation_name(
         &self,
         relation: Relation,
         new_name: &str,

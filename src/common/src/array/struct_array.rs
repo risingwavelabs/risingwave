@@ -26,11 +26,9 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayMeta, ArrayRe
 use crate::array::ArrayRef;
 use crate::buffer::{Bitmap, BitmapBuilder};
 use crate::types::to_text::ToText;
-use crate::types::{
-    hash_datum, memcmp_deserialize_datum_from, memcmp_serialize_datum_into, DataType, Datum,
-    DatumRef, Scalar, ScalarRefImpl, ToDatumRef,
-};
+use crate::types::{hash_datum, DataType, Datum, DatumRef, Scalar, ScalarRefImpl, ToDatumRef};
 use crate::util::iter_util::ZipEqFast;
+use crate::util::memcmp_encoding;
 
 #[derive(Debug)]
 pub struct StructArrayBuilder {
@@ -345,7 +343,7 @@ impl StructValue {
     ) -> memcomparable::Result<Self> {
         fields
             .iter()
-            .map(|field| memcmp_deserialize_datum_from(field, deserializer))
+            .map(|field| memcmp_encoding::deserialize_datum_in_composite(field, deserializer))
             .try_collect()
             .map(Self::new)
     }
@@ -384,7 +382,7 @@ impl<'a> StructRef<'a> {
     ) -> memcomparable::Result<()> {
         iter_fields_ref!(self, it, {
             for datum_ref in it {
-                memcmp_serialize_datum_into(datum_ref, serializer)?
+                memcmp_encoding::serialize_datum_in_composite(datum_ref, serializer)?
             }
             Ok(())
         })

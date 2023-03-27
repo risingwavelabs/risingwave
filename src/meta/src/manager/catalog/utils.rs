@@ -228,9 +228,8 @@ impl QueryRewriter<'_> {
     /// Visit expression and update all references.
     fn visit_expr(&self, expr: &mut Expr) {
         match expr {
-            Expr::FieldIdentifier(expr, ..) => self.visit_expr(expr),
-
-            Expr::IsNull(expr)
+            Expr::FieldIdentifier(expr, ..)
+            | Expr::IsNull(expr)
             | Expr::IsNotNull(expr)
             | Expr::IsTrue(expr)
             | Expr::IsNotTrue(expr)
@@ -290,7 +289,15 @@ impl QueryRewriter<'_> {
                     self.visit_expr(expr);
                 }
             }
-            _ => {}
+
+            // No need to visit.
+            Expr::Identifier(_)
+            | Expr::CompoundIdentifier(_)
+            | Expr::Collate { .. }
+            | Expr::Value(_)
+            | Expr::Parameter { .. }
+            | Expr::TypedString { .. }
+            | Expr::Case { .. } => {}
         }
     }
 

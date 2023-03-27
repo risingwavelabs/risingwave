@@ -1,0 +1,15 @@
+[package]
+name = "risingwave_expr_macro"
+version = "0.1.0"
+edition = "2021"
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+proc-macro = true
+
+[dependencies]
+itertools = "0.10"
+proc-macro-error = "1"
+proc-macro2 = "1"
+quote = "1"
+syn = "1"

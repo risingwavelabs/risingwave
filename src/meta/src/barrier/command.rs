@@ -58,6 +58,9 @@ pub struct Reschedule {
     /// The upstream fragments of this fragment, and the dispatchers that should be updated.
     pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
     /// New hash mapping of the upstream dispatcher to be updated.
+    ///
+    /// This field exists only when there's upstream fragment and the current fragment is
+    /// hash-sharded.
     pub upstream_dispatcher_mapping: Option<ActorMapping>,
 
     /// The downstream fragments of this fragment.
@@ -440,7 +443,7 @@ where
                     dropped_actors,
                     actor_splits,
                 });
-                tracing::trace!("update mutation: {mutation:#?}");
+                tracing::debug!("update mutation: {mutation:#?}");
                 Some(mutation)
             }
         };

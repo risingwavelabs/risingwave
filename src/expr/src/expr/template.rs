@@ -319,6 +319,7 @@ macro_rules! gen_expr_nullable {
             > $ty_name<$($arg, )* OA, F> {
                 // Compile failed due to some GAT lifetime issues so make this field private.
                 // Check issues #742.
+                #[allow(dead_code)]
                 pub fn new(
                     $([<expr_ $arg:lower>]: BoxedExpression, )*
                     return_type: DataType,
@@ -345,60 +346,5 @@ gen_expr_bytes!(BinaryBytesExpression, { IA1, IA2 });
 gen_expr_bytes!(TernaryBytesExpression, { IA1, IA2, IA3 });
 gen_expr_bytes!(QuaternaryBytesExpression, { IA1, IA2, IA3, IA4 });
 
+gen_expr_nullable!(UnaryNullableExpression, { IA1 });
 gen_expr_nullable!(BinaryNullableExpression, { IA1, IA2 });
-
-/// `for_all_cmp_types` helps in matching and casting types when building comparison expressions
-///  such as <= or IS DISTINCT FROM.
-#[macro_export]
-macro_rules! for_all_cmp_variants {
-    ($macro:ident, $l:expr, $r:expr, $ret:expr, $general_f:ident) => {
-        $macro! {
-            [$l, $r, $ret],
-            { int16, int16, int16, $general_f },
-            { int16, int32, int32, $general_f },
-            { int16, int64, int64, $general_f },
-            { int16, float32, float64, $general_f },
-            { int16, float64, float64, $general_f },
-            { int32, int16, int32, $general_f },
-            { int32, int32, int32, $general_f },
-            { int32, int64, int64, $general_f },
-            { int32, float32, float64, $general_f },
-            { int32, float64, float64, $general_f },
-            { int64, int16,int64, $general_f },
-            { int64, int32,int64, $general_f },
-            { int64, int64, int64, $general_f },
-            { int64, float32, float64 , $general_f},
-            { int64, float64, float64, $general_f },
-            { float32, int16, float64, $general_f },
-            { float32, int32, float64, $general_f },
-            { float32, int64, float64 , $general_f},
-            { float32, float32, float32, $general_f },
-            { float32, float64, float64, $general_f },
-            { float64, int16, float64, $general_f },
-            { float64, int32, float64, $general_f },
-            { float64, int64, float64, $general_f },
-            { float64, float32, float64, $general_f },
-            { float64, float64, float64, $general_f },
-            { decimal, int16, decimal, $general_f },
-            { decimal, int32, decimal, $general_f },
-            { decimal, int64, decimal, $general_f },
-            { decimal, float32, float64, $general_f },
-            { decimal, float64, float64, $general_f },
-            { int16, decimal, decimal, $general_f },
-            { int32, decimal, decimal, $general_f },
-            { int64, decimal, decimal, $general_f },
-            { decimal, decimal, decimal, $general_f },
-            { float32, decimal, float64, $general_f },
-            { float64, decimal, float64, $general_f },
-            { timestamptz, timestamptz, timestamptz, $general_f },
-            { timestamp, timestamp, timestamp, $general_f },
-            { interval, interval, interval, $general_f },
-            { time, time, time, $general_f },
-            { date, date, date, $general_f },
-            { timestamp, date, timestamp, $general_f },
-            { date, timestamp, timestamp, $general_f },
-            { interval, time, interval, $general_f },
-            { time, interval, interval, $general_f },
-        }
-    };
-}

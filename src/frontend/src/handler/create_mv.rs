@@ -249,7 +249,7 @@ pub mod tests {
         );
         let row_id_col_name = row_id_column_name();
         let expected_columns = maplit::hashmap! {
-            row_id_col_name.as_str() => DataType::Int64,
+            row_id_col_name.as_str() => DataType::Serial,
             "country" => DataType::new_struct(
                  vec![DataType::Varchar,city_type,DataType::Varchar],
                  vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],

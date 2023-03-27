@@ -44,7 +44,7 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tokio-stream = "0.1"
-toml = "0.5"
+toml = "0.7"
 tracing = "0.1"
 tracing-opentelemetry = { version = "0.17", optional = true }
 tracing-subscriber = "0.3.16"

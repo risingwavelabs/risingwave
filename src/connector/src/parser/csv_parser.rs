@@ -113,10 +113,10 @@ impl CsvParser {
     #[allow(clippy::unused_async)]
     pub async fn parse_inner(
         &mut self,
-        payload: &[u8],
+        payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> Result<WriteGuard> {
-        let mut fields = self.read_row(payload)?;
+        let mut fields = self.read_row(&payload)?;
         if let Some(headers) = &mut self.headers {
             if headers.is_empty() {
                 *headers = fields;
@@ -126,10 +126,11 @@ impl CsvParser {
             }
             writer.insert(|desc| {
                 if let Some(i) = headers.iter().position(|name| name == &desc.name) {
-                    Self::parse_string(
-                        &desc.data_type,
-                        fields.get_mut(i).map(std::mem::take).unwrap_or_default(),
-                    )
+                    let value = fields.get_mut(i).map(std::mem::take).unwrap_or_default();
+                    if value.is_empty() {
+                        return Ok(None);
+                    }
+                    Self::parse_string(&desc.data_type, value)
                 } else {
                     Ok(None)
                 }
@@ -138,6 +139,9 @@ impl CsvParser {
             fields.reverse();
             writer.insert(|desc| {
                 if let Some(value) = fields.pop() {
+                    if value.is_empty() {
+                        return Ok(None);
+                    }
                     Self::parse_string(&desc.data_type, value)
                 } else {
                     Ok(None)
@@ -157,11 +161,12 @@ mod tests {
     use crate::parser::SourceStreamChunkBuilder;
     #[tokio::test]
     async fn test_csv_without_headers() {
-        let data = [
+        let data = vec![
             r#"1,a,2"#,
             r#""15541","a,1,1,",4"#,
             r#"0,"""0",0"#,
             r#"0,0,0,0,0,0,0,0,0,0,0,0,0,"#,
+            r#",,,,"#,
         ];
         let descs = vec![
             SourceColumnDesc::simple("a", DataType::Int32, 0.into()),
@@ -180,7 +185,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in data {
             parser
-                .parse_inner(item.as_bytes(), builder.row_writer())
+                .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await
                 .unwrap();
         }
@@ -252,6 +257,14 @@ mod tests {
                 (Some(ScalarImpl::Int32(0)))
             );
         }
+
+        {
+            let (op, row) = rows.next().unwrap();
+            assert_eq!(op, Op::Insert);
+            assert_eq!(row.datum_at(0), None);
+            assert_eq!(row.datum_at(1), None);
+            assert_eq!(row.datum_at(2), None);
+        }
     }
     #[tokio::test]
     async fn test_csv_with_headers() {
@@ -279,7 +292,7 @@ mod tests {
         let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
         for item in data {
             let _ = parser
-                .parse_inner(item.as_bytes(), builder.row_writer())
+                .parse_inner(item.as_bytes().to_vec(), builder.row_writer())
                 .await;
         }
         let chunk = builder.finish();

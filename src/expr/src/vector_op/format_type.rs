@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use risingwave_common::types::DataType;
+use risingwave_expr_macro::function;
 
-use crate::Result;
-
-#[inline(always)]
-pub fn format_type(oid: Option<i32>, _typemod: Option<i32>) -> Result<Option<Box<str>>> {
+#[function("format_type(int32, int32) -> varchar")]
+pub fn format_type(oid: Option<i32>, _typemod: Option<i32>) -> Option<Box<str>> {
     // since we don't support type modifier, ignore it.
-    Ok(oid.map(|i| {
+    oid.map(|i| {
         DataType::from_oid(i)
             .map(|dt| format!("{}", dt).into_boxed_str())
             .unwrap_or("???".into())
-    }))
+    })
 }

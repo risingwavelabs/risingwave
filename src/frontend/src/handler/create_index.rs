@@ -337,28 +337,12 @@ fn check_columns(columns: Vec<OrderByExpr>) -> Result<Vec<(Ident, OrderType)>> {
     columns
         .into_iter()
         .map(|column| {
-            // TODO(rc): support `NULLS FIRST | LAST`
-            if column.nulls_first.is_some() {
-                return Err(ErrorCode::NotImplemented(
-                    "nulls_first not supported".into(),
-                    None.into(),
-                )
-                .into());
-            }
+            let order_type = OrderType::from_bools(column.asc, column.nulls_first);
 
             use risingwave_sqlparser::ast::Expr;
 
             if let Expr::Identifier(ident) = column.expr {
-                Ok::<(_, _), RwError>((
-                    ident,
-                    column.asc.map_or(OrderType::ascending(), |x| {
-                        if x {
-                            OrderType::ascending()
-                        } else {
-                            OrderType::descending()
-                        }
-                    }),
-                ))
+                Ok::<(_, _), RwError>((ident, order_type))
             } else {
                 Err(ErrorCode::NotImplemented(
                     "only identifier is supported for create index".into(),

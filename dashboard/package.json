@@ -8,7 +8,8 @@
     "gen-proto": "./scripts/generate_proto.sh",
     "lint": "prettier --check . && next lint",
     "format": "prettier --write . && next lint --fix",
-    "mock-server": "node ./mock-server.js"
+    "mock-server": "node ./mock-server.js",
+    "postinstall": "npm run gen-proto"
   },
   "dependencies": {
     "@chakra-ui/react": "^2.3.1",

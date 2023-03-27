@@ -13,6 +13,9 @@
 // limitations under the License.
 
 pub mod memory_manager;
+
+// Only enable the non-trivial policies on Linux as it relies on statistics from `jemalloc-ctl`
+// which might be inaccurate on other platforms.
 #[cfg(target_os = "linux")]
 pub mod policy;
 
