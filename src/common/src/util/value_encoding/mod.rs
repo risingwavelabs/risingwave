@@ -490,7 +490,6 @@ mod tests {
         test_estimate_serialize_scalar_size(ScalarImpl::Interval(
             IntervalUnit::from_month_day_usec(2, 3, 3333),
         ));
-        // test_estimate_serialize_scalar_size(ScalarImpl::Jsonb(JsonbVal::dummy()));
         test_estimate_serialize_scalar_size(ScalarImpl::Struct(StructValue::new(vec![
             ScalarImpl::Int64(233).into(),
             ScalarImpl::Float64(23.33.into()).into(),
